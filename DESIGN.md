@@ -1,0 +1,102 @@
+# Postrinch design
+
+Canonical. When a decision changes, change it here and say why in the commit.
+
+## What it is
+
+A desktop mail client that is built for an agent first and a person second, without being worse for the person.
+
+- **Many accounts.** Any number of Gmail accounts and any number of IMAP accounts, side by side.
+- **One inbox or many.** A combined inbox across accounts, and filtered views that are saved queries ("everything from my bank, any account", "unanswered threads older than a week").
+- **Search that understands.** Exact search (words, phrases, senders, dates) and semantic search ("the email where someone offered to cover my shift") over all mail, on the machine, through [rhypedb](https://github.com/joeleaver/rhypedb).
+- **Agent-first.** Every action the window offers is a command, and every command is an MCP tool. The window is one client of the command layer; an agent is another. Nothing the window can do is out of an agent's reach, and nothing an agent can do skips the person's say on what matters (see **Safety**).
+- **Local-first.** Mail, the index and the tokens live on the user's machine. There is no Postrinch server.
+
+## Non-goals (for now)
+
+- A web or mobile client.
+- A hosted service, sync between machines, or shared mailboxes.
+- Calendar, contacts and tasks, beyond reading what is in a message.
+- Exchange/EWS. Outlook.com over IMAP with OAuth may come later.
+
+## Shape
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ postrinch (the app)                                             │
+│                                                                 │
+│   rinch UI ──┐                       ┌── MCP server (local)     │
+│              ▼                       ▼                          │
+│        ┌───────────── command layer ─────────────┐              │
+│        │ search · read · draft · send · label ·  │              │
+│        │ archive · views · accounts · rules       │              │
+│        └──────┬──────────────┬───────────┬───────┘              │
+│               ▼              ▼           ▼                      │
+│          store (rhypedb)   sync        render                   │
+│          objects, links,   Gmail API,  parse, sanitize,         │
+│          full text,        IMAP/SMTP   map to rinch DOM         │
+│          vectors                                                │
+└─────────────────────────────────────────────────────────────────┘
+        tokens in the OS keychain · mail and index on local disk
+```
+
+Planned crates (a Cargo workspace, names provisional):
+
+| Crate | Holds |
+|---|---|
+| `postrinch-model` | Accounts, messages, threads, labels/folders, views; no I/O. |
+| `postrinch-store` | The rhypedb schema and every read and write of it; full-text and vector indexing; embeddings in the background. |
+| `postrinch-sync` | One provider trait; Gmail (API) and IMAP/SMTP implementations; OAuth; the outbox. |
+| `postrinch-render` | MIME to displayable parts; HTML parse and sanitize; remote content policy; handing a document to rinch. |
+| `postrinch-commands` | The command layer: every action, its arguments, its result, and whether it needs the person's confirmation. |
+| `postrinch-mcp` | The MCP server, generated from the command layer. |
+| `postrinch` | The rinch app. |
+
+## Decisions so far
+
+### Accounts and sign-in
+
+- **Gmail signs in with OAuth 2.0**, the installed-app flow: authorization code with PKCE, the system browser, a loopback redirect. Each account added runs the flow once; its refresh token is kept in the OS keychain (`keyring`), keyed by the account's address. `prompt=select_account` when adding, `login_hint` when an account must sign in again. Detail and Google's rules: [docs/research/gmail-auth.md](docs/research/gmail-auth.md).
+- **Every account can need to sign in again** at any time (revoked, password changed, unused for six months, an admin policy). That is a state of the account, shown on it, not an error for the app.
+- **Gmail over the Gmail API, everything else over IMAP/SMTP.** The API gives Gmail's labels and threads as they are, incremental sync from a `historyId`, and Gmail's own search to fall back on. One OAuth scope, `https://mail.google.com/`, also allows IMAP/SMTP, which keeps that route open.
+- **App passwords** are a manual fallback for IMAP accounts only, never the main path.
+
+### Storage and search
+
+- **rhypedb in process** (`rhypedb-engine`), not a server. Messages, threads, people and labels are objects with links between them; bodies are `@fulltext`; each message (or each chunk of a long one) has an embedding from `rhypedb-embed` (fastembed/ONNX, local, computed in the background).
+- **Saved views are queries** in rhypedb's query language, stored as objects, so the window and an agent create and read them the same way.
+
+### Rendering
+
+- **HTML mail is parsed and sanitized before rinch sees it**: an HTML5 parser (html5ever), an allow-list sanitizer, `<style>` kept and scoped, scripts, forms, frames and event attributes dropped.
+- **rinch does the layout**: real table layout and legacy attributes (rinch#2079) and floats (rinch#2080) remove the need for the spike's table-to-grid rewrite. See [docs/research/html-rendering.md](docs/research/html-rendering.md).
+- **Remote content is off by default** (tracking pixels), per sender or per message on request, fetched without cookies.
+- **"Open in browser"** stays as the fallback for mail that still renders badly.
+
+### Safety
+
+Mail is hostile input, for the renderer and for the agent.
+
+- **Commands say what they risk.** Reading, searching and drafting run freely. Sending, deleting, unsubscribing, forwarding outside the account's domain and anything else that leaves the machine or cannot be undone asks the person in the window, showing exactly what will happen, before it runs. An agent cannot grant itself that confirmation.
+- **Mail reaches an agent as data, marked as such.** Tool results carry message content in fields that say it is untrusted third-party text, and the rendered-hidden parts (white-on-white, 1px, `display:none` text) are flagged rather than silently passed on: the rendering spike's hostile fixture hid an instruction to an AI that a sanitizer does not remove.
+- **No secret leaves the keychain** through a tool. An agent never sees a token.
+
+## Open questions
+
+1. **Does a local-only client need Google's yearly CASA assessment?** Google's pages disagree; ask Google's verification team before relying on "no server, no assessment". Until it is answered, Postrinch runs as an unverified "in production" project (100 users, a warning screen), plus a bring-your-own-client-ID setting. See [docs/research/gmail-auth.md](docs/research/gmail-auth.md).
+2. **How does the MCP server reach agents?** stdio for an agent the app starts, streamable HTTP on localhost for one that is already running, or both; and how a connecting agent is authorised (a per-agent token the person issues in the window?).
+3. **What does an embedding cover?** A whole message, chunks of a long one, the quoted history or not, attachments' text or not. Decides index size and search quality; measure on a real mailbox.
+4. **Threading for IMAP accounts.** `References`/`In-Reply-To` with subject fallback (JWZ), and how a thread spanning two accounts shows in the combined inbox.
+5. **Offline sending and the outbox.** Queue, retry, and what "sent" means before the server has it.
+6. **How much mail to keep locally.** Everything, or a window plus headers, for a 15-year Gmail account.
+7. **License.** rinch and rhypedb are MIT/Apache-2.0; Postrinch probably follows.
+
+## First steps
+
+1. **A real-mail corpus.** Export a few hundred `.eml` files from real inboxes (kept out of git: `/corpus/`), write the MIME extraction step, and run them through rinch with #2079/#2080. The spike's 10 fixtures were mostly written for it; this decides whether "open in browser" is a fallback or a crutch.
+2. **Gmail read-only sync into rhypedb**, one account, then many: sign-in, full sync, incremental sync, the schema.
+3. **Search** over that store: full text, then semantic, measured on the corpus.
+4. **The command layer and the MCP server**, read-only commands first.
+5. **The window**: accounts, combined inbox, a thread, search.
+6. **Writing**: drafts, send through the outbox, confirmations.
+7. **IMAP/SMTP.**
