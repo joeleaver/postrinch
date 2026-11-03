@@ -15,6 +15,7 @@ mod error;
 mod format;
 mod keys;
 mod labels;
+mod mailboxes;
 mod messages;
 mod objects;
 mod people;
@@ -28,6 +29,7 @@ use std::time::Duration;
 use rhypedb_engine::database::Database;
 
 pub use error::{StoreError, StoreResult};
+pub use mailboxes::ThreadEntry;
 pub use search::SearchHit;
 
 const SCHEMA: &str = include_str!("schema.rhype");

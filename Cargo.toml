@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/joeleaver/postrinch"
 
 [workspace.dependencies]
+postrinch-commands = { path = "crates/postrinch-commands" }
 postrinch-model = { path = "crates/postrinch-model" }
 postrinch-store = { path = "crates/postrinch-store" }
 postrinch-sync = { path = "crates/postrinch-sync" }

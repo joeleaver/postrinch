@@ -8,7 +8,7 @@ use crate::{Store, StoreError, StoreResult};
 
 pub(crate) const TYPE: &str = "Message";
 pub(crate) const CONTENT: &str = "MessageContent";
-const THREAD: &str = "Thread";
+pub(crate) const THREAD: &str = "Thread";
 
 /// Subject, then everyone it was from or to, then the body: what full-text
 /// search matches against.

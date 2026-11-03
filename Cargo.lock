@@ -1917,6 +1917,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "postrinch-commands"
+version = "0.1.0"
+dependencies = [
+ "postrinch-model",
+ "postrinch-store",
+ "serde",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "postrinch-model"
 version = "0.1.0"
 dependencies = [
