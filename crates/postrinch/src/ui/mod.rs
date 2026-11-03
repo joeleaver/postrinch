@@ -27,27 +27,43 @@ pub fn account_color(index: usize) -> &'static str {
 }
 
 /// The whole window, over one store.
-pub fn app(__scope: &mut RenderScope, store: Store) -> NodeHandle {
-    let state = State::new();
+pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle {
     state.load(Rc::new(Commands::new(store.clone())));
     if let Err(why) = sync::start(store, state.sync, state.revision) {
         tracing::error!("sync is off: {why}");
         state.sync_off.set(Some(format!("Sync is off: {why}")));
     }
+    let brand: SectionRenderer = Rc::new(|__scope| rsx! { div { class: "brand", "postrinch" } });
+    let status: SectionRenderer = Rc::new(move |__scope| title_status(__scope, state));
     rsx! {
-        div { class: "app",
-            style { {style::CSS} }
-            header { class: "header",
-                div { class: "brand", "postrinch" }
-                for error in state.error.get() {
-                    div { key: error.clone(), class: "header-error", {error.clone()} }
+        BorderlessWindow {
+            title: "",
+            radius: "none",
+            left_section: Some(brand),
+            right_section: Some(status),
+            on_minimize: minimize_current_window,
+            on_maximize: toggle_maximize_current_window,
+            on_close: close_current_window,
+            div { class: "app",
+                style { {style::CSS} }
+                {label_edit::label_dialog(__scope, state)}
+                div { class: "panes",
+                    {sidebar::sidebar(__scope, state)}
+                    {list::thread_list(__scope, state)}
+                    {reader::reader(__scope, state)}
                 }
             }
-            {label_edit::label_dialog(__scope, state)}
-            div { class: "panes",
-                {sidebar::sidebar(__scope, state)}
-                {list::thread_list(__scope, state)}
-                {reader::reader(__scope, state)}
+        }
+    }
+}
+
+/// The right of the title bar: anything that went wrong loading.
+#[component]
+fn title_status(state: State) -> NodeHandle {
+    rsx! {
+        div { class: "title-status",
+            for error in state.error.get() {
+                div { key: error.clone(), class: "header-error", {error.clone()} }
             }
         }
     }

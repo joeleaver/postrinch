@@ -14,12 +14,20 @@ pub const CSS: &str = r#"
     --accent-tint: #e6eefb;
     --accent-ink: #173d84;
     --trouble: #7a3f06;
+    /* A white title bar, like the mockups, not rinch's blue one. */
+    --rinch-titlebar-bg: #ffffff;
+    --rinch-titlebar-text: #16181d;
+    --rinch-titlebar-icon: #3a3f4a;
+    --rinch-titlebar-hover: rgba(22, 24, 29, 0.06);
+    --rinch-titlebar-active: rgba(22, 24, 29, 0.1);
 }
+
+.rinch-borderlesswindow__titlebar { border-bottom: 1px solid var(--line); }
 
 html, body { margin: 0; height: 100%; }
 
 .app {
-    height: 100vh;
+    height: 100%;
     display: flex;
     flex-direction: column;
     background: #ffffff;
@@ -28,16 +36,8 @@ html, body { margin: 0; height: 100%; }
     font-size: 14px;
 }
 
-.header {
-    height: 52px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 0 16px;
-    border-bottom: 1px solid var(--line);
-}
-.brand { width: 208px; font-size: 18px; font-weight: 600; color: var(--accent); }
+.brand { padding: 0 6px 0 10px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.title-status { display: flex; align-items: center; gap: 12px; padding-right: 8px; }
 .header-error { color: #a3271d; font-size: 13px; }
 
 .panes { flex: 1; display: flex; min-height: 0; }
@@ -153,12 +153,11 @@ html, body { margin: 0; height: 100%; }
     display: flex;
     align-items: baseline;
     gap: 10px;
-    padding: 16px 20px 12px;
-    border-bottom: 1px solid var(--line-soft);
+    padding: 16px 20px 10px;
 }
 .list-head h1 { margin: 0; font-size: 18px; font-weight: 600; }
 .list-count { color: var(--muted); font-size: 13px; }
-.rows { flex: 1; overflow-y: auto; }
+.rows { flex: 1; overflow-y: auto; border-top: 1px solid var(--line-soft); }
 .row {
     display: flex;
     flex-direction: column;
@@ -189,13 +188,11 @@ html, body { margin: 0; height: 100%; }
 .tabs {
     flex-shrink: 0;
     display: flex;
-    gap: 2px;
-    padding: 0 12px;
-    border-bottom: 1px solid var(--line-soft);
+    padding: 0 13px;
 }
 .tab {
-    height: 34px;
-    padding: 0 10px;
+    height: 32px;
+    padding: 0 7px;
     border: 0;
     border-bottom: 2px solid transparent;
     background: transparent;

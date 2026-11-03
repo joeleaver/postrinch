@@ -1,6 +1,7 @@
 //! Postrinch: an agent-first desktop mail client.
 
 mod dates;
+mod menus;
 mod state;
 mod sync;
 mod ui;
@@ -46,11 +47,21 @@ fn main() -> ExitCode {
         font_family_monospace: Some("'IBM Plex Mono', monospace".into()),
         ..Default::default()
     };
-    App::new(move |scope| ui::app(scope, store))
-        .title("Postrinch")
-        .size(1440, 900)
+    let state = state::State::new();
+    let window = WindowProps {
+        title: "Postrinch".into(),
+        width: 1440,
+        height: 900,
+        borderless: true,
+        menu_in_titlebar: true,
+        app_id: Some("postrinch".into()),
+        ..Default::default()
+    };
+    App::new(move |scope| ui::app(scope, state, store))
+        .window_props(window)
         .fonts(FONTS)
         .theme(theme)
+        .menu(menus::menus(state))
         .run();
     ExitCode::SUCCESS
 }
