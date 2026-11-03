@@ -1,6 +1,6 @@
 //! Folders: what the sidebar lists and what a thread list shows.
 
-use postrinch_model::{Account, EmailAddress, Label, LabelKind, SystemLabel};
+use postrinch_model::{Account, EmailAddress, Label, LabelKind, LabelPrefs, SystemLabel};
 
 use crate::labels::{LabelTree, label_tree};
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,43 @@ impl Sidebar {
             .chain(self.accounts.iter().flat_map(|a| a.labels.entries()))
             .find(|e| &e.folder == folder)
     }
+}
+
+impl Commands {
+    /// What the person changed about a label on this computer.
+    pub fn label_prefs(&self, account: &EmailAddress, label: &str) -> CommandResult<LabelPrefs> {
+        Ok(self
+            .store
+            .label_prefs(account)?
+            .remove(label)
+            .unwrap_or_default())
+    }
+
+    /// Change how a label shows on this computer: its name, whether it
+    /// shows, whether it is pinned, its colour. Nothing is sent to the
+    /// provider.
+    pub fn set_label_prefs(
+        &self,
+        account: &EmailAddress,
+        label: &str,
+        prefs: &LabelPrefs,
+    ) -> CommandResult<()> {
+        if let Some(color) = &prefs.color
+            && !is_hex_color(color)
+        {
+            return Err(CommandError::BadColor(color.clone()));
+        }
+        let mut prefs = prefs.clone();
+        prefs.name = prefs
+            .name
+            .map(|n| n.trim().to_owned())
+            .filter(|n| !n.is_empty());
+        Ok(self.store.set_label_prefs(account, label, &prefs)?)
+    }
+}
+
+fn is_hex_color(s: &str) -> bool {
+    s.len() == 7 && s.starts_with('#') && s[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// The system labels the sidebar unifies across accounts, in its order.

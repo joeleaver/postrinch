@@ -75,7 +75,7 @@ async fn main() -> ExitCode {
     match commands::run(cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("postrinch: {e}");
+            eprintln!("postrinch-cli: {e}");
             ExitCode::FAILURE
         }
     }

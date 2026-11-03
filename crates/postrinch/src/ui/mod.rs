@@ -1,5 +1,6 @@
 //! The window: a header over the sidebar, the thread list and the reader.
 
+mod label_edit;
 mod labels;
 mod list;
 mod reader;
@@ -18,6 +19,8 @@ use crate::sync;
 /// Colours that tell accounts apart, in the order accounts were added. They
 /// stay clear of the blue that marks what is chosen.
 const ACCOUNT_COLORS: [&str; 5] = ["#7a4fc2", "#c2621a", "#2f8a55", "#c2417a", "#5b6170"];
+
+pub use label_edit::LabelEdit;
 
 pub fn account_color(index: usize) -> &'static str {
     ACCOUNT_COLORS[index % ACCOUNT_COLORS.len()]
@@ -40,6 +43,7 @@ pub fn app(__scope: &mut RenderScope, store: Store) -> NodeHandle {
                     div { key: error.clone(), class: "header-error", {error.clone()} }
                 }
             }
+            {label_edit::label_dialog(__scope, state)}
             div { class: "panes",
                 {sidebar::sidebar(__scope, state)}
                 {list::thread_list(__scope, state)}

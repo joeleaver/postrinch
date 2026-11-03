@@ -87,6 +87,14 @@ Planned crates (a Cargo workspace, names provisional):
 - **Raw messages are files, not rows**: a content-addressed blob directory beside the database (`blobs/ab/cdef….zst`, written to a temporary file, synced and renamed), because a message with attachments can be megabytes. Each is compressed with zstd at its default level: real mail shrinks by about 37% (446 MB to 282 MB for 3,718 messages), and higher levels save under 2% more. A blob is named by the SHA-256 of its uncompressed bytes, and reading it checks that hash, so a damaged file is an error rather than a wrong message. Garbage collection removes blobs no message refers to, sparing recent ones a writer may be about to refer to.
 - **Full text** is one `@fulltext(english)` field per message, on its `MessageContent`: subject, names and addresses, and body. Whether subject and people need their own weight is for the search step to measure.
 
+### Labels
+
+- **Labels are a tree**, split on "/". Gmail's own labels have fixed places (the unified inboxes, Sent, Drafts, and the categories as inbox tabs); the sidebar's tree is the labels people and apps made.
+- **Other apps' labels are set apart**, under "From other apps", collapsed: bracketed namespaces (`[Superhuman]/…`, `[Zoom Mail]`, `[Imap]/…`), SaneBox's `@Sane…`, and the folders IMAP clients create (`Deleted Items`, `Notes`, `Sync Issues`…). Anyone who has tried a few mail apps has these; they should not crowd the person's own.
+- **What shows by default:** labels Gmail lists, with mail in them; show-if-unread labels while they hold unread mail. "Show all labels" brings back the rest.
+- **Folder or tag is read from use:** a label whose mail is nearly all out of the inbox and filed nowhere else works as a folder; any other works as a tag and shows as a chip on thread rows.
+- **The person's changes stay on this computer** (`LabelPrefs`: a name, shown or hidden, pinned, a colour). Sync never touches them and nothing is sent to Gmail.
+
 ### Rendering
 
 - **HTML mail is parsed and sanitized before rinch sees it**: an HTML5 parser (html5ever), an allow-list sanitizer, `<style>` kept and scoped, scripts, forms, frames and event attributes dropped.

@@ -5,10 +5,13 @@
 use std::collections::HashSet;
 
 use postrinch_commands::{AppLabels, Folder, LabelNode, Sidebar};
+use postrinch_model::LabelPrefs;
 use rinch::prelude::*;
 
 use crate::state::State;
 use crate::sync::thousands;
+use crate::ui::LabelEdit;
+use crate::ui::label_edit::{EditMode, label_menu};
 
 /// One line of the labels section.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +26,9 @@ pub struct LabelRow {
     pub color: Option<String>,
     /// `Some(open)` for a row with something under it.
     pub open: Option<bool>,
+    /// For a row with a label of its own: what the person changed about it,
+    /// whether it shows by itself, and its name at the provider.
+    pub editable: Option<(LabelPrefs, bool, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,8 +49,8 @@ impl LabelRow {
     /// drawn again.
     pub fn key(&self) -> String {
         format!(
-            "{}|{}|{:?}|{}|{:?}",
-            self.id, self.name, self.open, self.unread, self.color
+            "{}|{}|{:?}|{}|{:?}|{:?}",
+            self.id, self.name, self.open, self.unread, self.color, self.editable
         )
     }
 }
@@ -147,6 +153,10 @@ fn push_node(
     ));
     if let Some(last) = rows.last_mut() {
         last.color = node.color.clone();
+        last.editable = node
+            .entry
+            .is_some()
+            .then(|| (node.prefs.clone(), node.shown, node.segment.clone()));
     }
     if open == Some(true) {
         for child in &node.children {
@@ -207,6 +217,7 @@ fn row(
         unread,
         color: None,
         open,
+        editable: None,
     }
 }
 
@@ -279,7 +290,20 @@ fn label_line(state: State, line: LabelRow) -> NodeHandle {
         let n = thousands(line.unread);
         rsx! { span { class: "count", {n} } }
     });
-    rsx! {
+    let menu = match (&line.folder, &line.editable) {
+        (Some(Folder::Label { account, label }), Some((prefs, shown, provider_name))) => {
+            let edit = LabelEdit {
+                account: account.clone(),
+                label: label.clone(),
+                provider_name: provider_name.clone(),
+                prefs: prefs.clone(),
+                mode: EditMode::Rename,
+            };
+            Some(label_menu(__scope, state, edit, *shown))
+        }
+        _ => None,
+    };
+    let body = rsx! {
         div {
             class: {move || {
                 let here = chosen.as_ref().is_some_and(|f| *f == state.folder.get());
@@ -293,5 +317,14 @@ fn label_line(state: State, line: LabelRow) -> NodeHandle {
             }
             {unread}
         }
+    };
+    match menu {
+        Some(menu) => rsx! {
+            ContextMenu {
+                ContextMenuTarget { {body} }
+                {menu}
+            }
+        },
+        None => body,
     }
 }

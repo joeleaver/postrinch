@@ -1,14 +1,23 @@
 //! What the window shows, as signals, and loading it through the commands.
 
+use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
 use postrinch_commands::{Commands, Folder, Sidebar, Thread, ThreadPage};
-use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
+use postrinch_model::{EmailAddress, LabelPrefs, ProviderThreadId, SystemLabel};
 use rinch::prelude::*;
 use rinch::{Effect, batch};
 
 use crate::sync::AccountSync;
+use crate::ui::LabelEdit;
+
+thread_local! {
+    /// The commands the window acts through, set once by [`State::load`].
+    /// The window's state is all `Copy` signals; this is the one thing it
+    /// shares that is not.
+    static COMMANDS: OnceCell<Rc<Commands>> = const { OnceCell::new() };
+}
 
 /// How many more threads "Show more" loads.
 pub const PAGE: usize = 100;
@@ -32,6 +41,8 @@ pub struct State {
     pub sync: Signal<Vec<AccountSync>>,
     /// Bumped whenever sync changed the store, so what is shown reloads.
     pub revision: Signal<u64>,
+    /// The label being renamed or coloured.
+    pub editing: Signal<Option<LabelEdit>>,
     /// Why sync is not running, when it is not.
     pub sync_off: Signal<Option<String>>,
     /// The last thing that went wrong loading, for the window to say.
@@ -52,6 +63,7 @@ impl State {
             thread: Signal::new(None),
             sync: Signal::new(Vec::new()),
             revision: Signal::new(0),
+            editing: Signal::new(None),
             sync_off: Signal::new(None),
             error: Signal::new(None),
         }
@@ -61,6 +73,11 @@ impl State {
     /// whenever sync changes the store or another folder is chosen, and
     /// the open thread whenever it changes or sync does.
     pub fn load(self, commands: Rc<Commands>) {
+        COMMANDS.with(|c| {
+            if c.set(commands.clone()).is_err() {
+                tracing::error!("the window's commands were set twice");
+            }
+        });
         let lists = commands.clone();
         Effect::new(move || {
             self.revision.get();
@@ -92,6 +109,17 @@ impl State {
             };
             self.thread.set(thread);
         });
+    }
+
+    /// Save what the person changed about a label, and show it.
+    pub fn save_label_prefs(self, account: &EmailAddress, label: &str, prefs: &LabelPrefs) {
+        let Some(commands) = COMMANDS.with(|c| c.get().cloned()) else {
+            return;
+        };
+        match commands.set_label_prefs(account, label, prefs) {
+            Ok(()) => self.revision.update(|n| *n += 1),
+            Err(e) => self.error.set(Some(e.to_string())),
+        }
     }
 
     pub fn open_folder(self, folder: Folder) {

@@ -261,4 +261,20 @@ html, body { margin: 0; height: 100%; }
     font-size: 12px;
     color: var(--ink-2);
 }
+
+/* Label dialog */
+.dialog { display: flex; flex-direction: column; gap: 12px; }
+.dialog-title { margin: 0; font-size: 16px; font-weight: 600; }
+.dialog-hint { margin: 0; font-size: 13px; color: var(--muted); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid #ffffff;
+    box-shadow: 0 0 0 1px var(--field);
+    cursor: pointer;
+}
+.swatch.chosen { box-shadow: 0 0 0 2px var(--ink); }
 "#;

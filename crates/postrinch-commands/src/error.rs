@@ -7,6 +7,8 @@ pub enum CommandError {
     Store(#[from] StoreError),
     #[error("no account {0}")]
     UnknownAccount(EmailAddress),
+    #[error("not a colour: {0:?} (expected #rrggbb)")]
+    BadColor(String),
 }
 
 pub type CommandResult<T> = Result<T, CommandError>;

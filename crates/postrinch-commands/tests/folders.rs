@@ -174,3 +174,32 @@ fn rows_carry_tag_like_labels_but_not_the_one_listed() {
     let page = commands.list_threads(&receipts, None, 0, 10).unwrap();
     assert!(page.threads[0].chips.is_empty());
 }
+
+#[test]
+fn label_prefs_rename_hide_and_pin_here_only() {
+    let (_dir, commands, a, _b) = setup();
+    let prefs = postrinch_model::LabelPrefs {
+        name: Some("  Bills  ".into()),
+        pinned: true,
+        ..Default::default()
+    };
+    commands.set_label_prefs(&a, "Label_1", &prefs).unwrap();
+    assert_eq!(
+        commands.label_prefs(&a, "Label_1").unwrap().name.as_deref(),
+        Some("Bills")
+    );
+    let sidebar = commands.sidebar().unwrap();
+    assert_eq!(sidebar.accounts[0].labels.pinned[0].name, "Bills");
+
+    let bad = postrinch_model::LabelPrefs {
+        color: Some("blue".into()),
+        ..Default::default()
+    };
+    assert!(commands.set_label_prefs(&a, "Label_1", &bad).is_err());
+    let blank = postrinch_model::LabelPrefs {
+        name: Some("   ".into()),
+        ..Default::default()
+    };
+    commands.set_label_prefs(&a, "Label_1", &blank).unwrap();
+    assert_eq!(commands.label_prefs(&a, "Label_1").unwrap().name, None);
+}

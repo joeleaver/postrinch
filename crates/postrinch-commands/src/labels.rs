@@ -43,6 +43,8 @@ pub struct LabelNode {
     /// Whether it shows unless the person asks for all labels.
     pub shown: bool,
     pub messages: usize,
+    /// What the person changed about the label here.
+    pub prefs: LabelPrefs,
     pub children: Vec<LabelNode>,
 }
 
@@ -231,6 +233,7 @@ pub fn label_tree(
                 .shown
                 .unwrap_or_else(|| shown_by_default(label, &stats)),
             messages: stats.messages,
+            prefs: prefs.clone(),
             children: Vec::new(),
         };
         match app_of(&label.name) {
@@ -287,6 +290,7 @@ fn insert(nodes: &mut Vec<LabelNode>, path: &[&str], mut leaf: LabelNode) {
                 color: None,
                 shown: false,
                 messages: 0,
+                prefs: LabelPrefs::default(),
                 children: Vec::new(),
             });
             nodes.len() - 1
