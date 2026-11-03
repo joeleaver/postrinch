@@ -18,7 +18,7 @@ mod threads;
 use postrinch_store::Store;
 
 pub use accounts::AccountInfo;
-pub use actions::{ThreadAction, ThreadRef};
+pub use actions::{LabelChoice, ThreadAction, ThreadRef};
 pub use error::{CommandError, CommandResult};
 pub use folders::{AccountFolders, Folder, FolderEntry, Sidebar};
 pub use labels::{AppLabels, Chip, LabelNode, LabelRole, LabelTree, app_of, role};

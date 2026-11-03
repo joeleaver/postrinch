@@ -12,7 +12,7 @@ use postrinch_model::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{CommandError, CommandResult, Commands};
+use crate::{CommandError, CommandResult, Commands, app_of};
 
 /// Something to do to threads.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -40,6 +40,16 @@ pub enum ThreadAction {
 /// A thread, as an action names it.
 pub type ThreadRef = (EmailAddress, ProviderThreadId);
 
+/// A label the person can put on mail, as the label menu offers it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LabelChoice {
+    /// The provider's id, for [`ThreadAction::AddLabel`].
+    pub label: String,
+    /// The person's name for it, or the provider's whole path.
+    pub name: String,
+    pub color: Option<String>,
+}
+
 impl Commands {
     /// Do `action` to each thread. Threads the store does not have are
     /// passed over. Only messages the action would change are changed, so
@@ -52,6 +62,31 @@ impl Commands {
             }
         }
         Ok(())
+    }
+
+    /// The labels the person made in an account, by name: what the label
+    /// menu offers. Other apps' labels are left out, as the sidebar sets
+    /// them apart.
+    pub fn label_choices(&self, account: &EmailAddress) -> CommandResult<Vec<LabelChoice>> {
+        let prefs = self.store.label_prefs(account)?;
+        let mut choices: Vec<LabelChoice> = self
+            .store
+            .labels(account)?
+            .into_iter()
+            .filter(|l| l.kind == LabelKind::User && app_of(&l.name).is_none())
+            .map(|l| {
+                let prefs = prefs.get(&l.provider_id).cloned().unwrap_or_default();
+                LabelChoice {
+                    name: prefs.name.unwrap_or_else(|| l.name.clone()),
+                    color: prefs
+                        .color
+                        .or_else(|| l.color.as_ref().map(|c| c.background.clone())),
+                    label: l.provider_id,
+                }
+            })
+            .collect();
+        choices.sort_by_key(|c| c.name.to_lowercase());
+        Ok(choices)
     }
 
     /// The changes `action` makes to a thread's messages (oldest first).

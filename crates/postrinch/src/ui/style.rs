@@ -350,6 +350,7 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .notice.trouble { border-color: var(--warn-line); background: var(--warn-bg); color: var(--trouble); }
 .settings-page { flex: 1; display: flex; min-width: 0; }
 .settings-heading { margin: 0; font-size: 22px; font-weight: 600; }
+.settings-subheading { margin: 8px 0 0; font-size: 15px; font-weight: 600; }
 .choices { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }
 .choice {
     display: flex;

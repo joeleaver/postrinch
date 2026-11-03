@@ -80,22 +80,26 @@ fn with_rows<R>(state: State, f: impl FnOnce(&[ThreadRow]) -> R) -> R {
     }
 }
 
+/// The threads listed, less those a pending action takes out.
 pub(crate) fn row_ids(state: State) -> Vec<RowId> {
-    with_rows(state, |rows| {
+    let ids: Vec<RowId> = with_rows(state, |rows| {
         rows.iter()
             .map(|r| (r.summary.account.clone(), r.summary.id.clone()))
             .collect()
-    })
+    });
+    ids.into_iter()
+        .filter(|id| !state.pending_removal(id))
+        .collect()
 }
 
-/// The row's thread as now loaded; the last one found while the row is
-/// on its way out.
+/// The row's thread as now loaded, with pending actions on it applied.
 fn find_row(state: State, id: &RowId) -> Option<ThreadRow> {
-    with_rows(state, |rows| {
+    let found = with_rows(state, |rows| {
         rows.iter()
             .find(|r| r.summary.account == id.0 && r.summary.id == id.1)
             .cloned()
-    })
+    });
+    found.map(|row| state.patched(row))
 }
 
 /// "6 for “cover my shift”".
@@ -277,7 +281,7 @@ fn account_index(sidebar: Option<&Sidebar>, summary: &ThreadSummary) -> Option<u
 }
 
 /// Whether a folder is an inbox, which gets Gmail's category tabs.
-fn is_inbox(folder: &Folder, sidebar: Option<&Sidebar>) -> bool {
+pub(crate) fn is_inbox(folder: &Folder, sidebar: Option<&Sidebar>) -> bool {
     match folder {
         Folder::Everywhere(system) => *system == SystemLabel::Inbox,
         Folder::Label { .. } => {

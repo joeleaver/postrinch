@@ -2,9 +2,11 @@
 
 mod actions;
 mod appearance;
+mod changes;
 mod dates;
 mod loader;
 mod menus;
+mod reading;
 mod state;
 mod sync;
 mod ui;

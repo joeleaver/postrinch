@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use postrinch_commands::{
-    AccountInfo, Commands, Folder, SearchResults, Sidebar, Thread, ThreadPage,
+    AccountInfo, Commands, Folder, LabelChoice, SearchResults, Sidebar, Thread, ThreadPage,
 };
 use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
 use rinch::prelude::*;
@@ -11,7 +11,9 @@ use rinch::{Effect, batch};
 
 use crate::actions::Notice;
 use crate::appearance::{Appearance, Settings, is_dark, system_prefers_dark};
+use crate::changes::Change;
 use crate::loader::{self, Request};
+use crate::reading::{AfterMove, MarkRead};
 use crate::sync::AccountSync;
 use crate::ui::LabelEdit;
 
@@ -33,6 +35,7 @@ pub enum View {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsSection {
     Accounts,
+    Reading,
     Appearance,
 }
 
@@ -66,6 +69,18 @@ pub struct State {
     pub downloaded: Signal<Vec<(String, String)>>,
     /// Light, dark or the system's choice, as saved.
     pub appearance: Signal<Appearance>,
+    /// When an opened conversation is marked read, as saved.
+    pub mark_read: Signal<MarkRead>,
+    /// What opens after the open conversation is archived or trashed.
+    pub after_move: Signal<AfterMove>,
+    /// The labels the open conversation's account has, for the label menu.
+    pub label_choices: Signal<Vec<LabelChoice>>,
+    /// Whether the label menu is open.
+    pub labelling: Signal<bool>,
+    /// Actions shown but not yet in every list loaded (see changes.rs).
+    pub pending: Signal<Vec<Change>>,
+    /// Ticks when an opened conversation may be due to be marked read.
+    pub read_due: Signal<u64>,
     /// Whether the system prefers dark (dark when it does not say).
     pub system_dark: Signal<bool>,
     /// The sidebar's and the thread list's widths, in px.
@@ -110,6 +125,12 @@ impl State {
             editing: Signal::new(None),
             downloaded: Signal::new(Vec::new()),
             appearance: Signal::new(settings.appearance),
+            mark_read: Signal::new(settings.mark_read),
+            after_move: Signal::new(settings.after_move),
+            label_choices: Signal::new(Vec::new()),
+            labelling: Signal::new(false),
+            pending: Signal::new(Vec::new()),
+            read_due: Signal::new(0),
             sidebar_width: Signal::new(settings.sidebar_width.unwrap_or(SIDEBAR_WIDTH)),
             list_width: Signal::new(settings.list_width.unwrap_or(LIST_WIDTH)),
             system_dark: Signal::new(system_prefers_dark()),
@@ -164,6 +185,15 @@ impl State {
         Effect::new(move || {
             self.revision.get();
             search(Request::Search(self.search.get()));
+        });
+        let labels = ask.clone();
+        Effect::new(move || {
+            self.revision.get();
+            if self.labelling.get()
+                && let Some((account, _)) = self.selected.get()
+            {
+                labels(Request::Labels(account));
+            }
         });
         Effect::new(move || {
             self.revision.get();

@@ -34,6 +34,8 @@ pub struct SyncHandle {
     pub runtime: Handle,
     /// Starts sync's next pass at once.
     pub wake: Arc<Notify>,
+    /// Sends the changes made here at once.
+    pub send: Arc<Notify>,
     sync: GmailSync,
 }
 
@@ -44,9 +46,10 @@ impl SyncHandle {
     }
 }
 
-/// Start keeping every account in sync on a thread of its own. `status`
-/// follows what each account's sync is doing; `revision` is bumped when the
-/// store changed. Fails, saying why, when sync cannot run at all.
+/// Start keeping every account in sync, and sending the changes made here,
+/// on a thread of its own. `status` follows what each account's sync is
+/// doing; `revision` is bumped when the store changed. Fails, saying why,
+/// when sync cannot run at all.
 pub fn start(
     store: Store,
     status: Signal<Vec<AccountSync>>,
@@ -63,17 +66,26 @@ pub fn start(
         .build()
         .map_err(|e| format!("cannot start its runtime: {e}"))?;
     let events = Arc::new(move |event: SyncEvent| report(event, status, revision));
-    let wake = Arc::new(Notify::new());
+    let (wake, send) = (Arc::new(Notify::new()), Arc::new(Notify::new()));
     let handle = SyncHandle {
         auth,
         store,
         runtime: runtime.handle().clone(),
         wake: wake.clone(),
+        send: send.clone(),
         sync: sync.clone(),
     };
+    let options = KeepOptions::default();
     thread::Builder::new()
         .name("sync".into())
-        .spawn(move || runtime.block_on(sync.keep_in_sync(KeepOptions::default(), events, wake)))
+        .spawn(move || {
+            runtime.block_on(async {
+                tokio::join!(
+                    sync.keep_in_sync(options, events.clone(), wake),
+                    sync.keep_sending(options, events, send),
+                )
+            })
+        })
         .map_err(|e| format!("cannot start its thread: {e}"))?;
     Ok(handle)
 }

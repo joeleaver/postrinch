@@ -4,9 +4,12 @@ use rinch::prelude::*;
 
 use crate::state::{State, View};
 use crate::ui::list::row_ids;
+use crate::ui::thread_actions;
+use postrinch_commands::ThreadAction;
 
 /// Listen for the window's keys: j and k (or the arrows) move through the
-/// list, Escape steps back out of a search, Settings or an open thread.
+/// list, Escape steps back out of a search, Settings or an open thread, and
+/// Gmail's keys act on the open thread (see [`act`]).
 pub fn listen(root: NodeHandle, state: State) {
     on_app_key(move |key: &KeyEventData| {
         let in_field = root
@@ -20,7 +23,7 @@ pub fn listen(root: NodeHandle, state: State) {
             "j" | "ArrowDown" => step(state, 1),
             "k" | "ArrowUp" => step(state, -1),
             "Escape" => back(state),
-            _ => false,
+            key => act(state, key),
         }
     });
 }
@@ -57,5 +60,28 @@ fn back(state: State) -> bool {
     } else {
         return false;
     }
+    true
+}
+
+/// Gmail's keys for the open thread: e archives (or moves back to the
+/// inbox), # trashes (or restores, in the trash), Shift+U marks it unread
+/// and Shift+I read, s stars or unstars, and l opens the label menu.
+fn act(state: State, key: &str) -> bool {
+    if state.view.get() != View::Mail || state.selected.get().is_none() {
+        return false;
+    }
+    let action = match key {
+        "e" => thread_actions::archive_or_restore(state),
+        "#" => thread_actions::trash_or_restore(state),
+        "U" => ThreadAction::MarkUnread,
+        "I" => ThreadAction::MarkRead,
+        "s" => thread_actions::star_or_unstar(state),
+        "l" => {
+            state.labelling.set(true);
+            return true;
+        }
+        _ => return false,
+    };
+    state.act_on_open(action);
     true
 }

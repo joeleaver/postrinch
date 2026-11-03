@@ -1,7 +1,9 @@
-//! Loading what the window shows, on a thread of its own, so the window
+//! Loading what the window shows, on threads of their own, so the window
 //! never waits for the store: the UI thread asks, the loader answers into
 //! the window's signals. When asks pile up, only the newest of each kind
-//! is answered.
+//! is answered. The open thread and its labels load on a thread apart from
+//! lists and search, so a folder that takes seconds to list never holds up
+//! what the person is reading.
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -10,6 +12,7 @@ use std::time::{Duration, Instant};
 use postrinch_commands::{Commands, Folder};
 use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
 
+use crate::changes;
 use crate::state::State;
 
 /// How many threads a search shows.
@@ -32,6 +35,8 @@ pub enum Request {
     Search(Option<String>),
     /// The open thread, or none.
     Thread(Option<(EmailAddress, ProviderThreadId)>),
+    /// The labels an account's mail can be given, for the label menu.
+    Labels(EmailAddress),
 }
 
 impl Request {
@@ -42,24 +47,49 @@ impl Request {
             Request::Accounts => 1,
             Request::Search(_) => 2,
             Request::Thread(_) => 3,
+            Request::Labels(_) => 4,
         }
     }
 }
 
-/// Start the loader; returns where to send it requests.
-pub fn start(commands: Commands, state: State) -> Result<Sender<Request>, String> {
-    let (tx, rx) = mpsc::channel();
-    thread::Builder::new()
-        .name("loader".into())
-        .spawn(move || serve(&commands, state, &rx))
-        .map_err(|e| format!("cannot start the loader: {e}"))?;
-    Ok(tx)
+/// Where the window sends what it wants loaded.
+#[derive(Clone)]
+pub struct Loader {
+    /// The open thread and its labels: quick, and what the person waits on.
+    quick: Sender<Request>,
+    /// Lists, search and accounts: they can take seconds.
+    slow: Sender<Request>,
+}
+
+impl Loader {
+    pub fn send(&self, request: Request) -> Result<(), mpsc::SendError<Request>> {
+        match request {
+            Request::Thread(_) | Request::Labels(_) => self.quick.send(request),
+            _ => self.slow.send(request),
+        }
+    }
+}
+
+/// Start the loader's two threads.
+pub fn start(commands: Commands, state: State) -> Result<Loader, String> {
+    let spawn = |name: &str, commands: Commands| {
+        let (tx, rx) = mpsc::channel();
+        thread::Builder::new()
+            .name(name.into())
+            .spawn(move || serve(&commands, state, &rx))
+            .map(|_| tx)
+            .map_err(|e| format!("cannot start the loader: {e}"))
+    };
+    Ok(Loader {
+        quick: spawn("loader-quick", commands.clone())?,
+        slow: spawn("loader", commands)?,
+    })
 }
 
 fn serve(commands: &Commands, state: State, rx: &Receiver<Request>) {
     while let Ok(first) = rx.recv() {
         // Everything asked for meanwhile; the newest of each kind wins.
-        let mut latest: [Option<Request>; 4] = Default::default();
+        let mut latest: [Option<Request>; 5] = Default::default();
         let k = first.kind();
         latest[k] = Some(first);
         while let Ok(more) = rx.try_recv() {
@@ -87,9 +117,16 @@ fn answer(commands: &Commands, state: State, request: Request) {
             shown,
         } => match commands.sidebar() {
             Ok(sidebar) => {
+                // Every action made by now shows in what is read next.
+                let as_of = changes::made();
                 state.sidebar.send(Some(sidebar));
                 match commands.list_threads(&folder, category, 0, shown) {
-                    Ok(page) => state.page.send(Some(page)),
+                    Ok(page) => {
+                        state.page.send(Some(page));
+                        state
+                            .pending
+                            .update_send(move |p| p.retain(|c| c.number > as_of));
+                    }
                     Err(e) => failed(e.to_string()),
                 }
             }
@@ -107,6 +144,10 @@ fn answer(commands: &Commands, state: State, request: Request) {
         Request::Thread(None) => state.thread.send(None),
         Request::Thread(Some((account, thread))) => match commands.read_thread(&account, &thread) {
             Ok(thread) => state.thread.send(thread),
+            Err(e) => failed(e.to_string()),
+        },
+        Request::Labels(account) => match commands.label_choices(&account) {
+            Ok(choices) => state.label_choices.send(choices),
             Err(e) => failed(e.to_string()),
         },
     }

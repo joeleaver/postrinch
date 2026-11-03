@@ -32,6 +32,10 @@ pub struct Settings {
     pub sidebar_width: Option<f32>,
     #[serde(default)]
     pub list_width: Option<f32>,
+    #[serde(default)]
+    pub mark_read: crate::reading::MarkRead,
+    #[serde(default)]
+    pub after_move: crate::reading::AfterMove,
 }
 
 impl Settings {

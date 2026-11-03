@@ -1,5 +1,5 @@
-//! Settings: for now its Accounts page, after the Settings › Accounts
-//! mockup. Other sections arrive with what they configure.
+//! Settings: Accounts, Reading and Appearance, after their mockups. Other
+//! sections arrive with what they configure.
 
 use postrinch_commands::AccountInfo;
 use postrinch_model::{AccountState, EmailAddress};
@@ -9,6 +9,7 @@ use crate::appearance::Appearance;
 use crate::state::{SettingsSection, State, View};
 use crate::sync::thousands;
 use crate::ui::account_color;
+use crate::ui::reading_settings::reading;
 
 #[component]
 pub fn settings(state: State) -> NodeHandle {
@@ -17,13 +18,14 @@ pub fn settings(state: State) -> NodeHandle {
             nav { class: "settings-nav",
                 div { class: "settings-title", "Settings" }
                 {section_link(__scope, state, SettingsSection::Accounts, "Accounts")}
+                {section_link(__scope, state, SettingsSection::Reading, "Reading")}
                 {section_link(__scope, state, SettingsSection::Appearance, "Appearance")}
                 div { class: "settings-back", onclick: move || state.view.set(View::Mail), "← Back to mail" }
             }
-            if state.settings_section.get() == SettingsSection::Accounts {
-                {accounts(__scope, state)}
-            } else {
-                {appearance(__scope, state)}
+            match state.settings_section.get() {
+                SettingsSection::Accounts => {accounts(__scope, state)},
+                SettingsSection::Reading => {reading(__scope, state)},
+                SettingsSection::Appearance => {appearance(__scope, state)},
             }
             {confirm_removal(__scope, state)}
         }

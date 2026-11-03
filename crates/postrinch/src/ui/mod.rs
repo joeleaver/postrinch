@@ -1,16 +1,19 @@
 //! The window: a header over the sidebar, the thread list and the reader.
 
+mod icons;
 mod keys;
 mod label_edit;
 mod labels;
-mod list;
+pub(crate) mod list;
 mod logo;
 mod palette;
 mod reader;
+mod reading_settings;
 mod settings;
 mod sidebar;
 mod splitter;
 mod style;
+pub(crate) mod thread_actions;
 
 use std::rc::Rc;
 
@@ -20,7 +23,7 @@ use rinch::prelude::*;
 
 use crate::state::{State, View};
 use crate::sync;
-use crate::{actions, appearance};
+use crate::{actions, appearance, changes};
 
 /// Colours that tell accounts apart, in the order accounts were added. They
 /// stay clear of the blue that marks what is chosen.
@@ -43,7 +46,13 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
             None
         }
     };
+    changes::start(
+        (*commands).clone(),
+        state,
+        sync.as_ref().map(|s| s.send.clone()),
+    );
     actions::init(commands.clone(), sync);
+    state.mark_read_when_opened();
     appearance::watch_system(state.system_dark);
     state.load(&commands);
     let brand: SectionRenderer = Rc::new(|__scope| {
@@ -72,6 +81,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                     style { {palette::DARK} }
                 }
                 style { {style::CSS} }
+                style { {thread_actions::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 if state.view.get() == View::Mail {
                     div { class: "panes",

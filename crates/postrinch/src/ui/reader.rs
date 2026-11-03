@@ -7,6 +7,7 @@ use rinch::prelude::*;
 
 use crate::dates;
 use crate::state::State;
+use crate::ui::thread_actions::toolbar;
 
 #[component]
 pub fn reader(state: State) -> NodeHandle {
@@ -16,7 +17,7 @@ pub fn reader(state: State) -> NodeHandle {
             // (or this one, changed) is drawn again (rinch#2105).
             for thread in state.thread.get() {
                 div { key: thread_key(thread),
-                    {open_thread(__scope, thread.clone())}
+                    {open_thread(__scope, state, thread.clone())}
                 }
             }
             if state.thread.get().is_none() {
@@ -40,7 +41,7 @@ fn thread_key(thread: &Thread) -> String {
 }
 
 #[component]
-fn open_thread(thread: Thread) -> NodeHandle {
+fn open_thread(state: State, thread: Thread) -> NodeHandle {
     let tz = TimeZone::system();
     let summary = &thread.summary;
     let count = match summary.message_count {
@@ -60,7 +61,10 @@ fn open_thread(thread: Thread) -> NodeHandle {
         .collect();
     rsx! {
         div { class: "thread",
-            h2 { class: "thread-subject", {subject} }
+            div { class: "thread-head",
+                h2 { class: "thread-subject", {subject} }
+                {toolbar(__scope, state)}
+            }
             div { class: "thread-meta", {meta} }
             {messages}
         }
