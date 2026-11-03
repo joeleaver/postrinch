@@ -6,12 +6,13 @@ use std::sync::Arc;
 use postrinch_model::EmailAddress;
 use tokio::sync::RwLock;
 
-use super::{GmailSync, Progress, ProgressFn, SyncReport};
+use super::{GmailSync, Phase, Progress, ProgressFn, SyncReport};
 use crate::SyncResult;
 
 impl GmailSync {
-    /// List every message id in the account; fetch those the store lacks;
-    /// remove stored ones Gmail no longer has. With `refresh_existing`, also
+    /// List every message id in the account; store the headers of those
+    /// the store lacks (their bodies come later, from
+    /// [`GmailSync::backfill`]); remove stored ones Gmail no longer has. With `refresh_existing`, also
     /// bring the labels of messages already stored up to date (when the
     /// history that would have told us what changed is gone).
     pub(super) async fn full(
@@ -50,6 +51,9 @@ impl GmailSync {
         let listed_set: HashSet<&String> = listed.iter().collect();
 
         // Newest first, as Gmail lists them, so the inbox fills from the top.
+        // Headers cost a third of a whole message, so the whole mailbox can
+        // be listed, threaded and searched by sender and subject long before
+        // every body is down.
         let missing: Vec<String> = listed
             .iter()
             .filter(|id| !stored.contains(*id))
@@ -57,10 +61,16 @@ impl GmailSync {
             .collect();
         let account_for = account.clone();
         let fetch_labels = Arc::clone(&labels);
-        self.for_each(missing, progress, &mut report, move |sync, id| {
-            let (account, labels) = (account_for.clone(), Arc::clone(&fetch_labels));
-            async move { sync.fetch(&account, &id, &labels).await }
-        })
+        self.for_each(
+            missing,
+            Phase::Headers,
+            progress,
+            &mut report,
+            move |sync, id| {
+                let (account, labels) = (account_for.clone(), Arc::clone(&fetch_labels));
+                async move { sync.fetch_headers(&account, &id, &labels).await }
+            },
+        )
         .await?;
 
         if refresh_existing {
@@ -71,10 +81,16 @@ impl GmailSync {
                 .collect();
             let account_for = account.clone();
             let relabel_labels = Arc::clone(&labels);
-            self.for_each(existing, progress, &mut report, move |sync, id| {
-                let (account, labels) = (account_for.clone(), Arc::clone(&relabel_labels));
-                async move { sync.relabel(&account, &id, &labels).await }
-            })
+            self.for_each(
+                existing,
+                Phase::Changes,
+                progress,
+                &mut report,
+                move |sync, id| {
+                    let (account, labels) = (account_for.clone(), Arc::clone(&relabel_labels));
+                    async move { sync.relabel(&account, &id, &labels).await }
+                },
+            )
             .await?;
         }
 

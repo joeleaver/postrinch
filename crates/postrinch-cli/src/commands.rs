@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use postrinch_model::{AccountState, EmailAddress, Provider, ProviderMessageId};
 use postrinch_store::Store;
-use postrinch_sync::google::{ClientConfig, GmailApi, GmailSync, GoogleAuth, Keychain, Progress};
+use postrinch_sync::google::{
+    ClientConfig, GmailApi, GmailSync, GoogleAuth, Keychain, Phase, Progress, ProgressFn,
+};
 
 use crate::{Cli, Command};
 
@@ -43,7 +45,18 @@ pub(crate) async fn run(cli: Cli) -> Result<()> {
         Command::AddGoogle => sign_in(&cx, None).await,
         Command::SignIn { address } => sign_in(&cx, Some(parse(&address)?)).await,
         Command::RemoveAccount { address } => remove_account(&cx, &parse(&address)?).await,
-        Command::Sync { address } => sync(&cx, address.as_deref().map(parse).transpose()?).await,
+        Command::Sync {
+            address,
+            no_backfill,
+        } => {
+            sync(
+                &cx,
+                address.as_deref().map(parse).transpose()?,
+                !no_backfill,
+            )
+            .await
+        }
+        Command::Resync { address } => resync(&cx, parse(&address)?).await,
         Command::Search { query, limit } => search(&cx, &query, limit),
         Command::Show {
             address,
@@ -99,7 +112,19 @@ async fn remove_account(cx: &Context, address: &EmailAddress) -> Result<()> {
     Ok(())
 }
 
-async fn sync(cx: &Context, only: Option<EmailAddress>) -> Result<()> {
+async fn resync(cx: &Context, address: EmailAddress) -> Result<()> {
+    let removed = cx.store.clear_mail(&address)?;
+    eprintln!("{address}: cleared {removed} messages; syncing again");
+    sync(cx, Some(address), true).await?;
+    // Raw messages the provider no longer has; the rest were reused.
+    let unused = cx.store.collect_garbage(std::time::Duration::ZERO)?;
+    if unused > 0 {
+        eprintln!("removed {unused} raw messages no longer in the account");
+    }
+    Ok(())
+}
+
+async fn sync(cx: &Context, only: Option<EmailAddress>, backfill: bool) -> Result<()> {
     let accounts: Vec<_> = cx
         .store
         .accounts()?
@@ -117,33 +142,36 @@ async fn sync(cx: &Context, only: Option<EmailAddress>) -> Result<()> {
     let sync = GmailSync::new(Arc::new(GmailApi::new(auth)), cx.store.clone());
     let mut failed = false;
     for account in accounts {
+        let address = &account.address;
         if !account.is_active() && only.is_none() {
-            eprintln!("{}: must sign in again; skipped", account.address);
+            eprintln!("{address}: must sign in again; skipped");
             continue;
         }
-        let label = account.address.to_string();
-        let progress = Arc::new(move |p: Progress| {
-            match p {
-                Progress::Listing { found } => eprint!("\r{label}: listing… {found} messages"),
-                Progress::Applying { done, total } => {
-                    eprint!("\r{label}: {done}/{total}          ")
+        let result = match sync.sync(address, progress(address)).await {
+            Ok(r) => {
+                eprintln!(
+                    "\r{address}: {} sync done: {} new (headers), {} downloaded, {} updated, {} removed",
+                    if r.full { "full" } else { "incremental" },
+                    r.headers,
+                    r.fetched,
+                    r.relabelled,
+                    r.removed
+                );
+                if backfill {
+                    sync.backfill(address, progress(address)).await.map(|r| {
+                        if r.fetched > 0 {
+                            eprintln!("\r{address}: downloaded {} messages", r.fetched);
+                        }
+                    })
+                } else {
+                    Ok(())
                 }
             }
-            let _ = std::io::stderr().flush();
-        });
-        match sync.sync(&account.address, progress).await {
-            Ok(r) => eprintln!(
-                "\r{}: {} sync done: {} fetched, {} updated, {} removed",
-                account.address,
-                if r.full { "full" } else { "incremental" },
-                r.fetched,
-                r.relabelled,
-                r.removed
-            ),
-            Err(e) => {
-                eprintln!("\r{}: {e}", account.address);
-                failed = true;
-            }
+            Err(e) => Err(e),
+        };
+        if let Err(e) = result {
+            eprintln!("\r{address}: {e}");
+            failed = true;
         }
     }
     if failed {
@@ -151,6 +179,25 @@ async fn sync(cx: &Context, only: Option<EmailAddress>) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+/// A progress line for one account, rewritten in place.
+fn progress(address: &EmailAddress) -> ProgressFn {
+    let label = address.to_string();
+    Arc::new(move |p: Progress| {
+        match p {
+            Progress::Listing { found } => eprint!("\r{label}: listing… {found} messages"),
+            Progress::Working { phase, done, total } => {
+                let what = match phase {
+                    Phase::Headers => "headers",
+                    Phase::Changes => "changes",
+                    Phase::Bodies => "downloading",
+                };
+                eprint!("\r{label}: {what} {done}/{total}          ")
+            }
+        }
+        let _ = std::io::stderr().flush();
+    })
 }
 
 fn search(cx: &Context, query: &str, limit: usize) -> Result<()> {

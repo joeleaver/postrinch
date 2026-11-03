@@ -70,6 +70,9 @@ type Message {
     attachments: Json
     // SHA-256 of the raw message in the blob store, hex; null until fetched.
     raw_sha256: String
+    // Whether body_text and attachments are known (false: headers only).
+    // Null on messages stored before the flag existed, all downloaded.
+    downloaded: Bool @indexed
 }
 
 type SavedView {

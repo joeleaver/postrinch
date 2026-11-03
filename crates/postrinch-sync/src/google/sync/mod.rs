@@ -9,6 +9,7 @@
 //! written only once everything before it is stored, so a sync that is
 //! interrupted repeats work when it runs again, and never skips any.
 
+mod backfill;
 mod cursor;
 mod full;
 mod incremental;
@@ -34,7 +35,10 @@ const CONCURRENT_FETCHES: usize = 10;
 pub struct SyncReport {
     /// Whether it listed the whole account rather than reading history.
     pub full: bool,
-    /// Messages fetched and stored.
+    /// Messages stored from their headers alone, to be downloaded later
+    /// ([`GmailSync::backfill`]).
+    pub headers: usize,
+    /// Messages downloaded whole and stored.
     pub fetched: usize,
     /// Stored messages whose labels or flags were brought up to date.
     pub relabelled: usize,
@@ -45,6 +49,7 @@ pub struct SyncReport {
 impl SyncReport {
     fn add(&mut self, other: SyncReport) {
         self.full |= other.full;
+        self.headers += other.headers;
         self.fetched += other.fetched;
         self.relabelled += other.relabelled;
         self.removed += other.removed;
@@ -56,8 +61,23 @@ impl SyncReport {
 pub enum Progress {
     /// A full sync has listed this many message ids so far.
     Listing { found: usize },
-    /// Messages fetched or brought up to date, of those that need it.
-    Applying { done: usize, total: usize },
+    /// Working through messages: `done` of `total` in this phase.
+    Working {
+        phase: Phase,
+        done: usize,
+        total: usize,
+    },
+}
+
+/// What a sync is working through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    /// Storing the headers of messages new to the store.
+    Headers,
+    /// Applying changes: new messages, labels, deletions.
+    Changes,
+    /// Downloading whole messages known only by their headers.
+    Bodies,
 }
 
 pub type ProgressFn = Arc<dyn Fn(Progress) + Send + Sync>;

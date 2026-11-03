@@ -11,4 +11,4 @@ pub mod google;
 mod mime;
 
 pub use error::{SyncError, SyncResult};
-pub use mime::{Envelope, parse_message};
+pub use mime::{Envelope, parse_headers, parse_message};

@@ -108,8 +108,13 @@ pub struct Message {
     /// `text/plain` part, or the text of the HTML part when there is none.
     pub body_text: String,
     pub attachments: Vec<AttachmentInfo>,
-    /// The raw message's size in bytes.
+    /// The raw message's size in bytes (the provider's estimate until it
+    /// is downloaded).
     pub size: u64,
+    /// Whether the whole message has been downloaded. Until it has, only
+    /// the headers, labels, flags and snippet are known: `body_text` is
+    /// empty and `attachments` lists nothing, whatever the message holds.
+    pub downloaded: bool,
 }
 
 impl Message {

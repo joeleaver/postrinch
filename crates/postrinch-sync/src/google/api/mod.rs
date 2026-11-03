@@ -3,137 +3,26 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use base64::Engine;
-use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
 use postrinch_model::EmailAddress;
 use reqwest::StatusCode;
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
+mod types;
+
+pub(crate) use types::*;
+
 use super::GoogleAuth;
+pub(crate) use super::quota::Priority;
 use super::quota::{Cost, Quota};
+
 use crate::{SyncError, SyncResult};
+
+const FG: Priority = Priority::Foreground;
 
 const GMAIL: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
 /// Attempts per request before a retryable failure is returned.
 const ATTEMPTS: u32 = 8;
 const MAX_BACKOFF: Duration = Duration::from_secs(32);
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct Profile {
-    pub history_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct LabelResource {
-    pub id: String,
-    pub name: String,
-    #[serde(rename = "type", default)]
-    pub kind: String,
-}
-
-#[derive(Deserialize)]
-struct LabelList {
-    #[serde(default)]
-    labels: Vec<LabelResource>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageRef {
-    pub id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MessageList {
-    #[serde(default)]
-    pub messages: Vec<MessageRef>,
-    pub next_page_token: Option<String>,
-}
-
-/// A message as `format=raw` returns it.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RawMessage {
-    pub id: String,
-    pub thread_id: String,
-    #[serde(default)]
-    pub label_ids: Vec<String>,
-    #[serde(default)]
-    pub snippet: String,
-    /// Milliseconds since the epoch, as a string.
-    pub internal_date: String,
-    pub raw: String,
-}
-
-impl RawMessage {
-    /// The message's bytes. Gmail documents base64url; accept it padded or
-    /// not.
-    pub(crate) fn bytes(&self) -> SyncResult<Vec<u8>> {
-        URL_SAFE_NO_PAD
-            .decode(self.raw.trim_end_matches('='))
-            .or_else(|_| URL_SAFE.decode(&self.raw))
-            .map_err(|e| SyncError::Mime(format!("message {}: raw is not base64url: {e}", self.id)))
-    }
-}
-
-/// A message as `format=minimal` returns it: just where it is filed.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MinimalMessage {
-    pub id: String,
-    #[serde(default)]
-    pub label_ids: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct HistoryMessage {
-    pub message: MessageRef,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct HistoryRecord {
-    #[serde(default)]
-    pub messages_added: Vec<HistoryMessage>,
-    #[serde(default)]
-    pub messages_deleted: Vec<HistoryMessage>,
-    #[serde(default)]
-    pub labels_added: Vec<HistoryMessage>,
-    #[serde(default)]
-    pub labels_removed: Vec<HistoryMessage>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct HistoryPage {
-    #[serde(default)]
-    pub history: Vec<HistoryRecord>,
-    pub next_page_token: Option<String>,
-    pub history_id: String,
-}
-
-#[derive(Deserialize)]
-struct ErrorBody {
-    error: ErrorDetail,
-}
-
-#[derive(Deserialize)]
-struct ErrorDetail {
-    #[serde(default)]
-    message: String,
-    #[serde(default)]
-    errors: Vec<ErrorReason>,
-}
-
-#[derive(Deserialize)]
-struct ErrorReason {
-    #[serde(default)]
-    reason: String,
-}
 
 /// The Gmail API for any signed-in account.
 pub struct GmailApi {
@@ -168,12 +57,13 @@ impl GmailApi {
     }
 
     pub(crate) async fn profile(&self, account: &EmailAddress) -> SyncResult<Profile> {
-        self.get(account, Cost::GetProfile, "profile", &[]).await
+        self.get(account, (Cost::GetProfile, FG), "profile", &[])
+            .await
     }
 
     pub(crate) async fn labels(&self, account: &EmailAddress) -> SyncResult<Vec<LabelResource>> {
         Ok(self
-            .get::<LabelList>(account, Cost::ListLabels, "labels", &[])
+            .get::<LabelList>(account, (Cost::ListLabels, FG), "labels", &[])
             .await?
             .labels)
     }
@@ -188,24 +78,43 @@ impl GmailApi {
         if let Some(page) = page {
             query.push(("pageToken", page));
         }
-        self.get(account, Cost::ListMessages, "messages", &query)
+        self.get(account, (Cost::ListMessages, FG), "messages", &query)
             .await
     }
 
+    /// A whole message (60 quota units).
     pub(crate) async fn raw_message(
         &self,
         account: &EmailAddress,
         id: &str,
+        priority: Priority,
     ) -> SyncResult<RawMessage> {
         self.get(
             account,
-            Cost::GetMessage,
+            (Cost::GetMessageRaw, priority),
             &format!("messages/{id}"),
             &[("format", "raw")],
         )
         .await
     }
 
+    /// A message's headers, labels and snippet, without its body (20 quota
+    /// units, a third of a whole message).
+    pub(crate) async fn metadata_message(
+        &self,
+        account: &EmailAddress,
+        id: &str,
+    ) -> SyncResult<MetadataMessage> {
+        self.get(
+            account,
+            (Cost::GetMessageMetadata, FG),
+            &format!("messages/{id}"),
+            &[("format", "metadata")],
+        )
+        .await
+    }
+
+    /// Where a message is filed, and nothing else (20 quota units).
     pub(crate) async fn minimal_message(
         &self,
         account: &EmailAddress,
@@ -213,7 +122,7 @@ impl GmailApi {
     ) -> SyncResult<MinimalMessage> {
         self.get(
             account,
-            Cost::GetMessage,
+            (Cost::GetMessageMetadata, FG),
             &format!("messages/{id}"),
             &[("format", "minimal")],
         )
@@ -239,7 +148,7 @@ impl GmailApi {
         if let Some(page) = page {
             query.push(("pageToken", page));
         }
-        self.get(account, Cost::ListHistory, "history", &query)
+        self.get(account, (Cost::ListHistory, FG), "history", &query)
             .await
     }
 
@@ -249,7 +158,7 @@ impl GmailApi {
     async fn get<T: DeserializeOwned>(
         &self,
         account: &EmailAddress,
-        cost: Cost,
+        (cost, priority): (Cost, Priority),
         path: &str,
         query: &[(&str, &str)],
     ) -> SyncResult<T> {
@@ -258,7 +167,7 @@ impl GmailApi {
         let mut attempt = 0;
         loop {
             attempt += 1;
-            self.quota.acquire(&account.key(), cost).await;
+            self.quota.acquire(&account.key(), cost, priority).await;
             let token = self.auth.access_token(account).await?;
             let response = match self
                 .http
@@ -389,6 +298,9 @@ fn backoff(attempt: u32, retry_after: Option<Duration>) -> Duration {
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine;
+    use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
+
     use super::*;
 
     #[test]

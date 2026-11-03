@@ -32,11 +32,23 @@ impl Store {
     /// been fetched; storing without it keeps any raw message already
     /// stored.
     ///
+    /// A message that is not downloaded (headers only) is stored as such,
+    /// to be downloaded later; but over one already downloaded it changes
+    /// only labels and flags, so a body is never lost.
+    ///
     /// The message's labels must already be in the store
     /// ([`Store::put_label`]). Calling this again with the same message
     /// repairs whatever an interrupted earlier call left undone.
     pub fn put_message(&self, message: &Message, raw: Option<&[u8]>) -> StoreResult<()> {
         let account = &message.account;
+        // Headers alone never replace a downloaded message: they would wipe
+        // its body. Only what headers can change is brought up to date.
+        if !message.downloaded
+            && let Some(existing) = self.find(TYPE, "key", &scoped(account, &message.id.0))?
+            && existing.opt_bool("downloaded")?.unwrap_or(true)
+        {
+            return self.set_message_labels(account, &message.id, &message.labels, message.flags);
+        }
         let account_id = self.account_id(account)?;
         let thread_id = self.thread_id(account, account_id, &message.thread)?;
         let label_ids = self.label_ids(account, &message.labels)?;
@@ -57,7 +69,8 @@ impl Store {
             .u64("size", message.size)
             .json("headers", &message.headers)
             .str("body_text", message.body_text.clone())
-            .json("attachments", &message.attachments);
+            .json("attachments", &message.attachments)
+            .bool("downloaded", message.downloaded);
         if let Some(hash) = raw_sha256 {
             fields = fields.str("raw_sha256", hash);
         }
@@ -256,6 +269,7 @@ impl Store {
             body_text: fields.str("body_text")?,
             attachments: fields.json("attachments")?,
             size: fields.u64("size")?,
+            downloaded: fields.opt_bool("downloaded")?.unwrap_or(true),
         })
     }
 }

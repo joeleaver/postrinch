@@ -8,6 +8,7 @@
 //! with attachments can run to megabytes and has no business in the LSM tree.
 
 mod accounts;
+mod backfill;
 mod blobs;
 mod codec;
 mod error;

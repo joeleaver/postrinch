@@ -35,29 +35,6 @@ pub fn parse_message(envelope: Envelope, raw: &[u8]) -> SyncResult<Message> {
         .parse(raw)
         .ok_or_else(|| SyncError::Mime(format!("message {} has no headers", envelope.id.0)))?;
 
-    let mut headers = MessageHeaders {
-        subject: parsed.subject().map(str::to_owned),
-        from: mailboxes(parsed.from()),
-        sender: mailboxes(parsed.sender()).into_iter().next(),
-        reply_to: mailboxes(parsed.reply_to()),
-        to: mailboxes(parsed.to()),
-        cc: mailboxes(parsed.cc()),
-        bcc: mailboxes(parsed.bcc()),
-        date: parsed
-            .date()
-            .map(|d| Timestamp::from_millis(d.to_timestamp().saturating_mul(1000))),
-        ..Default::default()
-    };
-    if let Some(id) = parsed.message_id() {
-        headers.set_message_id(id);
-    }
-    if let Some(list) = parsed.in_reply_to() {
-        headers.set_in_reply_to(&list.iter().collect::<Vec<_>>().join(" "));
-    }
-    if let Some(list) = parsed.references() {
-        headers.set_references(&list.iter().collect::<Vec<_>>().join(" "));
-    }
-
     let body_text = parsed
         .text_bodies()
         .map(|b| b.trim().to_owned())
@@ -85,24 +62,79 @@ pub fn parse_message(envelope: Envelope, raw: &[u8]) -> SyncResult<Message> {
         })
         .collect();
 
-    let snippet = match envelope.snippet {
-        Some(s) if !s.trim().is_empty() => s,
+    let snippet = match &envelope.snippet {
+        Some(s) if !s.trim().is_empty() => s.clone(),
         _ => snippet_from(&body_text),
     };
 
     Ok(Message {
-        account: envelope.account,
-        id: envelope.id,
-        thread: envelope.thread,
-        headers,
-        received: envelope.received,
-        labels: envelope.labels,
-        flags: envelope.flags,
+        headers: headers(&parsed),
         snippet,
         body_text,
         attachments,
         size: raw.len() as u64,
+        downloaded: true,
+        ..from_envelope(envelope)
     })
+}
+
+/// Build a [`Message`] that is not downloaded yet, from its envelope and
+/// its headers alone (`Name: value` lines ending in a blank line). `size`
+/// is the provider's estimate of the whole message's.
+pub fn parse_headers(envelope: Envelope, header_block: &[u8], size: u64) -> SyncResult<Message> {
+    let parsed = MessageParser::default()
+        .parse(header_block)
+        .ok_or_else(|| SyncError::Mime(format!("message {} has no headers", envelope.id.0)))?;
+    Ok(Message {
+        headers: headers(&parsed),
+        snippet: envelope.snippet.clone().unwrap_or_default(),
+        size,
+        ..from_envelope(envelope)
+    })
+}
+
+/// A message with what the envelope says and nothing downloaded.
+fn from_envelope(envelope: Envelope) -> Message {
+    Message {
+        account: envelope.account,
+        id: envelope.id,
+        thread: envelope.thread,
+        headers: MessageHeaders::default(),
+        received: envelope.received,
+        labels: envelope.labels,
+        flags: envelope.flags,
+        snippet: String::new(),
+        body_text: String::new(),
+        attachments: Vec::new(),
+        size: 0,
+        downloaded: false,
+    }
+}
+
+fn headers(parsed: &mail_parser::Message<'_>) -> MessageHeaders {
+    let mut headers = MessageHeaders {
+        subject: parsed.subject().map(str::to_owned),
+        from: mailboxes(parsed.from()),
+        sender: mailboxes(parsed.sender()).into_iter().next(),
+        reply_to: mailboxes(parsed.reply_to()),
+        to: mailboxes(parsed.to()),
+        cc: mailboxes(parsed.cc()),
+        bcc: mailboxes(parsed.bcc()),
+        date: parsed
+            .date()
+            .map(|d| Timestamp::from_millis(d.to_timestamp().saturating_mul(1000))),
+        ..Default::default()
+    };
+    if let Some(id) = parsed.message_id() {
+        headers.set_message_id(id);
+    }
+    if let Some(list) = parsed.in_reply_to() {
+        headers.set_in_reply_to(&list.iter().collect::<Vec<_>>().join(" "));
+    }
+    if let Some(list) = parsed.references() {
+        headers.set_references(&list.iter().collect::<Vec<_>>().join(" "));
+    }
+    headers
 }
 
 /// The mailboxes of an address header, skipping entries without a usable
@@ -215,6 +247,23 @@ mod tests {
         assert!(s.ends_with('…'));
         assert!(s.chars().count() <= SNIPPET_CHARS + 1);
         assert!(!s.contains("  "));
+    }
+
+    #[test]
+    fn headers_alone_make_an_undownloaded_message() {
+        let block = b"From: Ada Lovelace <ada@example.org>\r\nSubject: =?utf-8?q?Caf=C3=A9?=\r\n\
+                      Message-ID: <abc@x>\r\n\r\n";
+        let m = parse_headers(envelope(Some("preview")), block, 4321).unwrap();
+        assert!(!m.downloaded);
+        assert_eq!(m.headers.subject.as_deref(), Some("Café"));
+        assert_eq!(
+            m.headers.from[0].to_string(),
+            "Ada Lovelace <ada@example.org>"
+        );
+        assert_eq!(m.headers.message_id.as_deref(), Some("abc@x"));
+        assert_eq!(m.snippet, "preview");
+        assert_eq!(m.size, 4321);
+        assert!(m.body_text.is_empty() && m.attachments.is_empty());
     }
 
     #[test]

@@ -51,6 +51,14 @@ impl Fields {
             .ok_or_else(|| self.wrong(name, "String"))
     }
 
+    pub(crate) fn opt_bool(&self, name: &str) -> StoreResult<Option<bool>> {
+        match self.value(name) {
+            Value::Null => Ok(None),
+            Value::Bool(b) => Ok(Some(*b)),
+            _ => Err(self.wrong(name, "Bool")),
+        }
+    }
+
     pub(crate) fn bool(&self, name: &str) -> StoreResult<bool> {
         match self.value(name) {
             Value::Bool(b) => Ok(*b),

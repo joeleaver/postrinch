@@ -10,8 +10,8 @@ use postrinch_model::{
 use postrinch_store::Store;
 use postrinch_sync::SyncError;
 use postrinch_sync::google::{
-    ClientConfig, Endpoints, GmailApi, GmailSync, GoogleAuth, MemorySecrets, Progress, SecretStore,
-    SyncReport,
+    ClientConfig, Endpoints, GmailApi, GmailSync, GoogleAuth, MemorySecrets, Phase, Progress,
+    SecretStore, SyncReport,
 };
 use serde_json::json;
 use wiremock::matchers::{method, path, query_param};
@@ -109,6 +109,23 @@ async fn mock_raw(server: &MockServer, id: &str, labels: &[&str], subject: &str)
         .await;
 }
 
+async fn mock_meta(server: &MockServer, id: &str, labels: &[&str], subject: &str) {
+    Mock::given(method("GET"))
+        .and(path(format!("/gmail/messages/{id}")))
+        .and(query_param("format", "metadata"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": id, "threadId": format!("t-{id}"), "labelIds": labels, "snippet": format!("snippet {id}"),
+            "internalDate": "1700000000000", "sizeEstimate": 2048,
+            "payload": {"headers": [
+                {"name": "From", "value": "Ada <ada@example.org>"},
+                {"name": "To", "value": "me@example.org"},
+                {"name": "Subject", "value": subject},
+            ]},
+        })))
+        .mount(server)
+        .await;
+}
+
 async fn mock_history(server: &MockServer, start: &str, body: serde_json::Value) {
     Mock::given(method("GET"))
         .and(path("/gmail/history"))
@@ -147,13 +164,10 @@ async fn first_sync(f: &Fixture) -> SyncReport {
         ))
         .mount(&f.server)
         .await;
-    mock_raw(
-        &f.server,
-        "m1",
-        &["INBOX", "UNREAD", "CHAT"],
-        "Engine notes",
-    )
-    .await;
+    let m1_labels = ["INBOX", "UNREAD", "CHAT"];
+    mock_meta(&f.server, "m1", &m1_labels, "Engine notes").await;
+    mock_meta(&f.server, "m2", &["INBOX"], "Lunch").await;
+    mock_raw(&f.server, "m1", &m1_labels, "Engine notes").await;
     mock_raw(&f.server, "m2", &["INBOX"], "Lunch").await;
     mock_history(&f.server, "100", json!({"historyId": "105"})).await;
 
@@ -164,11 +178,11 @@ async fn first_sync(f: &Fixture) -> SyncReport {
         .sync(&f.me, Arc::new(move |p| log.lock().unwrap().push(p)))
         .await
         .unwrap();
-    assert!(
-        seen.lock()
-            .unwrap()
-            .contains(&Progress::Applying { done: 2, total: 2 })
-    );
+    assert!(seen.lock().unwrap().contains(&Progress::Working {
+        phase: Phase::Headers,
+        done: 2,
+        total: 2
+    }));
     report
 }
 
@@ -180,23 +194,36 @@ async fn full_then_incremental() {
         report,
         SyncReport {
             full: true,
-            fetched: 2,
-            relabelled: 0,
-            removed: 0
+            headers: 2,
+            ..Default::default()
         }
     );
 
-    let m1 = f
-        .store
-        .message(&f.me, &ProviderMessageId("m1".into()))
-        .unwrap()
-        .unwrap();
+    // Headers first: listed and searchable by subject, no body yet.
+    let m1_id = ProviderMessageId("m1".into());
+    let m1 = f.store.message(&f.me, &m1_id).unwrap().unwrap();
     assert_eq!(m1.subject(), "Engine notes");
+    assert_eq!(m1.headers.from[0].address.to_string(), "ada@example.org");
     assert_eq!(m1.labels, ["INBOX"]);
     assert!(m1.flags.unread);
-    assert!(f.store.raw_message(&f.me, &m1.id).unwrap().is_some());
+    assert!(!m1.downloaded);
+    assert!(f.store.raw_message(&f.me, &m1.id).unwrap().is_none());
     assert_eq!(f.store.labels(&f.me).unwrap().len(), 2);
     assert_eq!(f.store.search("lunch", 5).unwrap().len(), 1);
+    assert_eq!(f.store.undownloaded(&f.me).unwrap().len(), 2);
+
+    // Then the bodies.
+    let report = f.sync.backfill(&f.me, quiet()).await.unwrap();
+    assert_eq!(report.fetched, 2);
+    let m1 = f.store.message(&f.me, &m1_id).unwrap().unwrap();
+    assert!(m1.downloaded);
+    assert!(f.store.raw_message(&f.me, &m1.id).unwrap().is_some());
+    assert_eq!(f.store.search("body", 5).unwrap().len(), 2);
+    assert!(f.store.undownloaded(&f.me).unwrap().is_empty());
+    assert_eq!(
+        f.sync.backfill(&f.me, quiet()).await.unwrap(),
+        SyncReport::default()
+    );
 
     // m1 read and labelled, m2 deleted, m3 arrived.
     mock_history(
@@ -227,7 +254,8 @@ async fn full_then_incremental() {
             full: false,
             fetched: 1,
             relabelled: 1,
-            removed: 1
+            removed: 1,
+            ..Default::default()
         }
     );
     let m1 = f
@@ -301,9 +329,9 @@ async fn expired_history_falls_back_to_a_full_sync_that_refreshes_labels() {
         report,
         SyncReport {
             full: true,
-            fetched: 0,
             relabelled: 1,
-            removed: 1
+            removed: 1,
+            ..Default::default()
         }
     );
     let m1 = f

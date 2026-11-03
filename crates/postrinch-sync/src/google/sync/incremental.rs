@@ -7,8 +7,9 @@ use postrinch_model::{EmailAddress, ProviderMessageId};
 use tokio::sync::RwLock;
 
 use super::cursor::Cursor;
-use super::{GmailSync, ProgressFn, SyncReport};
+use super::{GmailSync, Phase, ProgressFn, SyncReport};
 use crate::SyncResult;
+use crate::google::api::Priority;
 
 impl GmailSync {
     /// Read history from `since` to now and apply it: remove deleted
@@ -53,18 +54,27 @@ impl GmailSync {
         if !changed.is_empty() {
             let labels = Arc::new(RwLock::new(self.refresh_labels(account).await?));
             let account_for = account.clone();
-            self.for_each(changed, progress, &mut report, move |sync, id| {
-                let (account, labels) = (account_for.clone(), Arc::clone(&labels));
-                async move {
-                    let a = account.clone();
-                    let mid = ProviderMessageId(id.clone());
-                    if sync.with_store(move |s| s.has_message(&a, &mid)).await? {
-                        sync.relabel(&account, &id, &labels).await
-                    } else {
-                        sync.fetch(&account, &id, &labels).await
+            self.for_each(
+                changed,
+                Phase::Changes,
+                progress,
+                &mut report,
+                move |sync, id| {
+                    let (account, labels) = (account_for.clone(), Arc::clone(&labels));
+                    async move {
+                        let a = account.clone();
+                        let mid = ProviderMessageId(id.clone());
+                        if sync.with_store(move |s| s.has_message(&a, &mid)).await? {
+                            sync.relabel(&account, &id, &labels).await
+                        } else {
+                            // New mail is what the person is waiting for:
+                            // download it whole, now.
+                            sync.fetch(&account, &id, &labels, Priority::Foreground)
+                                .await
+                        }
                     }
-                }
-            })
+                },
+            )
             .await?;
         }
 

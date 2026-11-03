@@ -33,8 +33,18 @@ enum Command {
     SignIn { address: String },
     /// Sign an account out and remove it and its mail from this machine.
     RemoveAccount { address: String },
-    /// Sync one account, or every signed-in account.
-    Sync { address: Option<String> },
+    /// Sync one account, or every signed-in account, then download the
+    /// bodies of messages known only by their headers, newest first.
+    Sync {
+        address: Option<String>,
+        /// Stop after the sync; leave the bodies for a later run.
+        #[arg(long)]
+        no_backfill: bool,
+    },
+    /// Throw away an account's local mail and sync it again from scratch.
+    /// The account stays signed in; raw messages already downloaded are
+    /// reused.
+    Resync { address: String },
     /// Search all accounts' mail.
     Search {
         query: String,

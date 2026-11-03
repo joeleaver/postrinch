@@ -61,6 +61,7 @@ fn message(
         },
         snippet: body.chars().take(40).collect(),
         body_text: body.into(),
+        downloaded: true,
         attachments: vec![AttachmentInfo {
             filename: Some("notes.pdf".into()),
             mime_type: "application/pdf".into(),
@@ -277,4 +278,69 @@ fn lists_an_accounts_message_ids_only() {
     );
     assert!(store.has_message(&me, &ids[0]).unwrap());
     assert!(!store.has_message(&other, &ids[0]).unwrap());
+}
+
+#[test]
+fn clear_mail_keeps_the_account_and_labels() {
+    let (_dir, store, me) = setup();
+    for id in ["m1", "m2"] {
+        store
+            .put_message(&message(&me, id, "t", 1, "s", "b"), Some(id.as_bytes()))
+            .unwrap();
+    }
+    store.set_sync_cursor(&me, Some("cursor")).unwrap();
+
+    assert_eq!(store.clear_mail(&me).unwrap(), 2);
+    assert!(store.message_ids(&me).unwrap().is_empty());
+    assert_eq!(store.sync_cursor(&me).unwrap(), None);
+    assert!(store.account(&me).unwrap().is_some());
+    assert_eq!(store.labels(&me).unwrap().len(), 2);
+    assert_eq!(store.collect_garbage(Duration::ZERO).unwrap(), 2);
+}
+
+fn headers_only(m: &Message) -> Message {
+    Message {
+        body_text: String::new(),
+        attachments: Vec::new(),
+        downloaded: false,
+        ..m.clone()
+    }
+}
+
+#[test]
+fn headers_only_messages_are_listed_newest_first_for_download() {
+    let (_dir, store, me) = setup();
+    let old = headers_only(&message(&me, "old", "t1", 1_000, "old", "b"));
+    let new = headers_only(&message(&me, "new", "t2", 3_000, "new", "b"));
+    let done = message(&me, "done", "t3", 2_000, "done", "b");
+    for m in [&old, &new, &done] {
+        store.put_message(m, None).unwrap();
+    }
+    assert_eq!(
+        store.undownloaded(&me).unwrap(),
+        [new.id.clone(), old.id.clone()]
+    );
+    assert_eq!(store.message(&me, &old.id).unwrap(), Some(old.clone()));
+
+    // Downloading it replaces the headers-only copy.
+    let full = message(&me, "old", "t1", 1_000, "old", "now with a body");
+    store.put_message(&full, Some(b"raw")).unwrap();
+    assert_eq!(store.undownloaded(&me).unwrap(), [new.id]);
+    assert_eq!(store.search("body", 5).unwrap().len(), 1);
+}
+
+#[test]
+fn headers_never_overwrite_a_downloaded_body() {
+    let (_dir, store, me) = setup();
+    let full = message(&me, "m1", "t1", 1_000, "s", "the body");
+    store.put_message(&full, Some(b"raw")).unwrap();
+
+    let mut later = headers_only(&full);
+    later.flags.unread = false;
+    store.put_message(&later, None).unwrap();
+
+    let stored = store.message(&me, &full.id).unwrap().unwrap();
+    assert!(stored.downloaded);
+    assert_eq!(stored.body_text, "the body");
+    assert!(!stored.flags.unread);
 }

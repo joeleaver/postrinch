@@ -93,6 +93,7 @@ mod tests {
             },
             snippet: format!("snippet of {id}"),
             body_text: String::new(),
+            downloaded: true,
             attachments: Vec::new(),
             size: 0,
         }
