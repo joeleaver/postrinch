@@ -72,11 +72,13 @@ impl Commands {
                 found.retain(|e| in_category.contains(&e.thread));
             }
             entries.extend(found);
-            if !account_chips.contains_key(&account.key()) {
+            if let std::collections::hash_map::Entry::Vacant(slot) =
+                account_chips.entry(account.key())
+            {
                 let labels = self.store.labels(&account)?;
                 let prefs = self.store.label_prefs(&account)?;
                 let stats = self.store.label_stats(&account)?;
-                account_chips.insert(account.key(), chips(&labels, &prefs, &stats));
+                slot.insert(chips(&labels, &prefs, &stats));
             }
         }
         let listed = match folder {

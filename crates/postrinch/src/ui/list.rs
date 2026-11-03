@@ -22,7 +22,7 @@ pub fn thread_list(state: State) -> NodeHandle {
             }
             div { class: "rows",
                 for thread in state.page.get().map(|p| p.threads).unwrap_or_default() {
-                    div { key: row_key(&thread),
+                    div { key: row_key(thread),
                         {row(__scope, state, thread.clone())}
                     }
                 }

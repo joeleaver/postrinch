@@ -15,7 +15,7 @@ pub fn reader(state: State) -> NodeHandle {
             // A keyed loop over the Option, not `if let`, so another thread
             // (or this one, changed) is drawn again (rinch#2105).
             for thread in state.thread.get() {
-                div { key: thread_key(&thread),
+                div { key: thread_key(thread),
                     {open_thread(__scope, thread.clone())}
                 }
             }
