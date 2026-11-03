@@ -124,11 +124,15 @@ Mail is hostile input, for the renderer and for the agent.
 
 Planning and progress live in Overboard, project "Postrinch". There is no `.eml`/mbox importer: real mail comes in through Gmail sync.
 
-1. **Gmail read-only sync into rhypedb**, one account, then many: the model, the schema, sign-in, full sync, incremental sync.
-2. **Rendering on real mail.** Run the synced mail through the pipeline and rinch with #2079/#2080; this decides whether "open in browser" is a fallback or a crutch.
-3. **Search** over that store: full text, then semantic, measured on a real mailbox.
-4. **Calendar read-only sync** for the same Google accounts.
-5. **The command layer and the MCP server**, read-only commands first.
-6. **The window**: designed first (mockups), then built: accounts, combined inbox, a thread, search, the calendar.
-7. **Writing**: drafts, send through the outbox, confirmations; creating and answering events.
+Status as of 2026-11-03:
+
+1. ~~**Gmail read-only sync into rhypedb**~~ Done. Several accounts; headers first, page by page as Gmail lists them, the newest 100 whole; bodies backfilled newest first; an opened message downloads at once; quota paced and fair; retried across network drops (`GmailSync::keep_in_sync`).
+2. **Rendering on real mail.** Not started: the reader shows `body_text`. Waiting partly on rinch's email-rendering work.
+3. **Search**: full text done (`Commands::search`, title-bar search with marked excerpts). Semantic search and the filter popover are not.
+4. **Calendar read-only sync.** Not started.
+5. **The command layer and the MCP server.** Read-only commands done (`postrinch-commands`: sidebar, listings, threads, search, accounts, label prefs). The MCP server and bridge are not started.
+6. ~~**The window**~~ Built: borderless, menus, sidebar with the label tree, inbox tabs, list, reader, search, Settings (Accounts, Appearance), light and dark, resizable panes, keyboard moves. Loads run on a loader thread, never the UI thread. Calendar views wait for step 4.
+7. **Changing mail, then writing.** Next. Local-first changes (read, archive, trash, labels) applied to the store at once and sent to Gmail through a persistent outbox that survives restarts and going offline; then drafts and sending through the same outbox, with confirmations.
 8. **IMAP/SMTP.**
+
+Known issues upstream, none blocking: rinch#1544 (glyphs on whole pixels: uneven letter spacing), rinch#2105 (`if let` in rsx keeps its first value; the window uses keyed `for` loops instead), rinch#2116 (menu dropdown scrollbar from rounding), rhypedb#27 (a `@unique` key that prefixes another is missed after reopen, so duplicates are created).
