@@ -152,9 +152,11 @@ mod tests {
     #[test]
     fn a_store_from_before_the_outbox_opens() {
         let dir = tempfile::tempdir().unwrap();
-        let start = SCHEMA.find("type OutboxEntry").expect("the outbox type");
-        let comment = SCHEMA[..start].rfind("\n\n").expect("its comment");
-        let before = &SCHEMA[..comment];
+        // A Windows checkout has CRLF line ends.
+        let schema = SCHEMA.replace("\r\n", "\n");
+        let start = schema.find("type OutboxEntry").expect("the outbox type");
+        let comment = schema[..start].rfind("\n\n").expect("its comment");
+        let before = &schema[..comment];
         let schema = rhypedb_schema::parser::parse_schema(before).unwrap();
         let db = Database::open(schema, dir.path().join("db")).unwrap();
         let fields = || {
