@@ -53,6 +53,10 @@ pub(crate) enum Cost {
     GetMessageMetadata,
     /// `messages.get` with `format=raw` (or `full`).
     GetMessageRaw,
+    /// `messages.batchModify`.
+    BatchModify,
+    /// `messages.trash` or `messages.untrash`.
+    Trash,
 }
 
 impl Cost {
@@ -63,6 +67,8 @@ impl Cost {
             Cost::ListMessages => 5.0,
             Cost::GetMessageMetadata => 20.0,
             Cost::GetMessageRaw => 60.0,
+            Cost::BatchModify => 50.0,
+            Cost::Trash => 5.0,
         }
     }
 }

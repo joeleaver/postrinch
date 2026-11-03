@@ -11,8 +11,9 @@ use postrinch_model::{Flags, Label, LabelColor, LabelKind, LabelVisibility, Syst
 
 use super::api::LabelResource;
 
-const UNREAD: &str = "UNREAD";
-const STARRED: &str = "STARRED";
+pub(crate) const UNREAD: &str = "UNREAD";
+pub(crate) const STARRED: &str = "STARRED";
+pub(crate) const TRASH: &str = "TRASH";
 
 fn system_label(id: &str) -> Option<SystemLabel> {
     Some(match id {
@@ -20,7 +21,7 @@ fn system_label(id: &str) -> Option<SystemLabel> {
         "SENT" => SystemLabel::Sent,
         "DRAFT" => SystemLabel::Drafts,
         "SPAM" => SystemLabel::Spam,
-        "TRASH" => SystemLabel::Trash,
+        TRASH => SystemLabel::Trash,
         "IMPORTANT" => SystemLabel::Important,
         "CATEGORY_PERSONAL" => SystemLabel::CategoryPersonal,
         "CATEGORY_SOCIAL" => SystemLabel::CategorySocial,

@@ -15,8 +15,10 @@ mod full;
 mod incremental;
 mod keep;
 mod messages;
+mod outbox;
 
 pub use keep::{KeepOptions, SyncEvent, SyncEventFn};
+pub use outbox::SendReport;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -112,13 +114,22 @@ impl GmailSync {
 
     /// Bring the store up to date with the account. When Gmail no longer
     /// accepts the account's credential, the account is marked as needing
-    /// to sign in and [`SyncError::NeedsSignIn`] is returned.
+    /// to sign in and [`SyncError::NeedsSignIn`] is returned. Changes sent
+    /// from the outbox before it began are forgotten once it succeeds.
     pub async fn sync(
         &self,
         account: &EmailAddress,
         progress: ProgressFn,
     ) -> SyncResult<SyncReport> {
+        let started = outbox::now();
         let result = self.sync_from_cursor(account, &progress).await;
+        if result.is_ok() {
+            // Gmail's report of the messages now includes every change sent
+            // before this sync began: those need not be applied again.
+            let account = account.clone();
+            self.with_store(move |s| s.forget_sent(&account, started))
+                .await?;
+        }
         if let Err(SyncError::NeedsSignIn(reason)) = &result {
             let state = AccountState::NeedsSignIn(reason.clone());
             let account = account.clone();

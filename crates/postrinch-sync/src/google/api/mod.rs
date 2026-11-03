@@ -153,16 +153,86 @@ impl GmailApi {
             .await
     }
 
-    /// GET with retries, paced by the account's quota: a 401 refreshes the
-    /// access token once; a rate limit pauses every request for the account;
-    /// server errors back off (honouring `Retry-After`) and try again.
+    /// Change messages' labels: add and remove, by Gmail label id (read
+    /// and starred are the `UNREAD` and `STARRED` labels). At most 1,000
+    /// messages a call.
+    pub(crate) async fn batch_modify(
+        &self,
+        account: &EmailAddress,
+        ids: &[String],
+        add: &[String],
+        remove: &[String],
+    ) -> SyncResult<()> {
+        let body = serde_json::json!({
+            "ids": ids,
+            "addLabelIds": add,
+            "removeLabelIds": remove,
+        });
+        self.send(
+            account,
+            (Cost::BatchModify, FG),
+            "messages/batchModify",
+            &[],
+            Some(&body),
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Move a message to the trash.
+    pub(crate) async fn trash(&self, account: &EmailAddress, id: &str) -> SyncResult<()> {
+        let path = format!("messages/{id}/trash");
+        self.send(
+            account,
+            (Cost::Trash, FG),
+            &path,
+            &[],
+            Some(&serde_json::json!({})),
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Take a message out of the trash.
+    pub(crate) async fn untrash(&self, account: &EmailAddress, id: &str) -> SyncResult<()> {
+        let path = format!("messages/{id}/untrash");
+        self.send(
+            account,
+            (Cost::Trash, FG),
+            &path,
+            &[],
+            Some(&serde_json::json!({})),
+        )
+        .await
+        .map(drop)
+    }
+
+    /// GET a JSON answer (see [`Self::send`]).
     async fn get<T: DeserializeOwned>(
+        &self,
+        account: &EmailAddress,
+        cost: (Cost, Priority),
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> SyncResult<T> {
+        let body = self.send(account, cost, path, query, None).await?;
+        serde_json::from_slice(&body).map_err(|e| {
+            SyncError::api("Gmail", 200, format!("unreadable response to {path}: {e}"))
+        })
+    }
+
+    /// GET, or POST `json`, with retries, paced by the account's quota: a
+    /// 401 refreshes the access token once; a rate limit pauses every
+    /// request for the account; server errors back off (honouring
+    /// `Retry-After`) and try again. Returns the answer's body.
+    async fn send(
         &self,
         account: &EmailAddress,
         (cost, priority): (Cost, Priority),
         path: &str,
         query: &[(&str, &str)],
-    ) -> SyncResult<T> {
+        json: Option<&serde_json::Value>,
+    ) -> SyncResult<bytes::Bytes> {
         let url = format!("{}/{path}", self.base);
         let mut refreshed = false;
         let mut attempt = 0;
@@ -170,14 +240,11 @@ impl GmailApi {
             attempt += 1;
             self.quota.acquire(&account.key(), cost, priority).await;
             let token = self.auth.access_token(account).await?;
-            let response = match self
-                .http
-                .get(&url)
-                .bearer_auth(&token)
-                .query(query)
-                .send()
-                .await
-            {
+            let request = match json {
+                Some(body) => self.http.post(&url).json(body),
+                None => self.http.get(&url),
+            };
+            let response = match request.bearer_auth(&token).query(query).send().await {
                 Ok(r) => r,
                 Err(e) if attempt < ATTEMPTS && is_transient(&e) => {
                     tracing::debug!("Gmail {path}: {}, retrying", chain(&e));
@@ -199,13 +266,7 @@ impl GmailApi {
                     }
                     Err(e) => return Err(e.into()),
                 };
-                return serde_json::from_slice(&body).map_err(|e| {
-                    SyncError::api(
-                        "Gmail",
-                        status.as_u16(),
-                        format!("unreadable response to {path}: {e}"),
-                    )
-                });
+                return Ok(body);
             }
             let retry_after = response
                 .headers()
@@ -241,7 +302,8 @@ impl GmailApi {
 /// Whether a request failed on the way, rather than being refused: a
 /// timeout, a connection that would not open or that dropped (HTTP/2
 /// connection resets, a server closing an idle connection). Every request
-/// here is a GET, so trying again is always safe.
+/// here is a GET or a change that only adds, removes or moves to the trash,
+/// so sending it again is always safe.
 fn is_transient(e: &reqwest::Error) -> bool {
     e.is_timeout() || e.is_connect() || e.is_request() || e.is_body()
 }

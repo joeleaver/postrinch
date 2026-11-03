@@ -132,6 +132,29 @@ fn report(event: SyncEvent, status: Signal<Vec<AccountSync>>, revision: Signal<u
         SyncEvent::NeedsSignIn { account } => {
             (account, "Needs to sign in".to_owned(), None, true, true)
         }
+        // Changes are shown as made; sending them is news only when it
+        // goes wrong.
+        SyncEvent::Sent { report, .. } if report.refused.is_empty() => return,
+        SyncEvent::Sent { account, report } => {
+            tracing::warn!("{account}: Gmail refused changes: {:?}", report.refused);
+            let line = match report.refused.len() {
+                1 => "Gmail refused a change; showing Gmail's mail".to_owned(),
+                n => format!("Gmail refused {n} changes; showing Gmail's mail"),
+            };
+            (account, line, None, true, true)
+        }
+        SyncEvent::SendFailed {
+            account,
+            error,
+            retry_in,
+        } => {
+            tracing::warn!("{account}: sending changes: {error}");
+            let line = format!(
+                "Could not send changes; trying again in {} s",
+                retry_in.as_secs().max(1)
+            );
+            (account, line, None, true, false)
+        }
     };
     status.update_send(move |all| {
         let entry = AccountSync {

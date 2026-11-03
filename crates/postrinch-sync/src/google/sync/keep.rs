@@ -11,7 +11,7 @@ use std::time::Duration;
 use postrinch_model::{EmailAddress, Provider};
 use tokio::sync::Notify;
 
-use super::{GmailSync, Progress, ProgressFn, SyncReport};
+use super::{GmailSync, Progress, ProgressFn, SendReport, SyncReport};
 use crate::SyncError;
 
 /// What a running sync reports, for a window or a log to show.
@@ -42,6 +42,19 @@ pub enum SyncEvent {
     /// Gmail no longer accepts the account's sign-in. It is marked so in
     /// the store and left alone until it signs in again.
     NeedsSignIn { account: EmailAddress },
+    /// Changes made here reached Gmail; any it refused for good were
+    /// dropped, and their messages read again.
+    Sent {
+        account: EmailAddress,
+        report: SendReport,
+    },
+    /// Sending an account's changes failed; they are tried again after
+    /// `retry_in`, and stay applied here meanwhile.
+    SendFailed {
+        account: EmailAddress,
+        error: String,
+        retry_in: Duration,
+    },
 }
 
 pub type SyncEventFn = Arc<dyn Fn(SyncEvent) + Send + Sync>;
@@ -79,6 +92,71 @@ impl GmailSync {
                 () = wake.notified() => {}
             }
         }
+    }
+
+    /// Send every account's changes to Gmail, again and again, until the
+    /// future is dropped. It runs beside [`Self::keep_in_sync`], so a long
+    /// first sync never holds a change back. Notifying `wake` sends at once:
+    /// after a change is made. What failed is tried again after
+    /// [`KeepOptions::retry`].
+    pub async fn keep_sending(&self, options: KeepOptions, events: SyncEventFn, wake: Arc<Notify>) {
+        loop {
+            let pause = if self.send_pass(&options, &events).await {
+                // Nothing waits: only a new change brings the next pass.
+                Duration::from_secs(3600)
+            } else {
+                options.retry
+            };
+            tokio::select! {
+                () = tokio::time::sleep(pause) => {}
+                () = wake.notified() => {}
+            }
+        }
+    }
+
+    /// Send each account's waiting changes. Returns whether all were sent.
+    async fn send_pass(&self, options: &KeepOptions, events: &SyncEventFn) -> bool {
+        let accounts = match self.with_store(|s| s.accounts()).await {
+            Ok(accounts) => accounts,
+            Err(e) => {
+                tracing::error!("cannot read the accounts to send changes for: {e}");
+                return false;
+            }
+        };
+        let mut all_sent = true;
+        for account in accounts {
+            if account.provider != Provider::Google || !account.is_active() {
+                continue;
+            }
+            let address = account.address;
+            match self.waiting(&address).await {
+                Ok(0) => continue,
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("{address}: cannot read its outbox: {e}");
+                    all_sent = false;
+                    continue;
+                }
+            }
+            match self.send_outbox(&address).await {
+                Ok(report) => events(SyncEvent::Sent {
+                    account: address,
+                    report,
+                }),
+                Err(SyncError::NeedsSignIn(_)) => {
+                    events(SyncEvent::NeedsSignIn { account: address });
+                }
+                Err(e) => {
+                    all_sent = false;
+                    events(SyncEvent::SendFailed {
+                        account: address,
+                        error: e.to_string(),
+                        retry_in: options.retry,
+                    });
+                }
+            }
+        }
+        all_sent
     }
 
     /// One pass over the accounts. Returns whether every account succeeded.

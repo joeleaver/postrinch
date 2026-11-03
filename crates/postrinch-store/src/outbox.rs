@@ -126,13 +126,13 @@ impl Store {
         self.db_delete(TYPE, entry)
     }
 
-    /// Forget the account's entries sent before `before`: the start of a
-    /// sync that has since finished, whose report of the messages includes
-    /// them. Returns how many were forgotten.
-    pub fn forget_sent(&self, account: &EmailAddress, before: Timestamp) -> StoreResult<usize> {
+    /// Forget the account's entries sent by `started`: the start of a sync
+    /// that has since finished, whose report of the messages, read after
+    /// it began, includes them. Returns how many were forgotten.
+    pub fn forget_sent(&self, account: &EmailAddress, started: Timestamp) -> StoreResult<usize> {
         let mut forgotten = 0;
         for entry in self.outbox(account)? {
-            if entry.sent.is_some_and(|sent| sent < before) {
+            if entry.sent.is_some_and(|sent| sent <= started) {
                 self.db_delete(TYPE, entry.id)?;
                 forgotten += 1;
             }

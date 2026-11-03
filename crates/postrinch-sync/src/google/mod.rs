@@ -22,5 +22,6 @@ pub use config::ClientConfig;
 pub use oauth::{Endpoints, SCOPES};
 pub use secrets::{Keychain, MemorySecrets, SecretStore};
 pub use sync::{
-    GmailSync, KeepOptions, Phase, Progress, ProgressFn, SyncEvent, SyncEventFn, SyncReport,
+    GmailSync, KeepOptions, Phase, Progress, ProgressFn, SendReport, SyncEvent, SyncEventFn,
+    SyncReport,
 };
