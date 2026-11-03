@@ -36,6 +36,7 @@ pub enum View {
 pub enum SettingsSection {
     Accounts,
     Reading,
+    Agents,
     Appearance,
 }
 
@@ -98,6 +99,14 @@ pub struct State {
     pub removing: Signal<Option<EmailAddress>>,
     /// What an account action wants the person to know.
     pub notice: Signal<Option<Notice>>,
+    /// Why agents cannot connect, when they cannot.
+    pub agents_off: Signal<Option<String>>,
+    /// The agents, read while Settings › Agents is open.
+    pub agent_list: Signal<Vec<postrinch_agents::Agent>>,
+    /// The dialog Settings › Agents has open.
+    pub agent_dialog: Signal<Option<crate::agents::AgentDialog>>,
+    /// The agent the person asked to remove, until they confirm.
+    pub agent_removing: Signal<Option<postrinch_agents::Agent>>,
     /// Why sync is not running, when it is not.
     pub sync_off: Signal<Option<String>>,
     /// The last thing that went wrong loading, for the window to say.
@@ -140,6 +149,10 @@ impl State {
             account_shown: Signal::new(None),
             removing: Signal::new(None),
             notice: Signal::new(None),
+            agents_off: Signal::new(None),
+            agent_list: Signal::new(Vec::new()),
+            agent_dialog: Signal::new(None),
+            agent_removing: Signal::new(None),
             sync_off: Signal::new(None),
             error: Signal::new(None),
         }
@@ -179,6 +192,13 @@ impl State {
             self.revision.get();
             if self.view.get() == View::Settings {
                 accounts(Request::Accounts);
+            }
+        });
+        Effect::new(move || {
+            if self.view.get() == View::Settings
+                && self.settings_section.get() == SettingsSection::Agents
+            {
+                self.load_agents();
             }
         });
         let search = ask.clone();

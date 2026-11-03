@@ -1,5 +1,7 @@
 //! The window: a header over the sidebar, the thread list and the reader.
 
+mod agent_dialogs;
+mod agents_settings;
 mod icons;
 mod keys;
 mod label_edit;
@@ -86,6 +88,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                     style { {palette::DARK} }
                 }
                 style { {style::CSS} }
+                style { {agents_settings::CSS} }
                 style { {thread_actions::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 if state.view.get() == View::Mail {
