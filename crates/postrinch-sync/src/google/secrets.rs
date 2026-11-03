@@ -20,13 +20,27 @@ pub trait SecretStore: Send + Sync + 'static {
 /// The OS keychain: Keychain Services on macOS, Credential Manager on
 /// Windows, the Secret Service elsewhere. Entries are under the service
 /// name `postrinch.google`, keyed by the account's address.
+///
+/// On Windows the credential is kept on this machine only. Credential
+/// Manager's default would roam it to every machine the person signs in to
+/// on a domain, and Postrinch's tokens stay where its mail is.
 pub struct Keychain;
 
 const SERVICE: &str = "postrinch.google";
 
 impl Keychain {
-    fn entry(account: &EmailAddress) -> SyncResult<keyring::Entry> {
-        keyring::Entry::new(SERVICE, &account.key()).map_err(|e| SyncError::Keychain(e.to_string()))
+    fn entry(account: &EmailAddress) -> SyncResult<keyring_core::Entry> {
+        // `keyring` chooses and installs the platform's store on first use.
+        if let Err(e) = keyring::Entry::store_status() {
+            return Err(SyncError::Keychain(e.to_string()));
+        }
+        let modifiers: HashMap<&str, &str> = if cfg!(windows) {
+            HashMap::from([("persistence", "Local")])
+        } else {
+            HashMap::new()
+        };
+        keyring_core::Entry::new_with_modifiers(SERVICE, &account.key(), &modifiers)
+            .map_err(|e| SyncError::Keychain(e.to_string()))
     }
 }
 
