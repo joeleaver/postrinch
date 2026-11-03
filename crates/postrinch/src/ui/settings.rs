@@ -5,7 +5,8 @@ use postrinch_commands::AccountInfo;
 use postrinch_model::{AccountState, EmailAddress};
 use rinch::prelude::*;
 
-use crate::state::{State, View};
+use crate::appearance::Appearance;
+use crate::state::{SettingsSection, State, View};
 use crate::sync::thousands;
 use crate::ui::account_color;
 
@@ -15,9 +16,24 @@ pub fn settings(state: State) -> NodeHandle {
         div { class: "settings",
             nav { class: "settings-nav",
                 div { class: "settings-title", "Settings" }
-                div { class: "folder chosen", "Accounts" }
+                {section_link(__scope, state, SettingsSection::Accounts, "Accounts")}
+                {section_link(__scope, state, SettingsSection::Appearance, "Appearance")}
                 div { class: "settings-back", onclick: move || state.view.set(View::Mail), "← Back to mail" }
             }
+            if state.settings_section.get() == SettingsSection::Accounts {
+                {accounts(__scope, state)}
+            } else {
+                {appearance(__scope, state)}
+            }
+            {confirm_removal(__scope, state)}
+        }
+    }
+}
+
+#[component]
+fn accounts(state: State) -> NodeHandle {
+    rsx! {
+        div { class: "settings-page",
             section { class: "settings-accounts",
                 div { class: "settings-accounts-head",
                     h1 { "Accounts" }
@@ -46,8 +62,54 @@ pub fn settings(state: State) -> NodeHandle {
                     }
                 }
             }
-            {confirm_removal(__scope, state)}
         }
+    }
+}
+
+/// Light, dark, or whatever the system prefers.
+#[component]
+fn appearance(state: State) -> NodeHandle {
+    rsx! {
+        main { class: "settings-main",
+            h1 { class: "settings-heading", "Appearance" }
+            div { class: "choices",
+                {choice(__scope, state, Appearance::System, "Match the system", "Light or dark as your desktop is; dark when it does not say.")}
+                {choice(__scope, state, Appearance::Light, "Light", "Always light.")}
+                {choice(__scope, state, Appearance::Dark, "Dark", "Always dark.")}
+            }
+            p { class: "settings-hint", {move || system_line(state.system_dark.get())} }
+        }
+    }
+}
+
+#[component]
+fn section_link(state: State, which: SettingsSection, name: &'static str) -> NodeHandle {
+    rsx! {
+        div {
+            class: {move || if state.settings_section.get() == which { "folder chosen" } else { "folder" }},
+            onclick: move || state.settings_section.set(which),
+            {name}
+        }
+    }
+}
+
+#[component]
+fn choice(state: State, which: Appearance, name: &'static str, about: &'static str) -> NodeHandle {
+    rsx! {
+        div {
+            class: {move || if state.appearance.get() == which { "choice chosen" } else { "choice" }},
+            onclick: move || state.set_appearance(which),
+            span { class: "choice-name", {name} }
+            span { class: "choice-about", {about} }
+        }
+    }
+}
+
+fn system_line(system_dark: bool) -> &'static str {
+    if system_dark {
+        "Your system prefers dark, or does not say."
+    } else {
+        "Your system prefers light."
     }
 }
 

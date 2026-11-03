@@ -1,42 +1,23 @@
 //! The window's stylesheet, after the mockups in the design canvas.
 
 pub const CSS: &str = r#"
-:root {
-    --rinch-primary-color: #2456b8;
-    --ink: #16181d;
-    --ink-2: #3a3f4a;
-    --muted: #5b6170;
-    --line: #dfe2e7;
-    --line-soft: #eceef1;
-    --field: #d4d8de;
-    --panel: #f4f5f7;
-    --accent: #2456b8;
-    --accent-tint: #e6eefb;
-    --accent-ink: #173d84;
-    --trouble: #7a3f06;
-    /* A white title bar, like the mockups, not rinch's blue one. */
-    --rinch-titlebar-bg: #ffffff;
-    --rinch-titlebar-text: #16181d;
-    --rinch-titlebar-icon: #3a3f4a;
-    --rinch-titlebar-hover: rgba(22, 24, 29, 0.06);
-    --rinch-titlebar-active: rgba(22, 24, 29, 0.1);
-}
-
 .rinch-borderlesswindow__titlebar { border-bottom: 1px solid var(--line); }
 
-html, body { margin: 0; height: 100%; }
+html, body { margin: 0; height: 100%; background: transparent; }
 
 .app {
     height: 100%;
     display: flex;
     flex-direction: column;
-    background: #ffffff;
+    background: var(--surface);
     color: var(--ink);
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 14px;
 }
 
 .brand { display: flex; align-items: center; gap: 7px; padding: 0 6px 0 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.logo-line { stroke: var(--logo-line); }
+.logo-outline { stroke: var(--logo-line); fill: var(--logo-line); }
 .title-status { display: flex; align-items: center; gap: 12px; padding-right: 8px; }
 .title-search { width: 360px; margin-right: 8px; }
 .title-search .rinch-text-input__input {
@@ -48,9 +29,9 @@ html, body { margin: 0; height: 100%; }
     background: var(--panel);
     font-size: 13px;
 }
-.title-search .rinch-text-input__input[data-focused="true"] { background: #ffffff; border-color: var(--accent); }
-mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; }
-.header-error { color: #a3271d; font-size: 13px; }
+.title-search .rinch-text-input__input[data-focused="true"] { background: var(--surface); border-color: var(--accent); }
+mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2px; }
+.header-error { color: var(--danger); font-size: 13px; }
 
 .panes { flex: 1; display: flex; min-height: 0; }
 
@@ -90,7 +71,7 @@ mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; 
     border-radius: 6px;
     cursor: pointer;
 }
-.folder:hover { background: #eaecef; }
+.folder:hover { background: var(--hover); }
 .folder.indented { padding-left: 22px; }
 .folder.chosen { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
 .folder-name {
@@ -102,6 +83,8 @@ mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; 
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+/* The name itself, which a flex row cannot cut with an ellipsis. */
+.name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .count { color: var(--muted); font-weight: 500; }
 .chevron {
     width: 14px;
@@ -177,7 +160,7 @@ mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; 
     font-size: 18px;
     cursor: pointer;
 }
-.back:hover { background: #eaecef; }
+.back:hover { background: var(--hover); }
 .search-head { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .list-head h1 { margin: 0; font-size: 18px; font-weight: 600; }
 .list-count { color: var(--muted); font-size: 13px; }
@@ -190,7 +173,7 @@ mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; 
     border-bottom: 1px solid var(--line-soft);
     cursor: pointer;
 }
-.row:hover { background: #f8f9fa; }
+.row:hover { background: var(--row-hover); }
 .row.chosen { background: var(--accent-tint); box-shadow: inset 3px 0 0 var(--accent); }
 .row-top { display: flex; align-items: center; gap: 8px; }
 .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -241,7 +224,7 @@ mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; 
     height: 34px;
     border: 1px solid var(--field);
     border-radius: 8px;
-    background: #ffffff;
+    background: var(--surface);
     color: var(--ink);
     font: inherit;
     cursor: pointer;
@@ -261,7 +244,7 @@ mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; 
 .message {
     border: 1px solid var(--line);
     border-radius: 10px;
-    background: #ffffff;
+    background: var(--surface);
     padding: 16px 18px;
     display: flex;
     flex-direction: column;
@@ -293,7 +276,7 @@ mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; 
     width: 28px;
     height: 28px;
     border-radius: 50%;
-    border: 2px solid #ffffff;
+    border: 2px solid var(--surface);
     box-shadow: 0 0 0 1px var(--field);
     cursor: pointer;
 }
@@ -334,7 +317,7 @@ mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; 
     border-radius: 8px;
     cursor: pointer;
 }
-.account-row:hover { background: #f4f5f7; }
+.account-row:hover { background: var(--row-hover); }
 .account-row.chosen { background: var(--accent-tint); }
 .account-row .dot { margin-top: 5px; width: 10px; height: 10px; border-radius: 3px; }
 .account-row-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -351,10 +334,26 @@ mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; 
 .settings-hint { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
 .notice {
     padding: 10px 14px;
-    border: 1px solid #c9d8f3;
+    border: 1px solid var(--notice-line);
     border-radius: 8px;
     background: var(--accent-tint);
     color: var(--accent-ink);
 }
-.notice.trouble { border-color: #f0cf96; background: #fdf4e3; color: var(--trouble); }
+.notice.trouble { border-color: var(--warn-line); background: var(--warn-bg); color: var(--trouble); }
+.settings-page { flex: 1; display: flex; min-width: 0; }
+.settings-heading { margin: 0; font-size: 22px; font-weight: 600; }
+.choices { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }
+.choice {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    cursor: pointer;
+}
+.choice:hover { background: var(--row-hover); }
+.choice.chosen { border-color: var(--accent); background: var(--accent-tint); }
+.choice-name { font-weight: 600; }
+.choice-about { font-size: 13px; color: var(--muted); }
 "#;

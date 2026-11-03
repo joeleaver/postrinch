@@ -5,6 +5,7 @@ mod label_edit;
 mod labels;
 mod list;
 mod logo;
+mod palette;
 mod reader;
 mod settings;
 mod sidebar;
@@ -16,9 +17,9 @@ use postrinch_commands::Commands;
 use postrinch_store::Store;
 use rinch::prelude::*;
 
-use crate::actions;
 use crate::state::{State, View};
 use crate::sync;
+use crate::{actions, appearance};
 
 /// Colours that tell accounts apart, in the order accounts were added. They
 /// stay clear of the blue that marks what is chosen.
@@ -42,6 +43,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
         }
     };
     actions::init(commands.clone(), sync);
+    appearance::watch_system(state.system_dark);
     state.load(commands);
     let brand: SectionRenderer = Rc::new(|__scope| {
         rsx! {
@@ -53,15 +55,21 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     });
     let status: SectionRenderer = Rc::new(move |__scope| title_status(__scope, state));
     let window = rsx! {
+        ThemeProvider {
+            dark_mode_fn: Rc::new(move || state.dark()),
         BorderlessWindow {
             title: "",
-            radius: "none",
+            radius: "md",
             left_section: Some(brand),
             right_section: Some(status),
             on_minimize: minimize_current_window,
             on_maximize: toggle_maximize_current_window,
             on_close: close_current_window,
             div { class: "app",
+                style { {palette::LIGHT} }
+                if state.dark() {
+                    style { {palette::DARK} }
+                }
                 style { {style::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 if state.view.get() == View::Mail {
@@ -74,6 +82,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                     {settings::settings(__scope, state)}
                 }
             }
+        }
         }
     };
     keys::listen(window.clone(), state);

@@ -93,7 +93,7 @@ fn folder_row(
                 class
             }},
             onclick: move || state.open_folder(folder.clone()),
-            span { class: "folder-name", {dot} {entry.name.clone()} }
+            span { class: "folder-name", {dot} span { class: "name-text", {entry.name.clone()} } }
             {unread}
         }
     }

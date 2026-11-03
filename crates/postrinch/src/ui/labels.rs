@@ -313,7 +313,7 @@ fn label_line(state: State, line: LabelRow) -> NodeHandle {
             {chevron}
             span { class: "folder-name", onclick: open_it,
                 {dot}
-                {line.name.clone()}
+                span { class: "name-text", {line.name.clone()} }
             }
             {unread}
         }

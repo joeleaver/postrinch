@@ -6,6 +6,7 @@ use postrinch_model::SystemLabel;
 use rinch::menu::{Menu, MenuItem};
 use rinch::prelude::*;
 
+use crate::appearance::Appearance;
 use crate::state::{State, View};
 
 pub fn menus(state: State) -> Vec<(&'static str, Menu)> {
@@ -51,6 +52,13 @@ pub fn menus(state: State) -> Vec<(&'static str, Menu)> {
             MenuItem::new("Drafts")
                 .shortcut("Ctrl+3")
                 .on_click(go(Folder::Everywhere(SystemLabel::Drafts))),
+        )
+        .separator()
+        .item(MenuItem::new("Light").on_click(move || state.set_appearance(Appearance::Light)))
+        .item(MenuItem::new("Dark").on_click(move || state.set_appearance(Appearance::Dark)))
+        .item(
+            MenuItem::new("Match the system")
+                .on_click(move || state.set_appearance(Appearance::System)),
         )
         .separator()
         .item(

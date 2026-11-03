@@ -1,6 +1,7 @@
 //! Postrinch: an agent-first desktop mail client.
 
 mod actions;
+mod appearance;
 mod dates;
 mod menus;
 mod state;
@@ -54,8 +55,11 @@ fn main() -> ExitCode {
         width: 1440,
         height: 900,
         borderless: true,
+        // Transparent, so the window's rounded corners show the desktop.
+        transparent: true,
         menu_in_titlebar: true,
         app_id: Some("postrinch".into()),
+        icon: Some(include_bytes!("../assets/icons/postrinch-256.png")),
         ..Default::default()
     };
     App::new(move |scope| ui::app(scope, state, store))

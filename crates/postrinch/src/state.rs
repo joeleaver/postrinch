@@ -11,6 +11,7 @@ use rinch::prelude::*;
 use rinch::{Effect, batch};
 
 use crate::actions::Notice;
+use crate::appearance::{Appearance, Settings, is_dark, system_prefers_dark};
 use crate::sync::AccountSync;
 use crate::ui::LabelEdit;
 
@@ -25,6 +26,13 @@ pub const PAGE: usize = 100;
 pub enum View {
     Mail,
     Settings,
+}
+
+/// The parts of Settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsSection {
+    Accounts,
+    Appearance,
 }
 
 /// The window's state. Every field is a signal, so this is `Copy`.
@@ -53,6 +61,12 @@ pub struct State {
     pub revision: Signal<u64>,
     /// The label being renamed or coloured.
     pub editing: Signal<Option<LabelEdit>>,
+    /// Light, dark or the system's choice, as saved.
+    pub appearance: Signal<Appearance>,
+    /// Whether the system prefers dark (dark when it does not say).
+    pub system_dark: Signal<bool>,
+    /// Which part of Settings is open.
+    pub settings_section: Signal<SettingsSection>,
     /// Which page the window shows.
     pub view: Signal<View>,
     /// Settings' accounts, loaded while Settings is open.
@@ -87,6 +101,9 @@ impl State {
             sync: Signal::new(Vec::new()),
             revision: Signal::new(0),
             editing: Signal::new(None),
+            appearance: Signal::new(Settings::load().appearance),
+            system_dark: Signal::new(system_prefers_dark()),
+            settings_section: Signal::new(SettingsSection::Accounts),
             view: Signal::new(View::Mail),
             accounts: Signal::new(Vec::new()),
             account_shown: Signal::new(None),
@@ -174,6 +191,22 @@ impl State {
             self.search.set(None);
             self.search_draft.set(String::new());
         });
+    }
+
+    /// Whether the window is dark now.
+    pub fn dark(self) -> bool {
+        is_dark(self.appearance.get(), self.system_dark.get())
+    }
+
+    /// Choose light, dark or the system's, and save the choice.
+    pub fn set_appearance(self, appearance: Appearance) {
+        self.appearance.set(appearance);
+        let mut settings = Settings::load();
+        settings.appearance = appearance;
+        if let Err(e) = settings.save() {
+            self.error
+                .set(Some(format!("The appearance was not saved: {e}")));
+        }
     }
 
     pub fn open_folder(self, folder: Folder) {
