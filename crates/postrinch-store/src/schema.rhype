@@ -2,8 +2,10 @@
 //
 // `@on_delete` on a relation field says what happens to objects of THIS type
 // when the object they point at is deleted: deleting an Account cascades to
-// its labels, threads and messages; deleting a Label or a Person only drops
-// the links to it.
+// its labels and threads, and a thread to its messages; deleting a Label or
+// a Person only drops the links to it.
+//
+// Changing this file changes the store's format: see format.rs.
 //
 // Objects that a provider identifies within an account carry a `key`,
 // "<account address key>\u001f<provider id>", unique across the store.
@@ -20,7 +22,6 @@ type Account {
     sync_cursor: String
     labels: [Label] @inverse(Label.account)
     threads: [Thread] @inverse(Thread.account)
-    messages: [Message] @inverse(Message.account)
 }
 
 type Label {
@@ -47,9 +48,14 @@ type Person {
     received: [Message] @inverse(Message.recipients)
 }
 
+// rhypedb copies an object into the reverse entry of a link whenever the
+// object has a to-one relation besides that link, and into the index of
+// every @indexed field. A message has eight-odd links and several indexed
+// fields, so Message holds only what is small, and what a message says is
+// in its MessageContent. Its account is reached through its thread.
+// `schema_keeps_message_small` guards both.
 type Message {
     key: String @unique
-    account: Account @on_delete(cascade)
     thread: Thread @on_delete(cascade)
     labels: [Label] @on_delete(remove)
     from: [Person] @on_delete(remove)
@@ -57,22 +63,38 @@ type Message {
     provider_id: String
     rfc_message_id: String @indexed
     subject: String
-    // Subject, names and addresses, and body, for full-text search.
-    search_text: String @fulltext(analyzer: "english")
     snippet: String
     received: DateTime @indexed
     unread: Bool @indexed
     starred: Bool @indexed
     has_attachments: Bool
     size: u64
-    headers: Json
-    body_text: String
-    attachments: Json
     // SHA-256 of the raw message in the blob store, hex; null until fetched.
     raw_sha256: String
-    // Whether body_text and attachments are known (false: headers only).
-    // Null on messages stored before the flag existed, all downloaded.
+    // Whether the content's body_text and attachments are known (false:
+    // headers only).
     downloaded: Bool @indexed
+    content: [MessageContent] @inverse(MessageContent.message)
+}
+
+// What a message says, kept apart from Message so that rhypedb's copies of
+// a message (one in the reverse entry of each of its links, one in each
+// @indexed field's index) stay small. MessageContent has one to-one
+// relation and no @indexed field, so rhypedb copies it nowhere.
+type MessageContent {
+    key: String @unique
+    message: Message @on_delete(cascade)
+    // Subject, names and addresses, and body, for full-text search.
+    search_text: String @fulltext(analyzer: "english")
+    body_text: String
+    headers: Json
+    attachments: Json
+}
+
+// The store's format version, one object with key "store". See format.rs.
+type StoreInfo {
+    key: String @unique
+    version: u32
 }
 
 type SavedView {

@@ -114,7 +114,7 @@ impl Store {
         // Clear the cursor first: if this is interrupted, the next sync is a
         // full one, which removes or refetches whatever is left.
         self.set_sync_cursor(address, None)?;
-        let messages = self.links(TYPE, id, "messages")?.len();
+        let messages = self.message_ids(address)?.len();
         // A thread's messages are deleted with it (Message.thread cascades).
         for thread in self.links(TYPE, id, "threads")? {
             self.db_delete("Thread", thread)?;

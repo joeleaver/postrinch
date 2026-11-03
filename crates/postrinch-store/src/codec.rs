@@ -51,18 +51,17 @@ impl Fields {
             .ok_or_else(|| self.wrong(name, "String"))
     }
 
-    pub(crate) fn opt_bool(&self, name: &str) -> StoreResult<Option<bool>> {
-        match self.value(name) {
-            Value::Null => Ok(None),
-            Value::Bool(b) => Ok(Some(*b)),
-            _ => Err(self.wrong(name, "Bool")),
-        }
-    }
-
     pub(crate) fn bool(&self, name: &str) -> StoreResult<bool> {
         match self.value(name) {
             Value::Bool(b) => Ok(*b),
             _ => Err(self.wrong(name, "Bool")),
+        }
+    }
+
+    pub(crate) fn u32(&self, name: &str) -> StoreResult<u32> {
+        match self.value(name) {
+            Value::U32(n) => Ok(*n),
+            _ => Err(self.wrong(name, "u32")),
         }
     }
 
@@ -112,6 +111,11 @@ impl FieldsBuilder {
 
     pub(crate) fn bool(mut self, name: &str, value: bool) -> Self {
         self.0.insert(name.into(), Value::Bool(value));
+        self
+    }
+
+    pub(crate) fn u32(mut self, name: &str, value: u32) -> Self {
+        self.0.insert(name.into(), Value::U32(value));
         self
     }
 

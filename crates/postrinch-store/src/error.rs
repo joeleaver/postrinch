@@ -19,6 +19,18 @@ pub enum StoreError {
     /// the messages that use them.
     #[error("no label {id} in account {account}")]
     UnknownLabel { account: EmailAddress, id: String },
+    /// The store was written in another format (see `format.rs`). While
+    /// Postrinch is in development, the fix is to delete `dir` and add the
+    /// accounts again.
+    #[error(
+        "the store at {} was written by another build of Postrinch ({found}); \
+         delete that directory and add your accounts again (raw messages are kept)",
+        dir.display()
+    )]
+    OldFormat {
+        dir: std::path::PathBuf,
+        found: String,
+    },
     #[error("not a usable view query: {0}")]
     InvalidView(String),
     /// A stored object does not decode to what the schema promises: a bug,

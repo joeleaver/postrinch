@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use postrinch_model::Message;
 
 use crate::codec::Fields;
-use crate::messages::TYPE;
+use crate::messages::{CONTENT, TYPE};
 use crate::{Store, StoreResult};
 
 /// A message that matched a search, with its BM25 score (higher is better).
@@ -20,8 +20,15 @@ impl Store {
     pub fn search(&self, query: &str, limit: usize) -> StoreResult<Vec<SearchHit>> {
         let result = self
             .db
-            .fulltext_search(TYPE, "search_text", query, limit, None, None)?;
-        let ids: Vec<u64> = result.hits.iter().map(|h| h.object_id).collect();
+            .fulltext_search(CONTENT, "search_text", query, limit, None, None)?;
+        // Each hit is a message's content; find the message it belongs to.
+        let mut message_of = HashMap::new();
+        for hit in &result.hits {
+            if let Some(message) = self.link(CONTENT, hit.object_id, "message")? {
+                message_of.insert(hit.object_id, message);
+            }
+        }
+        let ids: Vec<u64> = message_of.values().copied().collect();
         // get_many returns objects in id order and leaves out any deleted
         // since the search ran; match them back to the ranked hits by id.
         let objects: HashMap<u64, Fields> = self
@@ -32,7 +39,10 @@ impl Store {
         result
             .hits
             .iter()
-            .filter_map(|hit| objects.get(&hit.object_id).map(|f| (hit, f)))
+            .filter_map(|hit| {
+                let message = message_of.get(&hit.object_id)?;
+                objects.get(message).map(|f| (hit, f))
+            })
             .map(|(hit, fields)| {
                 Ok(SearchHit {
                     message: self.decode_message(fields)?,

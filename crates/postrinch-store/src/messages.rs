@@ -7,6 +7,7 @@ use crate::keys::scoped;
 use crate::{Store, StoreError, StoreResult};
 
 pub(crate) const TYPE: &str = "Message";
+pub(crate) const CONTENT: &str = "MessageContent";
 const THREAD: &str = "Thread";
 
 /// Subject, then everyone it was from or to, then the body: what full-text
@@ -45,7 +46,7 @@ impl Store {
         // its body. Only what headers can change is brought up to date.
         if !message.downloaded
             && let Some(existing) = self.find(TYPE, "key", &scoped(account, &message.id.0))?
-            && existing.opt_bool("downloaded")?.unwrap_or(true)
+            && existing.bool("downloaded")?
         {
             return self.set_message_labels(account, &message.id, &message.labels, message.flags);
         }
@@ -60,16 +61,12 @@ impl Store {
         let mut fields = FieldsBuilder::new()
             .opt_str("rfc_message_id", h.message_id.clone())
             .opt_str("subject", h.subject.clone())
-            .str("search_text", search_text(message))
             .str("snippet", message.snippet.clone())
             .datetime("received", message.received.as_millis())
             .bool("unread", message.flags.unread)
             .bool("starred", message.flags.starred)
             .bool("has_attachments", message.has_attachments())
             .u64("size", message.size)
-            .json("headers", &message.headers)
-            .str("body_text", message.body_text.clone())
-            .json("attachments", &message.attachments)
             .bool("downloaded", message.downloaded);
         if let Some(hash) = raw_sha256 {
             fields = fields.str("raw_sha256", hash);
@@ -80,7 +77,6 @@ impl Store {
             .clone()
             .str("key", key.clone())
             .str("provider_id", message.id.0.clone())
-            .relation("account", account_id)
             .relation("thread", thread_id);
         let id = self.upsert(TYPE, "key", &key, create.build(), fields.build())?;
 
@@ -88,6 +84,18 @@ impl Store {
         self.set_links(TYPE, id, "labels", &label_ids)?;
         self.set_links(TYPE, id, "from", &from_ids)?;
         self.set_links(TYPE, id, "recipients", &recipient_ids)?;
+
+        // What the message says, kept apart (see schema.rhype).
+        let content = FieldsBuilder::new()
+            .str("search_text", search_text(message))
+            .json("headers", &message.headers)
+            .str("body_text", message.body_text.clone())
+            .json("attachments", &message.attachments);
+        let create = content
+            .clone()
+            .str("key", key.clone())
+            .relation("message", id);
+        self.upsert(CONTENT, "key", &key, create.build(), content.build())?;
         Ok(())
     }
 
@@ -233,17 +241,18 @@ impl Store {
         let id = fields.id();
         let missing = |what: &str| StoreError::corrupt(TYPE, id, format!("no {what} link"));
 
-        let account_id = self
-            .link(TYPE, id, "account")?
-            .ok_or_else(|| missing("account"))?;
-        let address = self.get("Account", account_id)?.str("address")?;
-        let account = EmailAddress::parse(&address)
-            .map_err(|e| StoreError::corrupt("Account", account_id, e))?;
-
+        // A message reaches its account through its thread (see schema.rhype
+        // on why Message has no account link of its own).
         let thread_id = self
             .link(TYPE, id, "thread")?
             .ok_or_else(|| missing("thread"))?;
         let thread = ProviderThreadId(self.get(THREAD, thread_id)?.str("provider_id")?);
+        let account_id = self
+            .link(THREAD, thread_id, "account")?
+            .ok_or_else(|| StoreError::corrupt(THREAD, thread_id, "no account link"))?;
+        let address = self.get("Account", account_id)?.str("address")?;
+        let account = EmailAddress::parse(&address)
+            .map_err(|e| StoreError::corrupt("Account", account_id, e))?;
 
         let label_ids = self.links(TYPE, id, "labels")?;
         let mut labels = self
@@ -253,7 +262,13 @@ impl Store {
             .collect::<StoreResult<Vec<_>>>()?;
         labels.sort();
 
-        let headers: MessageHeaders = fields.json("headers")?;
+        let content_id = self
+            .links(TYPE, id, "content")?
+            .into_iter()
+            .next()
+            .ok_or_else(|| missing("content"))?;
+        let content = self.get(CONTENT, content_id)?;
+        let headers: MessageHeaders = content.json("headers")?;
         Ok(Message {
             account,
             id: ProviderMessageId(fields.str("provider_id")?),
@@ -266,10 +281,10 @@ impl Store {
                 starred: fields.bool("starred")?,
             },
             snippet: fields.str("snippet")?,
-            body_text: fields.str("body_text")?,
-            attachments: fields.json("attachments")?,
+            body_text: content.str("body_text")?,
+            attachments: content.json("attachments")?,
             size: fields.u64("size")?,
-            downloaded: fields.opt_bool("downloaded")?.unwrap_or(true),
+            downloaded: fields.bool("downloaded")?,
         })
     }
 }

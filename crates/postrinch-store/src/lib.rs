@@ -12,6 +12,7 @@ mod backfill;
 mod blobs;
 mod codec;
 mod error;
+mod format;
 mod keys;
 mod labels;
 mod messages;
@@ -44,15 +45,12 @@ pub struct Store {
 }
 
 impl Store {
-    /// Open the store under `root`, creating it if it does not exist.
+    /// Open the store under `root`, creating it if it does not exist. A
+    /// store in another format is refused ([`StoreError::OldFormat`]).
     pub fn open(root: impl AsRef<Path>) -> StoreResult<Self> {
-        let root = root.as_ref().to_path_buf();
-        std::fs::create_dir_all(&root)?;
-        let schema = rhypedb_schema::parser::parse_schema(SCHEMA)
-            .map_err(|e| StoreError::Schema(e.to_string()))?;
-        let db = Database::open(schema, root.join("db"))?;
-        let blobs = blobs::Blobs::open(root.join("blobs"))?;
-        Ok(Self { db, blobs, root })
+        let root = root.as_ref();
+        std::fs::create_dir_all(root)?;
+        format::open(root)
     }
 
     pub fn root(&self) -> &Path {
