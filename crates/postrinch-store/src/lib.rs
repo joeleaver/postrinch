@@ -21,9 +21,12 @@ mod objects;
 mod outbox;
 mod people;
 mod search;
+mod threads;
 mod views;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -48,6 +51,14 @@ pub struct Store {
     root: PathBuf,
     /// Held while an outbox entry takes the next sequence number.
     outbox_lock: Arc<Mutex<()>>,
+    /// Held while a thread's latest activity is read and written, as sync
+    /// stores several messages of one thread at once.
+    thread_lock: Arc<Mutex<()>>,
+    /// How many writes have gone through since the store opened.
+    writes: Arc<AtomicU64>,
+    /// Each account's label stats, with [`Store::writes`] as it was when
+    /// they were read: good until the next write.
+    stats: Arc<Mutex<HashMap<String, (u64, HashMap<String, LabelStats>)>>>,
 }
 
 impl Store {
@@ -61,6 +72,12 @@ impl Store {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// How many writes have gone through since the store opened: what was
+    /// read when it had one value is out of date once it has another.
+    pub fn writes(&self) -> u64 {
+        self.writes.load(Ordering::Acquire)
     }
 
     /// Delete raw messages no stored message refers to any more (after a

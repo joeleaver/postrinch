@@ -91,3 +91,21 @@ fn label_stats_tell_folders_from_tags() {
     assert_eq!(stats["INBOX"].messages, 1);
     assert_eq!(stats["Label_2"].filed_only_here, 0);
 }
+
+#[test]
+fn label_stats_follow_every_write() {
+    let (_dir, store, me) = setup();
+    store
+        .put_message(&message(&me, "m1", "t1", 100, "Rota", "a"), None)
+        .unwrap();
+    assert_eq!(store.label_stats(&me).unwrap()["INBOX"].unread, 1);
+    assert_eq!(store.label_stats(&me).unwrap()["INBOX"].unread, 1, "asked again");
+    store
+        .change_messages(
+            &me,
+            &[postrinch_model::ProviderMessageId("m1".into())],
+            &postrinch_model::MessageChange::read(),
+        )
+        .unwrap();
+    assert_eq!(store.label_stats(&me).unwrap()["INBOX"].unread, 0);
+}

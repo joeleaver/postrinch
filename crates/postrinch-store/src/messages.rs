@@ -85,6 +85,7 @@ impl Store {
         let id = self.upsert(TYPE, "key", &key, create.build(), fields.build())?;
 
         self.set_links(TYPE, id, "thread", &[thread_id])?;
+        self.thread_has(thread_id, message.received.as_millis())?;
         self.set_links(TYPE, id, "labels", &label_ids)?;
         self.set_links(TYPE, id, "from", &from_ids)?;
         self.set_links(TYPE, id, "recipients", &recipient_ids)?;
@@ -174,10 +175,12 @@ impl Store {
         };
         let thread = self.link(TYPE, fields.id(), "thread")?;
         self.db_delete(TYPE, fields.id())?;
-        if let Some(thread) = thread
-            && self.links(THREAD, thread, "messages")?.is_empty()
-        {
-            self.db_delete(THREAD, thread)?;
+        if let Some(thread) = thread {
+            if self.links(THREAD, thread, "messages")?.is_empty() {
+                self.db_delete(THREAD, thread)?;
+            } else {
+                self.thread_lost_one(thread)?;
+            }
         }
         Ok(())
     }

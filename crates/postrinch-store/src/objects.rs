@@ -161,9 +161,18 @@ impl Store {
                     std::thread::sleep(pause);
                     pause = (pause * 2).min(Duration::from_millis(50));
                 }
-                other => return Ok(other?),
+                other => return self.wrote(other),
             }
         }
-        Ok(write()?)
+        self.wrote(write())
+    }
+
+    /// Count a write that went through, so what was read before it is
+    /// known to be out of date ([`Store::writes`]).
+    fn wrote<T>(&self, result: EngineResult<T>) -> StoreResult<T> {
+        let value = result?;
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+        Ok(value)
     }
 }

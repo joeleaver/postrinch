@@ -69,13 +69,7 @@ impl Store {
             let Some(provider_id) = key.strip_prefix(&prefix) else {
                 continue;
             };
-            let messages = self.links(THREAD, thread.id(), "messages")?;
-            let mut latest = None;
-            for message in self.get_many(TYPE, &messages)? {
-                let received = message.datetime("received")?;
-                latest = latest.max(Some(received));
-            }
-            if let Some(latest) = latest {
+            if let Some(latest) = self.thread_latest(&thread)? {
                 entries.push(ThreadEntry {
                     account: account.clone(),
                     thread: ProviderThreadId(provider_id.to_owned()),
@@ -91,8 +85,34 @@ impl Store {
         Ok(entries)
     }
 
-    /// How each of an account's labels is used, by provider id.
+    /// How each of an account's labels is used, by provider id. Counting
+    /// reads every labelled message, so the answer is kept until the next
+    /// write: the sidebar and the thread list ask for it one after the
+    /// other.
     pub fn label_stats(&self, account: &EmailAddress) -> StoreResult<HashMap<String, LabelStats>> {
+        let as_of = self.writes();
+        let key = account.key();
+        if let Some((when, stats)) = self
+            .stats
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&key)
+            && *when == as_of
+        {
+            return Ok(stats.clone());
+        }
+        let stats = self.count_label_stats(account)?;
+        self.stats
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, (as_of, stats.clone()));
+        Ok(stats)
+    }
+
+    fn count_label_stats(
+        &self,
+        account: &EmailAddress,
+    ) -> StoreResult<HashMap<String, LabelStats>> {
         let account_id = self.account_id(account)?;
         let set_aside = self.set_aside(account)?;
         let mut members: Vec<(String, LabelKind, Vec<u64>)> = Vec::new();

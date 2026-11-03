@@ -45,6 +45,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    fill_thread_latest(&store);
     let theme = ThemeProviderProps {
         primary_color: Some("blue".into()),
         default_radius: Some("md".into()),
@@ -72,4 +73,20 @@ fn main() -> ExitCode {
         .menu(menus::menus(state))
         .run();
     ExitCode::SUCCESS
+}
+
+/// Keep the latest activity of threads stored before threads kept it, in
+/// the background: lists are right meanwhile, only slower.
+fn fill_thread_latest(store: &Store) {
+    let store = store.clone();
+    let spawned = std::thread::Builder::new()
+        .name("fill-threads".into())
+        .spawn(move || match store.fill_thread_latest() {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("kept the latest activity of {n} threads"),
+            Err(e) => tracing::warn!("keeping threads' latest activity: {e}"),
+        });
+    if let Err(e) = spawned {
+        tracing::warn!("cannot keep threads' latest activity: {e}");
+    }
 }

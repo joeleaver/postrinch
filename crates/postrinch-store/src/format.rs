@@ -56,6 +56,9 @@ pub(crate) fn open(root: &Path) -> StoreResult<Store> {
         blobs: blobs::Blobs::open(root.join("blobs"))?,
         root: root.to_path_buf(),
         outbox_lock: Arc::default(),
+        thread_lock: Arc::default(),
+        writes: Arc::default(),
+        stats: Arc::default(),
     };
     let key = Value::String(INFO_KEY.into());
     match store.db.find_by_unique(INFO, "key", &key)? {

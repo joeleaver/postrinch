@@ -42,6 +42,10 @@ type Thread {
     key: String @unique
     account: Account @on_delete(cascade)
     provider_id: String
+    // When its latest message arrived, so a mailbox lists in order without
+    // reading every message (threads.rs). Null in a store written before
+    // threads kept it, until the thread is next listed or added to.
+    latest: DateTime
     messages: [Message] @inverse(Message.thread)
 }
 
