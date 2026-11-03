@@ -6,6 +6,7 @@ use postrinch_model::{AccountState, EmailAddress, Provider, ProviderMessageId};
 use postrinch_store::Store;
 use postrinch_sync::google::{
     ClientConfig, GmailApi, GmailSync, GoogleAuth, Keychain, Phase, Progress, ProgressFn,
+    remove_google_account, sign_in_google,
 };
 
 use crate::{Cli, Command};
@@ -93,13 +94,11 @@ fn accounts(cx: &Context) -> Result<()> {
 
 async fn sign_in(cx: &Context, address: Option<EmailAddress>) -> Result<()> {
     let auth = cx.auth()?;
-    let account = auth
-        .sign_in(address.as_ref(), |url| {
-            eprintln!("Opening your browser to sign in. If it does not open, visit:\n{url}\n");
-            open::that_detached(url)
-        })
-        .await?;
-    cx.store.put_account(&account)?;
+    let account = sign_in_google(&auth, &cx.store, address.as_ref(), |url| {
+        eprintln!("Opening your browser to sign in. If it does not open, visit:\n{url}\n");
+        open::that_detached(url)
+    })
+    .await?;
     println!("Signed in as {}.", account.address);
     Ok(())
 }
@@ -109,11 +108,13 @@ async fn remove_account(cx: &Context, address: &EmailAddress) -> Result<()> {
         .store
         .account(address)?
         .ok_or_else(|| format!("no account {address}"))?;
-    if account.provider == Provider::Google {
-        cx.auth()?.sign_out(address).await?;
-    }
-    cx.store.remove_account(address)?;
-    let removed = cx.store.collect_garbage(std::time::Duration::ZERO)?;
+    let removed = match account.provider {
+        Provider::Google => remove_google_account(&*cx.auth()?, &cx.store, address).await?,
+        Provider::Imap => {
+            cx.store.remove_account(address)?;
+            cx.store.collect_garbage(std::time::Duration::ZERO)?
+        }
+    };
     println!("Removed {address} and {removed} stored messages' raw copies.");
     Ok(())
 }

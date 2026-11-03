@@ -6,6 +6,7 @@
 //! calls. These are the read-only commands; writing ones, and the person's
 //! confirmation they need, come with sending.
 
+mod accounts;
 mod error;
 mod folders;
 mod labels;
@@ -14,6 +15,7 @@ mod threads;
 
 use postrinch_store::Store;
 
+pub use accounts::AccountInfo;
 pub use error::{CommandError, CommandResult};
 pub use folders::{AccountFolders, Folder, FolderEntry, Sidebar};
 pub use labels::{AppLabels, Chip, LabelNode, LabelRole, LabelTree, app_of, role};

@@ -1,5 +1,6 @@
 //! Postrinch: an agent-first desktop mail client.
 
+mod actions;
 mod dates;
 mod menus;
 mod state;

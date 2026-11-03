@@ -298,4 +298,63 @@ mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; 
     cursor: pointer;
 }
 .swatch.chosen { box-shadow: 0 0 0 2px var(--ink); }
+
+/* Settings */
+.settings { flex: 1; display: flex; min-height: 0; height: 100%; }
+.settings-nav {
+    width: 220px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    padding: 18px 10px;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.settings-title { padding: 0 10px 12px; font-size: 16px; font-weight: 600; }
+.settings-back { margin-top: auto; padding: 8px 10px; color: var(--accent); cursor: pointer; font-size: 13px; }
+.settings-accounts {
+    width: 320px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    padding: 28px 16px 20px 24px;
+    border-right: 1px solid var(--line-soft);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.settings-accounts-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.settings-accounts-head h1 { margin: 0; font-size: 22px; font-weight: 600; }
+.account-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.account-row:hover { background: #f4f5f7; }
+.account-row.chosen { background: var(--accent-tint); }
+.account-row .dot { margin-top: 5px; width: 10px; height: 10px; border-radius: 3px; }
+.account-row-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.account-address { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-state { font-size: 12px; color: var(--muted); }
+.account-state.trouble { color: var(--trouble); }
+.settings-main { flex: 1; min-width: 0; padding: 28px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+.account-detail { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+.account-detail h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.facts { display: grid; grid-template-columns: 140px minmax(0, 1fr); row-gap: 10px; column-gap: 16px; }
+.fact-name { color: var(--muted); }
+.account-actions { display: flex; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.account-actions .spacer { flex: 1; }
+.settings-hint { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.notice {
+    padding: 10px 14px;
+    border: 1px solid #c9d8f3;
+    border-radius: 8px;
+    background: var(--accent-tint);
+    color: var(--accent-ink);
+}
+.notice.trouble { border-color: #f0cf96; background: #fdf4e3; color: var(--trouble); }
 "#;

@@ -1,5 +1,6 @@
 //! Google accounts: sign-in, and Gmail sync.
 
+mod accounts;
 mod api;
 mod auth;
 mod config;
@@ -13,6 +14,7 @@ mod secret_service;
 mod secrets;
 mod sync;
 
+pub use accounts::{remove_google_account, sign_in_google};
 pub use api::GmailApi;
 pub(crate) use api::chain as error_chain;
 pub use auth::GoogleAuth;

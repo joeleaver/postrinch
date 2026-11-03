@@ -13,6 +13,7 @@ postrinch-store = { workspace = true }
 postrinch-sync = { workspace = true }
 dirs = "7"
 jiff = "0.2"
+open = "5"
 rinch = { git = "https://github.com/joeleaver/rinch.git", features = ["desktop", "components", "theme"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 tracing = { workspace = true }

@@ -1,29 +1,31 @@
 //! What the window shows, as signals, and loading it through the commands.
 
-use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use postrinch_commands::{Commands, Folder, SearchResults, Sidebar, Thread, ThreadPage};
-use postrinch_model::{EmailAddress, LabelPrefs, ProviderThreadId, SystemLabel};
+use postrinch_commands::{
+    AccountInfo, Commands, Folder, SearchResults, Sidebar, Thread, ThreadPage,
+};
+use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
 use rinch::prelude::*;
 use rinch::{Effect, batch};
 
+use crate::actions::Notice;
 use crate::sync::AccountSync;
 use crate::ui::LabelEdit;
-
-thread_local! {
-    /// The commands the window acts through, set once by [`State::load`].
-    /// The window's state is all `Copy` signals; this is the one thing it
-    /// shares that is not.
-    static COMMANDS: OnceCell<Rc<Commands>> = const { OnceCell::new() };
-}
 
 /// How many threads a search shows.
 const SEARCH_LIMIT: usize = 100;
 
 /// How many more threads "Show more" loads.
 pub const PAGE: usize = 100;
+
+/// The window's pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum View {
+    Mail,
+    Settings,
+}
 
 /// The window's state. Every field is a signal, so this is `Copy`.
 #[derive(Clone, Copy)]
@@ -51,6 +53,16 @@ pub struct State {
     pub revision: Signal<u64>,
     /// The label being renamed or coloured.
     pub editing: Signal<Option<LabelEdit>>,
+    /// Which page the window shows.
+    pub view: Signal<View>,
+    /// Settings' accounts, loaded while Settings is open.
+    pub accounts: Signal<Vec<AccountInfo>>,
+    /// The account Settings shows.
+    pub account_shown: Signal<Option<EmailAddress>>,
+    /// The account the person asked to remove, until they confirm.
+    pub removing: Signal<Option<EmailAddress>>,
+    /// What an account action wants the person to know.
+    pub notice: Signal<Option<Notice>>,
     /// Why sync is not running, when it is not.
     pub sync_off: Signal<Option<String>>,
     /// The last thing that went wrong loading, for the window to say.
@@ -75,6 +87,11 @@ impl State {
             sync: Signal::new(Vec::new()),
             revision: Signal::new(0),
             editing: Signal::new(None),
+            view: Signal::new(View::Mail),
+            accounts: Signal::new(Vec::new()),
+            account_shown: Signal::new(None),
+            removing: Signal::new(None),
+            notice: Signal::new(None),
             sync_off: Signal::new(None),
             error: Signal::new(None),
         }
@@ -84,11 +101,6 @@ impl State {
     /// whenever sync changes the store or another folder is chosen, and
     /// the open thread whenever it changes or sync does.
     pub fn load(self, commands: Rc<Commands>) {
-        COMMANDS.with(|c| {
-            if c.set(commands.clone()).is_err() {
-                tracing::error!("the window's commands were set twice");
-            }
-        });
         let lists = commands.clone();
         Effect::new(move || {
             self.revision.get();
@@ -104,6 +116,15 @@ impl State {
                     self.page.set(Some(page));
                 }
                 Err(e) => self.error.set(Some(e.to_string())),
+            }
+        });
+        Effect::new(move || {
+            self.revision.get();
+            if self.view.get() == View::Settings {
+                match crate::actions::accounts() {
+                    Ok(accounts) => self.accounts.set(accounts),
+                    Err(e) => self.error.set(Some(e)),
+                }
             }
         });
         let searching = commands.clone();
@@ -137,22 +158,12 @@ impl State {
         });
     }
 
-    /// Save what the person changed about a label, and show it.
-    pub fn save_label_prefs(self, account: &EmailAddress, label: &str, prefs: &LabelPrefs) {
-        let Some(commands) = COMMANDS.with(|c| c.get().cloned()) else {
-            return;
-        };
-        match commands.set_label_prefs(account, label, prefs) {
-            Ok(()) => self.revision.update(|n| *n += 1),
-            Err(e) => self.error.set(Some(e.to_string())),
-        }
-    }
-
     /// Show the threads that match what the search box holds.
     pub fn run_search(self) {
         let query = self.search_draft.get();
         batch(|| {
             self.selected.set(None);
+            self.view.set(View::Mail);
             self.search.set((!query.trim().is_empty()).then_some(query));
         });
     }

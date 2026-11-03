@@ -9,6 +9,7 @@ use common::*;
 use postrinch_model::{Account, AccountState, EmailAddress, Provider, SignInReason};
 use postrinch_sync::google::{KeepOptions, SyncEvent};
 use serde_json::json;
+use tokio::sync::Notify;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
 
@@ -21,10 +22,11 @@ const FAST: KeepOptions = KeepOptions {
 async fn run_for(f: &Fixture, time: Duration) -> Vec<SyncEvent> {
     let events = Arc::new(Mutex::new(Vec::new()));
     let log = Arc::clone(&events);
+    let wake = Arc::new(Notify::new());
     let _ = tokio::time::timeout(
         time,
         f.sync
-            .keep_in_sync(FAST, Arc::new(move |e| log.lock().unwrap().push(e))),
+            .keep_in_sync(FAST, Arc::new(move |e| log.lock().unwrap().push(e)), wake),
     )
     .await;
     Arc::try_unwrap(events).unwrap().into_inner().unwrap()
@@ -108,4 +110,33 @@ async fn accounts_needing_sign_in_are_left_alone() {
         f.store.account(&other).unwrap().unwrap().state,
         AccountState::NeedsSignIn(_)
     ));
+}
+
+#[tokio::test]
+async fn waking_starts_the_next_pass_at_once() {
+    let f = fixture().await;
+    mock_one_message(&f).await;
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::clone(&events);
+    let wake = Arc::new(Notify::new());
+    let waker = Arc::clone(&wake);
+    let ring = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        waker.notify_one();
+    });
+    let _ = tokio::time::timeout(
+        Duration::from_secs(2),
+        f.sync
+            .keep_in_sync(FAST, Arc::new(move |e| log.lock().unwrap().push(e)), wake),
+    )
+    .await;
+    ring.await.unwrap();
+    let started = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| matches!(e, SyncEvent::Started { .. }))
+        .count();
+    // FAST waits an hour between passes; only the wake explains a second.
+    assert_eq!(started, 2);
 }

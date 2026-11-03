@@ -3689,6 +3689,7 @@ version = "0.1.0"
 dependencies = [
  "dirs",
  "jiff",
+ "open",
  "postrinch-commands",
  "postrinch-model",
  "postrinch-store",

@@ -142,8 +142,8 @@ fn rename(state: State, edit: LabelEdit) -> NodeHandle {
             }
             p { class: "dialog-hint", {hint} }
             div { class: "dialog-actions",
-                Button { variant: "default", onclick: move || state.editing.set(None), "Cancel" }
-                Button { variant: "filled", onclick: save, "Rename" }
+                Button { variant: "default", size: "sm", onclick: move || state.editing.set(None), "Cancel" }
+                Button { variant: "filled", size: "sm", onclick: save, "Rename" }
             }
         }
     }
@@ -174,7 +174,7 @@ fn colour(state: State, edit: LabelEdit) -> NodeHandle {
             h2 { class: "dialog-title", "Label colour" }
             div { class: "swatches", {swatches} }
             div { class: "dialog-actions",
-                Button { variant: "default", onclick: choose(None), "No colour of mine" }
+                Button { variant: "default", size: "sm", onclick: choose(None), "No colour of mine" }
             }
         }
     }

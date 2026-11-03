@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use postrinch_model::{EmailAddress, Provider};
+use tokio::sync::Notify;
 
 use super::{GmailSync, Progress, ProgressFn, SyncReport};
 use crate::SyncError;
@@ -64,15 +65,19 @@ impl Default for KeepOptions {
 
 impl GmailSync {
     /// Sync every signed-in Google account, again and again, until the
-    /// future is dropped.
-    pub async fn keep_in_sync(&self, options: KeepOptions, events: SyncEventFn) {
+    /// future is dropped. Notifying `wake` starts the next pass at once:
+    /// after an account signs in, or when the person asks.
+    pub async fn keep_in_sync(&self, options: KeepOptions, events: SyncEventFn, wake: Arc<Notify>) {
         loop {
             let pause = if self.pass(&options, &events).await {
                 options.interval
             } else {
                 options.retry
             };
-            tokio::time::sleep(pause).await;
+            tokio::select! {
+                () = tokio::time::sleep(pause) => {}
+                () = wake.notified() => {}
+            }
         }
     }
 

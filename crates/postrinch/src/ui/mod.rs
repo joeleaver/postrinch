@@ -4,6 +4,7 @@ mod label_edit;
 mod labels;
 mod list;
 mod reader;
+mod settings;
 mod sidebar;
 mod style;
 
@@ -13,7 +14,8 @@ use postrinch_commands::Commands;
 use postrinch_store::Store;
 use rinch::prelude::*;
 
-use crate::state::State;
+use crate::actions;
+use crate::state::{State, View};
 use crate::sync;
 
 /// Colours that tell accounts apart, in the order accounts were added. They
@@ -28,11 +30,17 @@ pub fn account_color(index: usize) -> &'static str {
 
 /// The whole window, over one store.
 pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle {
-    state.load(Rc::new(Commands::new(store.clone())));
-    if let Err(why) = sync::start(store, state.sync, state.revision) {
-        tracing::error!("sync is off: {why}");
-        state.sync_off.set(Some(format!("Sync is off: {why}")));
-    }
+    let commands = Rc::new(Commands::new(store.clone()));
+    let sync = match sync::start(store, state.sync, state.revision) {
+        Ok(handle) => Some(handle),
+        Err(why) => {
+            tracing::error!("sync is off: {why}");
+            state.sync_off.set(Some(format!("Sync is off: {why}")));
+            None
+        }
+    };
+    actions::init(commands.clone(), sync);
+    state.load(commands);
     let brand: SectionRenderer = Rc::new(|__scope| rsx! { div { class: "brand", "postrinch" } });
     let status: SectionRenderer = Rc::new(move |__scope| title_status(__scope, state));
     rsx! {
@@ -47,10 +55,14 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
             div { class: "app",
                 style { {style::CSS} }
                 {label_edit::label_dialog(__scope, state)}
-                div { class: "panes",
-                    {sidebar::sidebar(__scope, state)}
-                    {list::thread_list(__scope, state)}
-                    {reader::reader(__scope, state)}
+                if state.view.get() == View::Mail {
+                    div { class: "panes",
+                        {sidebar::sidebar(__scope, state)}
+                        {list::thread_list(__scope, state)}
+                        {reader::reader(__scope, state)}
+                    }
+                } else {
+                    {settings::settings(__scope, state)}
                 }
             }
         }

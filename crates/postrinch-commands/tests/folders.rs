@@ -219,3 +219,13 @@ fn search_finds_threads_once_with_where_they_matched() {
     assert_eq!(excerpt.hit, "ta2");
     assert!(commands.search("   ", 10).unwrap().threads.is_empty());
 }
+
+#[test]
+fn accounts_say_how_much_mail_is_here() {
+    let (_dir, commands, a, _b) = setup();
+    let accounts = commands.accounts().unwrap();
+    assert_eq!(accounts[0].account.address, a);
+    assert_eq!(accounts[0].messages, 3);
+    // The fixtures are headers only.
+    assert_eq!(accounts[0].downloaded, 0);
+}
