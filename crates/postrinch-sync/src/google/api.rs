@@ -150,8 +150,14 @@ impl GmailApi {
     pub fn with_base(auth: Arc<GoogleAuth>, base: String) -> Self {
         Self {
             auth,
+            // HTTP/1.1, one connection per concurrent fetch. Over HTTP/2,
+            // Gmail sends large raw messages in enough small DATA frames that
+            // h2 (0.4.16 on) takes it for a flood and drops the connection
+            // ("too_many_data_frames"), and reqwest does not let the limit
+            // be raised.
             http: reqwest::Client::builder()
                 .gzip(true)
+                .http1_only()
                 .build()
                 .expect("a default HTTP client builds"),
             base,
