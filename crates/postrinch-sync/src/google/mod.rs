@@ -7,6 +7,7 @@ mod labels;
 mod loopback;
 mod oauth;
 mod pkce;
+mod quota;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod secret_service;
 mod secrets;

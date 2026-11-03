@@ -11,11 +11,12 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use super::GoogleAuth;
+use super::quota::{Cost, Quota};
 use crate::{SyncError, SyncResult};
 
 const GMAIL: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
 /// Attempts per request before a retryable failure is returned.
-const ATTEMPTS: u32 = 6;
+const ATTEMPTS: u32 = 8;
 const MAX_BACKOFF: Duration = Duration::from_secs(32);
 
 #[derive(Debug, Deserialize)]
@@ -139,6 +140,7 @@ pub struct GmailApi {
     auth: Arc<GoogleAuth>,
     http: reqwest::Client,
     base: String,
+    quota: Quota,
 }
 
 impl GmailApi {
@@ -161,15 +163,19 @@ impl GmailApi {
                 .build()
                 .expect("a default HTTP client builds"),
             base,
+            quota: Quota::default(),
         }
     }
 
     pub(crate) async fn profile(&self, account: &EmailAddress) -> SyncResult<Profile> {
-        self.get(account, "profile", &[]).await
+        self.get(account, Cost::GetProfile, "profile", &[]).await
     }
 
     pub(crate) async fn labels(&self, account: &EmailAddress) -> SyncResult<Vec<LabelResource>> {
-        Ok(self.get::<LabelList>(account, "labels", &[]).await?.labels)
+        Ok(self
+            .get::<LabelList>(account, Cost::ListLabels, "labels", &[])
+            .await?
+            .labels)
     }
 
     /// One page of every message id in the account, spam and trash included.
@@ -182,7 +188,8 @@ impl GmailApi {
         if let Some(page) = page {
             query.push(("pageToken", page));
         }
-        self.get(account, "messages", &query).await
+        self.get(account, Cost::ListMessages, "messages", &query)
+            .await
     }
 
     pub(crate) async fn raw_message(
@@ -190,8 +197,13 @@ impl GmailApi {
         account: &EmailAddress,
         id: &str,
     ) -> SyncResult<RawMessage> {
-        self.get(account, &format!("messages/{id}"), &[("format", "raw")])
-            .await
+        self.get(
+            account,
+            Cost::GetMessage,
+            &format!("messages/{id}"),
+            &[("format", "raw")],
+        )
+        .await
     }
 
     pub(crate) async fn minimal_message(
@@ -199,8 +211,13 @@ impl GmailApi {
         account: &EmailAddress,
         id: &str,
     ) -> SyncResult<MinimalMessage> {
-        self.get(account, &format!("messages/{id}"), &[("format", "minimal")])
-            .await
+        self.get(
+            account,
+            Cost::GetMessage,
+            &format!("messages/{id}"),
+            &[("format", "minimal")],
+        )
+        .await
     }
 
     /// One page of changes since `start`. Answered 404 when `start` is
@@ -222,14 +239,17 @@ impl GmailApi {
         if let Some(page) = page {
             query.push(("pageToken", page));
         }
-        self.get(account, "history", &query).await
+        self.get(account, Cost::ListHistory, "history", &query)
+            .await
     }
 
-    /// GET with retries: a 401 refreshes the access token once; rate limits
-    /// and server errors back off (honouring `Retry-After`) and try again.
+    /// GET with retries, paced by the account's quota: a 401 refreshes the
+    /// access token once; a rate limit pauses every request for the account;
+    /// server errors back off (honouring `Retry-After`) and try again.
     async fn get<T: DeserializeOwned>(
         &self,
         account: &EmailAddress,
+        cost: Cost,
         path: &str,
         query: &[(&str, &str)],
     ) -> SyncResult<T> {
@@ -238,6 +258,7 @@ impl GmailApi {
         let mut attempt = 0;
         loop {
             attempt += 1;
+            self.quota.acquire(&account.key(), cost).await;
             let token = self.auth.access_token(account).await?;
             let response = match self
                 .http
@@ -290,7 +311,14 @@ impl GmailApi {
                 self.auth.invalidate(account).await;
                 continue;
             }
-            if attempt < ATTEMPTS && is_retryable(status, &reasons) {
+            if attempt < ATTEMPTS && is_rate_limit(status, &reasons) {
+                tracing::debug!("Gmail {path}: {status} {reasons:?}, pausing the account");
+                self.quota
+                    .back_off(&account.key(), backoff(attempt, retry_after))
+                    .await;
+                continue;
+            }
+            if attempt < ATTEMPTS && is_server_error(status) {
                 tracing::debug!("Gmail {path}: {status}, retrying");
                 tokio::time::sleep(backoff(attempt, retry_after)).await;
                 continue;
@@ -330,14 +358,19 @@ fn parse_error(body: &str) -> (String, Vec<String>) {
     }
 }
 
-fn is_retryable(status: StatusCode, reasons: &[String]) -> bool {
+/// Gmail saying the account (or the project) is over its quota.
+fn is_rate_limit(status: StatusCode, reasons: &[String]) -> bool {
     match status.as_u16() {
-        429 | 500 | 502 | 503 | 504 => true,
+        429 => true,
         403 => reasons
             .iter()
             .any(|r| r == "rateLimitExceeded" || r == "userRateLimitExceeded"),
         _ => false,
     }
+}
+
+fn is_server_error(status: StatusCode) -> bool {
+    matches!(status.as_u16(), 500 | 502 | 503 | 504)
 }
 
 /// Exponential backoff from half a second, with up to a quarter of jitter,
@@ -360,17 +393,18 @@ mod tests {
 
     #[test]
     fn retries_rate_limits_not_permissions() {
-        assert!(is_retryable(StatusCode::TOO_MANY_REQUESTS, &[]));
-        assert!(is_retryable(StatusCode::SERVICE_UNAVAILABLE, &[]));
-        assert!(is_retryable(
+        assert!(is_rate_limit(StatusCode::TOO_MANY_REQUESTS, &[]));
+        assert!(is_server_error(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(is_rate_limit(
             StatusCode::FORBIDDEN,
             &["userRateLimitExceeded".into()]
         ));
-        assert!(!is_retryable(
+        assert!(!is_rate_limit(
             StatusCode::FORBIDDEN,
             &["insufficientPermissions".into()]
         ));
-        assert!(!is_retryable(StatusCode::NOT_FOUND, &[]));
+        assert!(!is_rate_limit(StatusCode::NOT_FOUND, &[]));
+        assert!(!is_server_error(StatusCode::NOT_FOUND));
     }
 
     #[test]

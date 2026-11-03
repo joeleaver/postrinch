@@ -30,5 +30,5 @@ secret-service = { version = "5.2", features = ["crypto-rust"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
 wiremock = "0.6"
