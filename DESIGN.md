@@ -7,6 +7,7 @@ Canonical. When a decision changes, change it here and say why in the commit.
 A desktop mail client that is built for an agent first and a person second, without being worse for the person.
 
 - **Many accounts.** Any number of Gmail accounts and any number of IMAP accounts, side by side.
+- **Calendar alongside mail.** Each Google account's calendars, through the Calendar API: see, create and answer events, and act on the invitations that arrive as mail.
 - **One inbox or many.** A combined inbox across accounts, and filtered views that are saved queries ("everything from my bank, any account", "unanswered threads older than a week").
 - **Search that understands.** Exact search (words, phrases, senders, dates) and semantic search ("the email where someone offered to cover my shift") over all mail, on the machine, through [rhypedb](https://github.com/joeleaver/rhypedb).
 - **Agent-first.** Every action the window offers is a command, and every command is an MCP tool. The window is one client of the command layer; an agent is another. Nothing the window can do is out of an agent's reach, and nothing an agent can do skips the person's say on what matters (see **Safety**).
@@ -16,7 +17,8 @@ A desktop mail client that is built for an agent first and a person second, with
 
 - A web or mobile client.
 - A hosted service, sync between machines, or shared mailboxes.
-- Calendar, contacts and tasks, beyond reading what is in a message.
+- Contacts and tasks, beyond reading what is in a message.
+- Calendars other than Google's (CalDAV, iCloud, Exchange).
 - Exchange/EWS. Outlook.com over IMAP with OAuth may come later.
 
 ## Shape
@@ -59,12 +61,18 @@ Planned crates (a Cargo workspace, names provisional):
 - **Gmail signs in with OAuth 2.0**, the installed-app flow: authorization code with PKCE, the system browser, a loopback redirect. Each account added runs the flow once; its refresh token is kept in the OS keychain (`keyring`), keyed by the account's address. `prompt=select_account` when adding, `login_hint` when an account must sign in again. Detail and Google's rules: [docs/research/gmail-auth.md](docs/research/gmail-auth.md).
 - **Every account can need to sign in again** at any time (revoked, password changed, unused for six months, an admin policy). That is a state of the account, shown on it, not an error for the app.
 - **Gmail over the Gmail API, everything else over IMAP/SMTP.** The API gives Gmail's labels and threads as they are, incremental sync from a `historyId`, and Gmail's own search to fall back on. One OAuth scope, `https://mail.google.com/`, also allows IMAP/SMTP, which keeps that route open.
+- **Scopes:** `openid`, `email`, `https://mail.google.com/` (restricted) and `https://www.googleapis.com/auth/calendar` (sensitive), asked for together at sign-in.
+- **The Google Cloud project** is `postrinch` (organization joeleaver.com), with the Gmail and Calendar APIs enabled, an External consent screen and one "Desktop app" OAuth client. The client's JSON is kept outside the repository (`~/.config/postrinch/google-oauth-client.json` while developing); it never goes into git. The consent screen is in Testing until it has a home page, a privacy policy and an authorized domain, so for now only listed test users can sign in and their refresh tokens last 7 days.
 - **App passwords** are a manual fallback for IMAP accounts only, never the main path.
 
 ### Storage and search
 
 - **rhypedb in process** (`rhypedb-engine`), not a server. Messages, threads, people and labels are objects with links between them; bodies are `@fulltext`; each message (or each chunk of a long one) has an embedding from `rhypedb-embed` (fastembed/ONNX, local, computed in the background).
-- **Saved views are queries** in rhypedb's query language, stored as objects, so the window and an agent create and read them the same way.
+- **Saved views are queries** in rhypedb's query language, stored as objects, so the window and an agent create and read them the same way. A view must read `Message` and only filter, match, rank or page it (no traversal, no writes); the store refuses anything else when it is saved. That makes the `Message` type in `crates/postrinch-store/src/schema.rhype` a public contract: changing its fields breaks saved views.
+- **The schema** (`schema.rhype`) has `Account`, `Label`, `Thread`, `Message`, `Person` and `SavedView`. An object a provider names within an account has a unique `key` of the account's address and the provider's id. People are shared across accounts, one per address, so "everything from this person" spans accounts. Deleting an account cascades to its labels, threads and messages.
+- **Writes repeat safely.** rhypedb commits one object at a time, so storing a message is several commits (the message, then its label and people links). Every store write is an upsert that also repairs links, and the sync position is written only after what came before it is stored, so a crash means repeated work, never lost or half-linked mail.
+- **Raw messages are files, not rows**: a content-addressed blob directory beside the database (`blobs/ab/cdef…`, written to a temporary file, synced and renamed), because a message with attachments can be megabytes. Garbage collection removes blobs no message refers to, sparing recent ones a writer may be about to refer to.
+- **Full text** is one `@fulltext(english)` field per message: subject, names and addresses, and body. Whether subject and people need their own weight is for the search step to measure.
 
 ### Rendering
 
@@ -93,10 +101,13 @@ Mail is hostile input, for the renderer and for the agent.
 
 ## First steps
 
-1. **A real-mail corpus.** Export a few hundred `.eml` files from real inboxes (kept out of git: `/corpus/`), write the MIME extraction step, and run them through rinch with #2079/#2080. The spike's 10 fixtures were mostly written for it; this decides whether "open in browser" is a fallback or a crutch.
-2. **Gmail read-only sync into rhypedb**, one account, then many: sign-in, full sync, incremental sync, the schema.
-3. **Search** over that store: full text, then semantic, measured on the corpus.
-4. **The command layer and the MCP server**, read-only commands first.
-5. **The window**: accounts, combined inbox, a thread, search.
-6. **Writing**: drafts, send through the outbox, confirmations.
-7. **IMAP/SMTP.**
+Planning and progress live in Overboard, project "Postrinch". There is no `.eml`/mbox importer: real mail comes in through Gmail sync.
+
+1. **Gmail read-only sync into rhypedb**, one account, then many: the model, the schema, sign-in, full sync, incremental sync.
+2. **Rendering on real mail.** Run the synced mail through the pipeline and rinch with #2079/#2080; this decides whether "open in browser" is a fallback or a crutch.
+3. **Search** over that store: full text, then semantic, measured on a real mailbox.
+4. **Calendar read-only sync** for the same Google accounts.
+5. **The command layer and the MCP server**, read-only commands first.
+6. **The window**: designed first (mockups), then built: accounts, combined inbox, a thread, search, the calendar.
+7. **Writing**: drafts, send through the outbox, confirmations; creating and answering events.
+8. **IMAP/SMTP.**

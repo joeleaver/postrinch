@@ -1,0 +1,20 @@
+[package]
+name = "postrinch-store"
+description = "Postrinch's local store: the rhypedb schema, every read and write of it, and the raw-message blobs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+postrinch-model = { workspace = true }
+rhypedb-engine = { workspace = true }
+rhypedb-query = { workspace = true }
+rhypedb-schema = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

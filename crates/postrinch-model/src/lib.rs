@@ -1,0 +1,21 @@
+//! Postrinch's domain types.
+//!
+//! What an account, a message, a thread, a label and a saved view *are*,
+//! independent of where they are stored (`postrinch-store`) or where they
+//! come from (`postrinch-sync`). Nothing here does I/O.
+
+mod account;
+mod address;
+mod label;
+mod message;
+mod thread;
+mod time;
+mod view;
+
+pub use account::{Account, AccountState, Provider, SignInReason};
+pub use address::{AddressError, EmailAddress, Mailbox};
+pub use label::{Label, LabelKind, SystemLabel};
+pub use message::{AttachmentInfo, Flags, Message, MessageHeaders, ProviderMessageId};
+pub use thread::{ProviderThreadId, ThreadSummary};
+pub use time::Timestamp;
+pub use view::{SavedView, ViewError};

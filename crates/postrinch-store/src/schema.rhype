@@ -1,0 +1,77 @@
+// Postrinch's store schema.
+//
+// `@on_delete` on a relation field says what happens to objects of THIS type
+// when the object they point at is deleted: deleting an Account cascades to
+// its labels, threads and messages; deleting a Label or a Person only drops
+// the links to it.
+//
+// Objects that a provider identifies within an account carry a `key`,
+// "<account address key>\u001f<provider id>", unique across the store.
+
+type Account {
+    // EmailAddress::key(); `address` keeps it as written.
+    key: String @unique
+    address: String
+    display_name: String
+    provider: String
+    state: Json
+    // The provider's sync position (Gmail's historyId), written only after
+    // everything before it has been stored.
+    sync_cursor: String
+    labels: [Label] @inverse(Label.account)
+    threads: [Thread] @inverse(Thread.account)
+}
+
+type Label {
+    key: String @unique
+    account: Account @on_delete(cascade)
+    provider_id: String
+    name: String
+    kind: Json
+    messages: [Message] @inverse(Message.labels)
+}
+
+type Thread {
+    key: String @unique
+    account: Account @on_delete(cascade)
+    provider_id: String
+    messages: [Message] @inverse(Message.thread)
+}
+
+type Person {
+    // EmailAddress::key(): the address, lowercased.
+    address: String @unique
+    name: String
+    sent: [Message] @inverse(Message.from)
+    received: [Message] @inverse(Message.recipients)
+}
+
+type Message {
+    key: String @unique
+    account: Account @on_delete(cascade)
+    thread: Thread @on_delete(cascade)
+    labels: [Label] @on_delete(remove)
+    from: [Person] @on_delete(remove)
+    recipients: [Person] @on_delete(remove)
+    provider_id: String
+    rfc_message_id: String @indexed
+    subject: String
+    // Subject, names and addresses, and body, for full-text search.
+    search_text: String @fulltext(analyzer: "english")
+    snippet: String
+    received: DateTime @indexed
+    unread: Bool @indexed
+    starred: Bool @indexed
+    has_attachments: Bool
+    size: u64
+    headers: Json
+    body_text: String
+    attachments: Json
+    // SHA-256 of the raw message in the blob store, hex; null until fetched.
+    raw_sha256: String
+}
+
+type SavedView {
+    name: String @unique
+    query: String
+}
