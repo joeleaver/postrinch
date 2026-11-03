@@ -11,6 +11,8 @@ pub enum Icon {
     Trash,
     Restore,
     Unread,
+    /// An opened envelope: mark read.
+    Read,
     Label,
     Star,
     Starred,
@@ -33,6 +35,7 @@ pub fn icon(which: Icon) -> NodeHandle {
         ),
         Icon::Restore => two(__scope, "M4 12a8 8 0 1 0 3-6.2", "M4 4v5h5", "none"),
         Icon::Unread => two(__scope, "M3 5h18v14H3z", "M3 7l9 6 9-6", "none"),
+        Icon::Read => two(__scope, "M3 10l9-6 9 6v10H3z", "M3 10l9 6 9-6", "none"),
         Icon::Label => two(
             __scope,
             "M3 12V4h8l10 10-8 8L3 12z",

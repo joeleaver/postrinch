@@ -68,6 +68,16 @@ pub fn trash_or_restore(state: State) -> ThreadAction {
     }
 }
 
+/// Mark read while the conversation has unread mail, else mark unread:
+/// what the envelope button does, as in Gmail.
+pub fn read_or_unread(state: State) -> ThreadAction {
+    if open_summary(state).is_some_and(|s| s.unread_count > 0) {
+        ThreadAction::MarkRead
+    } else {
+        ThreadAction::MarkUnread
+    }
+}
+
 /// Star, or unstar a starred conversation: what `s` and the star do.
 pub fn star_or_unstar(state: State) -> ThreadAction {
     if open_summary(state).is_some_and(|s| s.starred) {
@@ -105,7 +115,7 @@ impl Kind {
         match self {
             Kind::Archive => archive_or_restore(state),
             Kind::Trash => trash_or_restore(state),
-            Kind::Unread => ThreadAction::MarkUnread,
+            Kind::Unread => read_or_unread(state),
             Kind::Star => star_or_unstar(state),
         }
     }
@@ -118,6 +128,7 @@ impl Kind {
             ThreadAction::Trash => "Move to trash (#)",
             ThreadAction::Untrash => "Restore from trash (#)",
             ThreadAction::MarkUnread => "Mark unread (Shift+U)",
+            ThreadAction::MarkRead => "Mark read (Shift+I)",
             ThreadAction::Star => "Star (S)",
             ThreadAction::Unstar => "Unstar (S)",
             _ => "",
@@ -132,6 +143,7 @@ impl Kind {
             ThreadAction::Untrash => Icon::Restore,
             ThreadAction::Unstar => Icon::Starred,
             ThreadAction::Star => Icon::Star,
+            ThreadAction::MarkRead => Icon::Read,
             _ => Icon::Unread,
         }
     }
