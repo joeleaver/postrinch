@@ -133,11 +133,3 @@ fn sync_off() -> Notice {
         trouble: true,
     }
 }
-
-/// The accounts, for Settings.
-pub fn accounts() -> Result<Vec<postrinch_commands::AccountInfo>, String> {
-    match commands() {
-        Some(c) => c.accounts().map_err(|e| e.to_string()),
-        None => Ok(Vec::new()),
-    }
-}

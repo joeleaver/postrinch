@@ -11,7 +11,9 @@ use crate::ui::labels::labels_section;
 #[component]
 pub fn sidebar(state: State) -> NodeHandle {
     rsx! {
-        nav { class: "sidebar",
+        nav {
+            class: "sidebar",
+            style: {move || format!("width: {}px", state.sidebar_width.get())},
             div { class: "folders",
                 // A keyed loop over the Option, not `if let`, so a changed
                 // sidebar is drawn again (rinch#2105).

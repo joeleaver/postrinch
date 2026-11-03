@@ -3,6 +3,7 @@
 mod actions;
 mod appearance;
 mod dates;
+mod loader;
 mod menus;
 mod state;
 mod sync;

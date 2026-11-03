@@ -23,10 +23,15 @@ pub enum Appearance {
 
 /// Postrinch's own settings, the ones that belong to this computer rather
 /// than to an account.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
     pub appearance: Appearance,
+    /// The panes' widths as the person left them, in px.
+    #[serde(default)]
+    pub sidebar_width: Option<f32>,
+    #[serde(default)]
+    pub list_width: Option<f32>,
 }
 
 impl Settings {

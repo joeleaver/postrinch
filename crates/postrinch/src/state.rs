@@ -1,7 +1,6 @@
 //! What the window shows, as signals, and loading it through the commands.
 
 use std::collections::HashSet;
-use std::rc::Rc;
 
 use postrinch_commands::{
     AccountInfo, Commands, Folder, SearchResults, Sidebar, Thread, ThreadPage,
@@ -12,11 +11,13 @@ use rinch::{Effect, batch};
 
 use crate::actions::Notice;
 use crate::appearance::{Appearance, Settings, is_dark, system_prefers_dark};
+use crate::loader::{self, Request};
 use crate::sync::AccountSync;
 use crate::ui::LabelEdit;
 
-/// How many threads a search shows.
-const SEARCH_LIMIT: usize = 100;
+/// The panes' widths until the person drags them.
+pub const SIDEBAR_WIDTH: f32 = 240.0;
+pub const LIST_WIDTH: f32 = 420.0;
 
 /// How many more threads "Show more" loads.
 pub const PAGE: usize = 100;
@@ -65,6 +66,9 @@ pub struct State {
     pub appearance: Signal<Appearance>,
     /// Whether the system prefers dark (dark when it does not say).
     pub system_dark: Signal<bool>,
+    /// The sidebar's and the thread list's widths, in px.
+    pub sidebar_width: Signal<f32>,
+    pub list_width: Signal<f32>,
     /// Which part of Settings is open.
     pub settings_section: Signal<SettingsSection>,
     /// Which page the window shows.
@@ -85,6 +89,7 @@ pub struct State {
 
 impl State {
     pub fn new() -> Self {
+        let settings = Settings::load();
         Self {
             sidebar: Signal::new(None),
             folder: Signal::new(Folder::Everywhere(SystemLabel::Inbox)),
@@ -101,7 +106,9 @@ impl State {
             sync: Signal::new(Vec::new()),
             revision: Signal::new(0),
             editing: Signal::new(None),
-            appearance: Signal::new(Settings::load().appearance),
+            appearance: Signal::new(settings.appearance),
+            sidebar_width: Signal::new(settings.sidebar_width.unwrap_or(SIDEBAR_WIDTH)),
+            list_width: Signal::new(settings.list_width.unwrap_or(LIST_WIDTH)),
             system_dark: Signal::new(system_prefers_dark()),
             settings_section: Signal::new(SettingsSection::Accounts),
             view: Signal::new(View::Mail),
@@ -117,61 +124,47 @@ impl State {
     /// Keep what is shown loaded: the sidebar and the folder's threads
     /// whenever sync changes the store or another folder is chosen, and
     /// the open thread whenever it changes or sync does.
-    pub fn load(self, commands: Rc<Commands>) {
-        let lists = commands.clone();
+    /// Keep what is shown loaded, through the loader: the sidebar and the
+    /// folder's threads whenever sync changes the store or another folder
+    /// is chosen, the open thread and the search likewise, and Settings'
+    /// accounts while Settings is open.
+    pub fn load(self, commands: &Commands) {
+        let loader = match loader::start(commands.clone(), self) {
+            Ok(loader) => loader,
+            Err(e) => {
+                self.error.set(Some(e));
+                return;
+            }
+        };
+        let ask = move |request: Request| {
+            if loader.send(request).is_err() {
+                tracing::error!("the loader has stopped");
+            }
+        };
+        let lists = ask.clone();
         Effect::new(move || {
             self.revision.get();
-            let folder = self.folder.get();
-            let category = self.category.get();
-            let shown = self.shown.get();
-            let loaded = lists.sidebar().and_then(|sidebar| {
-                Ok((sidebar, lists.list_threads(&folder, category, 0, shown)?))
+            lists(Request::Lists {
+                folder: self.folder.get(),
+                category: self.category.get(),
+                shown: self.shown.get(),
             });
-            match loaded {
-                Ok((sidebar, page)) => {
-                    self.sidebar.set(Some(sidebar));
-                    self.page.set(Some(page));
-                }
-                Err(e) => self.error.set(Some(e.to_string())),
-            }
         });
+        let accounts = ask.clone();
         Effect::new(move || {
             self.revision.get();
             if self.view.get() == View::Settings {
-                match crate::actions::accounts() {
-                    Ok(accounts) => self.accounts.set(accounts),
-                    Err(e) => self.error.set(Some(e)),
-                }
+                accounts(Request::Accounts);
             }
         });
-        let searching = commands.clone();
+        let search = ask.clone();
         Effect::new(move || {
             self.revision.get();
-            let results = match self.search.get() {
-                Some(query) => match searching.search(&query, SEARCH_LIMIT) {
-                    Ok(results) => Some(results),
-                    Err(e) => {
-                        self.error.set(Some(e.to_string()));
-                        None
-                    }
-                },
-                None => None,
-            };
-            self.results.set(results);
+            search(Request::Search(self.search.get()));
         });
         Effect::new(move || {
             self.revision.get();
-            let thread = match self.selected.get() {
-                Some((account, thread)) => match commands.read_thread(&account, &thread) {
-                    Ok(thread) => thread,
-                    Err(e) => {
-                        self.error.set(Some(e.to_string()));
-                        None
-                    }
-                },
-                None => None,
-            };
-            self.thread.set(thread);
+            ask(Request::Thread(self.selected.get()));
         });
     }
 
@@ -206,6 +199,16 @@ impl State {
         if let Err(e) = settings.save() {
             self.error
                 .set(Some(format!("The appearance was not saved: {e}")));
+        }
+    }
+
+    /// Keep the panes' widths for next time.
+    pub fn save_pane_widths(self) {
+        let mut settings = Settings::load();
+        settings.sidebar_width = Some(self.sidebar_width.get());
+        settings.list_width = Some(self.list_width.get());
+        if let Err(e) = settings.save() {
+            tracing::warn!("the pane widths were not saved: {e}");
         }
     }
 

@@ -13,7 +13,9 @@ use crate::ui::account_color;
 pub fn thread_list(state: State) -> NodeHandle {
     let searching = move || state.search.get().is_some();
     rsx! {
-        section { class: "list",
+        section {
+            class: "list",
+            style: {move || format!("width: {}px", state.list_width.get())},
             if searching() {
                 div { class: "list-head",
                     button {

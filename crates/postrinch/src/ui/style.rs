@@ -34,12 +34,21 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .header-error { color: var(--danger); font-size: 13px; }
 
 .panes { flex: 1; display: flex; min-height: 0; }
+/* A wide grip over the panes' 1px border, without taking room. */
+.splitter {
+    width: 7px;
+    margin: 0 -3px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 5;
+    cursor: col-resize;
+}
+.splitter:hover { background: var(--accent); opacity: 0.35; }
 
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
 
 /* Sidebar */
 .sidebar {
-    width: 240px;
     flex-shrink: 0;
     box-sizing: border-box;
     padding: 12px 8px;
@@ -136,7 +145,6 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 
 /* Thread list */
 .list {
-    width: 420px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;

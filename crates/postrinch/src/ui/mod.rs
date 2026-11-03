@@ -9,6 +9,7 @@ mod palette;
 mod reader;
 mod settings;
 mod sidebar;
+mod splitter;
 mod style;
 
 use std::rc::Rc;
@@ -44,7 +45,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     };
     actions::init(commands.clone(), sync);
     appearance::watch_system(state.system_dark);
-    state.load(commands);
+    state.load(&commands);
     let brand: SectionRenderer = Rc::new(|__scope| {
         rsx! {
             div { class: "brand",
@@ -75,7 +76,9 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 if state.view.get() == View::Mail {
                     div { class: "panes",
                         {sidebar::sidebar(__scope, state)}
+                        {splitter::splitter(__scope, state, splitter::Pane::Sidebar)}
                         {list::thread_list(__scope, state)}
+                        {splitter::splitter(__scope, state, splitter::Pane::List)}
                         {reader::reader(__scope, state)}
                     }
                 } else {

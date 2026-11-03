@@ -1,7 +1,8 @@
 //! Running sync in the background and reporting it to the window.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use postrinch_model::EmailAddress;
 use postrinch_store::Store;
@@ -80,8 +81,11 @@ fn report(event: SyncEvent, status: Signal<Vec<AccountSync>>, revision: Signal<u
             false,
         ),
         SyncEvent::Progress { account, progress } => {
+            // Mail arriving shows as it arrives, not when the pass ends,
+            // which for a new account's first sync is hours away.
+            let changed = adds_mail(progress) && refresh_due();
             let (line, progress) = describe(progress);
-            (account, line, progress, false, false)
+            (account, line, progress, false, changed)
         }
         SyncEvent::Synced { account, .. } => {
             (account, "New mail up to date".to_owned(), None, false, true)
@@ -118,6 +122,32 @@ fn report(event: SyncEvent, status: Signal<Vec<AccountSync>>, revision: Signal<u
     if changed {
         revision.update_send(|n| *n += 1);
     }
+}
+
+/// Whether sync is storing mail the lists should show.
+fn adds_mail(progress: Progress) -> bool {
+    matches!(
+        progress,
+        Progress::Working {
+            phase: Phase::Headers | Phase::Changes,
+            ..
+        }
+    )
+}
+
+/// How often the window reloads while sync adds mail.
+const REFRESH_EVERY: Duration = Duration::from_secs(5);
+
+/// Whether it has been [`REFRESH_EVERY`] since the last reload this asked
+/// for; if so, it counts as asked for now.
+fn refresh_due() -> bool {
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let due = last.is_none_or(|t| t.elapsed() >= REFRESH_EVERY);
+    if due {
+        *last = Some(Instant::now());
+    }
+    due
 }
 
 fn describe(progress: Progress) -> (String, Option<(usize, usize)>) {
