@@ -86,6 +86,55 @@ impl LabelTree {
     }
 }
 
+/// A label as a thread row shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Chip {
+    pub label: String,
+    pub name: String,
+    pub color: Option<String>,
+}
+
+/// The chips an account's labels show as on thread rows, by provider id:
+/// labels that work as tags and show in the sidebar. A folder-like label
+/// is where the mail lives, which the folder list already says.
+pub(crate) fn chips(
+    labels: &[Label],
+    prefs: &HashMap<String, LabelPrefs>,
+    stats: &HashMap<String, LabelStats>,
+) -> HashMap<String, Chip> {
+    let mut chips = HashMap::new();
+    for label in labels.iter().filter(|l| l.kind == LabelKind::User) {
+        let prefs = prefs.get(&label.provider_id).cloned().unwrap_or_default();
+        let stats = stats.get(&label.provider_id).copied().unwrap_or_default();
+        let shown = prefs
+            .shown
+            .unwrap_or_else(|| shown_by_default(label, &stats));
+        if !shown || role(&stats) == LabelRole::Folder {
+            continue;
+        }
+        let name = prefs
+            .name
+            .clone()
+            .unwrap_or_else(|| match app_of(&label.name) {
+                Some((_, rest)) if !rest.is_empty() => rest,
+                _ => label.name.clone(),
+            });
+        let color = prefs
+            .color
+            .clone()
+            .or_else(|| label.color.as_ref().map(|c| c.background.clone()));
+        chips.insert(
+            label.provider_id.clone(),
+            Chip {
+                label: label.provider_id.clone(),
+                name,
+                color,
+            },
+        );
+    }
+    chips
+}
+
 /// Names that IMAP mail apps (Outlook, Apple Mail, Thunderbird) create for
 /// their own folders, when a Gmail account is added to them over IMAP.
 const IMAP_CLIENT_FOLDERS: [&str; 11] = [

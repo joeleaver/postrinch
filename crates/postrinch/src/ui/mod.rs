@@ -36,8 +36,8 @@ pub fn app(__scope: &mut RenderScope, store: Store) -> NodeHandle {
             style { {style::CSS} }
             header { class: "header",
                 div { class: "brand", "postrinch" }
-                if let Some(error) = state.error.get() {
-                    div { class: "header-error", {error.clone()} }
+                for error in state.error.get() {
+                    div { key: error.clone(), class: "header-error", {error.clone()} }
                 }
             }
             div { class: "panes",

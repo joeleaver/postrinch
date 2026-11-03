@@ -1,6 +1,6 @@
 //! The thread list: one row per thread in the chosen folder.
 
-use postrinch_commands::{Folder, Sidebar, ThreadPage};
+use postrinch_commands::{CATEGORIES, Folder, Sidebar, ThreadPage, ThreadRow};
 use postrinch_model::{SystemLabel, ThreadSummary};
 use rinch::prelude::*;
 
@@ -17,49 +17,98 @@ pub fn thread_list(state: State) -> NodeHandle {
                 h1 { {move || title(&state.folder.get(), state.sidebar.get().as_ref())} }
                 span { class: "list-count", {move || unread_line(&state.folder.get(), state.sidebar.get().as_ref())} }
             }
+            if is_inbox(&state.folder.get(), state.sidebar.get().as_ref()) {
+                {tabs(__scope, state)}
+            }
             div { class: "rows",
-                if let Some(page) = state.page.get() {
-                    {rows(__scope, state, page.clone())}
+                for thread in state.page.get().map(|p| p.threads).unwrap_or_default() {
+                    div { key: row_key(&thread),
+                        {row(__scope, state, thread.clone())}
+                    }
+                }
+                if state.page.get().is_some_and(|p| p.threads.is_empty()) {
+                    div { class: "empty", "Nothing here." }
+                }
+                if state.page.get().is_some_and(|p| p.total > p.threads.len()) {
+                    button {
+                        class: "more",
+                        onclick: move || state.shown.update(|n| *n += PAGE),
+                        {move || more_label(state.page.get().as_ref())}
+                    }
                 }
             }
         }
     }
 }
 
-/// A page of rows, and "Show more" when the folder has more.
-#[component]
-fn rows(state: State, page: ThreadPage) -> NodeHandle {
-    if page.threads.is_empty() {
-        return rsx! { div { class: "empty", "Nothing here." } };
-    }
-    let more = (page.total > page.threads.len()).then(|| {
-        let label = format!(
+/// "Show more (100 of 1,799)".
+fn more_label(page: Option<&ThreadPage>) -> String {
+    page.map(|p| {
+        format!(
             "Show more ({} of {})",
-            thousands(page.threads.len()),
-            thousands(page.total)
-        );
-        rsx! {
-            button {
-                class: "more",
-                onclick: move || state.shown.update(|n| *n += PAGE),
-                {label}
-            }
-        }
-    });
-    rsx! {
-        div {
-            for summary in page.threads.clone() {
-                div { key: format!("{}\u{1f}{}", summary.account.key(), summary.id.0),
-                    {row(__scope, state, summary.clone())}
+            thousands(p.threads.len()),
+            thousands(p.total)
+        )
+    })
+    .unwrap_or_default()
+}
+
+/// Gmail's inbox tabs: everything, or one category.
+#[component]
+fn tabs(state: State) -> NodeHandle {
+    let all = std::iter::once(None).chain(CATEGORIES.into_iter().map(Some));
+    let buttons: Vec<NodeHandle> = all
+        .map(|category| {
+            let name = match category {
+                None => "All",
+                Some(SystemLabel::CategoryPersonal) => "Primary",
+                Some(SystemLabel::CategoryUpdates) => "Updates",
+                Some(SystemLabel::CategoryPromotions) => "Promotions",
+                Some(SystemLabel::CategorySocial) => "Social",
+                Some(_) => "Forums",
+            };
+            rsx! {
+                button {
+                    class: {move || if state.category.get() == category { "tab chosen" } else { "tab" }},
+                    onclick: move || state.open_category(category),
+                    {name}
                 }
             }
-            {more}
-        }
-    }
+        })
+        .collect();
+    rsx! { div { class: "tabs", role: "tablist", {buttons} } }
+}
+
+/// Changes whenever anything the row shows changes, so the row is drawn
+/// again.
+fn row_key(thread: &ThreadRow) -> String {
+    let s = &thread.summary;
+    format!(
+        "{}|{}|{}|{}|{}|{:?}",
+        s.account.key(),
+        s.id.0,
+        s.latest.as_millis(),
+        s.unread_count,
+        s.message_count,
+        thread.chips
+    )
 }
 
 #[component]
-fn row(state: State, summary: ThreadSummary) -> NodeHandle {
+fn row(state: State, thread: ThreadRow) -> NodeHandle {
+    let summary = thread.summary;
+    let chips: Vec<NodeHandle> = thread
+        .chips
+        .iter()
+        .map(|chip| {
+            let style = match &chip.color {
+                Some(c) => format!("border-color: {c}; color: {c}"),
+                None => String::new(),
+            };
+            let name = chip.name.clone();
+            rsx! { span { class: "label-chip", style: {style.clone()}, {name} } }
+        })
+        .collect();
     let key = (summary.account.clone(), summary.id.clone());
     let chosen = key.clone();
     let now = dates::now();
@@ -90,7 +139,10 @@ fn row(state: State, summary: ThreadSummary) -> NodeHandle {
                 span { class: "when", {dates::short(summary.latest, &now)} }
             }
             div { class: "subject", {or_none(&summary.subject, "(no subject)")} }
-            div { class: "snippet", {summary.snippet.clone()} }
+            div { class: "row-bottom",
+                {chips}
+                span { class: "snippet", {summary.snippet.clone()} }
+            }
         }
     }
 }
@@ -128,6 +180,16 @@ fn account_index(sidebar: Option<&Sidebar>, summary: &ThreadSummary) -> Option<u
     accounts
         .iter()
         .position(|a| a.account.address == summary.account)
+}
+
+/// Whether a folder is an inbox, which gets Gmail's category tabs.
+fn is_inbox(folder: &Folder, sidebar: Option<&Sidebar>) -> bool {
+    match folder {
+        Folder::Everywhere(system) => *system == SystemLabel::Inbox,
+        Folder::Label { .. } => {
+            sidebar.is_some_and(|s| s.accounts.iter().any(|a| &a.inbox.folder == folder))
+        }
+    }
 }
 
 fn title(folder: &Folder, sidebar: Option<&Sidebar>) -> String {

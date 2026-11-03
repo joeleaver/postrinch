@@ -12,13 +12,31 @@ use crate::state::State;
 pub fn reader(state: State) -> NodeHandle {
     rsx! {
         article { class: "reader",
-            if let Some(thread) = state.thread.get() {
-                {open_thread(__scope, thread.clone())}
-            } else {
+            // A keyed loop over the Option, not `if let`, so another thread
+            // (or this one, changed) is drawn again (rinch#2105).
+            for thread in state.thread.get() {
+                div { key: thread_key(&thread),
+                    {open_thread(__scope, thread.clone())}
+                }
+            }
+            if state.thread.get().is_none() {
                 div { class: "reader-empty", "Choose a conversation to read it." }
             }
         }
     }
+}
+
+/// Changes whenever the thread, or anything shown of it, does.
+fn thread_key(thread: &Thread) -> String {
+    let s = &thread.summary;
+    let downloaded = thread.messages.iter().filter(|m| m.downloaded).count();
+    format!(
+        "{}|{}|{}|{}|{downloaded}",
+        s.account.key(),
+        s.id.0,
+        s.message_count,
+        s.unread_count
+    )
 }
 
 #[component]

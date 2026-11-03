@@ -13,8 +13,12 @@ pub fn sidebar(state: State) -> NodeHandle {
     rsx! {
         nav { class: "sidebar",
             div { class: "folders",
-                if let Some(sidebar) = state.sidebar.get() {
-                    {unified(__scope, state, sidebar.clone())}
+                // A keyed loop over the Option, not `if let`, so a changed
+                // sidebar is drawn again (rinch#2105).
+                for sidebar in state.sidebar.get() {
+                    div { key: format!("{sidebar:?}"),
+                        {unified(__scope, state, sidebar.clone())}
+                    }
                 }
             }
             div { class: "labels",
@@ -22,8 +26,8 @@ pub fn sidebar(state: State) -> NodeHandle {
             }
             div { class: "sync",
                 div { class: "section-title", "Sync" }
-                if let Some(why) = state.sync_off.get() {
-                    div { class: "sync-line trouble", {why.clone()} }
+                for why in state.sync_off.get() {
+                    div { key: why.clone(), class: "sync-line trouble", {why.clone()} }
                 }
                 for account in state.sync.get() {
                     div { key: account.account.key(),

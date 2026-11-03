@@ -176,7 +176,38 @@ html, body { margin: 0; height: 100%; }
 .attachment { font-size: 12px; }
 .when { flex-shrink: 0; font-size: 12px; color: var(--muted); }
 .subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-bottom { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.label-chip {
+    flex-shrink: 0;
+    padding: 0 6px;
+    border: 1px solid var(--field);
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 16px;
+    color: var(--ink-2);
+}
+.tabs {
+    flex-shrink: 0;
+    display: flex;
+    gap: 2px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line-soft);
+}
+.tab {
+    height: 34px;
+    padding: 0 10px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+.tab.chosen { color: var(--accent-ink); border-bottom-color: var(--accent); font-weight: 600; }
 .snippet {
+    flex: 1;
+    min-width: 0;
     color: var(--muted);
     font-size: 13px;
     overflow: hidden;

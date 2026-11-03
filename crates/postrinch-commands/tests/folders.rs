@@ -16,6 +16,11 @@ fn account(store: &Store, me: &EmailAddress) {
     for (id, name, kind) in [
         ("INBOX", "Inbox", LabelKind::System(SystemLabel::Inbox)),
         ("SENT", "Sent", LabelKind::System(SystemLabel::Sent)),
+        (
+            "CATEGORY_UPDATES",
+            "CATEGORY_UPDATES",
+            LabelKind::System(SystemLabel::CategoryUpdates),
+        ),
         ("Label_1", "Receipts", LabelKind::User),
     ] {
         let label = Label::new(id, name, kind);
@@ -65,7 +70,7 @@ fn setup() -> (tempfile::TempDir, Commands, EmailAddress, EmailAddress) {
         message(&a, "a1", "ta1", 100, &["INBOX"], true),
         message(&a, "a2", "ta2", 300, &["INBOX", "Label_1"], false),
         message(&a, "a3", "ta2", 350, &["SENT"], false),
-        message(&b, "b1", "tb1", 200, &["INBOX"], true),
+        message(&b, "b1", "tb1", 200, &["INBOX", "CATEGORY_UPDATES"], true),
     ] {
         store.put_message(&m, None).unwrap();
     }
@@ -94,15 +99,19 @@ fn sidebar_unifies_inboxes_and_lists_each_accounts_labels() {
 fn all_inboxes_merge_accounts_by_latest_activity_and_page() {
     let (_dir, commands, _a, _b) = setup();
     let folder = Folder::Everywhere(SystemLabel::Inbox);
-    let page = commands.list_threads(&folder, 0, 10).unwrap();
-    let ids: Vec<_> = page.threads.iter().map(|t| t.id.0.as_str()).collect();
+    let page = commands.list_threads(&folder, None, 0, 10).unwrap();
+    let ids: Vec<_> = page
+        .threads
+        .iter()
+        .map(|t| t.summary.id.0.as_str())
+        .collect();
     // ta2's latest message is the reply in Sent, at 350.
     assert_eq!(ids, ["ta2", "tb1", "ta1"]);
     assert_eq!(page.total, 3);
-    assert_eq!(page.threads[0].message_count, 2);
+    assert_eq!(page.threads[0].summary.message_count, 2);
 
-    let second = commands.list_threads(&folder, 1, 1).unwrap();
-    assert_eq!(second.threads[0].id.0, "tb1");
+    let second = commands.list_threads(&folder, None, 1, 1).unwrap();
+    assert_eq!(second.threads[0].summary.id.0, "tb1");
     assert_eq!(second.total, 3);
 }
 
@@ -125,5 +134,43 @@ fn reads_a_thread_and_refuses_unknown_accounts() {
         account: address("c@example.org"),
         label: "INBOX".into(),
     };
-    assert!(commands.list_threads(&stranger, 0, 10).is_err());
+    assert!(commands.list_threads(&stranger, None, 0, 10).is_err());
+}
+
+#[test]
+fn a_category_narrows_the_inbox_like_gmails_tabs() {
+    let (_dir, commands, _a, _b) = setup();
+    let inbox = Folder::Everywhere(SystemLabel::Inbox);
+    let updates = commands
+        .list_threads(&inbox, Some(SystemLabel::CategoryUpdates), 0, 10)
+        .unwrap();
+    let ids: Vec<_> = updates
+        .threads
+        .iter()
+        .map(|t| t.summary.id.0.as_str())
+        .collect();
+    assert_eq!(ids, ["tb1"]);
+    assert_eq!(updates.total, 1);
+}
+
+#[test]
+fn rows_carry_tag_like_labels_but_not_the_one_listed() {
+    let (_dir, commands, a, _b) = setup();
+    let inbox = Folder::Everywhere(SystemLabel::Inbox);
+    let page = commands.list_threads(&inbox, None, 0, 10).unwrap();
+    let ta2 = page
+        .threads
+        .iter()
+        .find(|t| t.summary.id.0 == "ta2")
+        .unwrap();
+    // Receipts' only message is in the inbox: a tag, so a chip.
+    let chips: Vec<_> = ta2.chips.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(chips, ["Receipts"]);
+
+    let receipts = Folder::Label {
+        account: a,
+        label: "Label_1".into(),
+    };
+    let page = commands.list_threads(&receipts, None, 0, 10).unwrap();
+    assert!(page.threads[0].chips.is_empty());
 }

@@ -260,7 +260,7 @@ fn label_line(state: State, line: LabelRow) -> NodeHandle {
         Some(open) => {
             let toggle = toggle.clone();
             let glyph = if open { "▾" } else { "▸" };
-            rsx! { span { class: "chevron", onclick: move || toggle(), {glyph} } }
+            rsx! { span { class: "chevron", onclick: toggle, {glyph} } }
         }
         None => rsx! { span { class: "chevron" } },
     };

@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use postrinch_commands::{Commands, Folder, Sidebar, Thread, ThreadPage};
 use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
-use rinch::Effect;
 use rinch::prelude::*;
+use rinch::{Effect, batch};
 
 use crate::sync::AccountSync;
 
@@ -18,6 +18,8 @@ pub const PAGE: usize = 100;
 pub struct State {
     pub sidebar: Signal<Option<Sidebar>>,
     pub folder: Signal<Folder>,
+    /// Within an inbox, one of Gmail's categories, as its tabs show them.
+    pub category: Signal<Option<SystemLabel>>,
     /// How many of the folder's threads to show.
     pub shown: Signal<usize>,
     pub page: Signal<Option<ThreadPage>>,
@@ -41,6 +43,7 @@ impl State {
         Self {
             sidebar: Signal::new(None),
             folder: Signal::new(Folder::Everywhere(SystemLabel::Inbox)),
+            category: Signal::new(None),
             shown: Signal::new(PAGE),
             page: Signal::new(None),
             show_all: Signal::new(false),
@@ -62,10 +65,11 @@ impl State {
         Effect::new(move || {
             self.revision.get();
             let folder = self.folder.get();
+            let category = self.category.get();
             let shown = self.shown.get();
-            let loaded = lists
-                .sidebar()
-                .and_then(|sidebar| Ok((sidebar, lists.list_threads(&folder, 0, shown)?)));
+            let loaded = lists.sidebar().and_then(|sidebar| {
+                Ok((sidebar, lists.list_threads(&folder, category, 0, shown)?))
+            });
             match loaded {
                 Ok((sidebar, page)) => {
                     self.sidebar.set(Some(sidebar));
@@ -91,8 +95,18 @@ impl State {
     }
 
     pub fn open_folder(self, folder: Folder) {
-        self.shown.set(PAGE);
-        self.selected.set(None);
-        self.folder.set(folder);
+        batch(|| {
+            self.shown.set(PAGE);
+            self.selected.set(None);
+            self.category.set(None);
+            self.folder.set(folder);
+        });
+    }
+
+    pub fn open_category(self, category: Option<SystemLabel>) {
+        batch(|| {
+            self.shown.set(PAGE);
+            self.category.set(category);
+        });
     }
 }
