@@ -52,7 +52,8 @@ Planned crates (a Cargo workspace, names provisional):
 | `postrinch-cli` | `postrinch-cli`: add accounts, sync, search, show a message. For development and scripts. |
 | `postrinch-render` | MIME to displayable parts; HTML parse and sanitize; remote content policy; handing a document to rinch. |
 | `postrinch-commands` | The command layer: every action, its arguments, its result, and whether it needs the person's confirmation. |
-| `postrinch-mcp` | The MCP server, generated from the command layer. |
+| `postrinch-agents` | Agents: the agents file (keys and reach), the wire format between the bridge and the app, the app's listener, the bridge's client, and what each call answers. |
+| `postrinch-mcp` | The MCP server agents launch over stdio (rmcp); each tool is one call to the running app. |
 | `postrinch` | The rinch app: the window over the command layer, with sync running in the background (`GmailSync::keep_in_sync`). Its `debug` feature turns on rinch's debug server for tools; it is never on in a build for use, because it shows the window, mail included, to any local process. |
 
 ## Decisions so far
@@ -84,6 +85,13 @@ Planned crates (a Cargo workspace, names provisional):
 - **Sending** (`GmailSync::keep_sending`) runs beside sync, so a first sync of hours never holds a change back, and is woken when a change is made. Oldest first: the trash through `messages.trash`/`untrash`, the rest through `messages.batchModify`. A change Gmail refuses for good (400, 404) is dropped and its messages read again; any other failure keeps it, and the ones after it wait behind it, so Gmail gets them in the order they were made. Entries survive restarts and going offline.
 - **None of these asks for confirmation**: each can be undone and stays in the account. Deleting for good, sending and anything that leaves the account will (see **Safety**).
 - **In the window**, an action shows at once: it is kept as pending and applied over the rows and the reader until a list loaded after it arrives. Settings › Reading says when an opened conversation is marked read (on open, the default; after 3 seconds; or only when asked) and what opens after the open one is archived or trashed (the next, the default; or nothing).
+
+### Agents
+
+- **An agent is an app the person let in**, with a name, a key and the accounts it sees (every account, those added later included, or a list). The agents file (`<config>/postrinch/agents.json`, on this computer only, owner-only) keeps each key's SHA-256; the key itself (`postrinch_agent_<id>_<secret>`) is shown once. Until Settings › Agents exists, `postrinch-cli agent add/list/remove` makes them and prints the entry to give the app.
+- **The app answers; the bridge only carries.** `postrinch-mcp` holds no mail and opens no store: the store takes one opener, and the window is it. It sends each tool call over loopback (`127.0.0.1:7465`, or `POSTRINCH_APP_ADDR`) as one JSON line, after a hello carrying the key from `POSTRINCH_AGENT_KEY`. The app checks the key, reads the agents file again on every call (so removing or narrowing an agent applies to an open connection), and runs the call through the command layer limited to the agent's accounts (`Commands::limited_to`, which never widens). To an agent, the other accounts do not exist. With the app closed, every tool says so in a sentence; starting the app for an agent is for later.
+- **Tools:** `list_accounts`, `list_folders`, `list_threads`, `read_thread`, `search`, `list_labels` and `change_threads` (read, star, archive, trash, labels, each undone by its opposite). A change an agent makes shows in the window at once and wakes sync's sender, as the window's own do.
+- **Mail's words are kept apart.** Whatever a sender wrote (subjects, names, addresses, snippets, bodies, attachment names) is under an `untrusted` key in every result, and the server's instructions say to read it as data. Text hidden by rendering is not flagged yet: that waits for the renderer (see **Safety**).
 
 ### Storage and search
 
@@ -140,7 +148,7 @@ Status as of 2026-11-03 (evening):
 2. **Rendering on real mail.** Not started: the reader shows `body_text`. Waiting partly on rinch's email-rendering work.
 3. **Search**: full text done (`Commands::search`, title-bar search with marked excerpts). Semantic search and the filter popover are not.
 4. **Calendar read-only sync.** Not started.
-5. **The command layer and the MCP server.** Read commands done (`postrinch-commands`: sidebar, listings, threads, search, accounts, label prefs), and changing mail (`act`, `label_choices`). The MCP server and bridge are not started.
+5. **The command layer and the MCP server.** Read commands done (`postrinch-commands`: sidebar, listings, threads, search, accounts, label prefs), and changing mail (`act`, `label_choices`). The MCP server, bridge and agents are built (see **Agents**), set up from `postrinch-cli` for now. Next: Settings › Agents, with one-click setup for Claude Desktop, Claude Code, Cursor and Codex.
 6. ~~**The window**~~ Built: borderless, menus, sidebar with the label tree, inbox tabs, list, reader, search, Settings (Accounts, Appearance), light and dark, resizable panes, keyboard moves. Loads run on a loader thread, never the UI thread. Calendar views wait for step 4.
 7. **Changing mail, then writing.** Changing mail done: read, star, archive, trash and labels from the reader and Gmail's keys, applied at once and sent through the outbox; mark read on open. Checked live against Gmail on 2026-11-03: each change reached Gmail within seconds and was not undone by the syncs after it. Next: drafts and sending through the same outbox, with confirmations.
 8. **IMAP/SMTP.**
