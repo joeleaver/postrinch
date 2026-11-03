@@ -37,6 +37,9 @@ pub use mailboxes::{LabelStats, ThreadEntry};
 pub use outbox::OutboxEntry;
 pub use search::SearchHit;
 
+/// Label stats by account key, each with the write count it was read at.
+type KeptStats = HashMap<String, (u64, HashMap<String, LabelStats>)>;
+
 const SCHEMA: &str = include_str!("schema.rhype");
 
 /// The store: one rhypedb database and one blob directory under a root.
@@ -58,7 +61,7 @@ pub struct Store {
     writes: Arc<AtomicU64>,
     /// Each account's label stats, with [`Store::writes`] as it was when
     /// they were read: good until the next write.
-    stats: Arc<Mutex<HashMap<String, (u64, HashMap<String, LabelStats>)>>>,
+    stats: Arc<Mutex<KeptStats>>,
 }
 
 impl Store {
