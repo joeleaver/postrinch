@@ -99,7 +99,11 @@ fn label_stats_follow_every_write() {
         .put_message(&message(&me, "m1", "t1", 100, "Rota", "a"), None)
         .unwrap();
     assert_eq!(store.label_stats(&me).unwrap()["INBOX"].unread, 1);
-    assert_eq!(store.label_stats(&me).unwrap()["INBOX"].unread, 1, "asked again");
+    assert_eq!(
+        store.label_stats(&me).unwrap()["INBOX"].unread,
+        1,
+        "asked again"
+    );
     store
         .change_messages(
             &me,

@@ -46,6 +46,23 @@ impl SyncHandle {
     }
 }
 
+/// Why sync is not running: a sentence for the sidebar, and the detail
+/// for the log.
+#[derive(Debug)]
+pub struct SyncOff {
+    pub said: &'static str,
+    pub detail: String,
+}
+
+impl SyncOff {
+    fn new(said: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            said,
+            detail: detail.into(),
+        }
+    }
+}
+
 /// Start keeping every account in sync, and sending the changes made here,
 /// on a thread of its own. `status` follows what each account's sync is
 /// doing; `revision` is bumped when the store changed. Fails, saying why,
@@ -54,17 +71,32 @@ pub fn start(
     store: Store,
     status: Signal<Vec<AccountSync>>,
     revision: Signal<u64>,
-) -> Result<SyncHandle, String> {
-    let path = ClientConfig::default_path()
-        .ok_or_else(|| "this system has no configuration directory".to_owned())?;
-    let config = ClientConfig::load(&path)
-        .map_err(|e| format!("the Google OAuth client ({}): {e}", path.display()))?;
+) -> Result<SyncHandle, SyncOff> {
+    let Some(path) = ClientConfig::default_path() else {
+        return Err(SyncOff::new(
+            "Sync is off: this computer has no settings folder.",
+            "no configuration directory",
+        ));
+    };
+    let config = ClientConfig::load(&path).map_err(|e| {
+        let said = if path.exists() {
+            "Sync is off: the Google sign-in settings could not be read."
+        } else {
+            "Sync is off: Google sign-in is not set up on this computer."
+        };
+        SyncOff::new(said, format!("{}: {e}", path.display()))
+    })?;
     let auth = Arc::new(GoogleAuth::new(config, Arc::new(Keychain)));
     let sync = GmailSync::new(Arc::new(GmailApi::new(auth.clone())), store.clone());
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| format!("cannot start its runtime: {e}"))?;
+        .map_err(|e| {
+            SyncOff::new(
+                "Sync is off: it could not start.",
+                format!("its runtime: {e}"),
+            )
+        })?;
     let events = Arc::new(move |event: SyncEvent| report(event, status, revision));
     let (wake, send) = (Arc::new(Notify::new()), Arc::new(Notify::new()));
     let handle = SyncHandle {
@@ -86,7 +118,12 @@ pub fn start(
                 )
             })
         })
-        .map_err(|e| format!("cannot start its thread: {e}"))?;
+        .map_err(|e| {
+            SyncOff::new(
+                "Sync is off: it could not start.",
+                format!("its thread: {e}"),
+            )
+        })?;
     Ok(handle)
 }
 

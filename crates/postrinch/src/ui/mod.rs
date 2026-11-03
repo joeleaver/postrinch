@@ -40,9 +40,9 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     let commands = Rc::new(Commands::new(store.clone()));
     let sync = match sync::start(store, state.sync, state.revision) {
         Ok(handle) => Some(handle),
-        Err(why) => {
-            tracing::error!("sync is off: {why}");
-            state.sync_off.set(Some(format!("Sync is off: {why}")));
+        Err(off) => {
+            tracing::error!("{} ({})", off.said, off.detail);
+            state.sync_off.set(Some(off.said.to_owned()));
             None
         }
     };

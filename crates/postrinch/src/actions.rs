@@ -171,7 +171,7 @@ impl State {
 
 fn sync_off() -> Notice {
     Notice {
-        text: "Sync is off, so accounts cannot sign in. The sidebar says why.".into(),
+        text: "Sync is off, so accounts cannot sign in. The sidebar says why, and the log has the detail.".into(),
         trouble: true,
     }
 }
