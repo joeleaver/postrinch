@@ -62,9 +62,9 @@ impl GoogleAuth {
     /// account must sign in as that address (signing in again); without it,
     /// any account may (adding one).
     ///
-    /// On success the refresh token is in the secret store and the account
-    /// is returned, active, for the caller to store. A refresh token the
-    /// account had before is revoked.
+    /// On success the refresh token is in the secret store, replacing any
+    /// the account had, and the account is returned, active, for the caller
+    /// to store.
     pub async fn sign_in(
         &self,
         login_hint: Option<&EmailAddress>,
@@ -87,49 +87,47 @@ impl GoogleAuth {
             .refresh_token
             .clone()
             .ok_or_else(|| SyncError::SignIn("Google sent no refresh token".into()))?;
-        // A grant without what Postrinch needs is useless: give its token
-        // back rather than leave it counting against Google's limit.
-        if let Err(e) = check_scopes(&tokens.scope) {
-            self.revoke_quietly(&refresh_token).await;
+
+        let user = self.oauth.userinfo(&tokens.access_token).await?;
+        let address =
+            EmailAddress::parse(&user.email).map_err(|e| SyncError::SignIn(e.to_string()))?;
+        // Revoking a Google refresh token withdraws the whole grant for the
+        // account and this client, every token issued under it included. So
+        // a token Postrinch cannot use is given back only when Postrinch
+        // holds no other token for the account; otherwise it is left to
+        // lapse unused, and the token the account already has keeps working.
+        let held = self.secret(&address, |s, a| s.get(a)).await?.is_some();
+
+        let refused = if let Err(e) = check_scopes(&tokens.scope) {
+            Some(e)
+        } else if !user.email_verified {
+            Some(SyncError::SignIn(format!(
+                "{address} is not a verified address"
+            )))
+        } else if let Some(hint) = login_hint
+            && hint.key() != address.key()
+        {
+            Some(SyncError::SignIn(format!(
+                "signed in as {address}, not {hint}"
+            )))
+        } else {
+            None
+        };
+        if let Some(e) = refused {
+            if !held {
+                self.revoke_quietly(&refresh_token).await;
+            }
             return Err(e);
         }
 
-        let user = self.oauth.userinfo(&tokens.access_token).await?;
-        if !user.email_verified {
-            return Err(SyncError::SignIn(format!(
-                "{} is not a verified address",
-                user.email
-            )));
-        }
-        let address =
-            EmailAddress::parse(&user.email).map_err(|e| SyncError::SignIn(e.to_string()))?;
-        if let Some(hint) = login_hint
-            && hint.key() != address.key()
-        {
-            self.revoke_quietly(&refresh_token).await;
-            return Err(SyncError::SignIn(format!(
-                "signed in as {address}, not {hint}"
-            )));
-        }
-
-        // A token that cannot be kept is given back, as above.
+        // The new token replaces the one the account had, which shares its
+        // grant: neither is revoked.
         let stored = refresh_token.clone();
-        let previous = match self
-            .secret(&address, move |s, a| {
-                let previous = s.get(a)?;
-                s.set(a, &stored)?;
-                Ok(previous)
-            })
-            .await
-        {
-            Ok(previous) => previous,
-            Err(e) => {
+        if let Err(e) = self.secret(&address, move |s, a| s.set(a, &stored)).await {
+            if !held {
                 self.revoke_quietly(&refresh_token).await;
-                return Err(e);
             }
-        };
-        if let Some(previous) = previous.filter(|p| *p != refresh_token) {
-            self.revoke_quietly(&previous).await;
+            return Err(e);
         }
 
         self.cache.lock().await.insert(
@@ -186,12 +184,12 @@ impl GoogleAuth {
         self.secret(account, |s, a| s.delete(a)).await
     }
 
-    /// Revoke a token Postrinch is done with. A failure is logged, not
-    /// returned: the token is unused either way, and Google retires the
-    /// oldest when an account has too many.
+    /// Revoke a token, and with it the account's whole grant to Postrinch.
+    /// A failure is logged, not returned: the token goes unused either way,
+    /// and Google retires the oldest when an account has too many.
     async fn revoke_quietly(&self, token: &str) {
         if let Err(e) = self.oauth.revoke(token).await {
-            tracing::warn!("could not revoke an old refresh token: {e}");
+            tracing::warn!("could not revoke a refresh token: {e}");
         }
     }
 

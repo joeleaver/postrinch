@@ -72,7 +72,7 @@ async fn mock_userinfo(server: &MockServer, email: &str) {
 }
 
 #[tokio::test]
-async fn sign_in_stores_the_refresh_token_and_revokes_the_old_one() {
+async fn signing_in_again_replaces_the_token_and_revokes_nothing() {
     let server = MockServer::start().await;
     mock_tokens(
         &server,
@@ -81,11 +81,11 @@ async fn sign_in_stores_the_refresh_token_and_revokes_the_old_one() {
     )
     .await;
     mock_userinfo(&server, "Ada@Example.org").await;
+    // Revoking the old token would withdraw the grant the new one is under.
     Mock::given(method("POST"))
         .and(path("/revoke"))
-        .and(body_string_contains("token=rt-old"))
         .respond_with(ResponseTemplate::new(200))
-        .expect(1)
+        .expect(0)
         .mount(&server)
         .await;
 
@@ -112,6 +112,7 @@ async fn sign_in_without_mail_scope_is_refused() {
         serde_json::json!({"access_token": "at", "expires_in": 3599, "refresh_token": "rt", "scope": "openid email"}),
     )
     .await;
+    mock_userinfo(&server, "ada@example.org").await;
     Mock::given(method("POST"))
         .and(path("/revoke"))
         .and(body_string_contains("token=rt"))
@@ -128,6 +129,31 @@ async fn sign_in_without_mail_scope_is_refused() {
         ),
         "{err:?}"
     );
+}
+
+#[tokio::test]
+async fn a_refused_sign_in_leaves_the_accounts_token_working() {
+    let server = MockServer::start().await;
+    mock_tokens(
+        &server,
+        "authorization_code",
+        serde_json::json!({"access_token": "at", "expires_in": 3599, "refresh_token": "rt-partial", "scope": "openid email"}),
+    )
+    .await;
+    mock_userinfo(&server, "ada@example.org").await;
+    Mock::given(method("POST"))
+        .and(path("/revoke"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let secrets = Arc::new(MemorySecrets::default());
+    let ada = EmailAddress::parse("ada@example.org").unwrap();
+    secrets.set(&ada, "rt-working").unwrap();
+    let auth = auth(&server, secrets.clone());
+
+    assert!(auth.sign_in(Some(&ada), browser).await.is_err());
+    assert_eq!(secrets.get(&ada).unwrap().as_deref(), Some("rt-working"));
 }
 
 #[tokio::test]
