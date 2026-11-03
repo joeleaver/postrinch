@@ -1,0 +1,25 @@
+[package]
+name = "postrinch"
+description = "Postrinch, the window: an agent-first desktop mail client on rinch."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+postrinch-commands = { workspace = true }
+postrinch-model = { workspace = true }
+postrinch-store = { workspace = true }
+postrinch-sync = { workspace = true }
+dirs = "7"
+jiff = "0.2"
+rinch = { git = "https://github.com/joeleaver/rinch.git", features = ["desktop", "components", "theme"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[features]
+# rinch's debug server, for driving the window from tools while developing.
+# It shows the window's contents, mail included, to any local process, so it
+# is never on in a build for use.
+debug = ["rinch/debug"]

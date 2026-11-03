@@ -7,6 +7,7 @@ use postrinch_model::EmailAddress;
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 
+mod snippet;
 mod types;
 
 pub(crate) use types::*;

@@ -10,7 +10,11 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "postrinch", version, about = "Postrinch from the command line")]
+#[command(
+    name = "postrinch-cli",
+    version,
+    about = "Postrinch from the command line"
+)]
 struct Cli {
     /// Where the store lives. Defaults to `<data dir>/postrinch`.
     #[arg(long, global = true)]
@@ -45,6 +49,9 @@ enum Command {
     /// The account stays signed in; raw messages already downloaded are
     /// reused.
     Resync { address: String },
+    /// Rebuild an account's downloaded messages from the originals stored
+    /// here, after a change to how Postrinch reads mail. Needs no network.
+    Reparse { address: String },
     /// Search all accounts' mail.
     Search {
         query: String,

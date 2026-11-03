@@ -57,6 +57,12 @@ pub(crate) async fn run(cli: Cli) -> Result<()> {
             .await
         }
         Command::Resync { address } => resync(&cx, parse(&address)?).await,
+        Command::Reparse { address } => {
+            let address = parse(&address)?;
+            let rebuilt = postrinch_sync::reparse(&cx.store, &address)?;
+            eprintln!("{address}: rebuilt {rebuilt} messages from their originals");
+            Ok(())
+        }
         Command::Search { query, limit } => search(&cx, &query, limit),
         Command::Show {
             address,
@@ -72,7 +78,7 @@ fn parse(address: &str) -> Result<EmailAddress> {
 fn accounts(cx: &Context) -> Result<()> {
     let accounts = cx.store.accounts()?;
     if accounts.is_empty() {
-        println!("No accounts. Add one with `postrinch add-google`.");
+        println!("No accounts. Add one with `postrinch-cli add-google`.");
     }
     for account in accounts {
         let state = match &account.state {
@@ -135,7 +141,7 @@ async fn sync(cx: &Context, only: Option<EmailAddress>, backfill: bool) -> Resul
     if accounts.is_empty() {
         return Err(match only {
             Some(address) => format!("no Google account {address}").into(),
-            None => "no Google accounts; add one with `postrinch add-google`".into(),
+            None => "no Google accounts; add one with `postrinch-cli add-google`".into(),
         });
     }
     let auth = cx.auth()?;

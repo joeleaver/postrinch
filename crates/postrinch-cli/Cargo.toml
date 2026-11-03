@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "postrinch"
+name = "postrinch-cli"
 path = "src/main.rs"
 
 [dependencies]

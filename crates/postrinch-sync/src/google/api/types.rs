@@ -48,7 +48,7 @@ pub(crate) struct RawMessage {
     pub thread_id: String,
     #[serde(default)]
     pub label_ids: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "super::snippet::deserialize")]
     pub snippet: String,
     /// Milliseconds since the epoch, as a string.
     pub internal_date: String,
@@ -74,7 +74,7 @@ pub(crate) struct MetadataMessage {
     pub thread_id: String,
     #[serde(default)]
     pub label_ids: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "super::snippet::deserialize")]
     pub snippet: String,
     /// Milliseconds since the epoch, as a string.
     pub internal_date: String,

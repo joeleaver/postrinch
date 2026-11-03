@@ -37,7 +37,7 @@ pub fn parse_message(envelope: Envelope, raw: &[u8]) -> SyncResult<Message> {
 
     let body_text = parsed
         .text_bodies()
-        .map(|b| b.trim().to_owned())
+        .map(|b| one_kind_of_newline(b.trim()))
         .filter(|b| !b.is_empty())
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -151,6 +151,12 @@ fn mailboxes(list: Option<AddressList<'_>>) -> Vec<Mailbox> {
         .collect()
 }
 
+/// Text with every line ending as `\n`: mail is sent with CRLF, and a
+/// display shows a lone CR as a line break of its own.
+fn one_kind_of_newline(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 /// The start of the body on one line, cut at a word.
 fn snippet_from(body: &str) -> String {
     let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -203,6 +209,19 @@ mod tests {
         "JVBERi0xLjQK\r\n",
         "--b--\r\n",
     );
+
+    #[test]
+    fn body_lines_end_in_newlines_alone() {
+        let raw = concat!(
+            "From: ada@example.org\r\n",
+            "Subject: lines\r\n",
+            "Content-Type: text/plain\r\n",
+            "\r\n",
+            "one\r\ntwo\r\n\r\nthree\rfour\r\n",
+        );
+        let m = parse_message(envelope(None), raw.as_bytes()).unwrap();
+        assert_eq!(m.body_text, "one\ntwo\n\nthree\nfour");
+    }
 
     #[test]
     fn reads_headers_body_and_attachments() {

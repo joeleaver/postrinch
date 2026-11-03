@@ -49,11 +49,11 @@ Planned crates (a Cargo workspace, names provisional):
 | `postrinch-model` | Accounts, messages, threads, labels/folders, views; no I/O. |
 | `postrinch-store` | The rhypedb schema and every read and write of it; full-text and vector indexing; embeddings in the background. |
 | `postrinch-sync` | Google sign-in and Gmail sync (built); IMAP/SMTP and the outbox to come. A provider trait arrives with the second provider, shaped by both. |
-| `postrinch-cli` | `postrinch`: add accounts, sync, search, show a message. For development and scripts until the window exists. |
+| `postrinch-cli` | `postrinch-cli`: add accounts, sync, search, show a message. For development and scripts. |
 | `postrinch-render` | MIME to displayable parts; HTML parse and sanitize; remote content policy; handing a document to rinch. |
 | `postrinch-commands` | The command layer: every action, its arguments, its result, and whether it needs the person's confirmation. |
 | `postrinch-mcp` | The MCP server, generated from the command layer. |
-| `postrinch` | The rinch app. |
+| `postrinch` | The rinch app: the window over the command layer, with sync running in the background (`GmailSync::keep_in_sync`). Its `debug` feature turns on rinch's debug server for tools; it is never on in a build for use, because it shows the window, mail included, to any local process. |
 
 ## Decisions so far
 

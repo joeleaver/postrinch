@@ -9,6 +9,8 @@
 mod error;
 pub mod google;
 mod mime;
+mod reparse;
 
 pub use error::{SyncError, SyncResult};
 pub use mime::{Envelope, parse_headers, parse_message};
+pub use reparse::reparse;
