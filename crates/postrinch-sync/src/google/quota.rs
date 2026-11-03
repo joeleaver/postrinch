@@ -89,12 +89,14 @@ impl Quota {
     }
 
     /// Gmail said the account is over its limit: hold every request for it
-    /// for `pause`.
+    /// for at least `pause` from now. Pauses do not add up: when several
+    /// requests in flight are told the same thing, the account waits for the
+    /// longest of them, not their sum.
     pub(crate) async fn back_off(&self, account: &str, pause: Duration) {
         let bucket = self.bucket(account).await;
         let mut b = bucket.lock().await;
         b.refill(Instant::now());
-        b.tokens = b.tokens.min(0.0) - pause.as_secs_f64() * RATE;
+        b.tokens = b.tokens.min(-pause.as_secs_f64() * RATE);
     }
 }
 
@@ -124,6 +126,19 @@ mod tests {
             quota.acquire("b", Cost::GetMessage).await;
         }
         assert_eq!(start.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn back_offs_do_not_add_up() {
+        let quota = Quota::default();
+        for _ in 0..10 {
+            quota.back_off("a", Duration::from_secs(2)).await;
+        }
+        let start = Instant::now();
+        quota.acquire("a", Cost::GetProfile).await;
+        let took = start.elapsed();
+        assert!(took >= Duration::from_secs(2), "{took:?}");
+        assert!(took < Duration::from_millis(2100), "{took:?}");
     }
 
     #[tokio::test(start_paused = true)]
