@@ -76,6 +76,15 @@ Planned crates (a Cargo workspace, names provisional):
 - **Labels:** `UNREAD` and `STARRED` become flags; Gmail system labels the model has no place for (`CHAT`, the coloured stars) are not stored.
 - **Requests** go over HTTP/1.1 (h2 0.4.16+ drops Gmail's connections as a "flood" of small DATA frames, and reqwest does not expose the limit). They retry dropped connections and 5xx with exponential backoff (honouring `Retry-After`), and a 401 once with a fresh token. The store is blocking, so sync runs every store call on a blocking thread.
 
+### Changing mail
+
+- **Local first, through an outbox.** An action (read, unread, star, archive, back to the inbox, trash, restore, add or remove a label) names threads, as the window and an agent see mail (`Commands::act`, `ThreadAction`). It becomes one `MessageChange` to the messages it would change (unread and star go to the latest message, as in Gmail), which the store applies at once and records as an `OutboxEntry` in the same database. Nothing waits on the network.
+- **Labels by id; trash is a label.** A change adds or removes provider label ids and sets read or starred. Archiving removes the inbox label; trashing adds the trash label. Every mailbox but the trash and spam leaves out trashed and spam mail, and so does search, as Gmail's do, so this holds whatever labels Gmail itself strips on trashing.
+- **Sync never undoes a change on its way out.** Every store write of a message's labels and flags applies the account's outbox entries over it, in order. A change only adds, removes or sets, so applying it again is harmless. An entry stays after it is sent, until a sync that began after it finishes: that sync's report already includes it.
+- **Sending** (`GmailSync::keep_sending`) runs beside sync, so a first sync of hours never holds a change back, and is woken when a change is made. Oldest first: the trash through `messages.trash`/`untrash`, the rest through `messages.batchModify`. A change Gmail refuses for good (400, 404) is dropped and its messages read again; any other failure keeps it, and the ones after it wait behind it, so Gmail gets them in the order they were made. Entries survive restarts and going offline.
+- **None of these asks for confirmation**: each can be undone and stays in the account. Deleting for good, sending and anything that leaves the account will (see **Safety**).
+- **In the window**, an action shows at once: it is kept as pending and applied over the rows and the reader until a list loaded after it arrives. Settings › Reading says when an opened conversation is marked read (on open, the default; after 3 seconds; or only when asked) and what opens after the open one is archived or trashed (the next, the default; or nothing).
+
 ### Storage and search
 
 - **rhypedb in process** (`rhypedb-engine`), not a server. Messages, threads, people and labels are objects with links between them; bodies are `@fulltext`; each message (or each chunk of a long one) has an embedding from `rhypedb-embed` (fastembed/ONNX, local, computed in the background).
@@ -116,7 +125,7 @@ Mail is hostile input, for the renderer and for the agent.
 2. ~~How does the MCP server reach agents?~~ **Decided 2026-11-03, after Pimble's agents contract:** each connected app is an *agent* with its own name and key (shown once, stored hashed, on this machine only). Apps launch a small stdio bridge, `postrinch-mcp`, with the key in the environment, never on the command line; the bridge talks to the running app over loopback, and the app enforces the agent's scope: which accounts it can see, and that sending, deleting and anything else that leaves the machine still wait for the person's confirmation. Settings › Agents offers one-click setup that writes the entry into Claude Desktop, Claude Code, Cursor and Codex configs (leaving the rest of the file alone and keeping a backup), and a snippet to paste for any other app. A remote agent (one that cannot launch a process here) is for later.
 3. **What does an embedding cover?** A whole message, chunks of a long one, the quoted history or not, attachments' text or not. Decides index size and search quality; measure on a real mailbox.
 4. **Threading for IMAP accounts.** `References`/`In-Reply-To` with subject fallback (JWZ), and how a thread spanning two accounts shows in the combined inbox.
-5. **Offline sending and the outbox.** Queue, retry, and what "sent" means before the server has it.
+5. **Sending mail through the outbox.** Changes to mail go through it now (see **Changing mail**); sending adds what "sent" means before Gmail has it, and the person's confirmation.
 6. **How much mail to keep locally.** Everything, or a window plus headers, for a 15-year Gmail account.
 7. **License.** rinch and rhypedb are MIT/Apache-2.0; Postrinch probably follows.
 
@@ -124,15 +133,15 @@ Mail is hostile input, for the renderer and for the agent.
 
 Planning and progress live in Overboard, project "Postrinch". There is no `.eml`/mbox importer: real mail comes in through Gmail sync.
 
-Status as of 2026-11-03:
+Status as of 2026-11-03 (evening):
 
 1. ~~**Gmail read-only sync into rhypedb**~~ Done. Several accounts; headers first, page by page as Gmail lists them, the newest 100 whole; bodies backfilled newest first; an opened message downloads at once; quota paced and fair; retried across network drops (`GmailSync::keep_in_sync`).
 2. **Rendering on real mail.** Not started: the reader shows `body_text`. Waiting partly on rinch's email-rendering work.
 3. **Search**: full text done (`Commands::search`, title-bar search with marked excerpts). Semantic search and the filter popover are not.
 4. **Calendar read-only sync.** Not started.
-5. **The command layer and the MCP server.** Read-only commands done (`postrinch-commands`: sidebar, listings, threads, search, accounts, label prefs). The MCP server and bridge are not started.
+5. **The command layer and the MCP server.** Read commands done (`postrinch-commands`: sidebar, listings, threads, search, accounts, label prefs), and changing mail (`act`, `label_choices`). The MCP server and bridge are not started.
 6. ~~**The window**~~ Built: borderless, menus, sidebar with the label tree, inbox tabs, list, reader, search, Settings (Accounts, Appearance), light and dark, resizable panes, keyboard moves. Loads run on a loader thread, never the UI thread. Calendar views wait for step 4.
-7. **Changing mail, then writing.** Next. Local-first changes (read, archive, trash, labels) applied to the store at once and sent to Gmail through a persistent outbox that survives restarts and going offline; then drafts and sending through the same outbox, with confirmations.
+7. **Changing mail, then writing.** Changing mail done: read, star, archive, trash and labels from the reader and Gmail's keys, applied at once and sent through the outbox; mark read on open. Next: drafts and sending through the same outbox, with confirmations.
 8. **IMAP/SMTP.**
 
-Known issues upstream, none blocking: rinch#1544 (glyphs on whole pixels: uneven letter spacing), rinch#2105 (`if let` in rsx keeps its first value; the window uses keyed `for` loops instead), rinch#2116 (menu dropdown scrollbar from rounding), rhypedb#27 (a `@unique` key that prefixes another is missed after reopen, so duplicates are created), rinch#723 (the desktop DOM never frees a node a redraw throws away; until it does, the window's lists are keyed by what a row is, and each row follows its data through a `Memo`, so rows are built once rather than on every change), rhypedb#28 (compaction reads the whole database into memory and rewrites all of it every ~16 MB of writes).
+Known issues upstream, none blocking: rinch#1544 (glyphs on whole pixels: uneven letter spacing), rinch#2105 (`if let` in rsx keeps its first value; the window uses keyed `for` loops instead), rinch#2116 (menu dropdown scrollbar from rounding), rhypedb#27 (a `@unique` key that prefixes another is missed after reopen, so duplicates are created), rinch#723 (the desktop DOM never frees a node a redraw throws away; until it does, the window's lists are keyed by what a row is, and each row follows its data through a `Memo`, so rows are built once rather than on every change), rhypedb#28 (compaction reads the whole database into memory and rewrites all of it every ~16 MB of writes), rhypedb#29 (dropping a database can return before its lock is released, so reopening at once is occasionally refused).
