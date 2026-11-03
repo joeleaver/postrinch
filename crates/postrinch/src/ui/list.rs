@@ -1,7 +1,7 @@
 //! The thread list: one row per thread in the chosen folder.
 
 use postrinch_commands::{CATEGORIES, Folder, Sidebar, ThreadPage, ThreadRow};
-use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel, ThreadSummary};
+use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel, ThreadSummary, Timestamp};
 use rinch::prelude::*;
 
 use crate::dates;
@@ -39,10 +39,13 @@ pub fn thread_list(state: State) -> NodeHandle {
                 {tabs(__scope, state)}
             }
             div { class: "rows",
-                // Keyed by thread alone: a row is built once and follows
-                // its thread's changes in place.
-                for thread in row_ids(state) {
-                    div { key: format!("{}|{}", thread.0.key(), thread.1.0),
+                // Keyed by thread and its latest activity: a row is built
+                // once and follows its thread's other changes in place, and
+                // a thread that moves (new mail) gets a new row. So the list
+                // only ever gains and loses rows, and never moves one:
+                // rinch puts moved rows in the wrong order (rinch#2129).
+                for (thread, latest) in row_keys(state) {
+                    div { key: format!("{}|{}|{}", thread.0.key(), thread.1.0, latest.as_millis()),
                         {row(__scope, state, thread.clone())}
                     }
                 }
@@ -89,6 +92,21 @@ pub(crate) fn row_ids(state: State) -> Vec<RowId> {
     });
     ids.into_iter()
         .filter(|id| !state.pending_removal(id))
+        .collect()
+}
+
+/// The threads listed with their latest activity, as the rows are keyed.
+fn row_keys(state: State) -> Vec<(RowId, Timestamp)> {
+    let rows: Vec<(RowId, Timestamp)> = with_rows(state, |rows| {
+        rows.iter()
+            .map(|r| {
+                let id = (r.summary.account.clone(), r.summary.id.clone());
+                (id, r.summary.latest)
+            })
+            .collect()
+    });
+    rows.into_iter()
+        .filter(|(id, _)| !state.pending_removal(id))
         .collect()
 }
 
