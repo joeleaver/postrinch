@@ -48,7 +48,17 @@ impl Blobs {
             file.write_all(bytes)?;
             file.sync_all()?;
         }
-        fs::rename(&tmp, &path)?;
+        match fs::rename(&tmp, &path) {
+            Ok(()) => {}
+            // Windows will not rename onto an existing file. If another
+            // writer stored the same bytes first, theirs is as good as ours.
+            Err(_) if path.exists() => {
+                fs::remove_file(&tmp)?;
+                return Ok(hash);
+            }
+            Err(e) => return Err(e),
+        }
+        sync_dir(parent)?;
         Ok(hash)
     }
 
@@ -125,6 +135,21 @@ impl Blobs {
         }
         Ok(())
     }
+}
+
+/// Make a rename in `dir` durable. On Unix that takes an fsync of the
+/// directory. Windows has no directory fsync, and std's rename there is not
+/// write-through, so a power loss just after it can lose the rename: the
+/// message then refers to a blob that is not there, which reads as a raw
+/// message not yet fetched.
+#[cfg(unix)]
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    fs::File::open(dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 fn is_temporary(path: &Path) -> bool {
