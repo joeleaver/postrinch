@@ -2,11 +2,16 @@
 //! (code exchange and refresh), userinfo and revocation.
 
 use postrinch_model::{EmailAddress, SignInReason};
+use std::time::Duration;
+
 use serde::Deserialize;
 use url::Url;
 
 use super::ClientConfig;
 use crate::{SyncError, SyncResult};
+
+/// Tries at reaching the token endpoint, 2, 4 and 8 seconds apart.
+const CONNECT_ATTEMPTS: u32 = 4;
 
 /// Every scope Postrinch asks for, together, at sign-in.
 pub const SCOPES: &[&str] = &[
@@ -145,12 +150,26 @@ impl OAuth {
         let mut form: Vec<(&str, &str)> = params.to_vec();
         form.push(("client_id", &self.config.client_id));
         form.push(("client_secret", &self.config.client_secret));
-        let response = self
-            .http
-            .post(&self.endpoints.token)
-            .form(&form)
-            .send()
-            .await?;
+        // Retry only a request that could not connect: it never reached
+        // Google, so a one-time authorization code is still unspent.
+        let mut attempt = 0;
+        let response = loop {
+            attempt += 1;
+            match self
+                .http
+                .post(&self.endpoints.token)
+                .form(&form)
+                .send()
+                .await
+            {
+                Ok(response) => break response,
+                Err(e) if e.is_connect() && attempt < CONNECT_ATTEMPTS => {
+                    tracing::debug!("token endpoint unreachable, retrying: {e}");
+                    tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        };
         let status = response.status();
         let body = response.text().await?;
         if status.is_success() {
