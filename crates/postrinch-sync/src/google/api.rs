@@ -242,7 +242,8 @@ impl GmailApi {
                 .await
             {
                 Ok(r) => r,
-                Err(e) if attempt < ATTEMPTS && (e.is_timeout() || e.is_connect()) => {
+                Err(e) if attempt < ATTEMPTS && is_transient(&e) => {
+                    tracing::debug!("Gmail {path}: {}, retrying", chain(&e));
                     tokio::time::sleep(backoff(attempt, None)).await;
                     continue;
                 }
@@ -250,7 +251,24 @@ impl GmailApi {
             };
             let status = response.status();
             if status.is_success() {
-                return Ok(response.json().await?);
+                // Read the whole body before parsing, so a connection that
+                // drops part-way through a large message is retried too.
+                let body = match response.bytes().await {
+                    Ok(body) => body,
+                    Err(e) if attempt < ATTEMPTS && is_transient(&e) => {
+                        tracing::debug!("Gmail {path}: {}, retrying", chain(&e));
+                        tokio::time::sleep(backoff(attempt, None)).await;
+                        continue;
+                    }
+                    Err(e) => return Err(e.into()),
+                };
+                return serde_json::from_slice(&body).map_err(|e| {
+                    SyncError::api(
+                        "Gmail",
+                        status.as_u16(),
+                        format!("unreadable response to {path}: {e}"),
+                    )
+                });
             }
             let retry_after = response
                 .headers()
@@ -274,6 +292,26 @@ impl GmailApi {
             return Err(SyncError::api("Gmail", status.as_u16(), message));
         }
     }
+}
+
+/// Whether a request failed on the way, rather than being refused: a
+/// timeout, a connection that would not open or that dropped (HTTP/2
+/// connection resets, a server closing an idle connection). Every request
+/// here is a GET, so trying again is always safe.
+fn is_transient(e: &reqwest::Error) -> bool {
+    e.is_timeout() || e.is_connect() || e.is_request() || e.is_body()
+}
+
+/// An error with its causes, which `reqwest::Error`'s own message leaves out.
+pub(crate) fn chain(e: &dyn std::error::Error) -> String {
+    let mut text = e.to_string();
+    let mut source = e.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
 }
 
 fn parse_error(body: &str) -> (String, Vec<String>) {

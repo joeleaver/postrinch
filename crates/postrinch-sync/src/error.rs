@@ -16,7 +16,7 @@ pub enum SyncError {
     SignIn(String),
     #[error("the keychain: {0}")]
     Keychain(String),
-    #[error("network: {0}")]
+    #[error("network: {}", crate::google::error_chain(.0))]
     Http(#[from] reqwest::Error),
     /// The provider answered with an error that retrying did not cure.
     #[error("{service} answered {status}: {message}")]

@@ -13,6 +13,7 @@ mod secrets;
 mod sync;
 
 pub use api::GmailApi;
+pub(crate) use api::chain as error_chain;
 pub use auth::GoogleAuth;
 pub use config::ClientConfig;
 pub use oauth::{Endpoints, SCOPES};

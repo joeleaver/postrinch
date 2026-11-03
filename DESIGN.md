@@ -48,7 +48,8 @@ Planned crates (a Cargo workspace, names provisional):
 |---|---|
 | `postrinch-model` | Accounts, messages, threads, labels/folders, views; no I/O. |
 | `postrinch-store` | The rhypedb schema and every read and write of it; full-text and vector indexing; embeddings in the background. |
-| `postrinch-sync` | One provider trait; Gmail (API) and IMAP/SMTP implementations; OAuth; the outbox. |
+| `postrinch-sync` | Google sign-in and Gmail sync (built); IMAP/SMTP and the outbox to come. A provider trait arrives with the second provider, shaped by both. |
+| `postrinch-cli` | `postrinch`: add accounts, sync, search, show a message. For development and scripts until the window exists. |
 | `postrinch-render` | MIME to displayable parts; HTML parse and sanitize; remote content policy; handing a document to rinch. |
 | `postrinch-commands` | The command layer: every action, its arguments, its result, and whether it needs the person's confirmation. |
 | `postrinch-mcp` | The MCP server, generated from the command layer. |
@@ -64,6 +65,15 @@ Planned crates (a Cargo workspace, names provisional):
 - **Scopes:** `openid`, `email`, `https://mail.google.com/` (restricted) and `https://www.googleapis.com/auth/calendar` (sensitive), asked for together at sign-in.
 - **The Google Cloud project** is `postrinch` (organization joeleaver.com), with the Gmail and Calendar APIs enabled, an External consent screen and one "Desktop app" OAuth client. The client's JSON is kept outside the repository (`~/.config/postrinch/google-oauth-client.json` while developing); it never goes into git. The consent screen is in Testing until it has a home page, a privacy policy and an authorized domain, so for now only listed test users can sign in and their refresh tokens last 7 days.
 - **App passwords** are a manual fallback for IMAP accounts only, never the main path.
+- **OAuth is written on reqwest, not the `oauth2` crate**, which would pull in a second reqwest. A grant that leaves out the Gmail or Calendar scope is refused, and its token revoked; so is a token the keychain cannot keep. A new sign-in revokes the token it replaces, so Postrinch never nears Google's 100 tokens per account and client.
+- **The keychain, per platform** (the `keyring` crate): Keychain Services on macOS; Credential Manager on Windows, with local persistence so the token does not roam with a domain profile; the Secret Service on Linux (GNOME Keyring or KDE Wallet). When a Linux Secret Service has no default keyring (GNOME Keyring outside a GNOME session has only an in-memory one), Postrinch asks it to create one, which prompts the person for its password.
+
+### Gmail sync
+
+- **Full sync** lists every message id (spam and trash included), fetches the ones the store lacks ten at a time as raw RFC 5322 (`format=raw`), and removes stored ones Gmail no longer has. **Incremental sync** reads `history.list` from the cursor and applies it: deletions, new messages, label changes (`format=minimal` for those).
+- **The cursor** is `FullSince{historyId}` while a full sync runs, taken before listing, so an interrupted one resumes and then catches up from that point; and `History{historyId}` after. When Gmail's history has expired (404), a full sync runs that also refreshes stored messages' labels.
+- **Labels:** `UNREAD` and `STARRED` become flags; Gmail system labels the model has no place for (`CHAT`, the coloured stars) are not stored.
+- **Requests** retry 429, 5xx and 403 rate limits with exponential backoff (honouring `Retry-After`), and a 401 once with a fresh token. The store is blocking, so sync runs every store call on a blocking thread.
 
 ### Storage and search
 
