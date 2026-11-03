@@ -2,3 +2,7 @@
 *.eml
 /corpus/
 .env
+
+# Logo concepts from an image model under a non-commercial licence: references
+# for redrawing, never shipped.
+/design/logo-concepts/

@@ -272,7 +272,7 @@ mark { background: #fbe7b0; color: inherit; padding: 0 1px; border-radius: 2px; 
 .message-address { color: var(--muted); font-size: 13px; }
 .message-when { margin-left: auto; color: var(--muted); font-size: 13px; }
 .message-to { color: var(--muted); font-size: 13px; margin-top: -6px; }
-.message-body { white-space: pre-wrap; line-height: 1.6; color: var(--ink); }
+.message-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; color: var(--ink); }
 .message-note { color: var(--ink-2); font-style: italic; }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {

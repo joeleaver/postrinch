@@ -61,7 +61,7 @@ pub fn thread_list(state: State) -> NodeHandle {
 }
 
 /// The rows to show: the search's, while there is one, or the folder's.
-fn rows_now(state: State) -> Vec<ThreadRow> {
+pub(crate) fn rows_now(state: State) -> Vec<ThreadRow> {
     if state.search.get().is_some() {
         state.results.get().map(|r| r.threads).unwrap_or_default()
     } else {

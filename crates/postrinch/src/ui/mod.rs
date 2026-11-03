@@ -1,5 +1,6 @@
 //! The window: a header over the sidebar, the thread list and the reader.
 
+mod keys;
 mod label_edit;
 mod labels;
 mod list;
@@ -43,7 +44,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     state.load(commands);
     let brand: SectionRenderer = Rc::new(|__scope| rsx! { div { class: "brand", "postrinch" } });
     let status: SectionRenderer = Rc::new(move |__scope| title_status(__scope, state));
-    rsx! {
+    let window = rsx! {
         BorderlessWindow {
             title: "",
             radius: "none",
@@ -66,7 +67,9 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 }
             }
         }
-    }
+    };
+    keys::listen(window.clone(), state);
+    window
 }
 
 /// The right of the title bar: search, and anything that went wrong.
