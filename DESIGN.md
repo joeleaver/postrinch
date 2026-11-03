@@ -54,6 +54,7 @@ Planned crates (a Cargo workspace, names provisional):
 | `postrinch-commands` | The command layer: every action, its arguments, its result, and whether it needs the person's confirmation. |
 | `postrinch-agents` | Agents: the agents file (keys and reach), the wire format between the bridge and the app, the app's listener, the bridge's client, and what each call answers. |
 | `postrinch-mcp` | The MCP server agents launch over stdio (rmcp); each tool is one call to the running app. |
+| `postrinch-update` | The home-folder install (`postrinch --install`) and keeping it current: the release check, signature, staging, and the swap on restart. No UI. |
 | `postrinch` | The rinch app: the window over the command layer, with sync running in the background (`GmailSync::keep_in_sync`). Its `debug` feature turns on rinch's debug server for tools; it is never on in a build for use, because it shows the window, mail included, to any local process. |
 
 ## Decisions so far
@@ -120,6 +121,18 @@ Planned crates (a Cargo workspace, names provisional):
 - **rinch does the layout**: real table layout and legacy attributes (rinch#2079) and floats (rinch#2080) remove the need for the spike's table-to-grid rewrite. See [docs/research/html-rendering.md](docs/research/html-rendering.md).
 - **Remote content is off by default** (tracking pixels), per sender or per message on request, fetched without cookies.
 - **"Open in browser"** stays as the fallback for mail that still renders badly.
+
+### Installing and updating
+
+Decided 2026-11-03, after Pimble's updater (pimble `docs/UPDATE_CONTRACT.md`), adapted.
+
+- **A home-folder install, no root.** `postrinch --install`, run from an unpacked release, copies the three programs into `~/.local/share/postrinch-app/` (`%LOCALAPPDATA%\Programs\Postrinch` on Windows) and writes the marker `postrinch-install.json`. On Linux it links them from `~/.local/bin`, puts the icon in `~/.local/share/icons/hicolor`, and writes `~/.local/share/applications/postrinch.desktop` (its name is the window's Wayland app id; it replaces the hidden stub rinch writes for that id). Mail, settings, the OAuth client and the agents file stay where they were (`~/.local/share/postrinch`, `~/.config/postrinch`): the program lives apart from the mail, so removing one never touches the other. Only a program running from a marked folder updates itself, so a build folder's never does. A build with the `debug` feature refuses to install.
+- **The three programs move together.** The window, `postrinch-mcp` and `postrinch-cli` ship in one package and are replaced as one. The window finds the bridge beside itself (`setup::bridge_path`), so an agent connected from the installed window points at the installed bridge, and an update replaces that file in place. The bridge's hello carries its version and the app refuses a different one, with a sentence telling the person to restart the agent's app (which then starts the new bridge).
+- **Signed releases on GitHub.** A `v*` tag runs the Release workflow: the three programs built with `--release` and without `debug`, the tag checked against the version they carry, `postrinch-<v>-linux-x86_64.tar.gz` packaged (`tools/package.sh`) and signed with Ed25519 (`openssl pkeyutl -rawin`, the key in the `POSTRINCH_UPDATE_SIGNING_KEY` secret only). The public key is `crates/postrinch-update/update-key.pub`, compiled in; `tools/update-key.sh` made it (running it again strands every install). A package that does not verify is never unpacked.
+- **The check.** An installed window checks a minute after it starts and then daily (or at once from Settings › About › Check now). It reads `api.github.com/repos/joeleaver/postrinch/releases/latest` directly: unlike Pimble, Postrinch has no server of its own to serve a feed. The repository is private, so the check signs in with `POSTRINCH_GITHUB_TOKEN` or the GitHub CLI's login (`gh auth token`), sending the token only to GitHub's API; if the repository goes public it works without either. A newer version's package and signature are downloaded, verified and unpacked into `<install>/update/` with `ready.json`; nothing else changes. A failed check says why in Settings › About and tries again the next day.
+- **Restart to update, never on its own.** A staged version shows as "Restart to update to <v>" in the title bar and in Settings › About. A click renames the three staged programs over the installed ones (the running window keeps its open file), rewrites the marker, starts the new window with `POSTRINCH_WAIT_FOR_PID`, and closes. The new window waits (up to a minute) for the old one to exit before opening the store, which takes one opener, and the agents' port.
+- **Installing a release here:** `tools/install-release.sh [vX.Y.Z]` downloads the Linux package with `gh`, verifies it against the compiled-in key and runs `postrinch --install` from it, so what is installed is what shipped.
+- **Not yet:** Linux packages only (the updater code builds everywhere; Windows and macOS need packages and, on Windows, an installer, as Pimble has). No release notes shown, no rollback, no channels.
 
 ### Safety
 

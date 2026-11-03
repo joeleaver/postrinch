@@ -24,6 +24,7 @@ pub const CSS: &str = r#"
 .update-actions { display: flex; gap: 8px; }
 .status-dot.ready { background: var(--accent); }
 .status-dot.idle { background: var(--muted); }
+.about-hint { max-width: 560px; }
 .mono { font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
 .update-pill {
     display: flex;
@@ -117,7 +118,7 @@ pub fn about(state: State) -> NodeHandle {
                 span { class: "mono", {installed} }
             }
             {status_box(__scope, state)}
-            p { class: "settings-hint",
+            p { class: "settings-hint about-hint",
                 "Postrinch checks for a new version a minute after it starts and then once a day. It downloads and checks the new version in the background, and changes nothing until you restart. The agents\u{2019} bridge and postrinch-cli are updated with it."
             }
         }

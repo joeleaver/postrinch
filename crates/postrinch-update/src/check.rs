@@ -153,21 +153,19 @@ impl Http {
     /// GET `url`. The token goes only to GitHub's API; GitHub's redirect
     /// to its file storage drops it.
     fn get(&self, url: &str, accept: &str) -> Result<Vec<u8>, String> {
+        let api = url.starts_with("https://api.github.com/");
         let mut request = self.client.get(url).header("Accept", accept);
-        if let Some(token) = self
-            .token
-            .as_ref()
-            .filter(|_| url.starts_with("https://api.github.com/"))
-        {
+        if let Some(token) = self.token.as_ref().filter(|_| api) {
             request = request.bearer_auth(token);
         }
         let response = request.send().map_err(|e| format!("{url}: {e}"))?;
         let status = response.status();
-        if status == reqwest::StatusCode::NOT_FOUND
-            && self.token.is_none()
-            && url.starts_with("https://api.github.com/")
-        {
-            return Err("GitHub has no release to show without signing in: sign in with `gh auth login`, or set POSTRINCH_GITHUB_TOKEN".into());
+        if status == reqwest::StatusCode::NOT_FOUND && api {
+            return Err(if self.token.is_some() {
+                "GitHub shows no release of Postrinch: none is published yet, or this GitHub sign-in cannot see it".into()
+            } else {
+                "GitHub shows no release of Postrinch without signing in: sign in with `gh auth login`, or set POSTRINCH_GITHUB_TOKEN".into()
+            });
         }
         if !status.is_success() {
             return Err(format!("{url}: {status}"));
