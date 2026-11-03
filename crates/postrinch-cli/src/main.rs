@@ -2,6 +2,7 @@
 //! terminal. The window will do all of this; until it exists this is how a
 //! person or a script drives Postrinch.
 
+mod agent;
 mod commands;
 
 use std::path::PathBuf;
@@ -60,6 +61,27 @@ enum Command {
     },
     /// Show a message's headers and text.
     Show { address: String, message_id: String },
+    /// Make, list and remove the agents that may connect through
+    /// postrinch-mcp. Works while the window is open.
+    #[command(subcommand)]
+    Agent(AgentCommand),
+}
+
+#[derive(Subcommand)]
+enum AgentCommand {
+    /// Make an agent and print its key, once, with the entry to give the app.
+    Add {
+        /// What to call it: the app it is for, say.
+        name: String,
+        /// An account it may see; repeat for more. Without any, it sees
+        /// every account, those added later included.
+        #[arg(long)]
+        account: Vec<String>,
+    },
+    /// List the agents.
+    List,
+    /// Remove an agent by name: its key stops working at once.
+    Remove { name: String },
 }
 
 #[tokio::main]
@@ -72,7 +94,11 @@ async fn main() -> ExitCode {
         .init();
 
     let cli = Cli::parse();
-    match commands::run(cli).await {
+    let result = match cli.command {
+        Command::Agent(command) => agent::run(command),
+        _ => commands::run(cli).await,
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("postrinch-cli: {e}");

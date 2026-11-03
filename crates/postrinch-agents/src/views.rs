@@ -58,10 +58,20 @@ pub(crate) fn run(commands: &Commands, call: Call) -> Result<Value, String> {
         }
         Call::ListThreads {
             folder,
+            account,
             category,
             offset,
             limit,
         } => {
+            let narrowed;
+            let commands = match &account {
+                Some(account) => {
+                    commands.check(account).map_err(say)?;
+                    narrowed = commands.limited_to(std::slice::from_ref(account));
+                    &narrowed
+                }
+                None => commands,
+            };
             let page = commands
                 .list_threads(&folder, category, offset, limit)
                 .map_err(say)?;

@@ -69,6 +69,7 @@ pub(crate) async fn run(cli: Cli) -> Result<()> {
             address,
             message_id,
         } => show(&cx, &parse(&address)?, message_id),
+        Command::Agent(_) => unreachable!("main runs agent commands without the store"),
     }
 }
 

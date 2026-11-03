@@ -90,6 +90,12 @@ fn an_agent_sees_only_its_accounts() {
         label: "INBOX".into(),
     };
     assert!(hidden(agent.list_threads(&home_inbox, None, 0, 10)));
+    let widened = agent.limited_to(&[work.clone(), home.clone()]);
+    assert_eq!(
+        addresses(&widened),
+        ["work@example.org"],
+        "limiting never widens"
+    );
 
     // Acting on a thread it cannot see changes nothing, even beside one it can.
     let both = [(work.clone(), t1.clone()), (home.clone(), t1.clone())];

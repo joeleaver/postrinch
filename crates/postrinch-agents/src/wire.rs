@@ -44,6 +44,10 @@ pub enum Call {
     Folders,
     ListThreads {
         folder: Folder,
+        /// With an [`Folder::Everywhere`] folder: that folder of this
+        /// account alone.
+        #[serde(default)]
+        account: Option<EmailAddress>,
         category: Option<SystemLabel>,
         offset: usize,
         limit: usize,

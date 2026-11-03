@@ -9,12 +9,18 @@ use postrinch_model::{Account, EmailAddress};
 use crate::{CommandError, CommandResult, Commands};
 
 impl Commands {
-    /// The same commands, seeing only `accounts`. Asking about any other
-    /// account answers as for one the store does not have.
+    /// The same commands, seeing only those of `accounts` they already
+    /// see: limiting never widens. Asking about any other account answers
+    /// as for one the store does not have.
     pub fn limited_to(&self, accounts: &[EmailAddress]) -> Self {
+        let only = accounts
+            .iter()
+            .filter(|a| self.sees(a))
+            .map(EmailAddress::key)
+            .collect();
         Self {
             store: self.store.clone(),
-            only: Some(Arc::new(accounts.iter().map(EmailAddress::key).collect())),
+            only: Some(Arc::new(only)),
         }
     }
 
@@ -26,7 +32,7 @@ impl Commands {
     }
 
     /// An error for an account this caller does not see.
-    pub(crate) fn check(&self, account: &EmailAddress) -> CommandResult<()> {
+    pub fn check(&self, account: &EmailAddress) -> CommandResult<()> {
         if self.sees(account) {
             Ok(())
         } else {

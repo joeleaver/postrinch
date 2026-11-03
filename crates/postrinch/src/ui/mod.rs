@@ -23,7 +23,7 @@ use rinch::prelude::*;
 
 use crate::state::{State, View};
 use crate::sync;
-use crate::{actions, appearance, changes};
+use crate::{actions, agents, appearance, changes};
 
 /// Colours that tell accounts apart, in the order accounts were added. They
 /// stay clear of the blue that marks what is chosen.
@@ -47,6 +47,11 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
         }
     };
     changes::start(
+        (*commands).clone(),
+        state,
+        sync.as_ref().map(|s| s.send.clone()),
+    );
+    agents::start(
         (*commands).clone(),
         state,
         sync.as_ref().map(|s| s.send.clone()),

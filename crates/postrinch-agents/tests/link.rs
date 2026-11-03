@@ -90,6 +90,7 @@ fn an_agent_reads_and_changes_only_what_it_was_given() {
 
     let inbox = Call::ListThreads {
         folder: Folder::Everywhere(SystemLabel::Inbox),
+        account: None,
         category: None,
         offset: 0,
         limit: 10,
