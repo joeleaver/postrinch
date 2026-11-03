@@ -8,12 +8,14 @@
 
 mod error;
 mod folders;
+mod labels;
 mod threads;
 
 use postrinch_store::Store;
 
 pub use error::{CommandError, CommandResult};
-pub use folders::{Folder, FolderEntry, Sidebar};
+pub use folders::{AccountFolders, Folder, FolderEntry, Sidebar};
+pub use labels::{AppLabels, LabelNode, LabelRole, LabelTree, app_of, role};
 pub use threads::{Thread, ThreadPage};
 
 /// The commands, over one store. Cheap to clone.

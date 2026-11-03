@@ -133,35 +133,19 @@ fn account_index(sidebar: Option<&Sidebar>, summary: &ThreadSummary) -> Option<u
 fn title(folder: &Folder, sidebar: Option<&Sidebar>) -> String {
     match folder {
         Folder::Everywhere(SystemLabel::Inbox) => "All inboxes".to_owned(),
-        Folder::Everywhere(_) => sidebar
-            .and_then(|s| s.everywhere.iter().find(|e| &e.folder == folder))
-            .map(|e| e.name.clone())
-            .unwrap_or_default(),
-        Folder::Label { .. } => sidebar
-            .into_iter()
-            .flat_map(|s| &s.accounts)
-            .flat_map(|a| std::iter::once(&a.inbox).chain(&a.labels))
-            .find(|e| &e.folder == folder)
+        _ => sidebar
+            .and_then(|s| s.entry(folder))
             .map(|e| e.name.clone())
             .unwrap_or_default(),
     }
 }
 
 fn unread_line(folder: &Folder, sidebar: Option<&Sidebar>) -> String {
-    let unread = sidebar
-        .into_iter()
-        .flat_map(|s| {
-            s.everywhere.iter().chain(
-                s.accounts
-                    .iter()
-                    .flat_map(|a| std::iter::once(&a.inbox).chain(&a.labels)),
-            )
-        })
-        .find(|e| &e.folder == folder)
-        .map_or(0, |e| e.unread);
-    if unread == 0 {
-        String::new()
-    } else {
-        format!("{} unread", thousands(unread))
+    match sidebar
+        .and_then(|s| s.entry(folder))
+        .map_or(0, |e| e.unread)
+    {
+        0 => String::new(),
+        unread => format!("{} unread", thousands(unread)),
     }
 }

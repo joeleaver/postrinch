@@ -6,6 +6,7 @@ use rinch::prelude::*;
 use crate::state::State;
 use crate::sync::{AccountSync, thousands};
 use crate::ui::account_color;
+use crate::ui::labels::labels_section;
 
 #[component]
 pub fn sidebar(state: State) -> NodeHandle {
@@ -17,9 +18,7 @@ pub fn sidebar(state: State) -> NodeHandle {
                 }
             }
             div { class: "labels",
-                if let Some(sidebar) = state.sidebar.get() {
-                    {labels(__scope, state, sidebar.clone())}
-                }
+                {labels_section(__scope, state)}
             }
             div { class: "sync",
                 div { class: "section-title", "Sync" }
@@ -36,10 +35,16 @@ pub fn sidebar(state: State) -> NodeHandle {
     }
 }
 
-/// All inboxes with each account's inbox under it, then Sent and Drafts.
+/// All inboxes with each account's inbox under it, then Sent and Drafts,
+/// then the labels the person pinned.
 #[component]
 fn unified(state: State, sidebar: Sidebar) -> NodeHandle {
     let mut rows = Vec::new();
+    let pinned: Vec<FolderEntry> = sidebar
+        .accounts
+        .iter()
+        .flat_map(|a| a.labels.pinned.iter().cloned())
+        .collect();
     let mut everywhere = sidebar.everywhere.into_iter();
     if let Some(all) = everywhere.next() {
         rows.push(folder_row(__scope, state, all, None, false));
@@ -56,41 +61,10 @@ fn unified(state: State, sidebar: Sidebar) -> NodeHandle {
     for entry in everywhere {
         rows.push(folder_row(__scope, state, entry, None, false));
     }
+    for entry in pinned {
+        rows.push(folder_row(__scope, state, entry, None, false));
+    }
     rsx! { div { class: "folder-group", {rows} } }
-}
-
-/// The person's own labels, under the account they belong to when there is
-/// more than one.
-#[component]
-fn labels(state: State, sidebar: Sidebar) -> NodeHandle {
-    let several = sidebar.accounts.len() > 1;
-    let mut rows = Vec::new();
-    for (i, account) in sidebar.accounts.into_iter().enumerate() {
-        if account.labels.is_empty() {
-            continue;
-        }
-        if several {
-            let name = account.account.address.to_string();
-            rows.push(rsx! {
-                div { class: "label-account",
-                    span { class: "dot", style: {format!("background: {}", account_color(i))} }
-                    {name}
-                }
-            });
-        }
-        for entry in account.labels {
-            rows.push(folder_row(__scope, state, entry, None, false));
-        }
-    }
-    if rows.is_empty() {
-        return rsx! { div {} };
-    }
-    rsx! {
-        div { class: "folder-group",
-            div { class: "section-title", "Labels" }
-            {rows}
-        }
-    }
 }
 
 #[component]

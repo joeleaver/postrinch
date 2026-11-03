@@ -1,5 +1,6 @@
 //! What the window shows, as signals, and loading it through the commands.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use postrinch_commands::{Commands, Folder, Sidebar, Thread, ThreadPage};
@@ -20,6 +21,10 @@ pub struct State {
     /// How many of the folder's threads to show.
     pub shown: Signal<usize>,
     pub page: Signal<Option<ThreadPage>>,
+    /// Whether the sidebar shows every label, hidden ones included.
+    pub show_all: Signal<bool>,
+    /// Sidebar rows the person opened or closed (see `ui::labels`).
+    pub toggled: Signal<HashSet<String>>,
     pub selected: Signal<Option<(EmailAddress, ProviderThreadId)>>,
     pub thread: Signal<Option<Thread>>,
     pub sync: Signal<Vec<AccountSync>>,
@@ -38,6 +43,8 @@ impl State {
             folder: Signal::new(Folder::Everywhere(SystemLabel::Inbox)),
             shown: Signal::new(PAGE),
             page: Signal::new(None),
+            show_all: Signal::new(false),
+            toggled: Signal::new(HashSet::new()),
             selected: Signal::new(None),
             thread: Signal::new(None),
             sync: Signal::new(Vec::new()),

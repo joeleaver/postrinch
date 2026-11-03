@@ -60,15 +60,34 @@ fn label_threads_stay_within_the_account() {
 }
 
 #[test]
-fn counts_unread_messages() {
+fn label_stats_tell_folders_from_tags() {
     let (_dir, store, me) = setup();
     store
-        .put_message(&message(&me, "m1", "t1", 100, "One", "a"), None)
+        .put_label(
+            &me,
+            &postrinch_model::Label::new("Label_2", "Clients", postrinch_model::LabelKind::User),
+        )
         .unwrap();
-    let mut read = message(&me, "m2", "t1", 200, "Two", "b");
-    read.flags.unread = false;
-    store.put_message(&read, None).unwrap();
-    assert_eq!(store.unread_count(&me, "INBOX").unwrap(), 1);
-    assert_eq!(store.unread_count(&me, "Label_1").unwrap(), 0);
-    assert_eq!(store.unread_count(&me, "NO_SUCH_LABEL").unwrap(), 0);
+    // Filed in Receipts alone, out of the inbox: folder-like.
+    let mut filed = message(&me, "m1", "t1", 100, "Receipt", "a");
+    filed.labels = vec!["Label_1".into()];
+    store.put_message(&filed, None).unwrap();
+    // In the inbox and tagged with both labels.
+    let mut tagged = message(&me, "m2", "t2", 200, "Hello", "b");
+    tagged.labels = vec!["INBOX".into(), "Label_1".into(), "Label_2".into()];
+    tagged.flags.unread = false;
+    store.put_message(&tagged, None).unwrap();
+    // Out of the inbox but with two of the person's labels.
+    let mut both = message(&me, "m3", "t3", 300, "Both", "c");
+    both.labels = vec!["Label_1".into(), "Label_2".into()];
+    store.put_message(&both, None).unwrap();
+
+    let stats = store.label_stats(&me).unwrap();
+    let receipts = stats["Label_1"];
+    assert_eq!(receipts.messages, 3);
+    assert_eq!(receipts.unread, 2);
+    assert_eq!(receipts.in_inbox, 1);
+    assert_eq!(receipts.filed_only_here, 1);
+    assert_eq!(stats["INBOX"].messages, 1);
+    assert_eq!(stats["Label_2"].filed_only_here, 0);
 }

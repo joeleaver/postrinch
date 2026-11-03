@@ -69,11 +69,11 @@ html, body { margin: 0; height: 100%; }
     color: var(--muted);
 }
 .folder {
-    height: 34px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 6px;
     padding: 0 10px;
     border-radius: 6px;
     cursor: pointer;
@@ -91,6 +91,29 @@ html, body { margin: 0; height: 100%; }
     white-space: nowrap;
 }
 .count { color: var(--muted); font-weight: 500; }
+.chevron {
+    width: 14px;
+    flex-shrink: 0;
+    color: var(--muted);
+    font-size: 11px;
+    text-align: center;
+}
+.folder .folder-name { flex: 1; }
+.folder.heading .folder-name, .label-account {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.folder.heading { margin-top: 10px; height: 28px; }
+.folder.from-app .folder-name { color: var(--ink-2); }
+.show-all {
+    padding: 8px 10px 8px 22px;
+    font-size: 12px;
+    color: var(--accent);
+    cursor: pointer;
+}
 .folder.chosen .count { color: var(--accent-ink); }
 .label-account {
     display: flex;

@@ -1,5 +1,6 @@
 //! The window: a header over the sidebar, the thread list and the reader.
 
+mod labels;
 mod list;
 mod reader;
 mod sidebar;

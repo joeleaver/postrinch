@@ -9,8 +9,6 @@ use std::collections::HashSet;
 
 use postrinch_model::{Flags, Label, LabelColor, LabelKind, LabelVisibility, SystemLabel};
 
-#[cfg(test)]
-use super::api::LabelColorResource;
 use super::api::LabelResource;
 
 const UNREAD: &str = "UNREAD";

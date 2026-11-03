@@ -86,7 +86,7 @@ fn sidebar_unifies_inboxes_and_lists_each_accounts_labels() {
     let first = &sidebar.accounts[0];
     assert_eq!(first.account.address, a);
     assert_eq!(first.inbox.unread, 1);
-    let labels: Vec<_> = first.labels.iter().map(|f| f.name.as_str()).collect();
+    let labels: Vec<_> = first.labels.own.iter().map(|n| n.name.as_str()).collect();
     assert_eq!(labels, ["Receipts"]);
 }
 

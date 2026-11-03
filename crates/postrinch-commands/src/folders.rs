@@ -1,6 +1,8 @@
 //! Folders: what the sidebar lists and what a thread list shows.
 
 use postrinch_model::{Account, EmailAddress, Label, LabelKind, SystemLabel};
+
+use crate::labels::{LabelTree, label_tree};
 use serde::{Deserialize, Serialize};
 
 use crate::{CommandError, CommandResult, Commands};
@@ -26,13 +28,12 @@ pub struct FolderEntry {
     pub unread: usize,
 }
 
-/// One account in the sidebar: its inbox and the labels the person made.
+/// One account in the sidebar: its inbox and its labels.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountFolders {
     pub account: Account,
     pub inbox: FolderEntry,
-    /// The person's own labels, by name.
-    pub labels: Vec<FolderEntry>,
+    pub labels: LabelTree,
 }
 
 /// Everything the sidebar lists.
@@ -41,6 +42,17 @@ pub struct Sidebar {
     /// All inboxes, then the unified Sent and Drafts.
     pub everywhere: Vec<FolderEntry>,
     pub accounts: Vec<AccountFolders>,
+}
+
+impl Sidebar {
+    /// The sidebar's entry for a folder, wherever it is listed.
+    pub fn entry(&self, folder: &Folder) -> Option<&FolderEntry> {
+        self.everywhere
+            .iter()
+            .chain(self.accounts.iter().map(|a| &a.inbox))
+            .chain(self.accounts.iter().flat_map(|a| a.labels.entries()))
+            .find(|e| &e.folder == folder)
+    }
 }
 
 /// The system labels the sidebar unifies across accounts, in its order.
@@ -55,36 +67,26 @@ impl Commands {
     pub fn sidebar(&self) -> CommandResult<Sidebar> {
         let mut accounts = Vec::new();
         for account in self.store.accounts()? {
-            let labels = self.store.labels(&account.address)?;
+            let address = &account.address;
+            let labels = self.store.labels(address)?;
+            let stats = self.store.label_stats(address)?;
+            let prefs = self.store.label_prefs(address)?;
             let inbox_id = system_label(&labels, SystemLabel::Inbox).map(|l| l.provider_id.clone());
             let inbox = FolderEntry {
                 folder: Folder::Label {
-                    account: account.address.clone(),
+                    account: address.clone(),
                     label: inbox_id.clone().unwrap_or_default(),
                 },
-                name: account.address.to_string(),
-                unread: match &inbox_id {
-                    Some(id) => self.store.unread_count(&account.address, id)?,
-                    None => 0,
-                },
+                name: address.to_string(),
+                unread: inbox_id
+                    .and_then(|id| stats.get(&id))
+                    .map_or(0, |s| s.unread),
             };
-            let mut own = Vec::new();
-            for label in labels.iter().filter(|l| l.kind == LabelKind::User) {
-                own.push(FolderEntry {
-                    folder: Folder::Label {
-                        account: account.address.clone(),
-                        label: label.provider_id.clone(),
-                    },
-                    name: label.name.clone(),
-                    unread: self
-                        .store
-                        .unread_count(&account.address, &label.provider_id)?,
-                });
-            }
+            let labels = label_tree(address, &labels, &prefs, &stats);
             accounts.push(AccountFolders {
                 account,
                 inbox,
-                labels: own,
+                labels,
             });
         }
         let mut everywhere = Vec::new();

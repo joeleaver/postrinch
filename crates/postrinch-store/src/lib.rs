@@ -29,7 +29,7 @@ use std::time::Duration;
 use rhypedb_engine::database::Database;
 
 pub use error::{StoreError, StoreResult};
-pub use mailboxes::ThreadEntry;
+pub use mailboxes::{LabelStats, ThreadEntry};
 pub use search::SearchHit;
 
 const SCHEMA: &str = include_str!("schema.rhype");
