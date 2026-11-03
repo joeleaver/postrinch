@@ -54,6 +54,8 @@ impl SecretStore for Keychain {
     }
 
     fn set(&self, account: &EmailAddress, secret: &str) -> SyncResult<()> {
+        #[cfg(all(unix, not(target_os = "macos")))]
+        super::secret_service::ensure_default_collection()?;
         Self::entry(account)?
             .set_password(secret)
             .map_err(|e| SyncError::Keychain(e.to_string()))

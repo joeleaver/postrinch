@@ -24,6 +24,10 @@ tokio = { version = "1", features = ["rt", "net", "io-util", "time", "sync", "ma
 tracing = "0.1"
 url = "2"
 
+# The Secret Service, to create a default keyring when there is none.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+secret-service = { version = "5.2", features = ["crypto-rust"] }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
