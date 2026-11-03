@@ -3,10 +3,12 @@
 //!
 //! Each command takes plain arguments and returns plain results that
 //! serialize, so the MCP server can expose the same commands the window
-//! calls. These are the read-only commands; writing ones, and the person's
-//! confirmation they need, come with sending.
+//! calls. Reading, and changing mail in ways that can be undone and stay in
+//! the account ([`ThreadAction`]); sending, and the person's confirmation
+//! it needs, come later.
 
 mod accounts;
+mod actions;
 mod error;
 mod folders;
 mod labels;
@@ -16,6 +18,7 @@ mod threads;
 use postrinch_store::Store;
 
 pub use accounts::AccountInfo;
+pub use actions::{ThreadAction, ThreadRef};
 pub use error::{CommandError, CommandResult};
 pub use folders::{AccountFolders, Folder, FolderEntry, Sidebar};
 pub use labels::{AppLabels, Chip, LabelNode, LabelRole, LabelTree, app_of, role};

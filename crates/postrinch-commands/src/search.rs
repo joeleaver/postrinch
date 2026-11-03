@@ -2,7 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use postrinch_model::{EmailAddress, Message, ProviderThreadId, ThreadSummary};
+use postrinch_model::{
+    EmailAddress, LabelKind, Message, ProviderThreadId, SystemLabel, ThreadSummary,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::labels::chips;
@@ -50,7 +52,22 @@ impl Commands {
         // The best-scoring message of each thread, in the order found.
         let mut best: Vec<Message> = Vec::new();
         let mut seen: HashSet<(String, ProviderThreadId)> = HashSet::new();
+        let mut set_aside: HashMap<String, HashSet<String>> = HashMap::new();
         for hit in self.store.search(query, MESSAGE_LIMIT)? {
+            // The trash and spam are left out, as from every mailbox.
+            let account = hit.message.account.key();
+            if !set_aside.contains_key(&account) {
+                let ids = self.set_aside_labels(&hit.message.account)?;
+                set_aside.insert(account.clone(), ids);
+            }
+            if hit
+                .message
+                .labels
+                .iter()
+                .any(|l| set_aside[&account].contains(l))
+            {
+                continue;
+            }
             let key = (hit.message.account.key(), hit.message.thread.clone());
             if seen.insert(key) {
                 best.push(hit.message);
@@ -90,6 +107,22 @@ impl Commands {
             });
         }
         Ok(results)
+    }
+
+    /// The provider's ids for the account's trash and spam.
+    fn set_aside_labels(&self, account: &EmailAddress) -> CommandResult<HashSet<String>> {
+        Ok(self
+            .store
+            .labels(account)?
+            .into_iter()
+            .filter(|l| {
+                matches!(
+                    l.kind,
+                    LabelKind::System(SystemLabel::Trash | SystemLabel::Spam)
+                )
+            })
+            .map(|l| l.provider_id)
+            .collect())
     }
 
     pub(crate) fn account_chips(
