@@ -11,25 +11,44 @@ use crate::ui::account_color;
 
 #[component]
 pub fn thread_list(state: State) -> NodeHandle {
+    let searching = move || state.search.get().is_some();
     rsx! {
         section { class: "list",
-            div { class: "list-head",
-                h1 { {move || title(&state.folder.get(), state.sidebar.get().as_ref())} }
-                span { class: "list-count", {move || unread_line(&state.folder.get(), state.sidebar.get().as_ref())} }
+            if searching() {
+                div { class: "list-head",
+                    button {
+                        class: "back",
+                        title: "Close search",
+                        onclick: move || state.close_search(),
+                        "←"
+                    }
+                    div { class: "search-head",
+                        h1 { "Search results" }
+                        span { class: "list-count", {move || search_line(state)} }
+                    }
+                }
+            } else {
+                div { class: "list-head",
+                    h1 { {move || title(&state.folder.get(), state.sidebar.get().as_ref())} }
+                    span { class: "list-count", {move || unread_line(&state.folder.get(), state.sidebar.get().as_ref())} }
+                }
             }
-            if is_inbox(&state.folder.get(), state.sidebar.get().as_ref()) {
+            if !searching() && is_inbox(&state.folder.get(), state.sidebar.get().as_ref()) {
                 {tabs(__scope, state)}
             }
             div { class: "rows",
-                for thread in state.page.get().map(|p| p.threads).unwrap_or_default() {
+                for thread in rows_now(state) {
                     div { key: row_key(thread),
                         {row(__scope, state, thread.clone())}
                     }
                 }
-                if state.page.get().is_some_and(|p| p.threads.is_empty()) {
+                if !searching() && state.page.get().is_some_and(|p| p.threads.is_empty()) {
                     div { class: "empty", "Nothing here." }
                 }
-                if state.page.get().is_some_and(|p| p.total > p.threads.len()) {
+                if searching() && state.results.get().is_some_and(|r| r.threads.is_empty()) {
+                    div { class: "empty", "No mail matches." }
+                }
+                if !searching() && state.page.get().is_some_and(|p| p.total > p.threads.len()) {
                     button {
                         class: "more",
                         onclick: move || state.shown.update(|n| *n += PAGE),
@@ -38,6 +57,36 @@ pub fn thread_list(state: State) -> NodeHandle {
                 }
             }
         }
+    }
+}
+
+/// The rows to show: the search's, while there is one, or the folder's.
+fn rows_now(state: State) -> Vec<ThreadRow> {
+    if state.search.get().is_some() {
+        state.results.get().map(|r| r.threads).unwrap_or_default()
+    } else {
+        state.page.get().map(|p| p.threads).unwrap_or_default()
+    }
+}
+
+/// "6 for “cover my shift”".
+fn search_line(state: State) -> String {
+    match state.results.get() {
+        Some(r) => {
+            let n = r.threads.len();
+            let what = if n == 1 {
+                "conversation"
+            } else {
+                "conversations"
+            };
+            let more = if r.more { "+" } else { "" };
+            format!(
+                "{}{more} {what} for \u{201c}{}\u{201d}",
+                thousands(n),
+                r.query
+            )
+        }
+        None => String::new(),
     }
 }
 
@@ -84,13 +133,14 @@ fn tabs(state: State) -> NodeHandle {
 fn row_key(thread: &ThreadRow) -> String {
     let s = &thread.summary;
     format!(
-        "{}|{}|{}|{}|{}|{:?}",
+        "{}|{}|{}|{}|{}|{:?}|{:?}",
         s.account.key(),
         s.id.0,
         s.latest.as_millis(),
         s.unread_count,
         s.message_count,
-        thread.chips
+        thread.chips,
+        thread.excerpt
     )
 }
 
@@ -122,6 +172,12 @@ fn row(state: State, thread: ThreadRow) -> NodeHandle {
         .has_attachments
         .then(|| rsx! { span { class: "attachment", title: "Has attachments", "📎" } });
     let unread = summary.unread_count > 0;
+    let snippet = match thread.excerpt {
+        Some(e) => rsx! {
+            span { class: "snippet", {e.before.clone()} mark { {e.hit.clone()} } {e.after.clone()} }
+        },
+        None => rsx! { span { class: "snippet", {summary.snippet.clone()} } },
+    };
     rsx! {
         div {
             class: {move || {
@@ -141,7 +197,7 @@ fn row(state: State, thread: ThreadRow) -> NodeHandle {
             div { class: "subject", {or_none(&summary.subject, "(no subject)")} }
             div { class: "row-bottom",
                 {chips}
-                span { class: "snippet", {summary.snippet.clone()} }
+                {snippet}
             }
         }
     }

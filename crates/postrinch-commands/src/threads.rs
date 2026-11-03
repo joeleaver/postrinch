@@ -7,7 +7,8 @@ use postrinch_model::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::labels::{Chip, chips};
+use crate::labels::Chip;
+use crate::search::Excerpt;
 use crate::{CommandResult, Commands, Folder};
 
 /// A page of a folder's threads, latest activity first.
@@ -25,6 +26,8 @@ pub struct ThreadRow {
     pub summary: ThreadSummary,
     /// Its tag-like labels, leaving out the one being listed.
     pub chips: Vec<Chip>,
+    /// Where a search matched it; `None` in a folder listing.
+    pub excerpt: Option<Excerpt>,
 }
 
 /// Gmail's inbox categories, in the order its tabs show them.
@@ -75,10 +78,7 @@ impl Commands {
             if let std::collections::hash_map::Entry::Vacant(slot) =
                 account_chips.entry(account.key())
             {
-                let labels = self.store.labels(&account)?;
-                let prefs = self.store.label_prefs(&account)?;
-                let stats = self.store.label_stats(&account)?;
-                slot.insert(chips(&labels, &prefs, &stats));
+                slot.insert(self.account_chips(&account)?);
             }
         }
         let listed = match folder {
@@ -105,7 +105,11 @@ impl Commands {
                 .filter(|l| Some(l.as_str()) != listed)
                 .filter_map(|l| known.get(l).cloned())
                 .collect();
-            threads.push(ThreadRow { summary, chips });
+            threads.push(ThreadRow {
+                summary,
+                chips,
+                excerpt: None,
+            });
         }
         Ok(ThreadPage {
             total,

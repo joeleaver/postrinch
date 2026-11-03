@@ -203,3 +203,19 @@ fn label_prefs_rename_hide_and_pin_here_only() {
     commands.set_label_prefs(&a, "Label_1", &blank).unwrap();
     assert_eq!(commands.label_prefs(&a, "Label_1").unwrap().name, None);
 }
+
+#[test]
+fn search_finds_threads_once_with_where_they_matched() {
+    let (_dir, commands, _a, _b) = setup();
+    let found = commands.search("ta2", 10).unwrap();
+    let ids: Vec<_> = found
+        .threads
+        .iter()
+        .map(|t| t.summary.id.0.as_str())
+        .collect();
+    // Both of ta2's messages match; the thread comes back once.
+    assert_eq!(ids, ["ta2"]);
+    let excerpt = found.threads[0].excerpt.as_ref().unwrap();
+    assert_eq!(excerpt.hit, "ta2");
+    assert!(commands.search("   ", 10).unwrap().threads.is_empty());
+}

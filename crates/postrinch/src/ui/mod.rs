@@ -57,11 +57,20 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     }
 }
 
-/// The right of the title bar: anything that went wrong loading.
+/// The right of the title bar: search, and anything that went wrong.
 #[component]
 fn title_status(state: State) -> NodeHandle {
     rsx! {
         div { class: "title-status",
+            div { class: "title-search",
+                TextInput {
+                    size: "xs",
+                    placeholder: "Search all mail",
+                    value_fn: move || state.search_draft.get(),
+                    oninput: move |v: String| state.search_draft.set(v),
+                    onsubmit: move || state.run_search(),
+                }
+            }
             for error in state.error.get() {
                 div { key: error.clone(), class: "header-error", {error.clone()} }
             }

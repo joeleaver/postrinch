@@ -4,7 +4,7 @@ use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use postrinch_commands::{Commands, Folder, Sidebar, Thread, ThreadPage};
+use postrinch_commands::{Commands, Folder, SearchResults, Sidebar, Thread, ThreadPage};
 use postrinch_model::{EmailAddress, LabelPrefs, ProviderThreadId, SystemLabel};
 use rinch::prelude::*;
 use rinch::{Effect, batch};
@@ -19,6 +19,9 @@ thread_local! {
     static COMMANDS: OnceCell<Rc<Commands>> = const { OnceCell::new() };
 }
 
+/// How many threads a search shows.
+const SEARCH_LIMIT: usize = 100;
+
 /// How many more threads "Show more" loads.
 pub const PAGE: usize = 100;
 
@@ -32,6 +35,11 @@ pub struct State {
     /// How many of the folder's threads to show.
     pub shown: Signal<usize>,
     pub page: Signal<Option<ThreadPage>>,
+    /// What the search box holds.
+    pub search_draft: Signal<String>,
+    /// The search being shown in place of the folder, if any.
+    pub search: Signal<Option<String>>,
+    pub results: Signal<Option<SearchResults>>,
     /// Whether the sidebar shows every label, hidden ones included.
     pub show_all: Signal<bool>,
     /// Sidebar rows the person opened or closed (see `ui::labels`).
@@ -57,6 +65,9 @@ impl State {
             category: Signal::new(None),
             shown: Signal::new(PAGE),
             page: Signal::new(None),
+            search_draft: Signal::new(String::new()),
+            search: Signal::new(None),
+            results: Signal::new(None),
             show_all: Signal::new(false),
             toggled: Signal::new(HashSet::new()),
             selected: Signal::new(None),
@@ -95,6 +106,21 @@ impl State {
                 Err(e) => self.error.set(Some(e.to_string())),
             }
         });
+        let searching = commands.clone();
+        Effect::new(move || {
+            self.revision.get();
+            let results = match self.search.get() {
+                Some(query) => match searching.search(&query, SEARCH_LIMIT) {
+                    Ok(results) => Some(results),
+                    Err(e) => {
+                        self.error.set(Some(e.to_string()));
+                        None
+                    }
+                },
+                None => None,
+            };
+            self.results.set(results);
+        });
         Effect::new(move || {
             self.revision.get();
             let thread = match self.selected.get() {
@@ -122,8 +148,26 @@ impl State {
         }
     }
 
+    /// Show the threads that match what the search box holds.
+    pub fn run_search(self) {
+        let query = self.search_draft.get();
+        batch(|| {
+            self.selected.set(None);
+            self.search.set((!query.trim().is_empty()).then_some(query));
+        });
+    }
+
+    /// Go back from search results to the folder.
+    pub fn close_search(self) {
+        batch(|| {
+            self.search.set(None);
+            self.search_draft.set(String::new());
+        });
+    }
+
     pub fn open_folder(self, folder: Folder) {
         batch(|| {
+            self.search.set(None);
             self.shown.set(PAGE);
             self.selected.set(None);
             self.category.set(None);
