@@ -20,6 +20,7 @@ type Account {
     sync_cursor: String
     labels: [Label] @inverse(Label.account)
     threads: [Thread] @inverse(Thread.account)
+    messages: [Message] @inverse(Message.account)
 }
 
 type Label {

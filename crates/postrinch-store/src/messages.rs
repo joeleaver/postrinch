@@ -93,7 +93,7 @@ impl Store {
             .bool("unread", flags.unread)
             .bool("starred", flags.starred)
             .build();
-        self.db.update(TYPE, message_id, fields)?;
+        self.db_update(TYPE, message_id, fields)?;
         self.set_links(TYPE, message_id, "labels", &label_ids)
     }
 
@@ -132,11 +132,11 @@ impl Store {
             return Ok(());
         };
         let thread = self.link(TYPE, fields.id(), "thread")?;
-        self.db.delete(TYPE, fields.id())?;
+        self.db_delete(TYPE, fields.id())?;
         if let Some(thread) = thread
             && self.links(THREAD, thread, "messages")?.is_empty()
         {
-            self.db.delete(THREAD, thread)?;
+            self.db_delete(THREAD, thread)?;
         }
         Ok(())
     }
@@ -159,6 +159,26 @@ impl Store {
             .collect::<StoreResult<Vec<_>>>()?;
         messages.sort_by_key(|m| m.received);
         Ok(messages)
+    }
+
+    /// Whether a message is stored.
+    pub fn has_message(&self, account: &EmailAddress, id: &ProviderMessageId) -> StoreResult<bool> {
+        Ok(self.find(TYPE, "key", &scoped(account, &id.0))?.is_some())
+    }
+
+    /// The provider ids of every message stored for an account, for
+    /// reconciling with the provider's own list after a full sync.
+    pub fn message_ids(&self, account: &EmailAddress) -> StoreResult<Vec<ProviderMessageId>> {
+        let prefix = scoped(account, "");
+        let mut ids = Vec::new();
+        for object in self.db.scan_type_projected(TYPE, &["key"])? {
+            let key = Fields::new(TYPE, object).str("key")?;
+            if let Some(id) = key.strip_prefix(&prefix) {
+                ids.push(ProviderMessageId(id.to_owned()));
+            }
+        }
+        ids.sort();
+        Ok(ids)
     }
 
     pub(crate) fn message_id(

@@ -1,0 +1,29 @@
+[package]
+name = "postrinch-sync"
+description = "Postrinch's providers: Google sign-in, Gmail sync into the store."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+postrinch-model = { workspace = true }
+postrinch-store = { workspace = true }
+base64 = "0.22"
+dirs = "7"
+keyring = "4.2"
+mail-parser = "1.0"
+rand = "0.10"
+reqwest = { version = "0.13", features = ["json", "form", "query", "gzip"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt", "net", "io-util", "time", "sync", "macros"] }
+tracing = "0.1"
+url = "2"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+wiremock = "0.6"

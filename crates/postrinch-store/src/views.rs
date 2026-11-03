@@ -85,7 +85,7 @@ impl Store {
     /// Remove a view by name. Removing one that is not there does nothing.
     pub fn remove_saved_view(&self, name: &str) -> StoreResult<()> {
         if let Some(view) = self.find(TYPE, "name", name)? {
-            self.db.delete(TYPE, view.id())?;
+            self.db_delete(TYPE, view.id())?;
         }
         Ok(())
     }

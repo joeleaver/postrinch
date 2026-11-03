@@ -243,3 +243,38 @@ fn survives_reopen() {
     assert_eq!(store.message(&me, &m.id).unwrap(), Some(m));
     assert_eq!(store.search("persisted", 10).unwrap().len(), 1);
 }
+
+#[test]
+fn lists_an_accounts_message_ids_only() {
+    let (_dir, store, me) = setup();
+    let other = address("other@example.org");
+    store
+        .put_account(&Account::new(other.clone(), Provider::Google))
+        .unwrap();
+    store
+        .put_label(
+            &other,
+            &Label {
+                provider_id: "INBOX".into(),
+                name: "Inbox".into(),
+                kind: LabelKind::System(SystemLabel::Inbox),
+            },
+        )
+        .unwrap();
+    for (account, id) in [(&me, "m2"), (&me, "m1"), (&other, "m9")] {
+        store
+            .put_message(&message(account, id, "t", 1, "s", "b"), None)
+            .unwrap();
+    }
+
+    let ids = store.message_ids(&me).unwrap();
+    assert_eq!(
+        ids,
+        [
+            ProviderMessageId("m1".into()),
+            ProviderMessageId("m2".into())
+        ]
+    );
+    assert!(store.has_message(&me, &ids[0]).unwrap());
+    assert!(!store.has_message(&other, &ids[0]).unwrap());
+}

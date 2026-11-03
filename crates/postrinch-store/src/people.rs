@@ -18,7 +18,7 @@ impl Store {
             if existing.opt_str("name")?.is_none()
                 && let Some(name) = &mailbox.name
             {
-                self.db.update(
+                self.db_update(
                     TYPE,
                     existing.id(),
                     FieldsBuilder::new().str("name", name.clone()).build(),

@@ -11,6 +11,7 @@ repository = "https://github.com/joeleaver/postrinch"
 [workspace.dependencies]
 postrinch-model = { path = "crates/postrinch-model" }
 postrinch-store = { path = "crates/postrinch-store" }
+postrinch-sync = { path = "crates/postrinch-sync" }
 
 # rhypedb, from its repository. The ONNX/fastembed stack stays off until
 # semantic search turns it on deliberately.

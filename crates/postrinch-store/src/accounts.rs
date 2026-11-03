@@ -75,8 +75,7 @@ impl Store {
         state: &AccountState,
     ) -> StoreResult<()> {
         let id = self.account_id(address)?;
-        self.db
-            .update(TYPE, id, FieldsBuilder::new().json("state", state).build())?;
+        self.db_update(TYPE, id, FieldsBuilder::new().json("state", state).build())?;
         Ok(())
     }
 
@@ -92,7 +91,7 @@ impl Store {
     pub fn set_sync_cursor(&self, address: &EmailAddress, cursor: Option<&str>) -> StoreResult<()> {
         let id = self.account_id(address)?;
         let fields = FieldsBuilder::new().opt_str("sync_cursor", cursor).build();
-        self.db.update(TYPE, id, fields)?;
+        self.db_update(TYPE, id, fields)?;
         Ok(())
     }
 
@@ -101,7 +100,7 @@ impl Store {
     /// them.
     pub fn remove_account(&self, address: &EmailAddress) -> StoreResult<()> {
         let id = self.account_id(address)?;
-        self.db.delete(TYPE, id)?;
+        self.db_delete(TYPE, id)?;
         Ok(())
     }
 

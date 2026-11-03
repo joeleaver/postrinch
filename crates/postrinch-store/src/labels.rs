@@ -49,7 +49,7 @@ impl Store {
     /// that is not there does nothing.
     pub fn remove_label(&self, account: &EmailAddress, provider_id: &str) -> StoreResult<()> {
         if let Some(label) = self.find(TYPE, "key", &scoped(account, provider_id))? {
-            self.db.delete(TYPE, label.id())?;
+            self.db_delete(TYPE, label.id())?;
         }
         Ok(())
     }

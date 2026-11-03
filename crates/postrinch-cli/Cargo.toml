@@ -1,0 +1,21 @@
+[package]
+name = "postrinch-cli"
+description = "A command line for Postrinch: add accounts, sync, search. For development and for scripts until the window exists."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "postrinch"
+path = "src/main.rs"
+
+[dependencies]
+postrinch-model = { workspace = true }
+postrinch-store = { workspace = true }
+postrinch-sync = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+dirs = "7"
+open = "5"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
