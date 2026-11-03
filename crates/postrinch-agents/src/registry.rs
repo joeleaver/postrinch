@@ -15,6 +15,8 @@ use postrinch_model::{EmailAddress, Timestamp};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::setup::App;
+
 const KEY_PREFIX: &str = "postrinch_agent_";
 /// A last use is written at most this often.
 const TOUCH_EVERY_MS: i64 = 60_000;
@@ -54,7 +56,18 @@ pub struct Agent {
     pub reach: Reach,
     pub created: Timestamp,
     pub last_used: Option<Timestamp>,
+    /// Where Postrinch put its entry, when the person connected the app from
+    /// Postrinch rather than by hand.
+    #[serde(default)]
+    pub setup: Option<Setup>,
     key_sha256: String,
+}
+
+/// An app's settings entry Postrinch wrote for an agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Setup {
+    pub app: App,
+    pub entry: String,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -128,6 +141,7 @@ impl Agents {
             reach,
             created: now(),
             last_used: None,
+            setup: None,
             key_sha256: hex(&Sha256::digest(key.as_bytes())),
         };
         self.agents.push(agent.clone());
@@ -147,6 +161,37 @@ impl Agents {
         let removed = self.agents.remove(at);
         self.save()?;
         Ok(Some(removed))
+    }
+
+    /// `base`, or `base 2`, `base 3`…: a name no agent has yet.
+    pub fn free_name(&self, base: &str) -> String {
+        let taken = |n: &str| self.agents.iter().any(|a| a.name.eq_ignore_ascii_case(n));
+        let base = base.trim();
+        if !taken(base) {
+            return base.to_owned();
+        }
+        (2..)
+            .map(|i| format!("{base} {i}"))
+            .find(|n| !taken(n))
+            .expect("some number is free")
+    }
+
+    /// Change which accounts an agent sees. Takes effect on its next call.
+    pub fn set_reach(&mut self, id: &str, reach: Reach) -> Result<(), RegistryError> {
+        if let Some(agent) = self.agents.iter_mut().find(|a| a.id == id) {
+            agent.reach = reach;
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    /// Record where Postrinch put an agent's entry.
+    pub fn set_setup(&mut self, id: &str, setup: Option<Setup>) -> Result<(), RegistryError> {
+        if let Some(agent) = self.agents.iter_mut().find(|a| a.id == id) {
+            agent.setup = setup;
+            self.save()?;
+        }
+        Ok(())
     }
 
     /// The agent a key belongs to.
@@ -267,6 +312,18 @@ mod tests {
         wrong.push(if key.ends_with('A') { 'B' } else { 'A' });
         assert!(again.find_by_key(&wrong).is_none());
         assert!(again.find_by_key("postrinch_agent_nope_x").is_none());
+
+        assert_eq!(agents.free_name("claude desktop"), "claude desktop 2");
+        assert_eq!(agents.free_name("Cursor"), "Cursor");
+        agents.set_reach(&agent.id, Reach::Every).unwrap();
+        let setup = Setup {
+            app: App::ClaudeDesktop,
+            entry: "postrinch-claude-desktop".into(),
+        };
+        agents.set_setup(&agent.id, Some(setup.clone())).unwrap();
+        let again = Agents::load(&path).unwrap();
+        assert_eq!(again.list()[0].reach, Reach::Every);
+        assert_eq!(again.list()[0].setup, Some(setup));
 
         agents.remove("Claude Desktop").unwrap().unwrap();
         assert!(Agents::load(&path).unwrap().find_by_key(&key).is_none());

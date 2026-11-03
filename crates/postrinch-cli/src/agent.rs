@@ -1,8 +1,8 @@
 //! `postrinch-cli agent`: make, list and remove the agents that may connect
-//! through `postrinch-mcp`. Until Settings › Agents exists, this is how
-//! the person sets one up. Works while the window is open: it touches only
-//! the agents file, never the store.
+//! through `postrinch-mcp`, as Settings › Agents does. Works while the
+//! window is open: it touches only the agents file, never the store.
 
+use postrinch_agents::setup::{bridge_path, entry_name, json_snippet};
 use postrinch_agents::{Agents, Reach, wire};
 use postrinch_model::{EmailAddress, Timestamp};
 
@@ -26,23 +26,18 @@ pub(crate) fn run(command: AgentCommand) -> Result<()> {
             };
             let (agent, key) = agents.create(&name, reach)?;
             let bridge = bridge_path();
+            let entry = entry_name(&agent.name);
             println!(
                 "Agent {:?} made. Its key is shown this once:\n\n  {key}\n",
                 agent.name
             );
             println!("Add this to the app's MCP servers (Claude Desktop, Cursor, …):\n");
-            let entry = serde_json::json!({
-                format!("postrinch-{}", slug(&agent.name)): {
-                    "command": bridge,
-                    "env": { wire::KEY_ENV: key },
-                }
-            });
-            println!("{}\n", serde_json::to_string_pretty(&entry)?);
+            println!("{}\n", json_snippet(&entry, &bridge, &key));
             println!("Or for Claude Code:\n");
             println!(
-                "  claude mcp add postrinch-{} --env {}={key} -- {bridge}",
-                slug(&agent.name),
+                "  claude mcp add {entry} --env {}={key} -- {}",
                 wire::KEY_ENV,
+                bridge.display()
             );
         }
         AgentCommand::List => {
@@ -69,44 +64,22 @@ pub(crate) fn run(command: AgentCommand) -> Result<()> {
             }
         }
         AgentCommand::Remove { name } => match agents.remove(&name)? {
-            Some(agent) => println!(
-                "Removed {:?}: its key no longer works. Remove its entry from the app's MCP servers too.",
-                agent.name
-            ),
+            Some(agent) => {
+                println!("Removed {:?}: its key no longer works.", agent.name);
+                match &agent.setup {
+                    Some(setup) => match setup.app.remove(&setup.entry) {
+                        Ok(_) => println!("Its entry is out of {}'s settings.", setup.app.name()),
+                        Err(e) => {
+                            println!("Its entry in {}'s settings stays: {e}", setup.app.name())
+                        }
+                    },
+                    None => println!("Remove its entry from the app's MCP servers too."),
+                }
+            }
             None => return Err(format!("there is no agent {name:?}").into()),
         },
     }
     Ok(())
-}
-
-/// `postrinch-mcp`, beside this program.
-fn bridge_path() -> String {
-    let name = if cfg!(windows) {
-        "postrinch-mcp.exe"
-    } else {
-        "postrinch-mcp"
-    };
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
-        .map_or_else(|| name.to_owned(), |p| p.display().to_string())
-}
-
-fn slug(name: &str) -> String {
-    let slug: String = name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    slug.split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
 }
 
 fn when(t: Timestamp) -> String {
