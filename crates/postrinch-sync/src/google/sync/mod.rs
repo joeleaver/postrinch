@@ -13,7 +13,10 @@ mod backfill;
 mod cursor;
 mod full;
 mod incremental;
+mod keep;
 mod messages;
+
+pub use keep::{KeepOptions, SyncEvent, SyncEventFn};
 
 use std::collections::HashSet;
 use std::sync::Arc;

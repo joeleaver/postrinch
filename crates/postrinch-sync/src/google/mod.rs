@@ -19,4 +19,6 @@ pub use auth::GoogleAuth;
 pub use config::ClientConfig;
 pub use oauth::{Endpoints, SCOPES};
 pub use secrets::{Keychain, MemorySecrets, SecretStore};
-pub use sync::{GmailSync, Phase, Progress, ProgressFn, SyncReport};
+pub use sync::{
+    GmailSync, KeepOptions, Phase, Progress, ProgressFn, SyncEvent, SyncEventFn, SyncReport,
+};
