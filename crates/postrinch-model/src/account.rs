@@ -1,3 +1,5 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::EmailAddress;
@@ -26,6 +28,25 @@ pub enum SignInReason {
     ScopesMissing { missing: Vec<String> },
     /// No credential is stored for the account (the keychain entry is gone).
     NoCredential,
+}
+
+impl fmt::Display for SignInReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CredentialRejected { detail } => {
+                write!(f, "the provider no longer accepts its sign-in ({detail})")
+            }
+            Self::AdminPolicy { detail } => {
+                write!(f, "an administrator's policy blocks Postrinch ({detail})")
+            }
+            Self::ScopesMissing { missing } => write!(
+                f,
+                "access to {} was not granted; sign in again and allow it",
+                missing.join(" and ")
+            ),
+            Self::NoCredential => f.write_str("there is no saved sign-in for it on this machine"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

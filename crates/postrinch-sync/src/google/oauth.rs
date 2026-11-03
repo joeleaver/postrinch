@@ -116,16 +116,13 @@ impl OAuth {
         verifier: &str,
         redirect_uri: &str,
     ) -> SyncResult<Tokens> {
-        let tokens = self
-            .token_request(&[
-                ("grant_type", "authorization_code"),
-                ("code", code),
-                ("code_verifier", verifier),
-                ("redirect_uri", redirect_uri),
-            ])
-            .await?;
-        check_scopes(&tokens.scope)?;
-        Ok(tokens)
+        self.token_request(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("code_verifier", verifier),
+            ("redirect_uri", redirect_uri),
+        ])
+        .await
     }
 
     /// A new access token. A refresh response that lists its scopes is
@@ -197,7 +194,7 @@ impl OAuth {
 }
 
 /// Refuse a grant that left out a scope Postrinch needs.
-fn check_scopes(granted: &str) -> SyncResult<()> {
+pub(crate) fn check_scopes(granted: &str) -> SyncResult<()> {
     let granted: Vec<&str> = granted.split_whitespace().collect();
     let missing: Vec<String> = REQUIRED_SCOPES
         .iter()

@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 
 use super::ClientConfig;
 use super::loopback::Loopback;
-use super::oauth::{Endpoints, OAuth};
+use super::oauth::{Endpoints, OAuth, check_scopes};
 use super::pkce::Pkce;
 use super::secrets::SecretStore;
 use crate::{SyncError, SyncResult};
@@ -87,6 +87,12 @@ impl GoogleAuth {
             .refresh_token
             .clone()
             .ok_or_else(|| SyncError::SignIn("Google sent no refresh token".into()))?;
+        // A grant without what Postrinch needs is useless: give its token
+        // back rather than leave it counting against Google's limit.
+        if let Err(e) = check_scopes(&tokens.scope) {
+            self.revoke_quietly(&refresh_token).await;
+            return Err(e);
+        }
 
         let user = self.oauth.userinfo(&tokens.access_token).await?;
         if !user.email_verified {

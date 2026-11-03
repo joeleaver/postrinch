@@ -64,7 +64,7 @@ fn accounts(cx: &Context) -> Result<()> {
     for account in accounts {
         let state = match &account.state {
             AccountState::Active => "signed in".to_owned(),
-            AccountState::NeedsSignIn(reason) => format!("must sign in again ({reason:?})"),
+            AccountState::NeedsSignIn(reason) => format!("must sign in again: {reason}"),
         };
         let name = account.display_name.as_deref().unwrap_or("");
         println!("{}\t{name}\t{state}", account.address);

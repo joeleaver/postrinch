@@ -112,6 +112,13 @@ async fn sign_in_without_mail_scope_is_refused() {
         serde_json::json!({"access_token": "at", "expires_in": 3599, "refresh_token": "rt", "scope": "openid email"}),
     )
     .await;
+    Mock::given(method("POST"))
+        .and(path("/revoke"))
+        .and(body_string_contains("token=rt"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
     let auth = auth(&server, Arc::new(MemorySecrets::default()));
     let err = auth.sign_in(None, browser).await.unwrap_err();
     assert!(

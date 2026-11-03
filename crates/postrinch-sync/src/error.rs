@@ -8,7 +8,7 @@ pub enum SyncError {
     /// The account has to sign in again before anything else can happen.
     /// Callers record this on the account rather than treating it as a
     /// failure.
-    #[error("the account must sign in again: {0:?}")]
+    #[error("the account must sign in again: {0}")]
     NeedsSignIn(SignInReason),
     #[error("the OAuth client configuration: {0}")]
     Config(String),
