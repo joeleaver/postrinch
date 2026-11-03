@@ -200,3 +200,54 @@ async fn refreshes_and_reports_a_revoked_token() {
         "{err:?}"
     );
 }
+
+/// A secret store that refuses every write, like a keychain with no
+/// collection to write to.
+struct BrokenKeychain;
+
+impl SecretStore for BrokenKeychain {
+    fn get(&self, _: &EmailAddress) -> postrinch_sync::SyncResult<Option<String>> {
+        Ok(None)
+    }
+    fn set(&self, _: &EmailAddress, _: &str) -> postrinch_sync::SyncResult<()> {
+        Err(SyncError::Keychain("no collection".into()))
+    }
+    fn delete(&self, _: &EmailAddress) -> postrinch_sync::SyncResult<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn a_token_the_keychain_cannot_keep_is_revoked() {
+    let server = MockServer::start().await;
+    mock_tokens(
+        &server,
+        "authorization_code",
+        serde_json::json!({"access_token": "at", "expires_in": 3599, "refresh_token": "rt-unkept", "scope": ALL_SCOPES}),
+    )
+    .await;
+    mock_userinfo(&server, "ada@example.org").await;
+    Mock::given(method("POST"))
+        .and(path("/revoke"))
+        .and(body_string_contains("token=rt-unkept"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = ClientConfig {
+        client_id: "client".into(),
+        client_secret: "secret".into(),
+        auth_uri: format!("{}/auth", server.uri()),
+        token_uri: format!("{}/token", server.uri()),
+    };
+    let endpoints = Endpoints {
+        auth: config.auth_uri.clone(),
+        token: config.token_uri.clone(),
+        userinfo: format!("{}/userinfo", server.uri()),
+        revoke: format!("{}/revoke", server.uri()),
+    };
+    let auth = GoogleAuth::with_endpoints(config, endpoints, Arc::new(BrokenKeychain));
+    let err = auth.sign_in(None, browser).await.unwrap_err();
+    assert!(matches!(err, SyncError::Keychain(_)), "{err:?}");
+}

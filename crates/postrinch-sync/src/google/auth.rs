@@ -112,9 +112,22 @@ impl GoogleAuth {
             )));
         }
 
-        let previous = self.secret(&address, |s, a| s.get(a)).await?;
+        // A token that cannot be kept is given back, as above.
         let stored = refresh_token.clone();
-        self.secret(&address, move |s, a| s.set(a, &stored)).await?;
+        let previous = match self
+            .secret(&address, move |s, a| {
+                let previous = s.get(a)?;
+                s.set(a, &stored)?;
+                Ok(previous)
+            })
+            .await
+        {
+            Ok(previous) => previous,
+            Err(e) => {
+                self.revoke_quietly(&refresh_token).await;
+                return Err(e);
+            }
+        };
         if let Some(previous) = previous.filter(|p| *p != refresh_token) {
             self.revoke_quietly(&previous).await;
         }
