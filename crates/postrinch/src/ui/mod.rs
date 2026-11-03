@@ -4,6 +4,7 @@ mod keys;
 mod label_edit;
 mod labels;
 mod list;
+mod logo;
 mod reader;
 mod settings;
 mod sidebar;
@@ -42,7 +43,14 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     };
     actions::init(commands.clone(), sync);
     state.load(commands);
-    let brand: SectionRenderer = Rc::new(|__scope| rsx! { div { class: "brand", "postrinch" } });
+    let brand: SectionRenderer = Rc::new(|__scope| {
+        rsx! {
+            div { class: "brand",
+                {logo::logo(__scope)}
+                span { "postrinch" }
+            }
+        }
+    });
     let status: SectionRenderer = Rc::new(move |__scope| title_status(__scope, state));
     let window = rsx! {
         BorderlessWindow {

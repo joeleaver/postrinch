@@ -36,7 +36,7 @@ html, body { margin: 0; height: 100%; }
     font-size: 14px;
 }
 
-.brand { padding: 0 6px 0 10px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.brand { display: flex; align-items: center; gap: 7px; padding: 0 6px 0 8px; font-size: 15px; font-weight: 600; color: var(--accent); }
 .title-status { display: flex; align-items: center; gap: 12px; padding-right: 8px; }
 .title-search { width: 360px; margin-right: 8px; }
 .title-search .rinch-text-input__input {
