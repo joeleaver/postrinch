@@ -52,7 +52,11 @@ impl Store {
         }
         let account_id = self.account_id(account)?;
         let thread_id = self.thread_id(account, account_id, &message.thread)?;
-        let label_ids = self.label_ids(account, &message.labels)?;
+        // Changes made here and not yet forgotten win over what the
+        // provider reported (see outbox.rs).
+        let (mut labels, mut flags) = (message.labels.clone(), message.flags);
+        self.overlay(account, &message.id, &mut labels, &mut flags)?;
+        let label_ids = self.label_ids(account, &labels)?;
         let from_ids = self.person_ids(&message.headers.from)?;
         let h = &message.headers;
         let recipient_ids = self.person_ids(h.to.iter().chain(&h.cc).chain(&h.bcc))?;
@@ -63,8 +67,8 @@ impl Store {
             .opt_str("subject", h.subject.clone())
             .str("snippet", message.snippet.clone())
             .datetime("received", message.received.as_millis())
-            .bool("unread", message.flags.unread)
-            .bool("starred", message.flags.starred)
+            .bool("unread", flags.unread)
+            .bool("starred", flags.starred)
             .bool("has_attachments", message.has_attachments())
             .u64("size", message.size)
             .bool("downloaded", message.downloaded);
@@ -100,7 +104,9 @@ impl Store {
     }
 
     /// Change a stored message's labels and flags, as when the provider
-    /// reports that it was read, starred, archived or labelled.
+    /// reports that it was read, starred, archived or labelled. Changes made
+    /// here that the provider may not have yet are applied over them (see
+    /// outbox.rs).
     pub fn set_message_labels(
         &self,
         account: &EmailAddress,
@@ -109,7 +115,21 @@ impl Store {
         flags: Flags,
     ) -> StoreResult<()> {
         let message_id = self.message_id(account, id)?;
-        let label_ids = self.label_ids(account, labels)?;
+        self.write_labels(account, message_id, labels.to_vec(), flags)
+    }
+
+    /// Write a message's labels and flags, with the outbox applied over
+    /// them.
+    pub(crate) fn write_labels(
+        &self,
+        account: &EmailAddress,
+        message_id: u64,
+        mut labels: Vec<String>,
+        mut flags: Flags,
+    ) -> StoreResult<()> {
+        let provider_id = ProviderMessageId(self.get(TYPE, message_id)?.str("provider_id")?);
+        self.overlay(account, &provider_id, &mut labels, &mut flags)?;
+        let label_ids = self.label_ids(account, &labels)?;
         let fields = FieldsBuilder::new()
             .bool("unread", flags.unread)
             .bool("starred", flags.starred)

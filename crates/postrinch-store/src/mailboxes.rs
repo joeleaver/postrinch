@@ -44,8 +44,17 @@ impl Store {
         else {
             return Ok(Vec::new());
         };
+        let kind: LabelKind = label.json("kind")?;
+        let set_aside = if is_set_aside(&kind) {
+            HashSet::new()
+        } else {
+            self.set_aside(account)?
+        };
         let mut threads: Vec<u64> = Vec::new();
         for message in self.links(labels::TYPE, label.id(), "messages")? {
+            if set_aside.contains(&message) {
+                continue;
+            }
             if let Some(thread) = self.link(TYPE, message, "thread")? {
                 threads.push(thread);
             }
@@ -85,10 +94,15 @@ impl Store {
     /// How each of an account's labels is used, by provider id.
     pub fn label_stats(&self, account: &EmailAddress) -> StoreResult<HashMap<String, LabelStats>> {
         let account_id = self.account_id(account)?;
+        let set_aside = self.set_aside(account)?;
         let mut members: Vec<(String, LabelKind, Vec<u64>)> = Vec::new();
         for label in self.get_many(labels::TYPE, &self.links("Account", account_id, "labels")?)? {
-            let messages = self.links(labels::TYPE, label.id(), "messages")?;
-            members.push((label.str("provider_id")?, label.json("kind")?, messages));
+            let kind: LabelKind = label.json("kind")?;
+            let mut messages = self.links(labels::TYPE, label.id(), "messages")?;
+            if !is_set_aside(&kind) {
+                messages.retain(|m| !set_aside.contains(m));
+            }
+            members.push((label.str("provider_id")?, kind, messages));
         }
         let inbox: HashSet<u64> = members
             .iter()
@@ -135,4 +149,27 @@ impl Store {
         }
         Ok(stats)
     }
+
+    /// The account's messages in the trash or spam, which every other
+    /// mailbox leaves out, as Gmail's do.
+    fn set_aside(&self, account: &EmailAddress) -> StoreResult<HashSet<u64>> {
+        let mut found = HashSet::new();
+        for label in self.get_many(
+            labels::TYPE,
+            &self.links("Account", self.account_id(account)?, "labels")?,
+        )? {
+            if is_set_aside(&label.json("kind")?) {
+                found.extend(self.links(labels::TYPE, label.id(), "messages")?);
+            }
+        }
+        Ok(found)
+    }
+}
+
+/// The trash and spam: mailboxes whose mail no other mailbox shows.
+fn is_set_aside(kind: &LabelKind) -> bool {
+    matches!(
+        kind,
+        LabelKind::System(SystemLabel::Trash | SystemLabel::Spam)
+    )
 }

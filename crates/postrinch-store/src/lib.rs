@@ -18,18 +18,20 @@ mod labels;
 mod mailboxes;
 mod messages;
 mod objects;
+mod outbox;
 mod people;
 mod search;
 mod views;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rhypedb_engine::database::Database;
 
 pub use error::{StoreError, StoreResult};
 pub use mailboxes::{LabelStats, ThreadEntry};
+pub use outbox::OutboxEntry;
 pub use search::SearchHit;
 
 const SCHEMA: &str = include_str!("schema.rhype");
@@ -44,6 +46,8 @@ pub struct Store {
     db: Arc<Database>,
     blobs: blobs::Blobs,
     root: PathBuf,
+    /// Held while an outbox entry takes the next sequence number.
+    outbox_lock: Arc<Mutex<()>>,
 }
 
 impl Store {

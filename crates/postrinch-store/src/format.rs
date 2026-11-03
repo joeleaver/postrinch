@@ -10,6 +10,7 @@
 //! has types or fields it holds (rhypedb refuses to drop them silently).
 
 use std::path::Path;
+use std::sync::Arc;
 
 use rhypedb_engine::database::Database;
 use rhypedb_engine::object::Value;
@@ -54,6 +55,7 @@ pub(crate) fn open(root: &Path) -> StoreResult<Store> {
         db,
         blobs: blobs::Blobs::open(root.join("blobs"))?,
         root: root.to_path_buf(),
+        outbox_lock: Arc::default(),
     };
     let key = Value::String(INFO_KEY.into());
     match store.db.find_by_unique(INFO, "key", &key)? {
@@ -142,5 +144,23 @@ mod tests {
             matches!(err, StoreError::OldFormat { ref found, .. } if found.contains("Extra")),
             "{err}"
         );
+    }
+
+    #[test]
+    fn a_store_from_before_the_outbox_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let start = SCHEMA.find("type OutboxEntry").expect("the outbox type");
+        let comment = SCHEMA[..start].rfind("\n\n").expect("its comment");
+        let before = &SCHEMA[..comment];
+        let schema = rhypedb_schema::parser::parse_schema(before).unwrap();
+        let db = Database::open(schema, dir.path().join("db")).unwrap();
+        let fields = || {
+            FieldsBuilder::new()
+                .str("key", INFO_KEY)
+                .u32("version", CURRENT)
+        };
+        db.create(INFO, fields().build()).unwrap();
+        drop(db);
+        Store::open(dir.path()).expect("an added type needs no new format");
     }
 }

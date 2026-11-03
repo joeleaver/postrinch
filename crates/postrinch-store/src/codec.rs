@@ -73,8 +73,14 @@ impl Fields {
     }
 
     pub(crate) fn datetime(&self, name: &str) -> StoreResult<i64> {
+        self.opt_datetime(name)?
+            .ok_or_else(|| self.wrong(name, "DateTime"))
+    }
+
+    pub(crate) fn opt_datetime(&self, name: &str) -> StoreResult<Option<i64>> {
         match self.value(name) {
-            Value::DateTime(ms) => Ok(*ms),
+            Value::Null => Ok(None),
+            Value::DateTime(ms) => Ok(Some(*ms)),
             _ => Err(self.wrong(name, "DateTime")),
         }
     }
@@ -130,6 +136,12 @@ impl FieldsBuilder {
 
     pub(crate) fn u64(mut self, name: &str, value: u64) -> Self {
         self.0.insert(name.into(), Value::U64(value));
+        self
+    }
+
+    /// Clear an optional field.
+    pub(crate) fn null(mut self, name: &str) -> Self {
+        self.0.insert(name.into(), Value::Null);
         self
     }
 

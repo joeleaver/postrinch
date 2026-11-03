@@ -106,3 +106,24 @@ type SavedView {
     name: String @unique
     query: String
 }
+
+// A change made here to some messages (MessageChange), waiting to reach
+// the provider, and then kept until a sync has passed it. Every store write
+// of a message's labels and flags applies the account's entries over what
+// it writes, in `seq` order, so sync never undoes a change on its way out.
+// See outbox.rs.
+type OutboxEntry {
+    // "<account address key>\u001f<seq, 20 digits>".
+    key: String @unique
+    account: String
+    seq: u64
+    // The provider ids of the messages, a JSON list.
+    messages: Json
+    change: Json
+    created: DateTime
+    attempts: u32
+    // Why the last attempt failed; null after none has.
+    error: String
+    // When the provider took it; null while it waits.
+    sent: DateTime
+}
