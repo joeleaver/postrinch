@@ -114,13 +114,31 @@ impl Quota {
     }
 
     /// Wait until `account` can spend `cost` at `priority`, then spend it.
+    ///
+    /// Foreground requests are served in the order they ask: each books its
+    /// units at once, taking the balance below zero if it must, and waits
+    /// until the balance is back to zero. So a 60-unit whole message is
+    /// never starved by a stream of 20-unit header fetches that would each
+    /// fit sooner. Background requests wait until the balance covers their
+    /// cost with [`RESERVE`] to spare, and book nothing until it does: they
+    /// only ever use what foreground work leaves.
     pub(crate) async fn acquire(&self, account: &str, cost: Cost, priority: Priority) {
         let cost = cost.units();
-        let needed = match priority {
-            Priority::Foreground => cost,
-            Priority::Background => cost + RESERVE,
-        };
         let bucket = self.bucket(account).await;
+        if priority == Priority::Foreground {
+            let wait = {
+                let mut b = bucket.lock().await;
+                b.refill(Instant::now());
+                b.tokens -= cost;
+                if b.tokens >= 0.0 {
+                    return;
+                }
+                Duration::from_secs_f64(-b.tokens / b.rate)
+            };
+            tokio::time::sleep(wait).await;
+            return;
+        }
+        let needed = cost + RESERVE;
         loop {
             let wait = {
                 let mut b = bucket.lock().await;
@@ -171,6 +189,42 @@ mod tests {
         let took = start.elapsed();
         assert!(took >= Duration::from_secs(9), "{took:?}");
         assert!(took <= Duration::from_secs(11), "{took:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_whole_message_is_not_starved_by_cheaper_requests() {
+        let quota = Arc::new(Quota::default());
+        // Spend the burst, then keep ten header fetches always waiting, as
+        // a full sync does.
+        quota.acquire("a", Cost::GetMessageRaw, FG).await;
+        for _ in 0..12 {
+            quota.acquire("a", Cost::GetMessageMetadata, FG).await;
+        }
+        let stream = {
+            let quota = Arc::clone(&quota);
+            tokio::spawn(async move {
+                let mut fetches = tokio::task::JoinSet::new();
+                for _ in 0..200 {
+                    while fetches.len() >= 10 {
+                        fetches.join_next().await;
+                    }
+                    let quota = Arc::clone(&quota);
+                    fetches.spawn(async move {
+                        quota.acquire("a", Cost::GetMessageMetadata, FG).await;
+                    });
+                }
+            })
+        };
+        tokio::task::yield_now().await;
+        let start = Instant::now();
+        quota.acquire("a", Cost::GetMessageRaw, FG).await;
+        // Behind at most the ten already waiting: 260 units, under 3 s.
+        assert!(
+            start.elapsed() < Duration::from_secs(4),
+            "{:?}",
+            start.elapsed()
+        );
+        stream.abort();
     }
 
     #[tokio::test(start_paused = true)]

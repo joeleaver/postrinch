@@ -10,6 +10,9 @@ use crate::{SyncError, SyncResult};
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Profile {
     pub history_id: String,
+    /// How many messages the account holds.
+    #[serde(default)]
+    pub messages_total: u64,
 }
 
 #[derive(Debug, Deserialize)]

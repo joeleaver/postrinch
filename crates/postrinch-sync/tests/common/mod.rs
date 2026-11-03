@@ -55,7 +55,8 @@ pub async fn fixture() -> Fixture {
     store
         .put_account(&Account::new(me.clone(), Provider::Google))
         .unwrap();
-    let sync = GmailSync::new(api, store.clone());
+    // Headers only, unless a test asks for the newest whole.
+    let sync = GmailSync::new(api, store.clone()).with_whole_first(0);
     Fixture {
         server,
         store,

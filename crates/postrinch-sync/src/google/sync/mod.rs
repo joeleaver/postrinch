@@ -90,11 +90,24 @@ pub type ProgressFn = Arc<dyn Fn(Progress) + Send + Sync>;
 pub struct GmailSync {
     api: Arc<GmailApi>,
     store: Store,
+    /// How many of the newest messages a full sync downloads whole.
+    whole_first: usize,
 }
 
 impl GmailSync {
     pub fn new(api: Arc<GmailApi>, store: Store) -> Self {
-        Self { api, store }
+        Self {
+            api,
+            store,
+            whole_first: full::WHOLE_FIRST,
+        }
+    }
+
+    /// Download this many of the newest messages whole in a full sync,
+    /// rather than by their headers (by default [`full::WHOLE_FIRST`]).
+    pub fn with_whole_first(mut self, count: usize) -> Self {
+        self.whole_first = count;
+        self
     }
 
     /// Bring the store up to date with the account. When Gmail no longer

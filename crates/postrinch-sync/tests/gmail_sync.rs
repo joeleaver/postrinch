@@ -264,3 +264,42 @@ async fn a_revoked_token_marks_the_account() {
         AccountState::NeedsSignIn(SignInReason::CredentialRejected { .. })
     ));
 }
+
+#[tokio::test]
+async fn the_newest_messages_come_whole() {
+    let mut f = fixture().await;
+    f.sync = f.sync.clone().with_whole_first(1);
+    let report = first_sync(&f).await;
+    // m1 is listed first, so newest: whole. m2 by its headers.
+    assert_eq!((report.fetched, report.headers), (1, 1));
+    let m1 = f
+        .store
+        .message(&f.me, &ProviderMessageId("m1".into()))
+        .unwrap()
+        .unwrap();
+    assert!(m1.downloaded);
+    let m2 = f
+        .store
+        .message(&f.me, &ProviderMessageId("m2".into()))
+        .unwrap()
+        .unwrap();
+    assert!(!m2.downloaded);
+    assert_eq!(f.store.undownloaded(&f.me).unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn an_opened_message_downloads_at_once() {
+    let f = fixture().await;
+    first_sync(&f).await;
+    let m2 = ProviderMessageId("m2".into());
+    assert_eq!(
+        f.sync.download_now(&f.me, vec![m2.clone()]).await.unwrap(),
+        1
+    );
+    assert!(f.store.message(&f.me, &m2).unwrap().unwrap().downloaded);
+    // Only that one: m1 still waits for backfill.
+    assert_eq!(
+        f.store.undownloaded(&f.me).unwrap(),
+        [ProviderMessageId("m1".into())]
+    );
+}

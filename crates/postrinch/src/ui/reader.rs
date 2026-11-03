@@ -92,7 +92,7 @@ fn message(message: Message, when: String) -> NodeHandle {
     } else {
         rsx! {
             div { class: "message-note",
-                "Only the headers of this message are here yet. Its body is in the download queue."
+                "Downloading this message…"
             }
         }
     };

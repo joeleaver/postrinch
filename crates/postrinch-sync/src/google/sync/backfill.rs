@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use postrinch_model::EmailAddress;
+use postrinch_model::{EmailAddress, ProviderMessageId};
 use tokio::sync::RwLock;
 
 use super::{GmailSync, Phase, ProgressFn, SyncReport};
@@ -48,5 +48,36 @@ impl GmailSync {
         )
         .await?;
         Ok(report)
+    }
+
+    /// Download these messages now, at foreground priority: the person is
+    /// waiting for them. Returns how many were stored whole.
+    pub async fn download_now(
+        &self,
+        account: &EmailAddress,
+        ids: Vec<ProviderMessageId>,
+    ) -> SyncResult<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let labels = Arc::new(RwLock::new(self.refresh_labels(account).await?));
+        let mut report = SyncReport::default();
+        let account_for = account.clone();
+        let quiet: ProgressFn = Arc::new(|_| {});
+        self.for_each(
+            ids.into_iter().map(|id| id.0).collect(),
+            Phase::Bodies,
+            &quiet,
+            &mut report,
+            move |sync, id| {
+                let (account, labels) = (account_for.clone(), Arc::clone(&labels));
+                async move {
+                    sync.fetch(&account, &id, &labels, Priority::Foreground)
+                        .await
+                }
+            },
+        )
+        .await?;
+        Ok(report.fetched)
     }
 }

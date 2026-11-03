@@ -62,6 +62,8 @@ pub struct State {
     pub revision: Signal<u64>,
     /// The label being renamed or coloured.
     pub editing: Signal<Option<LabelEdit>>,
+    /// Downloads the person asked for that have finished, to forget.
+    pub downloaded: Signal<Vec<(String, String)>>,
     /// Light, dark or the system's choice, as saved.
     pub appearance: Signal<Appearance>,
     /// Whether the system prefers dark (dark when it does not say).
@@ -106,6 +108,7 @@ impl State {
             sync: Signal::new(Vec::new()),
             revision: Signal::new(0),
             editing: Signal::new(None),
+            downloaded: Signal::new(Vec::new()),
             appearance: Signal::new(settings.appearance),
             sidebar_width: Signal::new(settings.sidebar_width.unwrap_or(SIDEBAR_WIDTH)),
             list_width: Signal::new(settings.list_width.unwrap_or(LIST_WIDTH)),
@@ -166,6 +169,23 @@ impl State {
             self.revision.get();
             ask(Request::Thread(self.selected.get()));
         });
+        // An open thread's messages known only by their headers download
+        // at once: the person is reading them.
+        Effect::new(move || {
+            let Some(thread) = self.thread.get() else {
+                return;
+            };
+            let waiting: Vec<_> = thread
+                .messages
+                .iter()
+                .filter(|m| !m.downloaded)
+                .map(|m| m.id.clone())
+                .collect();
+            if !waiting.is_empty() {
+                self.download_now(thread.summary.account.clone(), waiting);
+            }
+        });
+        Effect::new(move || crate::actions::finished(&self.downloaded.get()));
     }
 
     /// Show the threads that match what the search box holds.

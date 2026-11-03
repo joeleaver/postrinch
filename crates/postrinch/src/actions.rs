@@ -1,11 +1,12 @@
 //! What the window does to mail and accounts: through the commands for the
 //! store, and on sync's runtime for anything that talks to Google.
 
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use postrinch_commands::Commands;
-use postrinch_model::{EmailAddress, LabelPrefs};
+use postrinch_model::{EmailAddress, LabelPrefs, ProviderMessageId};
 use postrinch_sync::google::{remove_google_account, sign_in_google};
 
 use crate::state::State;
@@ -20,9 +21,23 @@ struct Services {
 
 thread_local! {
     static SERVICES: OnceCell<Services> = const { OnceCell::new() };
+    /// Messages being downloaded because the person opened them, so one
+    /// download is not asked for twice.
+    static DOWNLOADING: RefCell<HashSet<(String, String)>> = RefCell::new(HashSet::new());
 }
 
 /// Set what the window acts through. Called once, before anything acts.
+/// Forget downloads that have finished, so a message can be asked for
+/// again if it failed.
+pub fn finished(keys: &[(String, String)]) {
+    DOWNLOADING.with(|d| {
+        let mut d = d.borrow_mut();
+        for key in keys {
+            d.remove(key);
+        }
+    });
+}
+
 pub fn init(commands: Rc<Commands>, sync: Option<SyncHandle>) {
     SERVICES.with(|s| {
         if s.set(Services { commands, sync }).is_err() {
@@ -118,6 +133,33 @@ impl State {
                 },
             };
             notice.send(Some(text));
+            revision.update_send(|n| *n += 1);
+        });
+    }
+
+    /// Download these messages now, because the person opened them.
+    /// Messages already on their way are left alone.
+    pub fn download_now(self, account: EmailAddress, ids: Vec<ProviderMessageId>) {
+        let Some(sync) = sync() else {
+            return;
+        };
+        let ids: Vec<ProviderMessageId> = DOWNLOADING.with(|d| {
+            let mut d = d.borrow_mut();
+            ids.into_iter()
+                .filter(|id| d.insert((account.key(), id.0.clone())))
+                .collect()
+        });
+        if ids.is_empty() {
+            return;
+        }
+        let (revision, error, done) = (self.revision, self.error, self.downloaded);
+        sync.runtime.clone().spawn(async move {
+            let keys: Vec<(String, String)> =
+                ids.iter().map(|id| (account.key(), id.0.clone())).collect();
+            if let Err(e) = sync.sync_engine().download_now(&account, ids).await {
+                error.send(Some(format!("The message did not download: {e}")));
+            }
+            done.send(keys);
             revision.update_send(|n| *n += 1);
         });
     }

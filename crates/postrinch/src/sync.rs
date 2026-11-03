@@ -34,6 +34,14 @@ pub struct SyncHandle {
     pub runtime: Handle,
     /// Starts sync's next pass at once.
     pub wake: Arc<Notify>,
+    sync: GmailSync,
+}
+
+impl SyncHandle {
+    /// The sync itself, for downloads the person asks for.
+    pub fn sync_engine(&self) -> &GmailSync {
+        &self.sync
+    }
 }
 
 /// Start keeping every account in sync on a thread of its own. `status`
@@ -61,6 +69,7 @@ pub fn start(
         store,
         runtime: runtime.handle().clone(),
         wake: wake.clone(),
+        sync: sync.clone(),
     };
     thread::Builder::new()
         .name("sync".into())
