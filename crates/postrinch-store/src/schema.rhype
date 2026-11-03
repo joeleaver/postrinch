@@ -30,6 +30,11 @@ type Label {
     provider_id: String
     name: String
     kind: Json
+    // LabelVisibility and Option<LabelColor>, as the provider has them.
+    visibility: Json
+    color: Json
+    // LabelPrefs: what the person changed here. Sync never writes it.
+    prefs: Json
     messages: [Message] @inverse(Message.labels)
 }
 

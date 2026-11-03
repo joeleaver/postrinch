@@ -166,11 +166,7 @@ fn survives_reopen() {
         store
             .put_label(
                 &me,
-                &Label {
-                    provider_id: "INBOX".into(),
-                    name: "Inbox".into(),
-                    kind: LabelKind::System(SystemLabel::Inbox),
-                },
+                &Label::new("INBOX", "Inbox", LabelKind::System(SystemLabel::Inbox)),
             )
             .unwrap();
         store.put_message(&m, None).unwrap();
@@ -190,11 +186,7 @@ fn lists_an_accounts_message_ids_only() {
     store
         .put_label(
             &other,
-            &Label {
-                provider_id: "INBOX".into(),
-                name: "Inbox".into(),
-                kind: LabelKind::System(SystemLabel::Inbox),
-            },
+            &Label::new("INBOX", "Inbox", LabelKind::System(SystemLabel::Inbox)),
         )
         .unwrap();
     for (account, id) in [(&me, "m2"), (&me, "m1"), (&other, "m9")] {

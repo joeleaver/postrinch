@@ -18,11 +18,7 @@ fn account(store: &Store, me: &EmailAddress) {
         ("SENT", "Sent", LabelKind::System(SystemLabel::Sent)),
         ("Label_1", "Receipts", LabelKind::User),
     ] {
-        let label = Label {
-            provider_id: id.into(),
-            name: name.into(),
-            kind,
-        };
+        let label = Label::new(id, name, kind);
         store.put_label(me, &label).unwrap();
     }
 }

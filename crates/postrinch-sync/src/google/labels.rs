@@ -7,8 +7,10 @@
 
 use std::collections::HashSet;
 
-use postrinch_model::{Flags, Label, LabelKind, SystemLabel};
+use postrinch_model::{Flags, Label, LabelColor, LabelKind, LabelVisibility, SystemLabel};
 
+#[cfg(test)]
+use super::api::LabelColorResource;
 use super::api::LabelResource;
 
 const UNREAD: &str = "UNREAD";
@@ -38,11 +40,17 @@ pub(crate) fn to_label(resource: &LabelResource) -> Option<Label> {
     } else {
         LabelKind::System(system_label(&resource.id)?)
     };
-    Some(Label {
-        provider_id: resource.id.clone(),
-        name: resource.name.clone(),
-        kind,
-    })
+    let mut label = Label::new(resource.id.clone(), resource.name.clone(), kind);
+    label.visibility = match resource.list_visibility.as_deref() {
+        Some("labelHide") => LabelVisibility::Hide,
+        Some("labelShowIfUnread") => LabelVisibility::ShowIfUnread,
+        _ => LabelVisibility::Show,
+    };
+    label.color = resource.color.as_ref().map(|c| LabelColor {
+        background: c.background_color.clone(),
+        text: c.text_color.clone(),
+    });
+    Some(label)
 }
 
 /// Split a message's Gmail label ids into the labels the store keeps and
@@ -63,13 +71,42 @@ pub(crate) fn split_label_ids(ids: &[String], stored: &HashSet<String>) -> (Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::google::api::LabelColorResource;
 
     fn resource(id: &str, name: &str, kind: &str) -> LabelResource {
         LabelResource {
             id: id.into(),
             name: name.into(),
             kind: kind.into(),
+            list_visibility: None,
+            color: None,
         }
+    }
+
+    #[test]
+    fn keeps_visibility_and_colour() {
+        let mut hidden = resource("Label_3", "[Superhuman]/Muted", "user");
+        hidden.list_visibility = Some("labelHide".into());
+        hidden.color = Some(LabelColorResource {
+            text_color: "#ffffff".into(),
+            background_color: "#16a766".into(),
+        });
+        let label = to_label(&hidden).unwrap();
+        assert_eq!(label.visibility, LabelVisibility::Hide);
+        assert_eq!(label.color.unwrap().background, "#16a766");
+
+        let mut unread = resource("Label_4", "Later", "user");
+        unread.list_visibility = Some("labelShowIfUnread".into());
+        assert_eq!(
+            to_label(&unread).unwrap().visibility,
+            LabelVisibility::ShowIfUnread
+        );
+        assert_eq!(
+            to_label(&resource("INBOX", "INBOX", "system"))
+                .unwrap()
+                .visibility,
+            LabelVisibility::Show
+        );
     }
 
     #[test]

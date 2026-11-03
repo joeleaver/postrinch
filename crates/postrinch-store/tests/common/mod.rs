@@ -21,11 +21,7 @@ pub fn setup() -> (tempfile::TempDir, Store, EmailAddress) {
         ("INBOX", "Inbox", LabelKind::System(SystemLabel::Inbox)),
         ("Label_1", "Receipts", LabelKind::User),
     ] {
-        let label = Label {
-            provider_id: id.into(),
-            name: name.into(),
-            kind,
-        };
+        let label = Label::new(id, name, kind);
         store.put_label(&me, &label).unwrap();
     }
     (dir, store, me)

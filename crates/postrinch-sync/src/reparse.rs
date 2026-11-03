@@ -55,11 +55,7 @@ mod tests {
         store
             .put_account(&Account::new(me.clone(), Provider::Google))
             .unwrap();
-        let inbox = Label {
-            provider_id: "INBOX".into(),
-            name: "Inbox".into(),
-            kind: LabelKind::System(SystemLabel::Inbox),
-        };
+        let inbox = Label::new("INBOX", "Inbox", LabelKind::System(SystemLabel::Inbox));
         store.put_label(&me, &inbox).unwrap();
         let raw = b"From: ada@example.org\r\nSubject: hi\r\n\r\none\r\ntwo\r\n";
         let envelope = Envelope {

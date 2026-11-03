@@ -18,6 +18,19 @@ pub(crate) struct LabelResource {
     pub name: String,
     #[serde(rename = "type", default)]
     pub kind: String,
+    /// `labelShow`, `labelShowIfUnread` or `labelHide`; absent for some
+    /// system labels.
+    #[serde(rename = "labelListVisibility", default)]
+    pub list_visibility: Option<String>,
+    #[serde(default)]
+    pub color: Option<LabelColorResource>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LabelColorResource {
+    pub text_color: String,
+    pub background_color: String,
 }
 
 #[derive(Deserialize)]

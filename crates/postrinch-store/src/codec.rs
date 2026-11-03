@@ -79,6 +79,15 @@ impl Fields {
         }
     }
 
+    /// A Json field that may be absent: written by a later version of the
+    /// schema than the object, or never set.
+    pub(crate) fn opt_json<T: DeserializeOwned>(&self, name: &str) -> StoreResult<Option<T>> {
+        match self.value(name) {
+            Value::Null => Ok(None),
+            _ => self.json(name).map(Some),
+        }
+    }
+
     pub(crate) fn json<T: DeserializeOwned>(&self, name: &str) -> StoreResult<T> {
         match self.value(name) {
             Value::Json(v) => serde_json::from_value(v.clone()).map_err(|e| {
