@@ -55,6 +55,9 @@ impl Commands {
     /// passed over. Only messages the action would change are changed, so
     /// marking a read thread read sends nothing.
     pub fn act(&self, threads: &[ThreadRef], action: &ThreadAction) -> CommandResult<()> {
+        for (account, _) in threads {
+            self.check(account)?;
+        }
         for (account, thread) in threads {
             let messages = self.store.thread_messages(account, thread)?;
             for (ids, change) in self.changes(account, &messages, action)? {
@@ -68,6 +71,7 @@ impl Commands {
     /// menu offers. Other apps' labels are left out, as the sidebar sets
     /// them apart.
     pub fn label_choices(&self, account: &EmailAddress) -> CommandResult<Vec<LabelChoice>> {
+        self.check(account)?;
         let prefs = self.store.label_prefs(account)?;
         let mut choices: Vec<LabelChoice> = self
             .store

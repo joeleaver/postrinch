@@ -139,6 +139,7 @@ impl Commands {
         account: &EmailAddress,
         thread: &ProviderThreadId,
     ) -> CommandResult<Option<Thread>> {
+        self.check(account)?;
         let messages = self.store.thread_messages(account, thread)?;
         Ok(ThreadSummary::from_messages(&messages).map(|summary| Thread { summary, messages }))
     }

@@ -58,6 +58,7 @@ impl Sidebar {
 impl Commands {
     /// What the person changed about a label on this computer.
     pub fn label_prefs(&self, account: &EmailAddress, label: &str) -> CommandResult<LabelPrefs> {
+        self.check(account)?;
         Ok(self
             .store
             .label_prefs(account)?
@@ -74,6 +75,7 @@ impl Commands {
         label: &str,
         prefs: &LabelPrefs,
     ) -> CommandResult<()> {
+        self.check(account)?;
         if let Some(color) = &prefs.color
             && !is_hex_color(color)
         {
@@ -103,7 +105,7 @@ impl Commands {
     /// The sidebar: unified folders, then each account's inbox and labels.
     pub fn sidebar(&self) -> CommandResult<Sidebar> {
         let mut accounts = Vec::new();
-        for account in self.store.accounts()? {
+        for account in self.visible_accounts()? {
             let address = &account.address;
             let labels = self.store.labels(address)?;
             let stats = self.store.label_stats(address)?;
@@ -151,6 +153,7 @@ impl Commands {
     pub(crate) fn sources(&self, folder: &Folder) -> CommandResult<Vec<(EmailAddress, String)>> {
         match folder {
             Folder::Label { account, label } => {
+                self.check(account)?;
                 if self.store.account(account)?.is_none() {
                     return Err(CommandError::UnknownAccount(account.clone()));
                 }
@@ -158,7 +161,7 @@ impl Commands {
             }
             Folder::Everywhere(system) => {
                 let mut sources = Vec::new();
-                for account in self.store.accounts()? {
+                for account in self.visible_accounts()? {
                     let labels = self.store.labels(&account.address)?;
                     if let Some(label) = system_label(&labels, *system) {
                         sources.push((account.address.clone(), label.provider_id.clone()));

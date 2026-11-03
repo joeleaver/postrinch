@@ -54,6 +54,9 @@ impl Commands {
         let mut seen: HashSet<(String, ProviderThreadId)> = HashSet::new();
         let mut set_aside: HashMap<String, HashSet<String>> = HashMap::new();
         for hit in self.store.search(query, MESSAGE_LIMIT)? {
+            if !self.sees(&hit.message.account) {
+                continue;
+            }
             // The trash and spam are left out, as from every mailbox.
             let account = hit.message.account.key();
             if !set_aside.contains_key(&account) {

@@ -12,6 +12,7 @@ mod actions;
 mod error;
 mod folders;
 mod labels;
+mod scope;
 mod search;
 mod threads;
 
@@ -29,10 +30,13 @@ pub use threads::{CATEGORIES, Thread, ThreadPage, ThreadRow};
 #[derive(Clone)]
 pub struct Commands {
     store: Store,
+    /// The accounts this caller sees; `None` for all of them.
+    only: scope::Only,
 }
 
 impl Commands {
+    /// Commands that see every account, as the window does.
     pub fn new(store: Store) -> Self {
-        Self { store }
+        Self { store, only: None }
     }
 }

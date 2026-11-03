@@ -19,7 +19,7 @@ impl Commands {
     /// Every account, in the order they were added.
     pub fn accounts(&self) -> CommandResult<Vec<AccountInfo>> {
         let mut infos = Vec::new();
-        for account in self.store.accounts()? {
+        for account in self.visible_accounts()? {
             let messages = self.store.message_ids(&account.address)?.len();
             let waiting = self.store.undownloaded(&account.address)?.len();
             infos.push(AccountInfo {
