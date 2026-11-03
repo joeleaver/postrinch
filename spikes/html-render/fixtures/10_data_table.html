@@ -1,0 +1,15 @@
+<html><body style="margin:16px;font:13px Arial,sans-serif">
+<h3 style="margin:0 0 8px">Auto-sized columns, rowspan, colspan</h3>
+<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse">
+<thead><tr bgcolor="#dde"><th rowspan="2">Service</th><th colspan="2">October</th><th colspan="2">November</th></tr>
+<tr bgcolor="#eef"><th>Uptime</th><th>Incidents</th><th>Uptime</th><th>Incidents</th></tr></thead>
+<tbody>
+<tr><td>api-gateway-production</td><td align="right">99.99%</td><td align="right">0</td><td align="right">99.2%</td><td align="right">3</td></tr>
+<tr><td>db</td><td align="right">100%</td><td align="right">0</td><td rowspan="2" valign="middle" align="center">pending</td><td align="right">0</td></tr>
+<tr><td>a very long service name that should force this column to take most of the room</td><td align="right">98%</td><td align="right">12</td><td align="right">1</td></tr>
+</tbody>
+<tfoot><tr bgcolor="#eee"><td>Total</td><td colspan="4" align="center">15 incidents</td></tr></tfoot>
+</table>
+<p>Border-spacing table:</p>
+<table cellspacing="6" cellpadding="6"><tr><td bgcolor="#fcc">a</td><td bgcolor="#cfc">bb</td><td bgcolor="#ccf">ccc</td></tr></table>
+</body></html>

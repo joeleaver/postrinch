@@ -1,6 +1,6 @@
 # Rendering HTML mail in rinch
 
-From the rendering spike of 2026-11-01 (local folder `~/dev/mail-render-spike`, whose `FINDINGS.md` has the screenshots and timings) and the rinch work that followed it.
+From the rendering spike of 2026-11-01 ([spikes/html-render](../../spikes/html-render), whose `FINDINGS.md` has the results and timings; its fixtures and Chrome comparison tooling live there too) and the rinch work that followed it.
 
 ## What the spike found
 

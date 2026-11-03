@@ -1,0 +1,13 @@
+[package]
+name = "mail-render-spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+rinch = { path = "../../../rinch/crates/rinch", default-features = false, features = ["desktop"] }
+rinch-core = { path = "../../../rinch/crates/rinch-core" }
+rinch-dom = { path = "../../../rinch/crates/rinch-dom", features = ["software-renderer"] }
+png = "0.17"
+
+[workspace]
