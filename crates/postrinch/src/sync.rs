@@ -96,10 +96,27 @@ fn report(event: SyncEvent, status: Signal<Vec<AccountSync>>, revision: Signal<u
             let (line, progress) = describe(progress);
             (account, line, progress, false, changed)
         }
-        SyncEvent::Synced { account, .. } => {
-            (account, "New mail up to date".to_owned(), None, false, true)
+        // A pass that found nothing new changes nothing the window shows.
+        SyncEvent::Synced { account, report } => {
+            let changed = report.headers + report.fetched + report.relabelled + report.removed > 0;
+            (
+                account,
+                "New mail up to date".to_owned(),
+                None,
+                false,
+                changed,
+            )
         }
-        SyncEvent::Done { account, .. } => (account, "Up to date".to_owned(), None, false, true),
+        SyncEvent::Done {
+            account,
+            downloaded,
+        } => (
+            account,
+            "Up to date".to_owned(),
+            None,
+            false,
+            downloaded > 0,
+        ),
         SyncEvent::Failed {
             account,
             error,
@@ -144,8 +161,9 @@ fn adds_mail(progress: Progress) -> bool {
     )
 }
 
-/// How often the window reloads while sync adds mail.
-const REFRESH_EVERY: Duration = Duration::from_secs(5);
+/// How often the window reloads while sync adds mail. A reload of a big
+/// folder takes seconds, so more often keeps the loader busy for nothing.
+const REFRESH_EVERY: Duration = Duration::from_secs(15);
 
 /// Whether it has been [`REFRESH_EVERY`] since the last reload this asked
 /// for; if so, it counts as asked for now.

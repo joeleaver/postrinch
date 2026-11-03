@@ -1,10 +1,11 @@
 //! The sidebar: unified folders, each account's inbox, labels, and sync.
 
-use postrinch_commands::{FolderEntry, Sidebar};
+use postrinch_commands::FolderEntry;
+use postrinch_model::EmailAddress;
 use rinch::prelude::*;
 
 use crate::state::State;
-use crate::sync::{AccountSync, thousands};
+use crate::sync::thousands;
 use crate::ui::account_color;
 use crate::ui::labels::labels_section;
 
@@ -15,11 +16,13 @@ pub fn sidebar(state: State) -> NodeHandle {
             class: "sidebar",
             style: {move || format!("width: {}px", state.sidebar_width.get())},
             div { class: "folders",
-                // A keyed loop over the Option, not `if let`, so a changed
-                // sidebar is drawn again (rinch#2105).
-                for sidebar in state.sidebar.get() {
-                    div { key: format!("{sidebar:?}"),
-                        {unified(__scope, state, sidebar.clone())}
+                div { class: "folder-group",
+                    // Keyed by what a row is, not its count: rows are built
+                    // once and their counts follow the sidebar in place.
+                    for slot in folder_slots(state) {
+                        div { key: format!("{slot:?}"),
+                            {folder_row(__scope, state, slot.clone())}
+                        }
                     }
                 }
             }
@@ -31,9 +34,11 @@ pub fn sidebar(state: State) -> NodeHandle {
                 for why in state.sync_off.get() {
                     div { key: why.clone(), class: "sync-line trouble", {why.clone()} }
                 }
-                for account in state.sync.get() {
-                    div { key: account.account.key(),
-                        {sync_row(__scope, account.clone())}
+                // Keyed by account alone: a row is built once and its
+                // line and bar follow the account's sync in place.
+                for account in sync_accounts(state) {
+                    div { key: account.key(),
+                        {sync_row(__scope, state, account.clone())}
                     }
                 }
             }
@@ -41,51 +46,68 @@ pub fn sidebar(state: State) -> NodeHandle {
     }
 }
 
-/// All inboxes with each account's inbox under it, then Sent and Drafts,
-/// then the labels the person pinned.
-#[component]
-fn unified(state: State, sidebar: Sidebar) -> NodeHandle {
-    let mut rows = Vec::new();
-    let pinned: Vec<FolderEntry> = sidebar
-        .accounts
-        .iter()
-        .flat_map(|a| a.labels.pinned.iter().cloned())
-        .collect();
-    let mut everywhere = sidebar.everywhere.into_iter();
-    if let Some(all) = everywhere.next() {
-        rows.push(folder_row(__scope, state, all, None, false));
-        for (i, account) in sidebar.accounts.into_iter().enumerate() {
-            rows.push(folder_row(
-                __scope,
-                state,
-                account.inbox,
-                Some(account_color(i)),
-                true,
-            ));
-        }
-    }
-    for entry in everywhere {
-        rows.push(folder_row(__scope, state, entry, None, false));
-    }
-    for entry in pinned {
-        rows.push(folder_row(__scope, state, entry, None, false));
-    }
-    rsx! { div { class: "folder-group", {rows} } }
-}
-
-#[component]
-fn folder_row(
-    state: State,
+/// A row of the sidebar's folders, without what changes as mail arrives.
+#[derive(Debug, Clone, PartialEq)]
+struct FolderSlot {
     entry: FolderEntry,
     dot: Option<&'static str>,
     indented: bool,
-) -> NodeHandle {
+}
+
+/// All inboxes with each account's inbox under it, then Sent and Drafts,
+/// then the labels the person pinned.
+fn folder_slots(state: State) -> Vec<FolderSlot> {
+    state.sidebar.with(|sidebar| {
+        let Some(sidebar) = sidebar else {
+            return Vec::new();
+        };
+        let slot = |entry: &FolderEntry, dot, indented| FolderSlot {
+            entry: FolderEntry {
+                unread: 0,
+                ..entry.clone()
+            },
+            dot,
+            indented,
+        };
+        let mut slots = Vec::new();
+        let mut everywhere = sidebar.everywhere.iter();
+        if let Some(all) = everywhere.next() {
+            slots.push(slot(all, None, false));
+            for (i, account) in sidebar.accounts.iter().enumerate() {
+                slots.push(slot(&account.inbox, Some(account_color(i)), true));
+            }
+        }
+        for entry in everywhere {
+            slots.push(slot(entry, None, false));
+        }
+        for account in &sidebar.accounts {
+            for entry in &account.labels.pinned {
+                slots.push(slot(entry, None, false));
+            }
+        }
+        slots
+    })
+}
+
+#[component]
+fn folder_row(state: State, slot: FolderSlot) -> NodeHandle {
+    let FolderSlot {
+        entry,
+        dot,
+        indented,
+    } = slot;
     let folder = entry.folder.clone();
     let chosen = entry.folder.clone();
-    let unread = (entry.unread > 0).then(|| thousands(entry.unread));
+    let counted = entry.folder.clone();
+    let unread = Memo::new(move || {
+        state.sidebar.with(|s| {
+            s.as_ref()
+                .and_then(|s| s.entry(&counted))
+                .map_or(0, |e| e.unread)
+        })
+    });
     let dot =
         dot.map(|color| rsx! { span { class: "dot", style: {format!("background: {color}")} } });
-    let unread = unread.map(|n| rsx! { span { class: "count", {n} } });
     rsx! {
         div {
             class: {move || {
@@ -96,31 +118,52 @@ fn folder_row(
             }},
             onclick: move || state.open_folder(folder.clone()),
             span { class: "folder-name", {dot} span { class: "name-text", {entry.name.clone()} } }
-            {unread}
+            span {
+                class: "count",
+                style: {move || if unread.get() > 0 { "" } else { "display: none" }},
+                {move || thousands(unread.get())}
+            }
         }
     }
 }
 
+fn sync_accounts(state: State) -> Vec<EmailAddress> {
+    state
+        .sync
+        .with(|all| all.iter().map(|s| s.account.clone()).collect())
+}
+
 #[component]
-fn sync_row(account: AccountSync) -> NodeHandle {
-    let bar = account.progress.map(|(done, total)| {
-        let percent = (done * 100).checked_div(total).unwrap_or(100);
-        rsx! {
-            div { class: "progress",
-                div { class: "progress-fill", style: {format!("width: {percent}%")} }
-            }
-        }
+fn sync_row(state: State, account: EmailAddress) -> NodeHandle {
+    let address = account.to_string();
+    let now = Memo::new(move || {
+        state
+            .sync
+            .with(|all| all.iter().find(|s| s.account == account).cloned())
     });
-    let line_class = if account.trouble {
-        "sync-line trouble"
-    } else {
-        "sync-line"
-    };
+    let progress = move || now.get().and_then(|s| s.progress);
     rsx! {
         div { class: "sync-account",
-            div { class: "sync-address", {account.account.to_string()} }
-            div { class: line_class, {account.line.clone()} }
-            {bar}
+            div { class: "sync-address", {address} }
+            div {
+                class: {move || match now.get() {
+                    Some(s) if s.trouble => "sync-line trouble",
+                    _ => "sync-line",
+                }},
+                {move || now.get().map(|s| s.line).unwrap_or_default()}
+            }
+            div {
+                class: "progress",
+                style: {move || if progress().is_some() { "" } else { "display: none" }},
+                div {
+                    class: "progress-fill",
+                    style: {move || {
+                        let percent = progress()
+                            .map_or(0, |(done, total)| (done * 100).checked_div(total).unwrap_or(100));
+                        format!("width: {percent}%")
+                    }},
+                }
+            }
         }
     }
 }

@@ -3,6 +3,7 @@
 //! "Show all labels".
 
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use postrinch_commands::{AppLabels, Folder, LabelNode, Sidebar};
 use postrinch_model::LabelPrefs;
@@ -45,8 +46,9 @@ pub enum RowKind {
 }
 
 impl LabelRow {
-    /// Changes whenever anything the row shows changes, so the row is
-    /// drawn again.
+    /// Changes whenever what the row is changes, so the row is built
+    /// again. The loop keys rows with `unread` at 0, so a count changing
+    /// updates the row in place instead.
     pub fn key(&self) -> String {
         format!(
             "{}|{}|{:?}|{}|{:?}|{:?}",
@@ -223,27 +225,47 @@ fn row(
 
 #[component]
 pub fn labels_section(state: State) -> NodeHandle {
+    let rows = Memo::new(move || {
+        let show_all = state.show_all.get();
+        let toggled = state.toggled.get();
+        Rc::new(state.sidebar.with(|s| match s {
+            Some(sidebar) => label_rows(sidebar, show_all, &toggled),
+            None => Vec::new(),
+        }))
+    });
     rsx! {
         div { class: "folder-group",
             div { class: "section-title", "Labels" }
-            for line in label_rows_now(state) {
+            // Keyed without the count: rows are built once and their
+            // counts follow the sidebar in place.
+            for line in uncounted(&rows.get()) {
                 div { key: line.key(),
-                    {label_line(__scope, state, line.clone())}
+                    {label_line(__scope, state, rows, line.clone())}
                 }
             }
         }
     }
 }
 
-fn label_rows_now(state: State) -> Vec<LabelRow> {
-    match state.sidebar.get() {
-        Some(sidebar) => label_rows(&sidebar, state.show_all.get(), &state.toggled.get()),
-        None => Vec::new(),
-    }
+/// The rows as the loop keys them: everything but how much is unread.
+fn uncounted(rows: &[LabelRow]) -> Vec<LabelRow> {
+    rows.iter()
+        .map(|r| LabelRow {
+            unread: 0,
+            ..r.clone()
+        })
+        .collect()
 }
 
 #[component]
-fn label_line(state: State, line: LabelRow) -> NodeHandle {
+fn label_line(state: State, rows: Memo<Rc<Vec<LabelRow>>>, line: LabelRow) -> NodeHandle {
+    let row_id = line.id.clone();
+    let unread = Memo::new(move || {
+        rows.get()
+            .iter()
+            .find(|r| r.id == row_id)
+            .map_or(0, |r| r.unread)
+    });
     let indent = match line.kind {
         RowKind::ShowAll => String::new(),
         _ => format!("padding-left: {}px", 2 + 14 * line.depth),
@@ -286,10 +308,6 @@ fn label_line(state: State, line: LabelRow) -> NodeHandle {
     let dot = line.color.clone().map(|c| {
         rsx! { span { class: "dot", style: {format!("background: {c}")} } }
     });
-    let unread = (line.unread > 0).then(|| {
-        let n = thousands(line.unread);
-        rsx! { span { class: "count", {n} } }
-    });
     let menu = match (&line.folder, &line.editable) {
         (Some(Folder::Label { account, label }), Some((prefs, shown, provider_name))) => {
             let edit = LabelEdit {
@@ -315,7 +333,11 @@ fn label_line(state: State, line: LabelRow) -> NodeHandle {
                 {dot}
                 span { class: "name-text", {line.name.clone()} }
             }
-            {unread}
+            span {
+                class: "count",
+                style: {move || if unread.get() > 0 { "" } else { "display: none" }},
+                {move || thousands(unread.get())}
+            }
         }
     };
     match menu {

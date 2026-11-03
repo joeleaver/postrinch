@@ -3,7 +3,7 @@
 use rinch::prelude::*;
 
 use crate::state::{State, View};
-use crate::ui::list::rows_now;
+use crate::ui::list::row_ids;
 
 /// Listen for the window's keys: j and k (or the arrows) move through the
 /// list, Escape steps back out of a search, Settings or an open thread.
@@ -30,22 +30,19 @@ fn step(state: State, by: isize) -> bool {
     if state.view.get() != View::Mail {
         return false;
     }
-    let rows = rows_now(state);
+    let rows = row_ids(state);
     if rows.is_empty() {
         return false;
     }
-    let current = state.selected.get().and_then(|(account, thread)| {
-        rows.iter()
-            .position(|r| r.summary.account == account && r.summary.id == thread)
-    });
+    let current = state
+        .selected
+        .get()
+        .and_then(|chosen| rows.iter().position(|r| *r == chosen));
     let next = match current {
         Some(i) => (i as isize + by).clamp(0, rows.len() as isize - 1) as usize,
         None => 0,
     };
-    let row = &rows[next].summary;
-    state
-        .selected
-        .set(Some((row.account.clone(), row.id.clone())));
+    state.selected.set(Some(rows[next].clone()));
     true
 }
 

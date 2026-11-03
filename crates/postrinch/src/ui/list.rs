@@ -1,7 +1,7 @@
 //! The thread list: one row per thread in the chosen folder.
 
 use postrinch_commands::{CATEGORIES, Folder, Sidebar, ThreadPage, ThreadRow};
-use postrinch_model::{SystemLabel, ThreadSummary};
+use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel, ThreadSummary};
 use rinch::prelude::*;
 
 use crate::dates;
@@ -39,8 +39,10 @@ pub fn thread_list(state: State) -> NodeHandle {
                 {tabs(__scope, state)}
             }
             div { class: "rows",
-                for thread in rows_now(state) {
-                    div { key: row_key(thread),
+                // Keyed by thread alone: a row is built once and follows
+                // its thread's changes in place.
+                for thread in row_ids(state) {
+                    div { key: format!("{}|{}", thread.0.key(), thread.1.0),
                         {row(__scope, state, thread.clone())}
                     }
                 }
@@ -62,13 +64,38 @@ pub fn thread_list(state: State) -> NodeHandle {
     }
 }
 
+/// Which thread a row shows.
+pub(crate) type RowId = (EmailAddress, ProviderThreadId);
+
 /// The rows to show: the search's, while there is one, or the folder's.
-pub(crate) fn rows_now(state: State) -> Vec<ThreadRow> {
+fn with_rows<R>(state: State, f: impl FnOnce(&[ThreadRow]) -> R) -> R {
     if state.search.get().is_some() {
-        state.results.get().map(|r| r.threads).unwrap_or_default()
+        state
+            .results
+            .with(|r| f(r.as_ref().map_or(&[], |r| &r.threads)))
     } else {
-        state.page.get().map(|p| p.threads).unwrap_or_default()
+        state
+            .page
+            .with(|p| f(p.as_ref().map_or(&[], |p| &p.threads)))
     }
+}
+
+pub(crate) fn row_ids(state: State) -> Vec<RowId> {
+    with_rows(state, |rows| {
+        rows.iter()
+            .map(|r| (r.summary.account.clone(), r.summary.id.clone()))
+            .collect()
+    })
+}
+
+/// The row's thread as now loaded; the last one found while the row is
+/// on its way out.
+fn find_row(state: State, id: &RowId) -> Option<ThreadRow> {
+    with_rows(state, |rows| {
+        rows.iter()
+            .find(|r| r.summary.account == id.0 && r.summary.id == id.1)
+            .cloned()
+    })
 }
 
 /// "6 for “cover my shift”".
@@ -130,79 +157,88 @@ fn tabs(state: State) -> NodeHandle {
     rsx! { div { class: "tabs", role: "tablist", {buttons} } }
 }
 
-/// Changes whenever anything the row shows changes, so the row is drawn
-/// again.
-fn row_key(thread: &ThreadRow) -> String {
-    let s = &thread.summary;
-    format!(
-        "{}|{}|{}|{}|{}|{:?}|{:?}",
-        s.account.key(),
-        s.id.0,
-        s.latest.as_millis(),
-        s.unread_count,
-        s.message_count,
-        thread.chips,
-        thread.excerpt
-    )
-}
-
 #[component]
-fn row(state: State, thread: ThreadRow) -> NodeHandle {
-    let summary = thread.summary;
-    let chips: Vec<NodeHandle> = thread
-        .chips
-        .iter()
-        .map(|chip| {
-            let style = match &chip.color {
-                Some(c) => format!("border-color: {c}; color: {c}"),
-                None => String::new(),
-            };
-            let name = chip.name.clone();
-            rsx! { span { class: "label-chip", style: {style.clone()}, {name} } }
-        })
-        .collect();
-    let key = (summary.account.clone(), summary.id.clone());
-    let chosen = key.clone();
-    let now = dates::now();
-    let color = account_index(state.sidebar.get().as_ref(), &summary).map(account_color);
-    let dot = color.map(|c| rsx! { span { class: "dot", style: {format!("background: {c}")} } });
-    let count = (summary.message_count > 1).then(|| {
-        let n = summary.message_count.to_string();
-        rsx! { span { class: "thread-count", {n} } }
-    });
-    let attachment = summary
-        .has_attachments
-        .then(|| rsx! { span { class: "attachment", title: "Has attachments", "📎" } });
-    let unread = summary.unread_count > 0;
-    let snippet = match thread.excerpt {
-        Some(e) => rsx! {
-            span { class: "snippet", {e.before.clone()} mark { {e.hit.clone()} } {e.after.clone()} }
-        },
-        None => rsx! { span { class: "snippet", {summary.snippet.clone()} } },
+fn row(state: State, id: RowId) -> NodeHandle {
+    let first = find_row(state, &id);
+    let Some(first) = first else {
+        return rsx! { div {} };
     };
+    let thread = {
+        let id = id.clone();
+        let last = std::cell::RefCell::new(first);
+        Memo::new(move || {
+            if let Some(found) = find_row(state, &id) {
+                *last.borrow_mut() = found;
+            }
+            last.borrow().clone()
+        })
+    };
+    let summary = move || thread.get().summary;
+    let chosen = id.clone();
+    let color = move || account_index(state.sidebar.get().as_ref(), &summary()).map(account_color);
     rsx! {
         div {
             class: {move || {
                 let mut class = String::from("row");
-                if unread { class.push_str(" unread"); }
+                if summary().unread_count > 0 { class.push_str(" unread"); }
                 if state.selected.get().as_ref() == Some(&chosen) { class.push_str(" chosen"); }
                 class
             }},
-            onclick: move || state.selected.set(Some(key.clone())),
+            onclick: move || state.selected.set(Some(id.clone())),
             div { class: "row-top",
-                {dot}
-                span { class: "who", {people(&summary)} }
-                {count}
-                {attachment}
-                span { class: "when", {dates::short(summary.latest, &now)} }
+                span {
+                    class: "dot",
+                    style: {move || match color() {
+                        Some(c) => format!("background: {c}"),
+                        None => "display: none".to_owned(),
+                    }},
+                }
+                span { class: "who", {move || people(&summary())} }
+                span {
+                    class: "thread-count",
+                    style: {move || shown(summary().message_count > 1)},
+                    {move || summary().message_count.to_string()}
+                }
+                span {
+                    class: "attachment",
+                    title: "Has attachments",
+                    style: {move || shown(summary().has_attachments)},
+                    "📎"
+                }
+                span { class: "when", {move || dates::short(summary().latest, &dates::now())} }
             }
-            div { class: "subject", {or_none(&summary.subject, "(no subject)")} }
+            div { class: "subject", {move || or_none(&summary().subject, "(no subject)")} }
             div { class: "row-bottom",
-                {chips}
-                {snippet}
+                for chip in thread.get().chips {
+                    span {
+                        key: format!("{chip:?}"),
+                        class: "label-chip",
+                        style: {match &chip.color {
+                            Some(c) => format!("border-color: {c}; color: {c}"),
+                            None => String::new(),
+                        }},
+                        {chip.name.clone()}
+                    }
+                }
+                span { class: "snippet",
+                    {move || match thread.get().excerpt {
+                        Some(e) => e.before,
+                        None => summary().snippet,
+                    }}
+                    mark {
+                        style: {move || shown(thread.get().excerpt.is_some())},
+                        {move || thread.get().excerpt.map(|e| e.hit).unwrap_or_default()}
+                    }
+                    {move || thread.get().excerpt.map(|e| e.after).unwrap_or_default()}
+                }
             }
         }
     }
+}
+
+/// A style that hides an element unless `show`.
+fn shown(show: bool) -> &'static str {
+    if show { "" } else { "display: none" }
 }
 
 /// Who a thread is between, by first name where there is one, leaving out
