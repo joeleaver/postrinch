@@ -96,7 +96,7 @@ impl Client {
             reader: BufReader::new(stream.take(MAX_LINE)),
             writer,
         };
-        write_line(&mut link.writer, &Hello { key: key.clone() }).map_err(lost)?;
+        write_line(&mut link.writer, &Hello::new(key.clone())).map_err(lost)?;
         let line = read_line(&mut link.reader).map_err(lost)?;
         match serde_json::from_str::<Greeting>(&line) {
             Ok(Greeting::Welcome { agent }) => {

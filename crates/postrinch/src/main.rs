@@ -11,6 +11,7 @@ mod reading;
 mod state;
 mod sync;
 mod ui;
+mod update;
 
 use std::process::ExitCode;
 
@@ -26,6 +27,28 @@ const FONTS: &[AppFont] = &[
 ];
 
 fn main() -> ExitCode {
+    // Before anything else: a window restarted into an update waits here
+    // for the one it replaces to let go of the store.
+    postrinch_update::at_start();
+    match std::env::args().nth(1).as_deref() {
+        Some("--install") => {
+            return match update::install() {
+                Ok(said) => {
+                    println!("{said}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("postrinch: cannot install: {e}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
+        Some("--version") => {
+            println!("postrinch {}", postrinch_update::CURRENT);
+            return ExitCode::SUCCESS;
+        }
+        _ => {}
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

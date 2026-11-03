@@ -1,4 +1,4 @@
-//! Settings: Accounts, Reading, Agents and Appearance, after their mockups. Other
+//! Settings: Accounts, Reading, Agents, Appearance and About, after their mockups. Other
 //! sections arrive with what they configure.
 
 use postrinch_commands::AccountInfo;
@@ -8,6 +8,7 @@ use rinch::prelude::*;
 use crate::appearance::Appearance;
 use crate::state::{SettingsSection, State, View};
 use crate::sync::thousands;
+use crate::ui::about::about;
 use crate::ui::account_color;
 use crate::ui::agent_dialogs::agent_dialogs;
 use crate::ui::agents_settings::agents_page;
@@ -23,6 +24,7 @@ pub fn settings(state: State) -> NodeHandle {
                 {section_link(__scope, state, SettingsSection::Reading, "Reading")}
                 {section_link(__scope, state, SettingsSection::Agents, "Agents")}
                 {section_link(__scope, state, SettingsSection::Appearance, "Appearance")}
+                {section_link(__scope, state, SettingsSection::About, "About")}
                 div { class: "settings-back", onclick: move || state.view.set(View::Mail), "← Back to mail" }
             }
             match state.settings_section.get() {
@@ -30,6 +32,7 @@ pub fn settings(state: State) -> NodeHandle {
                 SettingsSection::Reading => {reading(__scope, state)},
                 SettingsSection::Agents => {agents_page(__scope, state)},
                 SettingsSection::Appearance => {appearance(__scope, state)},
+                SettingsSection::About => {about(__scope, state)},
             }
             {confirm_removal(__scope, state)}
             {agent_dialogs(__scope, state)}

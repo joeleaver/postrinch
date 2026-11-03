@@ -3914,6 +3914,7 @@ dependencies = [
  "postrinch-model",
  "postrinch-store",
  "postrinch-sync",
+ "postrinch-update",
  "rinch",
  "serde",
  "serde_json",
@@ -4036,6 +4037,21 @@ dependencies = [
  "tracing",
  "url",
  "wiremock",
+]
+
+[[package]]
+name = "postrinch-update"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "dirs",
+ "ed25519-dalek",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -4473,7 +4489,9 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",

@@ -24,9 +24,40 @@ pub fn addr() -> String {
     std::env::var(ADDR_ENV).unwrap_or_else(|_| DEFAULT_ADDR.to_owned())
 }
 
+/// This build's version. The bridge and the app must be the same one: the
+/// wire format changes with them, so they are installed and updated together.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hello {
     pub key: String,
+    /// The bridge's [`VERSION`]; empty from a bridge older than this field.
+    #[serde(default)]
+    pub version: String,
+}
+
+impl Hello {
+    pub fn new(key: String) -> Self {
+        Self {
+            key,
+            version: VERSION.to_owned(),
+        }
+    }
+
+    /// Why the app turns this bridge away, if it is not the app's version.
+    pub fn mismatch(&self) -> Option<String> {
+        (self.version != VERSION).then(|| {
+            let theirs = if self.version.is_empty() {
+                "an older version".to_owned()
+            } else {
+                self.version.clone()
+            };
+            format!(
+                "This postrinch-mcp is {theirs} and Postrinch is {VERSION}; they must match. \
+                 Restart the app that started it, so it starts the one installed with Postrinch."
+            )
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,4 +127,21 @@ pub struct Response {
 pub enum Outcome {
     Ok(Value),
     Error(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_bridge_of_the_same_version_is_let_in() {
+        assert_eq!(Hello::new("k".into()).mismatch(), None);
+        let old: Hello = serde_json::from_str(r#"{"key":"k"}"#).unwrap();
+        assert!(old.mismatch().unwrap().contains("an older version"));
+        let other = Hello {
+            key: "k".into(),
+            version: "0.0.1".into(),
+        };
+        assert!(other.mismatch().unwrap().contains("0.0.1"));
+    }
 }

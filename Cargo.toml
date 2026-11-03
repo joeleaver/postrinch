@@ -14,6 +14,7 @@ postrinch-commands = { path = "crates/postrinch-commands" }
 postrinch-model = { path = "crates/postrinch-model" }
 postrinch-store = { path = "crates/postrinch-store" }
 postrinch-sync = { path = "crates/postrinch-sync" }
+postrinch-update = { path = "crates/postrinch-update" }
 
 # rhypedb, from its repository. The ONNX/fastembed stack stays off until
 # semantic search turns it on deliberately.

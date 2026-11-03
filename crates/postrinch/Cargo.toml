@@ -12,6 +12,7 @@ postrinch-commands = { workspace = true }
 postrinch-model = { workspace = true }
 postrinch-store = { workspace = true }
 postrinch-sync = { workspace = true }
+postrinch-update = { workspace = true }
 dark-light = "3"
 dirs = "7"
 jiff = "0.2"

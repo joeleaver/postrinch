@@ -1,5 +1,6 @@
 //! The window: a header over the sidebar, the thread list and the reader.
 
+mod about;
 mod agent_dialogs;
 mod agents_settings;
 mod icons;
@@ -25,7 +26,7 @@ use rinch::prelude::*;
 
 use crate::state::{State, View};
 use crate::sync;
-use crate::{actions, agents, appearance, changes};
+use crate::{actions, agents, appearance, changes, update};
 
 /// Colours that tell accounts apart, in the order accounts were added. They
 /// stay clear of the blue that marks what is chosen.
@@ -59,6 +60,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
         sync.as_ref().map(|s| s.send.clone()),
     );
     actions::init(commands.clone(), sync);
+    update::start(state);
     state.mark_read_when_opened();
     appearance::watch_system(state.system_dark);
     state.load(&commands);
@@ -89,6 +91,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 }
                 style { {style::CSS} }
                 style { {agents_settings::CSS} }
+                style { {about::CSS} }
                 style { {thread_actions::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 if state.view.get() == View::Mail {
@@ -115,6 +118,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
 fn title_status(state: State) -> NodeHandle {
     rsx! {
         div { class: "title-status",
+            {about::update_pill(__scope, state)}
             div { class: "title-search",
                 TextInput {
                     size: "xs",

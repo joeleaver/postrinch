@@ -87,7 +87,10 @@ impl Link {
 
         lines.read_line(&mut line)?;
         let key = match serde_json::from_str::<Hello>(&line) {
-            Ok(hello) => hello.key,
+            Ok(hello) => match hello.mismatch() {
+                Some(reason) => return send(&mut out, &Greeting::Refused { reason }),
+                None => hello.key,
+            },
             Err(_) => String::new(),
         };
         let agent = match self.agent(&key) {

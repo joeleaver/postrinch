@@ -38,6 +38,7 @@ pub enum SettingsSection {
     Reading,
     Agents,
     Appearance,
+    About,
 }
 
 /// The window's state. Every field is a signal, so this is `Copy`.
@@ -111,6 +112,10 @@ pub struct State {
     pub sync_off: Signal<Option<String>>,
     /// The last thing that went wrong loading, for the window to say.
     pub error: Signal<Option<String>>,
+    /// Where keeping the installed app current stands.
+    pub update: Signal<crate::update::UpdateStatus>,
+    /// A newer version downloaded and verified, waiting for a restart.
+    pub update_ready: Signal<Option<String>>,
 }
 
 impl State {
@@ -155,6 +160,8 @@ impl State {
             agent_removing: Signal::new(None),
             sync_off: Signal::new(None),
             error: Signal::new(None),
+            update: Signal::new(crate::update::UpdateStatus::NotInstalled),
+            update_ready: Signal::new(None),
         }
     }
 

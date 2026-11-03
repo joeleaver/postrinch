@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Builds and checks the package from a branch without releasing it: the
+  # release job runs for a tag only.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  # Linux only for now (DESIGN.md, "Installing and updating"). The three
+  # programs ship together: the bridge and the app speak a wire format that
+  # must match. The window is built without the `debug` feature.
+  build-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            libgtk-3-dev libglib2.0-dev libatk1.0-dev libcairo2-dev \
+            libpango1.0-dev libgdk-pixbuf-2.0-dev libxdo-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (release)
+        run: cargo build --release --locked -p postrinch -p postrinch-mcp -p postrinch-cli
+
+      # A tag must name the version the programs carry, or every installed
+      # copy would offer the same update again after restarting into it.
+      - name: Check the tag names the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          built="$(target/release/postrinch --version | awk '{print $2}')"
+          if [ "v$built" != "$GITHUB_REF_NAME" ]; then
+            echo "the tag is $GITHUB_REF_NAME but the programs are $built: bump [workspace.package] version" >&2
+            exit 1
+          fi
+
+      - name: Package
+        run: tools/package.sh "" target/release dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-package
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: [build-linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-package
+          path: release
+
+      # Each package gets a detached Ed25519 signature beside it, which the
+      # installed app verifies before it stages an update. No key, no
+      # release: an unsigned package would be refused by every install.
+      - name: Sign packages
+        env:
+          SIGNING_KEY: ${{ secrets.POSTRINCH_UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "POSTRINCH_UPDATE_SIGNING_KEY is not set: run tools/update-key.sh once" >&2
+            exit 1
+          fi
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+          for package in release/*.tar.gz; do
+            openssl pkeyutl -sign -rawin -inkey "$key" -in "$package" -out "$package.sig"
+          done
+          ls -la release
+
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
