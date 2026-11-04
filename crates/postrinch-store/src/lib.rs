@@ -20,6 +20,7 @@ mod mailboxes;
 mod messages;
 mod objects;
 mod outbox;
+mod outgoing;
 mod people;
 mod search;
 mod threads;
@@ -36,6 +37,7 @@ use rhypedb_engine::database::Database;
 pub use error::{StoreError, StoreResult};
 pub use mailboxes::{LabelStats, ThreadEntry};
 pub use outbox::OutboxEntry;
+pub use outgoing::{Outgoing, OutgoingKind};
 pub use search::SearchHit;
 
 /// Label stats by account key, each with the write count it was read at.

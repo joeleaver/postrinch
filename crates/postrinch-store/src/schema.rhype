@@ -131,3 +131,23 @@ type OutboxEntry {
     // When the provider took it; null while it waits.
     sent: DateTime
 }
+
+// Mail written here on its way out: a message to send, a draft to keep with
+// the provider, or an agent's proposal waiting for the person. See
+// outgoing.rs.
+type Outgoing {
+    // "<account address key>\u001f<seq, 20 digits>".
+    key: String @unique
+    account: String
+    seq: u64
+    // OutgoingKind.
+    kind: Json
+    // The Draft.
+    draft: Json
+    created: DateTime
+    attempts: u32
+    // Why the last attempt failed; null after none has.
+    error: String
+    // Whether the provider refused it for good.
+    refused: Bool
+}

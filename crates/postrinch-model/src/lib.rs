@@ -7,6 +7,7 @@
 mod account;
 mod address;
 mod change;
+mod draft;
 mod label;
 mod message;
 mod thread;
@@ -16,6 +17,7 @@ mod view;
 pub use account::{Account, AccountState, Provider, SignInReason};
 pub use address::{AddressError, EmailAddress, Mailbox};
 pub use change::MessageChange;
+pub use draft::{Answering, Draft, NotAnAddress, Proposal, format_mailboxes, parse_mailboxes};
 pub use label::{Label, LabelColor, LabelKind, LabelPrefs, LabelVisibility, SystemLabel};
 pub use message::{AttachmentInfo, Flags, Message, MessageHeaders, ProviderMessageId};
 pub use thread::{ProviderThreadId, ThreadSummary};

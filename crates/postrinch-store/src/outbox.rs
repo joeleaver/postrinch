@@ -42,7 +42,7 @@ pub struct OutboxEntry {
     pub sent: Option<Timestamp>,
 }
 
-fn now() -> Timestamp {
+pub(crate) fn now() -> Timestamp {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
@@ -172,7 +172,7 @@ impl Store {
             .collect()
     }
 
-    fn next_seq(&self) -> StoreResult<u64> {
+    pub(crate) fn next_seq(&self) -> StoreResult<u64> {
         Ok(self
             .outbox_all()?
             .iter()
