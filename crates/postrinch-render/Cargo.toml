@@ -9,4 +9,5 @@ repository.workspace = true
 [dependencies]
 ammonia = "4.2"
 base64 = "0.22"
+lol_html = "3.0.3"
 mail-parser = "1.0"

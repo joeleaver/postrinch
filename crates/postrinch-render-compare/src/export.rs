@@ -88,6 +88,36 @@ pub fn export(
     Ok(written)
 }
 
+/// A hand-written HTML file as a message folder `out/<name>`, cleaned as
+/// mail is: for narrowing a difference down to a few lines.
+pub fn case(out: &Path, html: &Path) -> Result<PathBuf> {
+    let name = html
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "case".into());
+    let original = std::fs::read_to_string(html)?;
+    let cleaned = postrinch_render::sanitize(&original, &[], Options { remote: true });
+    let dir = out.join(&name);
+    std::fs::create_dir_all(&dir)?;
+    let meta = Meta {
+        account: String::new(),
+        message: name.clone(),
+        thread: String::new(),
+        from: "case".into(),
+        subject: name,
+        received: 0,
+    };
+    std::fs::write(dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
+    std::fs::write(dir.join("original.html"), &original)?;
+    std::fs::write(dir.join("cleaned.html"), cleaned_page(&cleaned))?;
+    let probe = Cleaned {
+        html: cleaned.html.clone(),
+        body_style: cleaned.body_style.clone(),
+    };
+    std::fs::write(dir.join("cleaned.json"), serde_json::to_vec(&probe)?)?;
+    Ok(dir)
+}
+
 fn write_message(
     dir: &Path,
     account: &EmailAddress,

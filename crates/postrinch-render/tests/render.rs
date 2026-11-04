@@ -33,11 +33,18 @@ fn hostile_mail_loses_what_runs_submits_frames_or_covers() {
 }
 
 #[test]
-fn legacy_layout_attributes_stay() {
+fn legacy_layout_attributes_become_styles() {
     let out = sanitize(&fixture("03_receipt_attrs.html"), &[], Options::default());
-    assert!(out.html.contains("bgcolor="), "{}", out.html);
-    assert!(out.html.contains("cellpadding="), "{}", out.html);
-    assert!(out.html.contains("<table"));
+    let html = &out.html;
+    // bgcolor, width and cellpadding as CSS, before the sender's own.
+    assert!(html.contains("background-color: #232f3e"), "{html}");
+    assert!(html.contains("width: 600px"), "{html}");
+    assert!(
+        html.contains("padding: 0px; background-color: #232f3e"),
+        "{html}"
+    );
+    assert!(!html.contains("bgcolor="), "{html}");
+    assert!(html.contains("<table"));
 }
 
 #[test]

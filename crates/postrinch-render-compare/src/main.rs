@@ -72,6 +72,9 @@ enum Step {
     Capture { out: PathBuf },
     /// Write `out/report.html`.
     Report { out: PathBuf },
+    /// Hand-written HTML files as message folders in `out`, then every
+    /// step after export: for narrowing a difference down.
+    Cases { out: PathBuf, files: Vec<PathBuf> },
     /// The rinch window `capture` drives (not for running by hand).
     Probe { dirs: Vec<PathBuf> },
 }
@@ -115,6 +118,15 @@ fn run(step: Step) -> Result<()> {
         Step::Report { out } => {
             let report = report::report(&out, &message_dirs(&out)?)?;
             println!("{}", report.display());
+        }
+        Step::Cases { out, files } => {
+            let dirs = files
+                .iter()
+                .map(|f| export::case(&out, f))
+                .collect::<Result<Vec<_>>>()?;
+            screenshot(&out, &dirs)?;
+            capture::capture(&dirs)?;
+            println!("{}", report::report(&out, &dirs)?.display());
         }
         Step::Probe { dirs } => probe::run(dirs),
     }

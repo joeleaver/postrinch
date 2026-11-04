@@ -58,7 +58,7 @@ pub fn sanitize(html: &str, inline: &[(String, String)], options: Options) -> Re
         },
     );
     let body_style = body_style(body_tag(html).unwrap_or_default(), remote, &hidden);
-    let html = builder.clean(html).to_string();
+    let html = crate::presentational::to_css(&builder.clean(html).to_string());
     Rendered {
         html,
         body_style,
