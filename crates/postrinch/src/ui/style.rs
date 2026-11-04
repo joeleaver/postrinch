@@ -268,15 +268,7 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 /* A message as its sender drew it: on white, as mail is written for it,
    in dark mode too. */
 .mail { display: flex; flex-direction: column; gap: 10px; }
-.mail-html {
-    padding: 12px;
-    border-radius: 6px;
-    background: #ffffff;
-    color: #222222;
-    font-family: sans-serif;
-    line-height: 1.4;
-    overflow-x: auto;
-}
+/* .mail-html, the card a message is drawn in: postrinch_render::HOST_CSS. */
 .pictures-bar {
     display: flex;
     align-items: center;

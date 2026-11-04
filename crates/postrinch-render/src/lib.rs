@@ -38,13 +38,26 @@ pub struct Options {
     pub remote: bool,
 }
 
+/// The CSS for the element a message's `html` goes in (class `mail-html`,
+/// holding a `mail-body` with the message's `body_style`): mail is drawn on
+/// white, as it is written for, in a dark window too. The window and the
+/// rendering comparison tool both use it, so they draw mail alike.
+pub const HOST_CSS: &str = r#"
+.mail-html {
+    padding: 12px;
+    border-radius: 6px;
+    background: #ffffff;
+    color: #222222;
+    font-family: sans-serif;
+    line-height: 1.4;
+    overflow-x: auto;
+}
+"#;
+
 /// Render a raw RFC 5322 message. `None` when it does not parse.
 pub fn render(raw: &[u8], options: Options) -> Option<Rendered> {
     let parsed = MessageParser::default().parse(raw)?;
-    let html_part = parsed
-        .html_body()
-        .find(|part| matches!(part.kind(), PartKind::Html));
-    let Some(part) = html_part else {
+    let Some(html) = html_part(&parsed) else {
         let text = parsed.text_bodies().collect::<Vec<_>>().join("\n\n");
         return Some(Rendered {
             html: text_html(&text),
@@ -53,9 +66,36 @@ pub fn render(raw: &[u8], options: Options) -> Option<Rendered> {
             remote_hidden: 0,
         });
     };
-    let html = part.text().unwrap_or_default();
-    // Pictures the message carries, by Content-ID, as data: URLs.
-    let inline: Vec<(String, String)> = parsed
+    let cleaned = sanitize(&html, &inline_pictures(&parsed), options);
+    Some(Rendered {
+        from_html: true,
+        ..cleaned
+    })
+}
+
+/// A message's HTML part as its sender wrote it, unsanitized, with the
+/// pictures it carries (`cid:`) inlined: for comparing what Postrinch draws
+/// with what a browser draws. Never shown in the window. `None` without an
+/// HTML part.
+pub fn original_html(raw: &[u8]) -> Option<String> {
+    let parsed = MessageParser::default().parse(raw)?;
+    let mut html = html_part(&parsed)?;
+    for (id, url) in inline_pictures(&parsed) {
+        html = html.replace(&format!("cid:{id}"), &url);
+    }
+    Some(html)
+}
+
+fn html_part(parsed: &mail_parser::Message) -> Option<String> {
+    let part = parsed
+        .html_body()
+        .find(|part| matches!(part.kind(), PartKind::Html))?;
+    Some(part.text().unwrap_or_default().into_owned())
+}
+
+/// Pictures the message carries, by Content-ID, as data: URLs.
+fn inline_pictures(parsed: &mail_parser::Message) -> Vec<(String, String)> {
+    parsed
         .parts()
         .filter_map(|p| {
             let id = p.content_id()?.trim_matches(['<', '>']).to_owned();
@@ -68,12 +108,7 @@ pub fn render(raw: &[u8], options: Options) -> Option<Rendered> {
             let data = base64::engine::general_purpose::STANDARD.encode(p.decoded());
             Some((id, format!("data:{mime};base64,{data}")))
         })
-        .collect();
-    let cleaned = sanitize(&html, &inline, options);
-    Some(Rendered {
-        from_html: true,
-        ..cleaned
-    })
+        .collect()
 }
 
 /// Plain text as HTML: escaped, its line breaks and runs of spaces kept.

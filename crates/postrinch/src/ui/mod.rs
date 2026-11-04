@@ -94,6 +94,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                     style { {palette::DARK} }
                 }
                 style { {style::CSS} }
+                style { {postrinch_render::HOST_CSS} }
                 style { {agents_settings::CSS} }
                 style { {compose::CSS} }
                 style { {search::CSS} }
