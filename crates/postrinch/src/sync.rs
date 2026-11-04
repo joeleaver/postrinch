@@ -184,7 +184,9 @@ fn report(event: SyncEvent, status: Signal<Vec<AccountSync>>, revision: Signal<u
         // Changes are shown as made; sending them is news only when it
         // goes wrong.
         SyncEvent::Sent { report, .. } if report.refused.is_empty() => return,
-        SyncEvent::Sent { account, report } => {
+        SyncEvent::Sent {
+            account, report, ..
+        } => {
             tracing::warn!("{account}: Gmail refused changes: {:?}", report.refused);
             let line = match report.refused.len() {
                 1 => "Gmail refused a change; showing Gmail's mail".to_owned(),

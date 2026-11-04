@@ -47,6 +47,8 @@ pub enum SyncEvent {
     Sent {
         account: EmailAddress,
         report: SendReport,
+        /// How many messages and drafts written here went.
+        mail: usize,
     },
     /// Sending an account's changes failed; they are tried again after
     /// `retry_in`, and stay applied here meanwhile.
@@ -129,7 +131,14 @@ impl GmailSync {
                 continue;
             }
             let address = account.address;
-            match self.waiting(&address).await {
+            let waiting = match (
+                self.waiting(&address).await,
+                self.outgoing_waiting(&address).await,
+            ) {
+                (Ok(changes), Ok(mail)) => Ok(changes + mail),
+                (Err(e), _) | (_, Err(e)) => Err(e),
+            };
+            match waiting {
                 Ok(0) => continue,
                 Ok(_) => {}
                 Err(e) => {
@@ -138,10 +147,19 @@ impl GmailSync {
                     continue;
                 }
             }
-            match self.send_outbox(&address).await {
-                Ok(report) => events(SyncEvent::Sent {
+            // Changes first, then mail, each in the order made.
+            let sent = match self.send_outbox(&address).await {
+                Ok(report) => self
+                    .send_outgoing(&address)
+                    .await
+                    .map(|mail| (report, mail)),
+                Err(e) => Err(e),
+            };
+            match sent {
+                Ok((report, mail)) => events(SyncEvent::Sent {
                     account: address,
                     report,
+                    mail,
                 }),
                 Err(SyncError::NeedsSignIn(_)) => {
                     events(SyncEvent::NeedsSignIn { account: address });

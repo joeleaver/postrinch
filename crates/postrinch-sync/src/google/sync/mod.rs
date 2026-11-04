@@ -16,6 +16,7 @@ mod incremental;
 mod keep;
 mod messages;
 mod outbox;
+mod outgoing;
 
 pub use keep::{KeepOptions, SyncEvent, SyncEventFn};
 pub use outbox::SendReport;

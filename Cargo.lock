@@ -2974,6 +2974,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
 
 [[package]]
+name = "mail-builder"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aca3ad941e4c466402151719d6b4cea4bdfcb212b11e5970afa75e7d28c6502a"
+dependencies = [
+ "encodify",
+ "gethostname",
+ "web-time",
+]
+
+[[package]]
 name = "mail-parser"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4073,6 +4084,7 @@ dependencies = [
  "dirs",
  "keyring",
  "keyring-core",
+ "mail-builder",
  "mail-parser",
  "postrinch-model",
  "postrinch-store",

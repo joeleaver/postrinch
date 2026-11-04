@@ -7,6 +7,7 @@ use postrinch_model::EmailAddress;
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 
+mod outgoing;
 mod snippet;
 mod types;
 
@@ -228,10 +229,34 @@ impl GmailApi {
     async fn send(
         &self,
         account: &EmailAddress,
+        cost: (Cost, Priority),
+        path: &str,
+        query: &[(&str, &str)],
+        json: Option<&serde_json::Value>,
+    ) -> SyncResult<bytes::Bytes> {
+        let method = if json.is_some() {
+            reqwest::Method::POST
+        } else {
+            reqwest::Method::GET
+        };
+        self.request(method, account, cost, path, query, json, true)
+            .await
+    }
+
+    /// One request, retried on rate limits and server errors (which Gmail
+    /// answers without acting), and on dropped connections when `resend`:
+    /// not for a call that must not happen twice, such as sending mail,
+    /// as a dropped connection may have been after Gmail acted.
+    #[allow(clippy::too_many_arguments)]
+    async fn request(
+        &self,
+        method: reqwest::Method,
+        account: &EmailAddress,
         (cost, priority): (Cost, Priority),
         path: &str,
         query: &[(&str, &str)],
         json: Option<&serde_json::Value>,
+        resend: bool,
     ) -> SyncResult<bytes::Bytes> {
         let url = format!("{}/{path}", self.base);
         let mut refreshed = false;
@@ -240,13 +265,13 @@ impl GmailApi {
             attempt += 1;
             self.quota.acquire(&account.key(), cost, priority).await;
             let token = self.auth.access_token(account).await?;
-            let request = match json {
-                Some(body) => self.http.post(&url).json(body),
-                None => self.http.get(&url),
-            };
+            let mut request = self.http.request(method.clone(), &url);
+            if let Some(body) = json {
+                request = request.json(body);
+            }
             let response = match request.bearer_auth(&token).query(query).send().await {
                 Ok(r) => r,
-                Err(e) if attempt < ATTEMPTS && is_transient(&e) => {
+                Err(e) if resend && attempt < ATTEMPTS && is_transient(&e) => {
                     tracing::debug!("Gmail {path}: {}, retrying", chain(&e));
                     tokio::time::sleep(backoff(attempt, None)).await;
                     continue;
@@ -259,7 +284,7 @@ impl GmailApi {
                 // drops part-way through a large message is retried too.
                 let body = match response.bytes().await {
                     Ok(body) => body,
-                    Err(e) if attempt < ATTEMPTS && is_transient(&e) => {
+                    Err(e) if resend && attempt < ATTEMPTS && is_transient(&e) => {
                         tracing::debug!("Gmail {path}: {}, retrying", chain(&e));
                         tokio::time::sleep(backoff(attempt, None)).await;
                         continue;

@@ -57,6 +57,10 @@ pub(crate) enum Cost {
     BatchModify,
     /// `messages.trash` or `messages.untrash`.
     Trash,
+    /// `messages.send` or `drafts.send`.
+    SendMessage,
+    /// `drafts.create`, `drafts.update` or `drafts.delete`.
+    Draft,
 }
 
 impl Cost {
@@ -69,6 +73,8 @@ impl Cost {
             Cost::GetMessageRaw => 60.0,
             Cost::BatchModify => 50.0,
             Cost::Trash => 5.0,
+            Cost::SendMessage => 100.0,
+            Cost::Draft => 15.0,
         }
     }
 }
