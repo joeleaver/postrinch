@@ -10,6 +10,7 @@ repository.workspace = true
 postrinch-model = { workspace = true }
 postrinch-render = { workspace = true }
 postrinch-store = { workspace = true }
+jiff = "0.2"
 serde = { workspace = true }
 thiserror = { workspace = true }
 

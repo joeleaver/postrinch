@@ -15,6 +15,7 @@ mod labels;
 mod scope;
 mod search;
 mod threads;
+mod writing;
 
 use postrinch_store::Store;
 
@@ -26,6 +27,7 @@ pub use labels::{AppLabels, Chip, LabelNode, LabelRole, LabelTree, app_of, role}
 pub use postrinch_render::Rendered;
 pub use search::{Excerpt, SearchResults};
 pub use threads::{CATEGORIES, Thread, ThreadPage, ThreadRow};
+pub use writing::{Queued, Start};
 
 /// The commands, over one store. Cheap to clone.
 #[derive(Clone)]

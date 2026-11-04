@@ -4015,6 +4015,7 @@ dependencies = [
 name = "postrinch-commands"
 version = "0.1.1"
 dependencies = [
+ "jiff",
  "postrinch-model",
  "postrinch-render",
  "postrinch-store",
