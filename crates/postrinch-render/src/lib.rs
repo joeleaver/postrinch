@@ -14,7 +14,7 @@ mod sanitize;
 
 use mail_parser::{MessageParser, PartKind};
 
-pub use sanitize::sanitize;
+pub use sanitize::{policy, sanitize};
 
 /// What a message shows as.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,13 +29,22 @@ pub struct Rendered {
     /// Pictures on the web left out because the person has not asked for
     /// them.
     pub remote_hidden: usize,
+    /// The HTML part as its sender wrote it, the pictures it carries
+    /// inlined, for a view that cleans it at its own width (rinch's
+    /// `HtmlView` with [`policy`]); empty for a text message.
+    pub document: String,
+    /// Whether pictures from the web were allowed: what [`policy`] needs.
+    pub remote: bool,
 }
 
 /// How to render.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Options {
     /// Load pictures from the web.
     pub remote: bool,
+    /// The width the message is drawn at, for its `@media` rules; `None`
+    /// leaves them out (as a wide view).
+    pub width: Option<f32>,
 }
 
 /// The CSS for the element a message's `html` goes in (class `mail-html`,
@@ -64,11 +73,15 @@ pub fn render(raw: &[u8], options: Options) -> Option<Rendered> {
             body_style: String::new(),
             from_html: false,
             remote_hidden: 0,
+            document: String::new(),
+            remote: options.remote,
         });
     };
-    let cleaned = sanitize(&html, &inline_pictures(&parsed), options);
+    let inline = inline_pictures(&parsed);
+    let cleaned = sanitize(&html, &inline, options);
     Some(Rendered {
         from_html: true,
+        document: with_pictures(html, &inline),
         ..cleaned
     })
 }
@@ -79,11 +92,16 @@ pub fn render(raw: &[u8], options: Options) -> Option<Rendered> {
 /// HTML part.
 pub fn original_html(raw: &[u8]) -> Option<String> {
     let parsed = MessageParser::default().parse(raw)?;
-    let mut html = html_part(&parsed)?;
-    for (id, url) in inline_pictures(&parsed) {
-        html = html.replace(&format!("cid:{id}"), &url);
+    let html = html_part(&parsed)?;
+    Some(with_pictures(html, &inline_pictures(&parsed)))
+}
+
+/// `html` with its `cid:` references replaced by the pictures they name.
+fn with_pictures(mut html: String, inline: &[(String, String)]) -> String {
+    for (id, url) in inline {
+        html = html.replace(&format!("cid:{id}"), url);
     }
-    Some(html)
+    html
 }
 
 fn html_part(parsed: &mail_parser::Message) -> Option<String> {
@@ -109,4 +127,35 @@ fn inline_pictures(parsed: &mail_parser::Message) -> Vec<(String, String)> {
             Some((id, format!("data:{mime};base64,{data}")))
         })
         .collect()
+}
+
+/// A message's text, for a program reading it (an agent): what its reader
+/// sees, and apart from it what the message hides from its reader.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MessageText {
+    /// The text the reader sees: an HTML message's as drawn, else its text
+    /// part.
+    pub text: String,
+    /// Text in the HTML that the reader cannot see (`display: none`,
+    /// white on white, a 1px font…): a known way to address instructions to
+    /// an AI, invisible to the person.
+    pub hidden: Vec<String>,
+}
+
+/// A raw message's [`MessageText`]. `None` when it does not parse.
+pub fn message_text(raw: &[u8]) -> Option<MessageText> {
+    let rendered = render(raw, Options::default())?;
+    if !rendered.from_html {
+        let parsed = MessageParser::default().parse(raw)?;
+        let text = parsed.text_bodies().collect::<Vec<_>>().join("\n\n");
+        return Some(MessageText {
+            text,
+            hidden: Vec::new(),
+        });
+    }
+    let text = rinch_html::text(&rendered.html);
+    Some(MessageText {
+        text: text.visible,
+        hidden: text.hidden,
+    })
 }

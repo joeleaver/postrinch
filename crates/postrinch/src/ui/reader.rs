@@ -143,13 +143,19 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
 fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
     // The mail's own body (its style, its contents) inside the white card,
     // so a body with no padding of its own still sits off the card's edge.
-    // A click on a link in it opens the link (crate::links).
-    let (html, body_style) = (rendered.html.clone(), rendered.body_style.clone());
-    let host = rsx! {
-        div { class: "mail-html",
-            HtmlView { html: html, body_style: body_style, onlink: move |href: String| crate::links::open(&href) }
-        }
+    // HTML mail is cleaned by the view at the card's width, and again when a
+    // resize crosses one of its `@media` breakpoints (a narrow pane gets what
+    // a phone shows); text mail is drawn as rendered. A click on a link opens
+    // it (crate::links).
+    let view = if rendered.document.is_empty() {
+        let (html, body_style) = (rendered.html.clone(), rendered.body_style.clone());
+        rsx! { HtmlView { html: html, body_style: body_style, onlink: move |href: String| crate::links::open(&href) } }
+    } else {
+        let document = rendered.document.clone();
+        let policy = postrinch_render::policy(rendered.remote);
+        rsx! { HtmlView { document: document, policy: policy, onlink: move |href: String| crate::links::open(&href) } }
     };
+    let host = rsx! { div { class: "mail-html", {view} } };
     let hidden = rendered.remote_hidden;
     let line = match hidden {
         1 => "A picture from the web is hidden, so the sender can\u{2019}t tell you opened this."

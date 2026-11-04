@@ -262,8 +262,19 @@ fn rows(commands: &Commands, labels: &mut LabelNames, rows: &[ThreadRow]) -> Vec
 fn message(commands: &Commands, labels: &mut LabelNames, m: &Message) -> Value {
     let h = &m.headers;
     let people = |list: &[Mailbox]| list.iter().map(mailbox).collect::<Vec<_>>();
-    let mut body: String = m.body_text.chars().take(BODY_CHARS).collect();
-    if body.len() < m.body_text.len() {
+    // What the person sees (an HTML message's text as drawn), and what the
+    // message hides from them, set apart.
+    let read = if m.downloaded {
+        commands.message_text(&m.account, &m.id).ok().flatten()
+    } else {
+        None
+    };
+    let (full, hidden) = match read {
+        Some(read) => (read.text, read.hidden),
+        None => (m.body_text.clone(), Vec::new()),
+    };
+    let mut body: String = full.chars().take(BODY_CHARS).collect();
+    if body.len() < full.len() {
         body.push_str("\n[… the rest of this message is left out]");
     }
     json!({
@@ -280,6 +291,7 @@ fn message(commands: &Commands, labels: &mut LabelNames, m: &Message) -> Value {
             "cc": people(&h.cc),
             "reply_to": people(&h.reply_to),
             "body": if m.downloaded { Value::String(body) } else { Value::Null },
+            "hidden_text": hidden,
             "attachments": m.attachments.iter().map(|a| json!({
                 "name": a.filename,
                 "type": a.mime_type,

@@ -163,6 +163,28 @@ impl Commands {
         let Some(raw) = self.store.raw_message(account, message)? else {
             return Ok(None);
         };
-        Ok(postrinch_render::render(&raw, RenderOptions { remote }))
+        Ok(postrinch_render::render(
+            &raw,
+            RenderOptions {
+                remote,
+                ..RenderOptions::default()
+            },
+        ))
+    }
+
+    /// A downloaded message's text for a program reading it: what its reader
+    /// sees, and what it hides from its reader (`postrinch_render::
+    /// MessageText`). `None` for a message not downloaded or that does not
+    /// parse.
+    pub fn message_text(
+        &self,
+        account: &EmailAddress,
+        message: &ProviderMessageId,
+    ) -> CommandResult<Option<postrinch_render::MessageText>> {
+        self.check(account)?;
+        let Some(raw) = self.store.raw_message(account, message)? else {
+            return Ok(None);
+        };
+        Ok(postrinch_render::message_text(&raw))
     }
 }

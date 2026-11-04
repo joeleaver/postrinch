@@ -21,10 +21,11 @@ pub fn export(
     query: &str,
     count: usize,
     per_sender: usize,
+    width: u32,
 ) -> Result<Vec<PathBuf>> {
     let store = Store::open(data_dir)?;
     let commands = Commands::new(store.clone());
-    let setup = crate::setup();
+    let setup = crate::setup(width);
     // Ask for plenty: many matches are plain text or not downloaded.
     let results = commands.search(query, (count * 8).max(100))?;
     let mut senders: Vec<String> = Vec::new();
@@ -57,9 +58,16 @@ pub fn export(
         let Some(raw) = store.raw_message(&account, &message.id)? else {
             continue;
         };
-        let (Some(original), Some(rendered)) =
-            (original_html(&raw), render(&raw, Options { remote: true }))
-        else {
+        let (Some(original), Some(rendered)) = (
+            original_html(&raw),
+            render(
+                &raw,
+                Options {
+                    remote: true,
+                    width: Some(setup.width as f32),
+                },
+            ),
+        ) else {
             continue;
         };
         let from = message

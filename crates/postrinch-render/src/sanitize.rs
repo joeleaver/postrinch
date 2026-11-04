@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use rinch_html::{Policy, clean};
+use rinch_html::{Policy, clean, clean_at};
 
 use crate::{Options, Rendered};
 
@@ -39,11 +39,32 @@ pub fn sanitize(html: &str, inline: &[(String, String)], options: Options) -> Re
         }),
         ..Policy::default()
     };
-    let cleaned = clean(html, &policy);
+    let cleaned = match options.width {
+        Some(width) => clean_at(html, &policy, width),
+        None => clean(html, &policy),
+    };
     Rendered {
         html: cleaned.html,
         body_style: cleaned.body_style,
         from_html: true,
         remote_hidden: hidden.load(Ordering::Relaxed),
+        document: String::new(),
+        remote: options.remote,
+    }
+}
+
+/// Mail's picture rule for a view that cleans a message itself (rinch's
+/// `HtmlView` given [`Rendered::document`](crate::Rendered::document), whose
+/// pictures are already inlined): `data:` pictures, and pictures from the
+/// web when `remote`.
+pub fn policy(remote: bool) -> Policy {
+    Policy {
+        picture: Arc::new(move |src| {
+            let src = src.trim();
+            let lower = src.to_ascii_lowercase();
+            let web = lower.starts_with("http://") || lower.starts_with("https://");
+            (lower.starts_with("data:image/") || (remote && web)).then(|| src.to_owned())
+        }),
+        ..Policy::default()
     }
 }

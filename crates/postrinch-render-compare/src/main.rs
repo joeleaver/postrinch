@@ -4,7 +4,7 @@
 //! chooses the mail and draws it as the window does.
 //!
 //! ```text
-//! render-compare all --data-dir <store copy> --out <dir> [--query <search>] [--count N]
+//! render-compare all --data-dir <store copy> --out <dir> [--query <search>] [--count N] [--widths 480,720,1080]
 //! ```
 //!
 //! runs every step: `export` (choose mail, write it as sent and as
@@ -29,9 +29,9 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 /// The window's fonts, for Chrome to draw the cleaned HTML with.
 const FONT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../postrinch/assets/fonts");
 
-/// Mail as the reader draws it: about the reader's card in a 1440-wide
-/// window, the card's CSS, the window's fonts.
-pub fn setup() -> Setup {
+/// Mail as the reader draws it, `width` wide (720 is about the reader's
+/// card in a 1440-wide window): the card's CSS, the window's fonts.
+pub fn setup(width: u32) -> Setup {
     let face = |file: &str, weight: &str, style: &str| {
         format!(
             "@font-face {{ font-family: 'Postrinch Sans'; src: url('file://{FONT_DIR}/{file}'); font-weight: {weight}; font-style: {style}; }}"
@@ -47,7 +47,7 @@ pub fn setup() -> Setup {
     ]
     .join("\n");
     Setup {
-        width: 720,
+        width,
         host_css: postrinch_render::HOST_CSS.replace(".mail-html", ".html-compare-host")
             + "\n.html-compare-host { border-radius: 0; }",
         chrome_css,
@@ -78,6 +78,9 @@ enum Step {
         /// At most this many messages from one sender.
         #[arg(long, default_value_t = 1)]
         per_sender: usize,
+        /// The widths to draw at, each in `out/w<width>` when more than one.
+        #[arg(long, value_delimiter = ',', default_value = "720")]
+        widths: Vec<u32>,
     },
     /// Choose mail and write it as sent and as cleaned.
     Export {
@@ -99,7 +102,7 @@ enum Step {
     /// Write `out/report.html`.
     Report { out: PathBuf },
     /// The rinch window `capture` drives (not for running by hand).
-    Probe { dirs: Vec<PathBuf> },
+    Probe { width: u32, dirs: Vec<PathBuf> },
 }
 
 fn main() {
@@ -118,12 +121,23 @@ fn run(step: Step) -> Result<()> {
             query,
             count,
             per_sender,
+            widths,
         } => {
-            let dirs = export::export(&data_dir, &out, &query, count, per_sender)?;
-            eprintln!("exported {} messages", dirs.len());
-            screenshot(&out, &dirs)?;
-            draw(&dirs)?;
-            println!("{}", report::report(&out, &dirs)?.display());
+            for &width in &widths {
+                let out = if widths.len() == 1 {
+                    out.clone()
+                } else {
+                    out.join(format!("w{width}"))
+                };
+                let dirs = export::export(&data_dir, &out, &query, count, per_sender, width)?;
+                eprintln!("exported {} messages at {width}px", dirs.len());
+                screenshot(&out, &dirs, width)?;
+                draw(&dirs, width)?;
+                println!("{}", report::report(&out, &dirs)?.display());
+            }
+            if widths.len() > 1 {
+                println!("{}", report::index(&out, &widths)?.display());
+            }
         }
         Step::Export {
             data_dir,
@@ -132,34 +146,34 @@ fn run(step: Step) -> Result<()> {
             count,
             per_sender,
         } => {
-            let dirs = export::export(&data_dir, &out, &query, count, per_sender)?;
+            let dirs = export::export(&data_dir, &out, &query, count, per_sender, 720)?;
             println!("exported {} messages into {}", dirs.len(), out.display());
         }
-        Step::Chrome { out } => screenshot(&out, &html_compare::case_dirs(&out)?)?,
-        Step::Capture { out } => draw(&html_compare::case_dirs(&out)?)?,
+        Step::Chrome { out } => screenshot(&out, &html_compare::case_dirs(&out)?, 720)?,
+        Step::Capture { out } => draw(&html_compare::case_dirs(&out)?, 720)?,
         Step::Report { out } => {
             let dirs = html_compare::case_dirs(&out)?;
             println!("{}", report::report(&out, &dirs)?.display());
         }
-        Step::Probe { dirs } => {
+        Step::Probe { width, dirs } => {
             probe::fetch_web_pictures();
-            html_compare::probe::run(dirs, setup());
+            html_compare::probe::run(dirs, setup(width));
         }
     }
     Ok(())
 }
 
-fn screenshot(out: &Path, dirs: &[PathBuf]) -> Result<()> {
+fn screenshot(out: &Path, dirs: &[PathBuf], width: u32) -> Result<()> {
     let profile = out.join(".chrome-profile");
     for dir in dirs {
-        chrome::case(dir, setup().width, &profile)?;
+        chrome::case(dir, width, &profile)?;
         eprintln!("chrome: {}", dir.display());
     }
     Ok(())
 }
 
-fn draw(dirs: &[PathBuf]) -> Result<()> {
+fn draw(dirs: &[PathBuf], width: u32) -> Result<()> {
     let mut probe = Command::new(std::env::current_exe()?);
-    probe.arg("probe").args(dirs);
-    capture::capture(dirs, probe, setup().width)
+    probe.arg("probe").arg(width.to_string()).args(dirs);
+    capture::capture(dirs, probe, width)
 }
