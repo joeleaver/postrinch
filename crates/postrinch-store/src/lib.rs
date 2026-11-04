@@ -11,6 +11,7 @@ mod accounts;
 mod backfill;
 mod blobs;
 mod codec;
+mod duplicates;
 mod error;
 mod format;
 mod keys;

@@ -156,12 +156,9 @@ impl Store {
                 continue;
             }
             let mut change = entry.change;
-            change.add_labels.retain(|l| {
-                matches!(
-                    self.find(labels::TYPE, "key", &scoped(account, l)),
-                    Ok(Some(_))
-                )
-            });
+            change
+                .add_labels
+                .retain(|l| matches!(self.find_label(account, l), Ok(Some(_))));
             change.apply(labels, flags);
         }
         Ok(())

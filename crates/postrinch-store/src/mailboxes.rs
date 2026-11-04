@@ -40,8 +40,7 @@ impl Store {
         account: &EmailAddress,
         label_provider_id: &str,
     ) -> StoreResult<Vec<ThreadEntry>> {
-        let Some(label) = self.find(labels::TYPE, "key", &scoped(account, label_provider_id))?
-        else {
+        let Some(label) = self.find_label(account, label_provider_id)? else {
             return Ok(Vec::new());
         };
         let kind: LabelKind = label.json("kind")?;

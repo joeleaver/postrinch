@@ -82,6 +82,11 @@ pub(crate) fn open(root: &Path) -> StoreResult<Store> {
             store.upsert(INFO, "key", INFO_KEY, fields().build(), fields().build())?;
         }
     }
+    // Copies of a label made before labels were found despite rhypedb#27.
+    let merged = store.merge_duplicate_labels()?;
+    if merged > 0 {
+        tracing::info!("merged {merged} copies of labels into their originals");
+    }
     Ok(store)
 }
 

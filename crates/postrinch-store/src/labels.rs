@@ -37,7 +37,14 @@ impl Store {
             .json("kind", &label.kind)
             .json("visibility", &label.visibility)
             .json("color", &label.color);
-        self.upsert(TYPE, "key", &key, create.build(), update.build())?;
+        // Found by key or among the account's labels (rhypedb#27, see
+        // duplicates.rs), so a lookup that misses never makes a copy.
+        match self.find_label(account, &label.provider_id)? {
+            Some(existing) => self.db_update(TYPE, existing.id(), update.build())?,
+            None => {
+                self.upsert(TYPE, "key", &key, create.build(), update.build())?;
+            }
+        }
         Ok(())
     }
 
@@ -75,12 +82,12 @@ impl Store {
         provider_id: &str,
         prefs: &LabelPrefs,
     ) -> StoreResult<()> {
-        let label = self
-            .find(TYPE, "key", &scoped(account, provider_id))?
-            .ok_or_else(|| StoreError::UnknownLabel {
-                account: account.clone(),
-                id: provider_id.to_owned(),
-            })?;
+        let label =
+            self.find_label(account, provider_id)?
+                .ok_or_else(|| StoreError::UnknownLabel {
+                    account: account.clone(),
+                    id: provider_id.to_owned(),
+                })?;
         let update = FieldsBuilder::new().json("prefs", prefs);
         self.db_update(TYPE, label.id(), update.build())
     }
@@ -88,7 +95,7 @@ impl Store {
     /// Remove a label; messages that carried it lose it. Removing a label
     /// that is not there does nothing.
     pub fn remove_label(&self, account: &EmailAddress, provider_id: &str) -> StoreResult<()> {
-        if let Some(label) = self.find(TYPE, "key", &scoped(account, provider_id))? {
+        if let Some(label) = self.find_label(account, provider_id)? {
             self.db_delete(TYPE, label.id())?;
         }
         Ok(())
@@ -103,7 +110,7 @@ impl Store {
         provider_ids
             .iter()
             .map(|id| {
-                self.find(TYPE, "key", &scoped(account, id))?
+                self.find_label(account, id)?
                     .map(|f| f.id())
                     .ok_or_else(|| StoreError::UnknownLabel {
                         account: account.clone(),
