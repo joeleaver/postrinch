@@ -10,7 +10,6 @@
 //! tells the sender the mail was opened. A message with no HTML part is its
 //! text, escaped.
 
-mod presentational;
 mod sanitize;
 
 use mail_parser::{MessageParser, PartKind};

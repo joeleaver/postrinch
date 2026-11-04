@@ -12,7 +12,7 @@ use crate::{Options, Rendered};
 /// Tags kept beyond ammonia's defaults: the legacy ones mail still uses.
 const EXTRA_TAGS: &[&str] = &["font", "center", "big", "strike"];
 /// Attributes kept on any tag: layout and the legacy presentational ones
-/// rinch understands (`bgcolor`, `align`, `cellpadding`…).
+/// rinch maps as presentational hints (`bgcolor`, `align`, `cellpadding`…).
 const LAYOUT_ATTRIBUTES: &[&str] = &[
     "style",
     "align",
@@ -62,7 +62,7 @@ pub fn sanitize(html: &str, inline: &[(String, String)], options: Options) -> Re
     let inlined = inline_sheets(html);
     let html = inlined.as_str();
     let body_style = body_style(body_tag(html).unwrap_or_default(), remote, &hidden);
-    let html = crate::presentational::to_css(&builder.clean(html).to_string());
+    let html = builder.clean(html).to_string();
     Rendered {
         html,
         body_style,

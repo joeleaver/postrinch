@@ -69,7 +69,7 @@ version = "4.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f45dfa685e1ec33b1bf1a3b93b8047cbdbef41b6040deebbe6bea7720a45574"
 dependencies = [
- "cssparser 0.38.0",
+ "cssparser",
  "html5ever",
  "maplit",
  "url",
@@ -1041,28 +1041,15 @@ version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c357d136b76b660cf6024f37871b9c39f4f31e63cc7e548c81579cae22bbd45b"
 dependencies = [
- "cssparser 0.38.0",
+ "cssparser",
  "hashbrown 0.17.1",
  "html5ever",
  "memchr",
  "precomputed-hash",
  "rustc-hash 2.1.3",
- "selectors 0.41.0",
+ "selectors",
  "smallvec",
  "url",
-]
-
-[[package]]
-name = "cssparser"
-version = "0.36.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dae61cf9c0abb83bd659dab65b7e4e38d8236824c85f0f804f173567bda257d2"
-dependencies = [
- "cssparser-macros 0.6.1",
- "dtoa-short",
- "itoa",
- "phf 0.13.1",
- "smallvec",
 ]
 
 [[package]]
@@ -1071,22 +1058,12 @@ version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11119743ad110e8c1bdccd930d7f5c30c99e5fc76a7b63ec9807e84eef0c5f59"
 dependencies = [
- "cssparser-macros 0.7.1",
+ "cssparser-macros",
  "dtoa-short",
  "itoa",
- "phf 0.14.0",
+ "phf",
  "serde",
  "smallvec",
-]
-
-[[package]]
-name = "cssparser-macros"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13b588ba4ac1a99f7f2964d24b3d896ddc6bf847ee3855dbd4366f058cfcd331"
-dependencies = [
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -1234,6 +1211,12 @@ dependencies = [
  "quote",
  "syn 3.0.9",
 ]
+
+[[package]]
+name = "data-url"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "deadpool"
@@ -1640,6 +1623,12 @@ dependencies = [
  "miniz_oxide 0.9.1",
  "zlib-rs",
 ]
+
+[[package]]
+name = "float-cmp"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
 
 [[package]]
 name = "fnv"
@@ -2211,8 +2200,6 @@ version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
- "allocator-api2",
- "equivalent",
  "foldhash 0.2.0",
 ]
 
@@ -2606,6 +2593,12 @@ dependencies = [
  "byteorder-lite",
  "quick-error",
 ]
+
+[[package]]
+name = "imagesize"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 
 [[package]]
 name = "indexmap"
@@ -3002,25 +2995,6 @@ name = "log"
 version = "0.4.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
-
-[[package]]
-name = "lol_html"
-version = "3.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "691b898297b684292c8808d0285769fc05fb721a36ee5b62c75c8da83e60d350"
-dependencies = [
- "bitflags 2.13.2",
- "cfg-if",
- "cssparser 0.36.0",
- "encoding_rs",
- "foldhash 0.2.0",
- "hashbrown 0.17.1",
- "memchr",
- "mime",
- "precomputed-hash",
- "selectors 0.37.0",
- "thiserror 2.0.21",
-]
 
 [[package]]
 name = "lru-slab"
@@ -3839,34 +3813,13 @@ dependencies = [
 
 [[package]]
 name = "phf"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1562dc717473dbaa4c1f85a36410e03c047b2e7df7f45ee938fbef64ae7fadf"
-dependencies = [
- "phf_macros 0.13.1",
- "phf_shared 0.13.1",
- "serde",
-]
-
-[[package]]
-name = "phf"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "010378780309880b08997fae13be7834dba947d36393bd372f2b1556deb2a2f6"
 dependencies = [
- "phf_macros 0.14.0",
- "phf_shared 0.14.0",
+ "phf_macros",
+ "phf_shared",
  "serde",
-]
-
-[[package]]
-name = "phf_codegen"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49aa7f9d80421bca176ca8dbfebe668cc7a2684708594ec9f3c0db0805d5d6e1"
-dependencies = [
- "phf_generator 0.13.1",
- "phf_shared 0.13.1",
 ]
 
 [[package]]
@@ -3875,18 +3828,8 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41b585a510fb76fdebead6897982ef2a03a21d8e6cbcca904999742a4afc6ffe"
 dependencies = [
- "phf_generator 0.14.0",
- "phf_shared 0.14.0",
-]
-
-[[package]]
-name = "phf_generator"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "135ace3a761e564ec88c03a77317a7c6b80bb7f7135ef2544dbe054243b89737"
-dependencies = [
- "fastrand",
- "phf_shared 0.13.1",
+ "phf_generator",
+ "phf_shared",
 ]
 
 [[package]]
@@ -3896,20 +3839,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aeb62e0959d5a1bebc965f4d15d9e2b7cea002b6b0f5ba8cde6cc26738467100"
 dependencies = [
  "fastrand",
- "phf_shared 0.14.0",
-]
-
-[[package]]
-name = "phf_macros"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "812f032b54b1e759ccd5f8b6677695d5268c588701effba24601f6932f8269ef"
-dependencies = [
- "phf_generator 0.13.1",
- "phf_shared 0.13.1",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
+ "phf_shared",
 ]
 
 [[package]]
@@ -3918,20 +3848,11 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fa8d0ca26d424d27630da600c6624696e7dec8bf7b3b492b383c5dc49e5e085"
 dependencies = [
- "phf_generator 0.14.0",
- "phf_shared 0.14.0",
+ "phf_generator",
+ "phf_shared",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "phf_shared"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
-dependencies = [
- "siphasher",
 ]
 
 [[package]]
@@ -3942,6 +3863,12 @@ checksum = "c6fd9027e2d9319be6349febd1db4e8d02aa544921200c9b777720ac34a3aa89"
 dependencies = [
  "siphasher",
 ]
+
+[[package]]
+name = "pico-args"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5be167a7af36ee22fe3115051bc51f6e6c7054c9348e28deb4f49bd6f705a315"
 
 [[package]]
 name = "pin-project"
@@ -4173,7 +4100,6 @@ dependencies = [
  "ammonia",
  "base64 0.22.1",
  "css-inline",
- "lol_html",
  "mail-parser",
 ]
 
@@ -4723,6 +4649,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "resvg"
+version = "0.49.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1572844b6727a1bf842190e9947641a68ac44bed83f50afb4bd1407a2564bee8"
+dependencies = [
+ "bytemuck",
+ "log",
+ "pico-args",
+ "rgb",
+ "svgtypes",
+ "tiny-skia",
+ "usvg",
+]
+
+[[package]]
+name = "rgb"
+version = "0.8.53"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "rhypedb-authz"
 version = "0.1.0"
 source = "git+https://github.com/joeleaver/rhypedb#bf1bf0e09249198c4af20f712f57ae0766a6a8dc"
@@ -4842,7 +4792,7 @@ dependencies = [
 [[package]]
 name = "rinch"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "base64 0.22.1",
  "bytemuck",
@@ -4882,7 +4832,7 @@ dependencies = [
 [[package]]
 name = "rinch-android"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "android-activity",
  "base64 0.22.1",
@@ -4895,7 +4845,7 @@ dependencies = [
 [[package]]
 name = "rinch-clipboard"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "arboard",
  "js-sys",
@@ -4908,7 +4858,7 @@ dependencies = [
 [[package]]
 name = "rinch-components"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "rinch-core",
  "rinch-macros",
@@ -4920,7 +4870,7 @@ dependencies = [
 [[package]]
 name = "rinch-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -4930,7 +4880,7 @@ dependencies = [
 [[package]]
 name = "rinch-debug"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "serde",
  "serde_json",
@@ -4940,13 +4890,13 @@ dependencies = [
 [[package]]
 name = "rinch-dom"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "app_units",
  "atomic_refcell",
  "base64 0.22.1",
  "bitflags 2.13.2",
- "cssparser 0.38.0",
+ "cssparser",
  "euclid",
  "icu_properties",
  "icu_segmenter",
@@ -4954,13 +4904,14 @@ dependencies = [
  "parley",
  "peniko",
  "precomputed-hash",
+ "resvg",
  "rinch-core",
  "rinch-words",
  "rustc-hash 2.1.3",
- "selectors 0.41.0",
+ "selectors",
  "serde",
  "serde_json",
- "servo_arc 0.5.0",
+ "servo_arc",
  "skrifa",
  "slab",
  "stylo",
@@ -4968,9 +4919,10 @@ dependencies = [
  "stylo_dom",
  "stylo_static_prefs",
  "stylo_traits",
+ "svgtypes",
  "swash",
  "taffy",
- "tiny-skia 0.11.4",
+ "tiny-skia",
  "tracing",
  "url",
  "vello",
@@ -4981,7 +4933,7 @@ dependencies = [
 [[package]]
 name = "rinch-editable"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "rinch-words",
 ]
@@ -4989,7 +4941,7 @@ dependencies = [
 [[package]]
 name = "rinch-editor-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "regex",
  "rinch-words",
@@ -4999,7 +4951,7 @@ dependencies = [
 [[package]]
 name = "rinch-editor-view"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "rinch-core",
  "rinch-editor-core",
@@ -5009,7 +4961,7 @@ dependencies = [
 [[package]]
 name = "rinch-macros"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5019,7 +4971,7 @@ dependencies = [
 [[package]]
 name = "rinch-platform"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "peniko",
  "vello",
@@ -5029,7 +4981,7 @@ dependencies = [
 [[package]]
 name = "rinch-tabler-icons"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "heck 0.5.0",
  "rinch-core",
@@ -5041,12 +4993,12 @@ dependencies = [
 [[package]]
 name = "rinch-theme"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 
 [[package]]
 name = "rinch-visual-test"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -5061,7 +5013,7 @@ dependencies = [
 [[package]]
 name = "rinch-words"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#8421ff53c17dedfcae3cbb3c8a378becaf2a70ae"
+source = "git+https://github.com/joeleaver/rinch.git#e03f79a251ecdd6c6ed1370d6349ddc6cc36d1ca"
 dependencies = [
  "icu_segmenter",
  "regex",
@@ -5326,7 +5278,7 @@ dependencies = [
  "log",
  "memmap2",
  "smithay-client-toolkit",
- "tiny-skia 0.12.0",
+ "tiny-skia",
 ]
 
 [[package]]
@@ -5373,37 +5325,18 @@ dependencies = [
 
 [[package]]
 name = "selectors"
-version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cfaaa6035167f0e604e42723c7650d59ee269ef220d7bbe0565602c8a0173b9"
-dependencies = [
- "bitflags 2.13.2",
- "cssparser 0.36.0",
- "derive_more",
- "log",
- "new_debug_unreachable",
- "phf 0.13.1",
- "phf_codegen 0.13.1",
- "precomputed-hash",
- "rustc-hash 2.1.3",
- "servo_arc 0.4.3",
- "smallvec",
-]
-
-[[package]]
-name = "selectors"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8322aebea94a6cc288ff884e8a49bdbceef60206c400c6c46d22e62fc4fd91a6"
 dependencies = [
  "bitflags 2.13.2",
- "cssparser 0.38.0",
+ "cssparser",
  "derive_more",
  "log",
  "new_debug_unreachable",
  "precomputed-hash",
  "rustc-hash 2.1.3",
- "servo_arc 0.5.0",
+ "servo_arc",
  "smallvec",
  "to_shmem",
  "to_shmem_derive",
@@ -5514,15 +5447,6 @@ dependencies = [
 
 [[package]]
 name = "servo_arc"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "170fb83ab34de17dc69aa7c67482b22218ddb85da56546f9bd6b929e32a05930"
-dependencies = [
- "stable_deref_trait",
-]
-
-[[package]]
-name = "servo_arc"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4eceb519ec34d8290aaf6e46f435102f2bfa63f22b05a144fb16ab266d3b198"
@@ -5608,6 +5532,15 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "simplecss"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a9c6883ca9c3c7c90e888de77b7a5c849c779d25d74a1269b0218b14e8b136c"
+dependencies = [
+ "log",
+]
 
 [[package]]
 name = "siphasher"
@@ -5762,6 +5695,9 @@ name = "strict-num"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731"
+dependencies = [
+ "float-cmp",
+]
 
 [[package]]
 name = "string_cache"
@@ -5771,7 +5707,7 @@ checksum = "ffa8a5dbe8b3f0bbe29d4c3225daafaeead63afdc1b65fc4c01a1384166038e6"
 dependencies = [
  "new_debug_unreachable",
  "parking_lot",
- "phf_shared 0.14.0",
+ "phf_shared",
  "precomputed-hash",
  "serde",
 ]
@@ -5782,8 +5718,8 @@ version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "928dcdf75e47626b3617a976ec205d9f057584c371c1f23b782129268d0e6edc"
 dependencies = [
- "phf_generator 0.14.0",
- "phf_shared 0.14.0",
+ "phf_generator",
+ "phf_shared",
  "proc-macro2",
  "quote",
 ]
@@ -5823,7 +5759,7 @@ dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
  "byteorder",
- "cssparser 0.38.0",
+ "cssparser",
  "derive_more",
  "encoding_rs",
  "euclid",
@@ -5844,9 +5780,9 @@ dependencies = [
  "rayon",
  "rayon-core",
  "rustc-hash 2.1.3",
- "selectors 0.41.0",
+ "selectors",
  "serde",
- "servo_arc 0.5.0",
+ "servo_arc",
  "smallbitvec",
  "smallvec",
  "static_assertions",
@@ -5909,11 +5845,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83ed69d55ee907599f093221004a28371925236f09f20961963020abf38bab6a"
 dependencies = [
  "app_units",
- "cssparser 0.38.0",
+ "cssparser",
  "euclid",
  "parking_lot",
- "selectors 0.41.0",
- "servo_arc 0.5.0",
+ "selectors",
+ "servo_arc",
  "smallbitvec",
  "smallvec",
  "string_cache",
@@ -5938,12 +5874,12 @@ checksum = "645d6bfe40eb6e86ebe9f2d2adadcbced41bfa96175de7cb13d4d178d27bc83d"
 dependencies = [
  "app_units",
  "bitflags 2.13.2",
- "cssparser 0.38.0",
+ "cssparser",
  "euclid",
  "malloc_size_of_derive",
- "selectors 0.41.0",
+ "selectors",
  "serde",
- "servo_arc 0.5.0",
+ "servo_arc",
  "stylo_atoms",
  "stylo_malloc_size_of",
  "thin-vec",
@@ -5963,6 +5899,16 @@ name = "svg_fmt"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0193cc4331cfd2f3d2011ef287590868599a2f33c3e69bc22c1a3d3acf9e02fb"
+
+[[package]]
+name = "svgtypes"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "695b5790b3131dafa99b3bbfd25a216edb3d216dad9ca208d4657bfb8f2abc3d"
+dependencies = [
+ "kurbo",
+ "siphasher",
+]
 
 [[package]]
 name = "swash"
@@ -6075,8 +6021,7 @@ dependencies = [
 [[package]]
 name = "taffy"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "639627c87f43b9181c811f40a6296409e093a17bc761214cba3c15df74f86b99"
+source = "git+https://github.com/joeleaver/taffy-fork?rev=d2e1f98d4dc2d423704971cbe408ee1f909b2d87#d2e1f98d4dc2d423704971cbe408ee1f909b2d87"
 dependencies = [
  "arrayvec",
  "serde",
@@ -6097,7 +6042,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -6222,21 +6167,6 @@ dependencies = [
 
 [[package]]
 name = "tiny-skia"
-version = "0.11.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83d13394d44dae3207b52a326c0c85a8bf87f1541f23b0d143811088497b09ab"
-dependencies = [
- "arrayref",
- "arrayvec",
- "bytemuck",
- "cfg-if",
- "log",
- "png 0.17.16",
- "tiny-skia-path 0.11.4",
-]
-
-[[package]]
-name = "tiny-skia"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47ffee5eaaf5527f630fb0e356b90ebdec84d5d18d937c5e440350f88c5a91ea"
@@ -6246,18 +6176,8 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "log",
- "tiny-skia-path 0.12.0",
-]
-
-[[package]]
-name = "tiny-skia-path"
-version = "0.11.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c9e7fc0c2e86a30b117d0462aa261b72b7a99b7ebd7deb3a14ceda95c5bdc93"
-dependencies = [
- "arrayref",
- "bytemuck",
- "strict-num",
+ "png 0.18.1",
+ "tiny-skia-path",
 ]
 
 [[package]]
@@ -6307,8 +6227,8 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbf077da8dd01cc18453bd7d9bc3a945c262f5f344562e5f6deb3914b4dd6f14"
 dependencies = [
- "cssparser 0.38.0",
- "servo_arc 0.5.0",
+ "cssparser",
+ "servo_arc",
  "smallbitvec",
  "smallvec",
  "string_cache",
@@ -6712,6 +6632,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "usvg"
+version = "0.49.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d09b73ee83641d390ad7ffd9000f347b16eb128e437675b6ff277ea5c7fcf22c"
+dependencies = [
+ "data-url",
+ "imagesize",
+ "kurbo",
+ "log",
+ "pico-args",
+ "roxmltree",
+ "simplecss",
+ "siphasher",
+ "strict-num",
+ "svgtypes",
+ "tiny-skia-path",
+]
+
+[[package]]
 name = "utf8-zero"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6759,7 +6698,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 [[package]]
 name = "vello"
 version = "0.11.0"
-source = "git+https://github.com/joeleaver/vello-fork?rev=7a511341325479f8dbbf0b6f71d9f7f29483d5c0#7a511341325479f8dbbf0b6f71d9f7f29483d5c0"
+source = "git+https://github.com/joeleaver/vello-fork?rev=f010985c43f499f76e7d587e2c5ee3c6f0877817#f010985c43f499f76e7d587e2c5ee3c6f0877817"
 dependencies = [
  "bytemuck",
  "futures-intrusive",
@@ -6777,7 +6716,7 @@ dependencies = [
 [[package]]
 name = "vello_encoding"
 version = "0.11.0"
-source = "git+https://github.com/joeleaver/vello-fork?rev=7a511341325479f8dbbf0b6f71d9f7f29483d5c0#7a511341325479f8dbbf0b6f71d9f7f29483d5c0"
+source = "git+https://github.com/joeleaver/vello-fork?rev=f010985c43f499f76e7d587e2c5ee3c6f0877817#f010985c43f499f76e7d587e2c5ee3c6f0877817"
 dependencies = [
  "bytemuck",
  "guillotiere",
@@ -6789,7 +6728,7 @@ dependencies = [
 [[package]]
 name = "vello_shaders"
 version = "0.11.0"
-source = "git+https://github.com/joeleaver/vello-fork?rev=7a511341325479f8dbbf0b6f71d9f7f29483d5c0#7a511341325479f8dbbf0b6f71d9f7f29483d5c0"
+source = "git+https://github.com/joeleaver/vello-fork?rev=f010985c43f499f76e7d587e2c5ee3c6f0877817#f010985c43f499f76e7d587e2c5ee3c6f0877817"
 dependencies = [
  "bytemuck",
  "log",
@@ -7066,8 +7005,8 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7572660c8890448ba236b7376f27e389c6a7e1c70195622faced601f855c0ada"
 dependencies = [
- "phf 0.14.0",
- "phf_codegen 0.14.0",
+ "phf",
+ "phf_codegen",
  "string_cache",
  "string_cache_codegen",
 ]
@@ -7594,7 +7533,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 [[package]]
 name = "winit"
 version = "0.31.0-beta.4"
-source = "git+https://github.com/joeleaver/winit-fork?rev=34f153bd6e523de53f9da67c6db58bd1f8732542#34f153bd6e523de53f9da67c6db58bd1f8732542"
+source = "git+https://github.com/joeleaver/winit-fork?rev=d99384edd804a20e737c013b5f57b56ab931a611#d99384edd804a20e737c013b5f57b56ab931a611"
 dependencies = [
  "bitflags 2.13.2",
  "cfg_aliases",
@@ -7620,7 +7559,7 @@ dependencies = [
 [[package]]
 name = "winit-android"
 version = "0.31.0-beta.4"
-source = "git+https://github.com/joeleaver/winit-fork?rev=34f153bd6e523de53f9da67c6db58bd1f8732542#34f153bd6e523de53f9da67c6db58bd1f8732542"
+source = "git+https://github.com/joeleaver/winit-fork?rev=d99384edd804a20e737c013b5f57b56ab931a611#d99384edd804a20e737c013b5f57b56ab931a611"
 dependencies = [
  "android-activity",
  "bitflags 2.13.2",
@@ -7635,7 +7574,7 @@ dependencies = [
 [[package]]
 name = "winit-appkit"
 version = "0.31.0-beta.4"
-source = "git+https://github.com/joeleaver/winit-fork?rev=34f153bd6e523de53f9da67c6db58bd1f8732542#34f153bd6e523de53f9da67c6db58bd1f8732542"
+source = "git+https://github.com/joeleaver/winit-fork?rev=d99384edd804a20e737c013b5f57b56ab931a611#d99384edd804a20e737c013b5f57b56ab931a611"
 dependencies = [
  "bitflags 2.13.2",
  "block2 0.6.2",
@@ -7657,7 +7596,7 @@ dependencies = [
 [[package]]
 name = "winit-common"
 version = "0.31.0-beta.4"
-source = "git+https://github.com/joeleaver/winit-fork?rev=34f153bd6e523de53f9da67c6db58bd1f8732542#34f153bd6e523de53f9da67c6db58bd1f8732542"
+source = "git+https://github.com/joeleaver/winit-fork?rev=d99384edd804a20e737c013b5f57b56ab931a611#d99384edd804a20e737c013b5f57b56ab931a611"
 dependencies = [
  "block2 0.6.2",
  "dpi",
@@ -7675,7 +7614,7 @@ dependencies = [
 [[package]]
 name = "winit-core"
 version = "0.31.0-beta.4"
-source = "git+https://github.com/joeleaver/winit-fork?rev=34f153bd6e523de53f9da67c6db58bd1f8732542#34f153bd6e523de53f9da67c6db58bd1f8732542"
+source = "git+https://github.com/joeleaver/winit-fork?rev=d99384edd804a20e737c013b5f57b56ab931a611#d99384edd804a20e737c013b5f57b56ab931a611"
 dependencies = [
  "bitflags 2.13.2",
  "cursor-icon",
@@ -7689,7 +7628,7 @@ dependencies = [
 [[package]]
 name = "winit-orbital"
 version = "0.31.0-beta.4"
-source = "git+https://github.com/joeleaver/winit-fork?rev=34f153bd6e523de53f9da67c6db58bd1f8732542#34f153bd6e523de53f9da67c6db58bd1f8732542"
+source = "git+https://github.com/joeleaver/winit-fork?rev=d99384edd804a20e737c013b5f57b56ab931a611#d99384edd804a20e737c013b5f57b56ab931a611"
 dependencies = [
  "bitflags 2.13.2",
  "dpi",
@@ -7705,7 +7644,7 @@ dependencies = [
 [[package]]
 name = "winit-uikit"
 version = "0.31.0-beta.4"
-source = "git+https://github.com/joeleaver/winit-fork?rev=34f153bd6e523de53f9da67c6db58bd1f8732542#34f153bd6e523de53f9da67c6db58bd1f8732542"
+source = "git+https://github.com/joeleaver/winit-fork?rev=d99384edd804a20e737c013b5f57b56ab931a611#d99384edd804a20e737c013b5f57b56ab931a611"
 dependencies = [
  "bitflags 2.13.2",
  "block2 0.6.2",
@@ -7725,7 +7664,7 @@ dependencies = [
 [[package]]
 name = "winit-wayland"
 version = "0.31.0-beta.4"
-source = "git+https://github.com/joeleaver/winit-fork?rev=34f153bd6e523de53f9da67c6db58bd1f8732542#34f153bd6e523de53f9da67c6db58bd1f8732542"
+source = "git+https://github.com/joeleaver/winit-fork?rev=d99384edd804a20e737c013b5f57b56ab931a611#d99384edd804a20e737c013b5f57b56ab931a611"
 dependencies = [
  "bitflags 2.13.2",
  "calloop",
@@ -7752,7 +7691,7 @@ dependencies = [
 [[package]]
 name = "winit-web"
 version = "0.31.0-beta.4"
-source = "git+https://github.com/joeleaver/winit-fork?rev=34f153bd6e523de53f9da67c6db58bd1f8732542#34f153bd6e523de53f9da67c6db58bd1f8732542"
+source = "git+https://github.com/joeleaver/winit-fork?rev=d99384edd804a20e737c013b5f57b56ab931a611#d99384edd804a20e737c013b5f57b56ab931a611"
 dependencies = [
  "atomic-waker",
  "bitflags 2.13.2",
@@ -7774,7 +7713,7 @@ dependencies = [
 [[package]]
 name = "winit-win32"
 version = "0.31.0-beta.4"
-source = "git+https://github.com/joeleaver/winit-fork?rev=34f153bd6e523de53f9da67c6db58bd1f8732542#34f153bd6e523de53f9da67c6db58bd1f8732542"
+source = "git+https://github.com/joeleaver/winit-fork?rev=d99384edd804a20e737c013b5f57b56ab931a611#d99384edd804a20e737c013b5f57b56ab931a611"
 dependencies = [
  "bitflags 2.13.2",
  "cursor-icon",
@@ -7792,7 +7731,7 @@ dependencies = [
 [[package]]
 name = "winit-x11"
 version = "0.31.0-beta.4"
-source = "git+https://github.com/joeleaver/winit-fork?rev=34f153bd6e523de53f9da67c6db58bd1f8732542#34f153bd6e523de53f9da67c6db58bd1f8732542"
+source = "git+https://github.com/joeleaver/winit-fork?rev=d99384edd804a20e737c013b5f57b56ab931a611#d99384edd804a20e737c013b5f57b56ab931a611"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
