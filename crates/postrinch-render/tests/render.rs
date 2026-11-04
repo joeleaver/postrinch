@@ -99,3 +99,28 @@ fn text_mail_is_escaped() {
     );
     assert!(out.html.contains("pre-wrap"));
 }
+
+#[test]
+fn style_sheets_apply_inline_and_are_filtered() {
+    let mail = r##"<html><head><style>
+        .mobile { display: none }
+        .lead { color: #332f2e; font-size: 18px }
+        .cover { position: fixed; top: 0; left: 0 }
+        @media (max-width: 600px) { .mobile { display: block } }
+        body { background: #f4f1ed }
+    </style></head><body>
+        <p class="lead">Ready, set, gift</p>
+        <div class="mobile">phones only</div>
+        <div class="cover">over the window</div>
+    </body></html>"##;
+    let out = sanitize(mail, &[], Options::default());
+    let html = &out.html;
+    assert!(html.contains("color: #332f2e; font-size: 18px"), "{html}");
+    assert!(
+        html.contains(r#"<div style="display: none">phones only"#),
+        "{html}"
+    );
+    assert!(!html.contains("position"), "{html}");
+    assert!(!html.contains("<style"), "{html}");
+    assert_eq!(out.body_style, "background: #f4f1ed");
+}

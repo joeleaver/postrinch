@@ -57,6 +57,10 @@ pub fn sanitize(html: &str, inline: &[(String, String)], options: Options) -> Re
             _ => Some(value.into()),
         },
     );
+    // The sender's <style> sheets onto the elements they style; the sheets
+    // themselves are dropped below, as they would reach the window.
+    let inlined = inline_sheets(html);
+    let html = inlined.as_str();
     let body_style = body_style(body_tag(html).unwrap_or_default(), remote, &hidden);
     let html = crate::presentational::to_css(&builder.clean(html).to_string());
     Rendered {
@@ -65,6 +69,19 @@ pub fn sanitize(html: &str, inline: &[(String, String)], options: Options) -> Re
         from_html: true,
         remote_hidden: hidden.load(Ordering::Relaxed),
     }
+}
+
+/// `html` with its `<style>` sheets applied as inline styles (rules in
+/// `@media` blocks are left out: they are mostly for phones), never fetching
+/// a linked sheet. As it was, if the sheets do not parse.
+fn inline_sheets(html: &str) -> String {
+    let inliner = css_inline::CSSInliner::options()
+        .keep_style_tags(false)
+        .keep_link_tags(false)
+        .keep_at_rules(false)
+        .load_remote_stylesheets(false)
+        .build();
+    inliner.inline(html).unwrap_or_else(|_| html.to_owned())
 }
 
 /// A picture's source: the message's own (`cid:`), inline data, or the
