@@ -6,6 +6,7 @@ use common::{address, message, setup};
 use postrinch_model::{
     Account, Flags, Label, LabelKind, Message, Provider, ProviderMessageId, SystemLabel,
 };
+use postrinch_store::Find;
 use postrinch_store::{Store, StoreError};
 
 #[test]
@@ -130,14 +131,33 @@ fn search_matches_subject_people_and_body() {
     store.put_message(&engine, None).unwrap();
     store.put_message(&lunch, None).unwrap();
 
-    let hits = store.search("weaving patterns", 10).unwrap();
+    let hits = store
+        .find_messages(&Find {
+            text: Some("+weaving +patterns".into()),
+            ..Default::default()
+        })
+        .unwrap();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].message.id, engine.id);
+    assert_eq!(hits[0].id, engine.id);
 
-    let by_name = store.search("lovelace", 10).unwrap();
+    let by_name = store
+        .find_messages(&Find {
+            text: Some("+lovelace".into()),
+            ..Default::default()
+        })
+        .unwrap();
     assert_eq!(by_name.len(), 2);
 
-    assert_eq!(store.search("noodles", 10).unwrap()[0].message.id, lunch.id);
+    assert_eq!(
+        store
+            .find_messages(&Find {
+                text: Some("+noodles".into()),
+                ..Default::default()
+            })
+            .unwrap()[0]
+            .id,
+        lunch.id
+    );
 }
 
 #[test]
@@ -149,7 +169,15 @@ fn removing_an_account_removes_its_mail_and_garbage_collects_raw() {
     assert_eq!(store.collect_garbage(Duration::ZERO).unwrap(), 0);
     store.remove_account(&me).unwrap();
     assert_eq!(store.account(&me).unwrap(), None);
-    assert!(store.search("b", 10).unwrap().is_empty());
+    assert!(
+        store
+            .find_messages(&Find {
+                text: Some("+b".into()),
+                ..Default::default()
+            })
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(store.collect_garbage(Duration::ZERO).unwrap(), 1);
 }
 
@@ -173,7 +201,16 @@ fn survives_reopen() {
     }
     let store = Store::open(dir.path()).unwrap();
     assert_eq!(store.message(&me, &m.id).unwrap(), Some(m));
-    assert_eq!(store.search("persisted", 10).unwrap().len(), 1);
+    assert_eq!(
+        store
+            .find_messages(&Find {
+                text: Some("+persisted".into()),
+                ..Default::default()
+            })
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -253,7 +290,16 @@ fn headers_only_messages_are_listed_newest_first_for_download() {
     let full = message(&me, "old", "t1", 1_000, "old", "now with a body");
     store.put_message(&full, Some(b"raw")).unwrap();
     assert_eq!(store.undownloaded(&me).unwrap(), [new.id]);
-    assert_eq!(store.search("body", 5).unwrap().len(), 1);
+    assert_eq!(
+        store
+            .find_messages(&Find {
+                text: Some("+body".into()),
+                ..Default::default()
+            })
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]

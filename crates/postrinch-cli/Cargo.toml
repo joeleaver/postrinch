@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 postrinch-agents = { workspace = true }
+postrinch-commands = { workspace = true }
 postrinch-model = { workspace = true }
 postrinch-store = { workspace = true }
 postrinch-sync = { workspace = true }

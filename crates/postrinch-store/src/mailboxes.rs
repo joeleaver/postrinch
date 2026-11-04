@@ -171,7 +171,7 @@ impl Store {
 
     /// The account's messages in the trash or spam, which every other
     /// mailbox leaves out, as Gmail's do.
-    fn set_aside(&self, account: &EmailAddress) -> StoreResult<HashSet<u64>> {
+    pub(crate) fn set_aside(&self, account: &EmailAddress) -> StoreResult<HashSet<u64>> {
         let mut found = HashSet::new();
         for label in self.get_many(
             labels::TYPE,

@@ -13,6 +13,7 @@ mod blobs;
 mod codec;
 mod duplicates;
 mod error;
+mod find;
 mod format;
 mod keys;
 mod labels;
@@ -22,7 +23,6 @@ mod objects;
 mod outbox;
 mod outgoing;
 mod people;
-mod search;
 mod threads;
 mod views;
 
@@ -35,12 +35,14 @@ use std::time::Duration;
 use rhypedb_engine::database::Database;
 
 pub use error::{StoreError, StoreResult};
+pub use find::{Find, Found};
 pub use mailboxes::{LabelStats, ThreadEntry};
 pub use outbox::OutboxEntry;
 pub use outgoing::{Outgoing, OutgoingKind};
-pub use search::SearchHit;
 
 /// Label stats by account key, each with the write count it was read at.
+/// Undownloaded messages by account key, and when they were counted.
+type KeptCounts = (std::time::Instant, HashMap<String, usize>);
 type KeptStats = HashMap<String, (u64, HashMap<String, LabelStats>)>;
 
 const SCHEMA: &str = include_str!("schema.rhype");
@@ -65,6 +67,9 @@ pub struct Store {
     /// Each account's label stats, with [`Store::writes`] as it was when
     /// they were read: good until the next write.
     stats: Arc<Mutex<KeptStats>>,
+    /// How many messages each account has not downloaded, and when that
+    /// was counted (see backfill.rs).
+    undownloaded: Arc<Mutex<Option<KeptCounts>>>,
 }
 
 impl Store {

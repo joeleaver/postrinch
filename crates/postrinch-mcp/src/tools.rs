@@ -73,7 +73,12 @@ pub struct ThreadArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchArgs {
-    /// Plain words, `"exact phrases"`, `+required` words and `prefix*`.
+    /// Gmail's search language: words (all must match), `"exact
+    /// phrases"`, `prefix*`, and `from:` `to:` `subject:` `label:`
+    /// (`label:work-clients`) `in:inbox|sent|drafts|trash|spam|anywhere`
+    /// `category:promotions` `is:unread|read|starred` `has:attachment`
+    /// `after:2024/01/31` `before:` `newer_than:7d|2w|6m|1y` `older_than:`,
+    /// plus `account:` (part of an address). `-label:` and `-in:` leave out.
     pub query: String,
     /// At most this many threads (default 25, at most 200).
     #[serde(default)]
@@ -206,9 +211,12 @@ impl Postrinch {
         .await
     }
 
-    /// Search every account's mail (subjects, people and bodies), best match
-    /// first, leaving out the trash and spam. Each thread shows where it
-    /// matched, the match in [brackets], under `untrusted`.
+    /// Search the mail this agent may see (subjects, people and bodies),
+    /// newest first, leaving out the trash and spam unless `in:` names
+    /// them. Each thread shows where it matched, the match in [brackets],
+    /// under `untrusted`. `not_downloaded` lists accounts with mail whose
+    /// bodies are not here yet: words were matched there only against
+    /// subject and people.
     #[tool(name = "search")]
     async fn search(&self, Parameters(args): Parameters<SearchArgs>) -> Result<String, String> {
         self.call(Call::Search {

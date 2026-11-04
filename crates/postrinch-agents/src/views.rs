@@ -83,7 +83,19 @@ pub(crate) fn run(commands: &Commands, call: Call, agent: &str) -> Result<Value,
         Call::Search { query, limit } => {
             let found = commands.search(&query, limit).map_err(say)?;
             let threads = rows(commands, &mut labels, &found.threads);
-            Ok(json!({ "query": found.query, "more": found.more, "threads": threads }))
+            // Where words were not searched: bodies not downloaded yet.
+            let not_downloaded: Vec<Value> = found
+                .remote
+                .iter()
+                .flat_map(|r| &r.accounts)
+                .map(|(account, n)| json!({ "account": account, "messages": n }))
+                .collect();
+            Ok(json!({
+                "query": found.query,
+                "more": found.more,
+                "threads": threads,
+                "not_downloaded": not_downloaded,
+            }))
         }
         Call::ReadThread { account, thread } => {
             let Some(read) = commands.read_thread(&account, &thread).map_err(say)? else {

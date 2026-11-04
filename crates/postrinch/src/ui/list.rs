@@ -29,6 +29,7 @@ pub fn thread_list(state: State) -> NodeHandle {
                         span { class: "list-count", {move || search_line(state)} }
                     }
                 }
+                {crate::ui::search::search_notes(__scope, state)}
             } else {
                 div { class: "list-head",
                     h1 { {move || title(&state.folder.get(), state.sidebar.get().as_ref())} }
@@ -52,7 +53,7 @@ pub fn thread_list(state: State) -> NodeHandle {
                 if !searching() && state.page.get().is_some_and(|p| p.threads.is_empty()) {
                     div { class: "empty", "Nothing here." }
                 }
-                if searching() && state.results.get().is_some_and(|r| r.threads.is_empty()) {
+                if searching() && state.search_error.get().is_none() && row_ids(state).is_empty() && state.results.get().is_some() {
                     div { class: "empty", "No mail matches." }
                 }
                 if !searching() && state.page.get().is_some_and(|p| p.total > p.threads.len()) {
@@ -70,12 +71,23 @@ pub fn thread_list(state: State) -> NodeHandle {
 /// Which thread a row shows.
 pub(crate) type RowId = (EmailAddress, ProviderThreadId);
 
-/// The rows to show: the search's, while there is one, or the folder's.
+/// The rows to show: the search's, with what Gmail found after them,
+/// while there is one, or the folder's.
 fn with_rows<R>(state: State, f: impl FnOnce(&[ThreadRow]) -> R) -> R {
     if state.search.get().is_some() {
-        state
+        let mut rows: Vec<ThreadRow> = state
             .results
-            .with(|r| f(r.as_ref().map_or(&[], |r| &r.threads)))
+            .with(|r| r.as_ref().map(|r| r.threads.clone()).unwrap_or_default());
+        state.remote.with(|remote| {
+            if let Some(remote) = remote
+                && state
+                    .results
+                    .with(|r| r.as_ref().is_some_and(|r| r.query == remote.query))
+            {
+                rows.extend(remote.rows.iter().cloned());
+            }
+        });
+        f(&rows)
     } else {
         state
             .page
@@ -241,6 +253,11 @@ fn row(state: State, id: RowId) -> NodeHandle {
                         }},
                         {chip.name.clone()}
                     }
+                }
+                span {
+                    class: "found-by",
+                    style: {move || shown(thread.get().remote)},
+                    "found by Gmail"
                 }
                 span { class: "snippet",
                     {move || match thread.get().excerpt {

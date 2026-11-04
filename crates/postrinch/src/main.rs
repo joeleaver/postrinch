@@ -9,6 +9,7 @@ mod loader;
 mod menus;
 mod pictures;
 mod reading;
+mod remote_search;
 mod state;
 mod sync;
 mod ui;

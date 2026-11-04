@@ -84,6 +84,27 @@ impl GmailApi {
             .await
     }
 
+    /// The ids of up to `max` messages Gmail's search finds for `query`,
+    /// newest first; one request, so at most 500. As in Gmail, the trash
+    /// and spam are searched only when the query names them.
+    pub(crate) async fn search(
+        &self,
+        account: &EmailAddress,
+        query: &str,
+        max: usize,
+    ) -> SyncResult<Vec<String>> {
+        let max = max.clamp(1, 500).to_string();
+        let list: MessageList = self
+            .get(
+                account,
+                (Cost::ListMessages, FG),
+                "messages",
+                &[("q", query), ("maxResults", max.as_str())],
+            )
+            .await?;
+        Ok(list.messages.into_iter().map(|m| m.id).collect())
+    }
+
     /// A whole message (60 quota units).
     pub(crate) async fn raw_message(
         &self,

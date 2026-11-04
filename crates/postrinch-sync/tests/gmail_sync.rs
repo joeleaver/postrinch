@@ -1,5 +1,6 @@
 //! Gmail sync against a mock of the Gmail API, into a real store.
 
+use postrinch_store::Find;
 use std::sync::{Arc, Mutex};
 
 mod common;
@@ -82,7 +83,16 @@ async fn full_then_incremental() {
     assert!(!m1.downloaded);
     assert!(f.store.raw_message(&f.me, &m1.id).unwrap().is_none());
     assert_eq!(f.store.labels(&f.me).unwrap().len(), 2);
-    assert_eq!(f.store.search("lunch", 5).unwrap().len(), 1);
+    assert_eq!(
+        f.store
+            .find_messages(&Find {
+                text: Some("+lunch".into()),
+                ..Default::default()
+            })
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(f.store.undownloaded(&f.me).unwrap().len(), 2);
 
     // Then the bodies.
@@ -91,7 +101,16 @@ async fn full_then_incremental() {
     let m1 = f.store.message(&f.me, &m1_id).unwrap().unwrap();
     assert!(m1.downloaded);
     assert!(f.store.raw_message(&f.me, &m1.id).unwrap().is_some());
-    assert_eq!(f.store.search("body", 5).unwrap().len(), 2);
+    assert_eq!(
+        f.store
+            .find_messages(&Find {
+                text: Some("+body".into()),
+                ..Default::default()
+            })
+            .unwrap()
+            .len(),
+        2
+    );
     assert!(f.store.undownloaded(&f.me).unwrap().is_empty());
     assert_eq!(
         f.sync.backfill(&f.me, quiet()).await.unwrap(),

@@ -144,9 +144,24 @@ fn answer(commands: &Commands, state: State, request: Request) {
             Ok(accounts) => state.accounts.send(accounts),
             Err(e) => failed(e.to_string()),
         },
-        Request::Search(None) => state.results.send(None),
+        Request::Search(None) => {
+            state.search_error.send(None);
+            state.results.send(None);
+        }
         Request::Search(Some(query)) => match commands.search(&query, SEARCH_LIMIT) {
-            Ok(results) => state.results.send(Some(results)),
+            Ok(results) => {
+                state.search_error.send(None);
+                state.results.send(Some(results));
+            }
+            Err(postrinch_commands::CommandError::Invalid(why)) => {
+                state.search_error.send(Some(why));
+                state.results.send(Some(postrinch_commands::SearchResults {
+                    query,
+                    threads: Vec::new(),
+                    more: false,
+                    remote: None,
+                }));
+            }
             Err(e) => failed(e.to_string()),
         },
         Request::Thread { thread: None, .. } => state.thread.send(None),

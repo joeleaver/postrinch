@@ -10,8 +10,10 @@
 mod accounts;
 mod actions;
 mod error;
+mod filters;
 mod folders;
 mod labels;
+mod query;
 mod scope;
 mod search;
 mod threads;
@@ -22,10 +24,12 @@ use postrinch_store::Store;
 pub use accounts::AccountInfo;
 pub use actions::{LabelChoice, ThreadAction, ThreadRef};
 pub use error::{CommandError, CommandResult};
+pub use filters::Filters;
 pub use folders::{AccountFolders, Folder, FolderEntry, Sidebar};
 pub use labels::{AppLabels, Chip, LabelNode, LabelRole, LabelTree, app_of, role};
 pub use postrinch_render::Rendered;
-pub use search::{Excerpt, SearchResults};
+pub use query::{LabelName, Query, label_matches};
+pub use search::{Excerpt, Remote, SearchResults};
 pub use threads::{CATEGORIES, Thread, ThreadPage, ThreadRow};
 pub use writing::{Queued, Start};
 

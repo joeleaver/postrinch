@@ -209,22 +209,31 @@ fn progress(address: &EmailAddress) -> ProgressFn {
 }
 
 fn search(cx: &Context, query: &str, limit: usize) -> Result<()> {
-    for hit in cx.store.search(query, limit)? {
-        let m = &hit.message;
-        let from = m
-            .headers
-            .from
-            .first()
-            .map(|f| f.display_name())
+    let commands = postrinch_commands::Commands::new(cx.store.clone());
+    let results = commands.search(query, limit)?;
+    for row in &results.threads {
+        let t = &row.summary;
+        let when = jiff::Timestamp::from_millisecond(t.latest.as_millis())
+            .map(|t| t.strftime("%Y-%m-%d").to_string())
             .unwrap_or_default();
+        let people: Vec<String> = t.participants.iter().map(|m| m.display_name()).collect();
         println!(
-            "{:.2}\t{}\t{}\t{}\t{}",
-            hit.score,
-            m.account,
-            m.id.0,
-            from,
-            m.subject()
+            "{when}\t{}\t{}\t{}\t{}",
+            t.account,
+            t.id.0,
+            people.join(", "),
+            t.subject
         );
+    }
+    if results.more {
+        println!("(more than {limit})");
+    }
+    if let Some(remote) = &results.remote {
+        for (account, n) in &remote.accounts {
+            eprintln!(
+                "{account}: {n} messages are not downloaded yet; their bodies were not searched"
+            );
+        }
     }
     Ok(())
 }

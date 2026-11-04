@@ -30,6 +30,9 @@ pub struct ThreadRow {
     pub chips: Vec<Chip>,
     /// Where a search matched it; `None` in a folder listing.
     pub excerpt: Option<Excerpt>,
+    /// Found by the provider's own search, in mail not downloaded here.
+    #[serde(default)]
+    pub remote: bool,
 }
 
 /// Gmail's inbox categories, in the order its tabs show them.
@@ -111,6 +114,7 @@ impl Commands {
                 summary,
                 chips,
                 excerpt: None,
+                remote: false,
             });
         }
         Ok(ThreadPage {

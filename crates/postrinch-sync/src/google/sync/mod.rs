@@ -17,6 +17,7 @@ mod keep;
 mod messages;
 mod outbox;
 mod outgoing;
+mod search;
 
 pub use keep::{KeepOptions, SyncEvent, SyncEventFn};
 pub use outbox::SendReport;

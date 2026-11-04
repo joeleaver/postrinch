@@ -14,6 +14,7 @@ mod outgoing;
 mod palette;
 mod reader;
 mod reading_settings;
+mod search;
 mod settings;
 mod sidebar;
 mod splitter;
@@ -95,6 +96,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {style::CSS} }
                 style { {agents_settings::CSS} }
                 style { {compose::CSS} }
+                style { {search::CSS} }
                 style { {outgoing::CSS} }
                 style { {about::CSS} }
                 style { {thread_actions::CSS} }
@@ -133,6 +135,7 @@ fn title_status(state: State) -> NodeHandle {
                     oninput: move |v: String| state.search_draft.set(v),
                     onsubmit: move || state.run_search(),
                 }
+                {search::search_filters(__scope, state)}
             }
             for error in state.error.get() {
                 div { key: error.clone(), class: "header-error", {error.clone()} }

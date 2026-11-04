@@ -56,6 +56,13 @@ pub struct State {
     /// The search being shown in place of the folder, if any.
     pub search: Signal<Option<String>>,
     pub results: Signal<Option<SearchResults>>,
+    /// Why the search as typed could not run (an unknown operator, a bad
+    /// date), shown in place of its results.
+    pub search_error: Signal<Option<String>>,
+    /// Gmail's part of the search, for mail not downloaded yet.
+    pub remote: Signal<Option<crate::remote_search::RemoteSearch>>,
+    /// Whether the search filters are open.
+    pub filters_open: Signal<bool>,
     /// Whether the sidebar shows every label, hidden ones included.
     pub show_all: Signal<bool>,
     /// Sidebar rows the person opened or closed (see `ui::labels`).
@@ -142,6 +149,9 @@ impl State {
             search_draft: Signal::new(String::new()),
             search: Signal::new(None),
             results: Signal::new(None),
+            search_error: Signal::new(None),
+            remote: Signal::new(None),
+            filters_open: Signal::new(false),
             show_all: Signal::new(false),
             toggled: Signal::new(HashSet::new()),
             selected: Signal::new(None),
@@ -267,6 +277,7 @@ impl State {
             }
         });
         Effect::new(move || crate::actions::finished(&self.downloaded.get()));
+        self.watch_remote();
     }
 
     /// Show the threads that match what the search box holds.
