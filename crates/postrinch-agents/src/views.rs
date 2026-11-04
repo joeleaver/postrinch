@@ -7,8 +7,10 @@
 
 use std::collections::HashMap;
 
-use postrinch_commands::{Commands, Folder, FolderEntry, ThreadAction, ThreadRef, ThreadRow};
-use postrinch_model::{EmailAddress, Mailbox, Message, Timestamp};
+use postrinch_commands::{
+    Commands, Folder, FolderEntry, Start, ThreadAction, ThreadRef, ThreadRow,
+};
+use postrinch_model::{EmailAddress, Mailbox, Message, Proposal, Timestamp};
 use serde_json::{Value, json};
 
 use crate::wire::Call;
@@ -17,7 +19,7 @@ use crate::wire::Call;
 const BODY_CHARS: usize = 100_000;
 
 /// Run a call and shape its answer.
-pub(crate) fn run(commands: &Commands, call: Call) -> Result<Value, String> {
+pub(crate) fn run(commands: &Commands, call: Call, agent: &str) -> Result<Value, String> {
     let mut labels = LabelNames::default();
     match call {
         Call::Accounts => {
@@ -106,6 +108,60 @@ pub(crate) fn run(commands: &Commands, call: Call) -> Result<Value, String> {
                     .map(|c| json!({ "label": c.label, "name": c.name }))
                     .collect(),
             ))
+        }
+        Call::Propose {
+            account,
+            thread,
+            to,
+            cc,
+            bcc,
+            subject,
+            body,
+            reason,
+        } => {
+            let mut draft = match &thread {
+                Some(thread) => {
+                    let read = commands
+                        .read_thread(&account, thread)
+                        .map_err(say)?
+                        .ok_or_else(|| format!("{account} has no thread {}.", thread.0))?;
+                    let latest = read.messages.last().ok_or("That thread has no messages.")?;
+                    let mut draft = commands
+                        .start_draft(&account, Some((thread, &latest.id)), &Start::ReplyAll)
+                        .map_err(say)?;
+                    // The agent's words above the quoted message.
+                    draft.body = format!("{}{}", body.trim_end(), draft.body);
+                    draft
+                }
+                None => {
+                    let mut draft = commands
+                        .start_draft(&account, None, &Start::New)
+                        .map_err(say)?;
+                    draft.body = body;
+                    draft
+                }
+            };
+            if let Some(to) = to {
+                draft.to = to;
+            }
+            if let Some(cc) = cc {
+                draft.cc = cc;
+            }
+            if let Some(bcc) = bcc {
+                draft.bcc = bcc;
+            }
+            if let Some(subject) = subject {
+                draft.subject = subject;
+            }
+            draft.proposal = Some(Proposal {
+                agent: agent.to_owned(),
+                reason,
+            });
+            commands.propose_draft(&draft).map_err(say)?;
+            Ok(json!({
+                "proposed": true,
+                "note": "It is open in Postrinch for the person to check. Nothing is sent until they press Send; they may change it or discard it.",
+            }))
         }
         Call::Act { threads, action } => {
             let action = match action {

@@ -156,7 +156,7 @@ impl Link {
             Reach::Only(accounts) => self.commands.limited_to(accounts),
         };
         let changes = call.changes();
-        match views::run(&commands, call) {
+        match views::run(&commands, call, &agent.name) {
             Ok(value) => {
                 if changes {
                     (self.on_change)();

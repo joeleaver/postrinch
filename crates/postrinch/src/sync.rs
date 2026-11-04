@@ -97,8 +97,9 @@ pub fn start(
                 format!("its runtime: {e}"),
             )
         })?;
-    let events = Arc::new(move |event: SyncEvent| report(event, status, revision));
     let (wake, send) = (Arc::new(Notify::new()), Arc::new(Notify::new()));
+    let fetch = wake.clone();
+    let events = Arc::new(move |event: SyncEvent| report(event, status, revision, &fetch));
     let handle = SyncHandle {
         auth,
         store,
@@ -129,7 +130,12 @@ pub fn start(
 
 /// Turn a sync event into the sidebar's line for the account, from the
 /// sync thread.
-fn report(event: SyncEvent, status: Signal<Vec<AccountSync>>, revision: Signal<u64>) {
+fn report(
+    event: SyncEvent,
+    status: Signal<Vec<AccountSync>>,
+    revision: Signal<u64>,
+    wake: &Notify,
+) {
     let (account, line, progress, trouble, changed) = match event {
         SyncEvent::Started { account } => (
             account,
@@ -180,6 +186,13 @@ fn report(event: SyncEvent, status: Signal<Vec<AccountSync>>, revision: Signal<u
         }
         SyncEvent::NeedsSignIn { account } => {
             (account, "Needs to sign in".to_owned(), None, true, true)
+        }
+        // Mail that went: show what is left to send, and fetch Gmail's
+        // copy into Sent now rather than at the next check.
+        SyncEvent::Sent { report, mail, .. } if report.refused.is_empty() && mail > 0 => {
+            revision.update_send(|n| *n += 1);
+            wake.notify_one();
+            return;
         }
         // Changes are shown as made; sending them is news only when it
         // goes wrong.

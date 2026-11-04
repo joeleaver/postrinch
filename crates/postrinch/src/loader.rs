@@ -124,6 +124,10 @@ fn answer(commands: &Commands, state: State, request: Request) {
                 // Every action made by now shows in what is read next.
                 let as_of = changes::made();
                 state.sidebar.send(Some(sidebar));
+                match commands.outgoing() {
+                    Ok(outgoing) => state.outgoing.send(outgoing),
+                    Err(e) => failed(e.to_string()),
+                }
                 match commands.list_threads(&folder, category, 0, shown) {
                     Ok(page) => {
                         state.page.send(Some(page));

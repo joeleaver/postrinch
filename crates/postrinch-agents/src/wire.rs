@@ -6,7 +6,7 @@
 //! [`Response`] with the same id.
 
 use postrinch_commands::{Folder, ThreadAction, ThreadRef};
-use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
+use postrinch_model::{EmailAddress, Mailbox, ProviderThreadId, SystemLabel};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -98,12 +98,25 @@ pub enum Call {
         threads: Vec<ThreadRef>,
         action: ThreadAction,
     },
+    /// A message for the person to check and send: a reply to `thread`'s
+    /// latest message (to everyone on it, unless `to` says otherwise), or
+    /// new mail.
+    Propose {
+        account: EmailAddress,
+        thread: Option<ProviderThreadId>,
+        to: Option<Vec<Mailbox>>,
+        cc: Option<Vec<Mailbox>>,
+        bcc: Option<Vec<Mailbox>>,
+        subject: Option<String>,
+        body: String,
+        reason: Option<String>,
+    },
 }
 
 impl Call {
     /// Whether the call changes mail.
     pub fn changes(&self) -> bool {
-        matches!(self, Call::Act { .. })
+        matches!(self, Call::Act { .. } | Call::Propose { .. })
     }
 }
 

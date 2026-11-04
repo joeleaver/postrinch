@@ -292,6 +292,7 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .mail-foot { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
 .mail-foot > span:first-child { flex: 1; }
 .mail-open { color: var(--accent); cursor: pointer; }
+.answer-bar { display: flex; gap: 8px; padding: 4px 0 12px; }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
     padding: 4px 10px;

@@ -114,6 +114,12 @@ pub struct State {
     pub pictures_shown: Signal<HashSet<String>>,
     /// Senders whose pictures always load (saved in Settings).
     pub pictures_from: Signal<HashSet<String>>,
+    /// The draft the compose dialog has open.
+    pub composing: Signal<Option<crate::writing::Compose>>,
+    /// Why the open draft could not be sent or kept.
+    pub compose_error: Signal<Option<String>>,
+    /// Mail on its way out and agents' proposals, oldest first.
+    pub outgoing: Signal<Vec<postrinch_commands::Queued>>,
     /// Why sync is not running, when it is not.
     pub sync_off: Signal<Option<String>>,
     /// The last thing that went wrong loading, for the window to say.
@@ -167,6 +173,9 @@ impl State {
             rendered: Signal::new(Default::default()),
             pictures_shown: Signal::new(HashSet::new()),
             pictures_from: Signal::new(settings.pictures_from.iter().cloned().collect()),
+            composing: Signal::new(None),
+            compose_error: Signal::new(None),
+            outgoing: Signal::new(Vec::new()),
             sync_off: Signal::new(None),
             error: Signal::new(None),
             update: Signal::new(crate::update::UpdateStatus::NotInstalled),

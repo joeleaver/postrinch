@@ -113,7 +113,8 @@ impl Commands {
     }
 
     /// Send a draft: queued here at once, delivered by sync. `settles` is
-    /// the proposal it came from, if an agent wrote it.
+    /// the queued mail it came from: an agent's proposal, or a message the
+    /// provider refused that the person put right.
     pub fn send_draft(&self, draft: &Draft, settles: Option<u64>) -> CommandResult<()> {
         self.check(&draft.account)?;
         if draft.recipients().next().is_none() {
@@ -158,7 +159,7 @@ impl Commands {
             && self
                 .outgoing()?
                 .iter()
-                .any(|o| o.id == id && o.kind == OutgoingKind::Proposed)
+                .any(|o| o.id == id && (o.kind == OutgoingKind::Proposed || o.refused))
         {
             self.store.outgoing_done(id)?;
         }

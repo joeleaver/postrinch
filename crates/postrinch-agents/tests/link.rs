@@ -143,6 +143,43 @@ fn an_agent_reads_and_changes_only_what_it_was_given() {
             .unread
     );
 
+    // A reply for the person to send: proposed, never sent.
+    let proposed = client
+        .call(&Call::Propose {
+            account: work.clone(),
+            thread: Some(ProviderThreadId("t1".into())),
+            to: None,
+            cc: None,
+            bcc: None,
+            subject: None,
+            body: "I can cover it.".into(),
+            reason: Some("You asked me to answer Ada.".into()),
+        })
+        .unwrap();
+    assert_eq!(proposed["proposed"], true);
+    let waiting = Commands::new(store.clone()).outgoing().unwrap();
+    assert_eq!(waiting.len(), 1);
+    let draft = &waiting[0].draft;
+    assert_eq!(draft.proposal.as_ref().unwrap().agent, "Test agent");
+    assert_eq!(draft.to[0].address.to_string(), "ada@example.org");
+    assert!(
+        draft.body.starts_with("I can cover it.\n\nOn "),
+        "{}",
+        draft.body
+    );
+    assert_eq!(draft.subject, "Re: Thursday rota");
+    let elsewhere = client.call(&Call::Propose {
+        account: home.clone(),
+        thread: None,
+        to: None,
+        cc: None,
+        bcc: None,
+        subject: None,
+        body: "x".into(),
+        reason: None,
+    });
+    assert!(elsewhere.unwrap_err().contains("No account"));
+
     // Removed: the open connection's next call is refused.
     agents.remove("Test agent").unwrap();
     let refused = client.call(&Call::Accounts).unwrap_err();

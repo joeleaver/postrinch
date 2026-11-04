@@ -3,12 +3,14 @@
 mod about;
 mod agent_dialogs;
 mod agents_settings;
+mod compose;
 mod icons;
 mod keys;
 mod label_edit;
 mod labels;
 pub(crate) mod list;
 mod logo;
+mod outgoing;
 mod palette;
 mod reader;
 mod reading_settings;
@@ -92,9 +94,12 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 }
                 style { {style::CSS} }
                 style { {agents_settings::CSS} }
+                style { {compose::CSS} }
+                style { {outgoing::CSS} }
                 style { {about::CSS} }
                 style { {thread_actions::CSS} }
                 {label_edit::label_dialog(__scope, state)}
+                {compose::compose_dialog(__scope, state)}
                 if state.view.get() == View::Mail {
                     div { class: "panes",
                         {sidebar::sidebar(__scope, state)}

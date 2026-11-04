@@ -6,7 +6,7 @@ use std::sync::Arc;
 use postrinch_agents::Call;
 use postrinch_agents::client::Client;
 use postrinch_commands::{Folder, ThreadAction};
-use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
+use postrinch_model::{EmailAddress, Mailbox, ProviderThreadId, SystemLabel, parse_mailboxes};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{Implementation, ServerCapabilities, ServerConfig};
@@ -25,7 +25,10 @@ counts, flags, labels) sit outside it.
 
 Threads are named by `account` and `thread` id, as list_threads and search return them. \
 change_threads makes changes that can be undone and stay in the account (read, star, \
-archive, trash, labels); they show in the window at once and reach Gmail in the background.";
+archive, trash, labels); they show in the window at once and reach Gmail in the background.
+
+You cannot send mail. propose_message writes one for the person: it opens in Postrinch \
+with your reason, and goes only if they press Send.";
 
 /// The most threads a listing or search returns.
 const MAX_LIMIT: usize = 200;
@@ -94,6 +97,33 @@ pub struct ChangeArgs {
     /// list_labels gives it. Its threads must all be in one account.
     #[serde(default)]
     pub label: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProposeArgs {
+    /// The account it goes from.
+    pub account: String,
+    /// To answer a conversation: its thread id. The reply goes to everyone
+    /// on its latest message, quoted under your text, unless `to` and `cc`
+    /// say otherwise.
+    #[serde(default)]
+    pub thread: Option<String>,
+    /// Recipients, as an address field reads: `Ada <ada@example.org>,
+    /// bob@example.org`.
+    #[serde(default)]
+    pub to: Option<String>,
+    #[serde(default)]
+    pub cc: Option<String>,
+    #[serde(default)]
+    pub bcc: Option<String>,
+    /// The subject; a reply keeps the conversation's.
+    #[serde(default)]
+    pub subject: Option<String>,
+    /// What the message says, as plain text.
+    pub body: String,
+    /// Why you wrote it, shown to the person beside it.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[tool_router(router = tool_router)]
@@ -197,6 +227,35 @@ impl Postrinch {
     ) -> Result<String, String> {
         self.call(Call::LabelChoices {
             account: address(&args.account)?,
+        })
+        .await
+    }
+
+    /// Write a message for the person to send: new mail, or a reply to a
+    /// conversation. It opens in Postrinch with your reason beside it, and
+    /// is sent only if the person presses Send (they may change it, keep it
+    /// as a draft or discard it). You cannot send mail yourself.
+    #[tool(name = "propose_message")]
+    async fn propose_message(
+        &self,
+        Parameters(args): Parameters<ProposeArgs>,
+    ) -> Result<String, String> {
+        let list = |field: &str, text: Option<String>| -> Result<Option<Vec<Mailbox>>, String> {
+            text.map(|t| parse_mailboxes(&t).map_err(|e| format!("{field}: {e}.")))
+                .transpose()
+        };
+        if args.thread.is_none() && args.to.as_deref().is_none_or(|t| t.trim().is_empty()) {
+            return Err("New mail needs someone in `to` (or give a `thread` to reply to).".into());
+        }
+        self.call(Call::Propose {
+            account: address(&args.account)?,
+            thread: args.thread.map(ProviderThreadId),
+            to: list("to", args.to)?,
+            cc: list("cc", args.cc)?,
+            bcc: list("bcc", args.bcc)?,
+            subject: args.subject,
+            body: args.body,
+            reason: args.reason,
         })
         .await
     }

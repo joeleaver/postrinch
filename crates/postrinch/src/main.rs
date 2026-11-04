@@ -13,6 +13,7 @@ mod state;
 mod sync;
 mod ui;
 mod update;
+mod writing;
 
 use std::process::ExitCode;
 

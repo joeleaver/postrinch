@@ -1,7 +1,7 @@
 //! The reading pane: the open thread, every message in it.
 
 use jiff::tz::TimeZone;
-use postrinch_commands::{Rendered, Thread};
+use postrinch_commands::{Rendered, Start, Thread};
 use postrinch_model::Message;
 use rinch::prelude::*;
 
@@ -68,6 +68,7 @@ fn open_thread(state: State, thread: Thread) -> NodeHandle {
             }
             div { class: "thread-meta", {meta} }
             {messages}
+            {answer_bar(__scope, state, thread.clone())}
         }
     }
 }
@@ -189,5 +190,28 @@ fn plain(text: String) -> NodeHandle {
         rsx! { div { class: "message-note", "This message has no text." } }
     } else {
         rsx! { div { class: "message-body", {text.clone()} } }
+    }
+}
+
+/// Answering the conversation, after the main mockup: Reply, Reply all and
+/// Forward; Edit draft when its latest message is one of the account's
+/// drafts.
+#[component]
+fn answer_bar(state: State, thread: Thread) -> NodeHandle {
+    let draft = thread.messages.last().cloned().filter(|m| {
+        crate::actions::commands().is_some_and(|c| c.is_draft(&m.account, m).unwrap_or(false))
+    });
+    let edit = draft.map(|message| {
+        rsx! {
+            Button { variant: "filled", size: "sm", onclick: move || state.edit_draft(&message), "Edit draft" }
+        }
+    });
+    rsx! {
+        div { class: "answer-bar",
+            {edit}
+            Button { variant: "default", size: "sm", onclick: move || state.write(Start::Reply), "Reply" }
+            Button { variant: "default", size: "sm", onclick: move || state.write(Start::ReplyAll), "Reply all" }
+            Button { variant: "default", size: "sm", onclick: move || state.write(Start::Forward), "Forward" }
+        }
     }
 }

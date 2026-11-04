@@ -5,7 +5,7 @@ use rinch::prelude::*;
 use crate::state::{State, View};
 use crate::ui::list::row_ids;
 use crate::ui::thread_actions;
-use postrinch_commands::ThreadAction;
+use postrinch_commands::{Start, ThreadAction};
 
 /// Listen for the window's keys: j and k (or the arrows) move through the
 /// list, Escape steps back out of a search, Settings or an open thread, and
@@ -63,12 +63,30 @@ fn back(state: State) -> bool {
     true
 }
 
-/// Gmail's keys for the open thread: e archives (or moves back to the
-/// inbox), # trashes (or restores, in the trash), Shift+U marks it unread
-/// and Shift+I read, s stars or unstars, and l opens the label menu.
+/// Gmail's keys: c writes new mail; for the open thread, r replies, a
+/// replies to all, f forwards, e archives (or moves back to the inbox), #
+/// trashes (or restores, in the trash), Shift+U marks it unread and
+/// Shift+I read, s stars or unstars, and l opens the label menu.
 fn act(state: State, key: &str) -> bool {
-    if state.view.get() != View::Mail || state.selected.get().is_none() {
+    if state.view.get() != View::Mail || state.composing.get().is_some() {
         return false;
+    }
+    if key == "c" {
+        state.write(Start::New);
+        return true;
+    }
+    if state.selected.get().is_none() {
+        return false;
+    }
+    let start = match key {
+        "r" => Some(Start::Reply),
+        "a" => Some(Start::ReplyAll),
+        "f" => Some(Start::Forward),
+        _ => None,
+    };
+    if let Some(start) = start {
+        state.write(start);
+        return true;
     }
     let action = match key {
         "e" => thread_actions::archive_or_restore(state),

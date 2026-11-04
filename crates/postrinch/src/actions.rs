@@ -46,11 +46,11 @@ pub fn init(commands: Rc<Commands>, sync: Option<SyncHandle>) {
     });
 }
 
-fn commands() -> Option<Rc<Commands>> {
+pub(crate) fn commands() -> Option<Rc<Commands>> {
     SERVICES.with(|s| s.get().map(|s| s.commands.clone()))
 }
 
-fn sync() -> Option<SyncHandle> {
+pub(crate) fn sync() -> Option<SyncHandle> {
     SERVICES.with(|s| s.get().and_then(|s| s.sync.clone()))
 }
 
