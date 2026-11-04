@@ -15,14 +15,24 @@ fn list(mailboxes: &[Mailbox]) -> Address<'static> {
     Address::new_list(mailboxes.iter().map(address).collect())
 }
 
+/// The header that marks a message Postrinch sent with its place in the
+/// queue. Gmail replaces `Message-ID` with its own, so this is how a send
+/// that may have gone through is found again.
+pub const MARKER_HEADER: &str = "X-Postrinch-Id";
+
 /// The message a draft makes, from `from_name` at its account, with
-/// `message_id` (without brackets) as its `Message-ID`.
+/// `message_id` (without brackets) as its `Message-ID` and its
+/// [`MARKER_HEADER`].
 pub fn build_message(draft: &Draft, from_name: Option<&str>, message_id: &str) -> Vec<u8> {
     let from = Mailbox::new(from_name.map(str::to_owned), draft.account.clone());
     let mut message = MessageBuilder::new()
         .from(address(&from))
         .subject(draft.subject.clone())
         .message_id(message_id.to_owned())
+        .header(
+            MARKER_HEADER,
+            mail_builder::headers::raw::Raw::new(message_id.to_owned()),
+        )
         .text_body(draft.body.replace("\r\n", "\n"));
     if !draft.to.is_empty() {
         message = message.to(list(&draft.to));
@@ -74,6 +84,7 @@ mod tests {
         let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
         assert_eq!(parsed.subject(), Some("Re: Thursday — the rota"));
         assert_eq!(parsed.message_id(), Some("out1@example.org"));
+        assert!(String::from_utf8_lossy(&raw).contains("X-Postrinch-Id: out1@example.org"));
         assert_eq!(
             parsed.in_reply_to().and_then(|r| r.first()),
             Some("m1@example.org")

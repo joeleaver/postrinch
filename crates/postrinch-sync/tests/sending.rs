@@ -8,7 +8,7 @@ use common::*;
 use postrinch_model::{Draft, EmailAddress, Mailbox, ProviderMessageId, ProviderThreadId};
 use postrinch_store::OutgoingKind;
 use serde_json::{Value, json};
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
 
 fn reply(f: &Fixture) -> Draft {
@@ -102,13 +102,28 @@ async fn a_send_that_may_have_gone_is_not_sent_again() {
         .outgoing_failed(id, "connection lost", false)
         .unwrap();
 
-    // Gmail has it: the next pass finds it rather than sending it again.
+    // Gmail has it, under a Message-ID of its own: the next pass finds it
+    // by Postrinch's marker rather than sending it again.
     Mock::given(method("GET"))
         .and(path("/gmail/messages"))
-        .and(query_param("q", format!("rfc822msgid:{message_id}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"messages": [{"id": "s1"}]})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"messages": [{"id": "s0"}, {"id": "s1"}]})),
+        )
         .mount(&f.server)
         .await;
+    get(
+        &f.server,
+        "messages/s0",
+        json!({"payload": {"headers": [{"name": "X-Postrinch-Id", "value": "someone-else"}]}}),
+    )
+    .await;
+    get(
+        &f.server,
+        "messages/s1",
+        json!({"payload": {"headers": [{"name": "X-Postrinch-Id", "value": message_id}]}}),
+    )
+    .await;
     assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
     assert_eq!(
         requests_to(&f, "POST", "/gmail/messages/send").await.len(),

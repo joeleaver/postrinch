@@ -32,6 +32,32 @@ struct DraftList {
 }
 
 #[derive(Deserialize)]
+struct Headers {
+    #[serde(default)]
+    payload: Payload,
+}
+
+#[derive(Default, Deserialize)]
+struct Payload {
+    #[serde(default)]
+    headers: Vec<Header>,
+}
+
+#[derive(Deserialize)]
+struct Header {
+    name: String,
+    value: String,
+}
+
+impl Headers {
+    fn marked(&self, marker: &str) -> bool {
+        self.payload.headers.iter().any(|h| {
+            h.name.eq_ignore_ascii_case(crate::compose::MARKER_HEADER) && h.value.trim() == marker
+        })
+    }
+}
+
+#[derive(Deserialize)]
 struct IdList {
     #[serde(default)]
     messages: Vec<Taken>,
@@ -54,8 +80,8 @@ fn read<T: for<'de> Deserialize<'de>>(body: &[u8], what: &str) -> SyncResult<T> 
 
 impl GmailApi {
     /// Send a message. Never sent twice by a retry here: a connection that
-    /// drops is an error, and [`GmailApi::find_by_message_id`] tells
-    /// whether Gmail took it before the next attempt.
+    /// drops is an error, and [`GmailApi::find_sent`] tells whether Gmail
+    /// took it before the next attempt.
     pub(crate) async fn send_message(
         &self,
         account: &EmailAddress,
@@ -77,23 +103,43 @@ impl GmailApi {
         read(&answer, "messages/send")
     }
 
-    /// The message with this `Message-ID` header (without brackets), if
-    /// Gmail has one: a send that may or may not have gone through.
-    pub(crate) async fn find_by_message_id(
+    /// The sent message marked `marker` (see `compose::MARKER_HEADER`),
+    /// among those sent since `since` (Unix seconds): a send that may or
+    /// may not have gone through. Gmail rewrites `Message-ID`, so the
+    /// marker is read from each recent sent message.
+    pub(crate) async fn find_sent(
         &self,
         account: &EmailAddress,
-        message_id: &str,
+        marker: &str,
+        since: i64,
     ) -> SyncResult<Option<Taken>> {
-        let q = format!("rfc822msgid:{message_id}");
+        let q = format!("in:sent after:{since}");
         let list: IdList = self
             .get(
                 account,
                 (Cost::ListMessages, FG),
                 "messages",
-                &[("q", q.as_str()), ("includeSpamTrash", "true")],
+                &[("q", q.as_str()), ("maxResults", "50")],
             )
             .await?;
-        Ok(list.messages.into_iter().next())
+        for message in list.messages {
+            let path = format!("messages/{}", message.id);
+            let found: Headers = self
+                .get(
+                    account,
+                    (Cost::GetMessageMetadata, FG),
+                    &path,
+                    &[
+                        ("format", "metadata"),
+                        ("metadataHeaders", crate::compose::MARKER_HEADER),
+                    ],
+                )
+                .await?;
+            if found.marked(marker) {
+                return Ok(Some(message));
+            }
+        }
+        Ok(None)
     }
 
     /// Keep a message as a draft: a new one, or in place of the draft whose

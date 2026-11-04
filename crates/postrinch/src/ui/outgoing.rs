@@ -11,6 +11,7 @@ use crate::state::State;
 pub fn outgoing_lines(state: State) -> NodeHandle {
     rsx! {
         div { class: "outgoing",
+            style: {move || if state.outgoing.with(|all| all.is_empty()) { "display: none".to_owned() } else { String::new() }},
             // Keyed by what each is, so a line is built once.
             for queued in state.outgoing.get().into_iter().filter(|q| q.kind == OutgoingKind::Proposed || q.refused) {
                 div { key: format!("{}|{}", queued.id, queued.refused),
@@ -79,7 +80,6 @@ fn needs_you(state: State, queued: Queued) -> NodeHandle {
 pub const CSS: &str = r#"
 .write { display: flex; flex-direction: column; padding: 4px 4px 10px; }
 .outgoing { display: flex; flex-direction: column; gap: 6px; padding: 0 4px 10px; }
-.outgoing:empty { display: none; }
 .outgoing-line { font-size: 12px; color: var(--muted); padding: 0 6px; }
 .needs-you {
     display: flex;

@@ -87,7 +87,9 @@ impl GmailSync {
             OutgoingKind::Send => {
                 // An attempt that failed may have reached Gmail first.
                 let already = if outgoing.attempts > 0 {
-                    self.api.find_by_message_id(account, &message_id).await?
+                    // A minute's slack for clocks that disagree.
+                    let since = outgoing.created.as_millis() / 1000 - 60;
+                    self.api.find_sent(account, &message_id, since).await?
                 } else {
                     None
                 };

@@ -129,11 +129,12 @@ fn form(state: State, compose: Compose) -> NodeHandle {
             for error in state.compose_error.get() {
                 p { key: error.clone(), class: "agent-warn", {error.clone()} }
             }
+            // The confirming button last, on the right; the rest before it.
             div { class: "compose-actions",
-                Button { variant: "filled", size: "sm", onclick: send, "Send" }
-                Button { variant: "default", size: "sm", onclick: keep, "Keep as draft" }
-                span { class: "spacer" }
                 Button { variant: "subtle", color: "red", size: "sm", onclick: move || state.discard_composed(), "Discard" }
+                span { class: "spacer" }
+                Button { variant: "default", size: "sm", onclick: keep, "Keep as draft" }
+                Button { variant: "filled", size: "sm", onclick: send, "Send" }
             }
         }
     }
