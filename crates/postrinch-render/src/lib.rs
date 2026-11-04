@@ -1,14 +1,14 @@
 //! A message, ready to show: its best part, parsed and sanitized.
 //!
 //! Mail is hostile input (DESIGN.md "Rendering" and "Safety"). The HTML part
-//! is parsed with the HTML5 algorithm (html5ever, through ammonia) and kept
-//! only as far as an allow-list says: no scripts, forms, frames, objects,
-//! event attributes or `<style>` sheets (they would reach the window's own
-//! elements); inline styles lose what could cover the window or fetch from
-//! the web. Pictures the message carries (`cid:`) are inlined; pictures on
-//! the web are held back unless the person asked for them, as loading them
-//! tells the sender the mail was opened. A message with no HTML part is its
-//! text, escaped.
+//! goes through rinch's cleaner (`rinch_html::clean`): parsed as a browser
+//! parses it and kept only as far as an allow-list says (no scripts, forms,
+//! frames, objects or event attributes), its `<style>` sheets applied inline
+//! and dropped (they would reach the window's own elements), inline styles
+//! without what could cover the window. Pictures the message carries
+//! (`cid:`) are inlined; pictures on the web are held back unless the person
+//! asked for them, as loading them tells the sender the mail was opened
+//! (sanitize.rs). A message with no HTML part is its text, escaped.
 
 mod sanitize;
 
@@ -60,7 +60,7 @@ pub fn render(raw: &[u8], options: Options) -> Option<Rendered> {
     let Some(html) = html_part(&parsed) else {
         let text = parsed.text_bodies().collect::<Vec<_>>().join("\n\n");
         return Some(Rendered {
-            html: text_html(&text),
+            html: rinch_html::Cleaned::from_text(&text).html,
             body_style: String::new(),
             from_html: false,
             remote_hidden: 0,
@@ -109,14 +109,4 @@ fn inline_pictures(parsed: &mail_parser::Message) -> Vec<(String, String)> {
             Some((id, format!("data:{mime};base64,{data}")))
         })
         .collect()
-}
-
-/// Plain text as HTML: escaped, its line breaks and runs of spaces kept.
-fn text_html(text: &str) -> String {
-    let escaped = text
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace("\r\n", "\n");
-    format!("<div style=\"white-space: pre-wrap; overflow-wrap: anywhere\">{escaped}</div>")
 }

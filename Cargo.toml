@@ -17,6 +17,12 @@ postrinch-store = { path = "crates/postrinch-store" }
 postrinch-sync = { path = "crates/postrinch-sync" }
 postrinch-update = { path = "crates/postrinch-update" }
 
+# rinch, from its repository: the `html-view` branch (rinch-html, HtmlView,
+# click_link, html-compare) until its pull request merges; then main.
+rinch = { git = "https://github.com/joeleaver/rinch.git", branch = "html-view" }
+rinch-html = { git = "https://github.com/joeleaver/rinch.git", branch = "html-view" }
+rinch-visual-test = { git = "https://github.com/joeleaver/rinch.git", branch = "html-view" }
+
 # rhypedb, from its repository. The ONNX/fastembed stack stays off until
 # semantic search turns it on deliberately.
 rhypedb-engine = { git = "https://github.com/joeleaver/rhypedb", default-features = false }

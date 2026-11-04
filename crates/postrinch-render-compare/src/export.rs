@@ -1,35 +1,17 @@
-//! Choosing real mail from a store and writing each message out twice: as
-//! its sender wrote it (`original.html`), and as Postrinch cleans it
-//! (`cleaned.html`, plus `cleaned.json` for the probe), with `meta.json`.
+//! Choosing real mail from a store and writing each message as a case for
+//! rinch's `html_compare`: as its sender wrote it, and as Postrinch cleans
+//! it (with pictures from the web allowed, as "Show pictures" would).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use postrinch_commands::Commands;
-use postrinch_model::{EmailAddress, Message};
-use postrinch_render::{HOST_CSS, Options, original_html, render};
+use postrinch_render::{Options, original_html, render};
 use postrinch_store::Store;
-use serde::{Deserialize, Serialize};
+use rinch_html::Cleaned;
+use rinch_visual_test::html_compare::case::{self, Meta};
 
-use crate::{Result, WIDTH};
-
-/// One message chosen for comparing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Meta {
-    pub account: String,
-    pub message: String,
-    pub thread: String,
-    pub from: String,
-    pub subject: String,
-    pub received: i64,
-}
-
-/// What the probe shows for a message: Postrinch's cleaned HTML.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Cleaned {
-    pub html: String,
-    pub body_style: String,
-}
+use crate::Result;
 
 /// Write up to `count` messages matching `query` (Postrinch's search
 /// language) into `out/NNN/`, one sender at most `per_sender` times.
@@ -42,6 +24,7 @@ pub fn export(
 ) -> Result<Vec<PathBuf>> {
     let store = Store::open(data_dir)?;
     let commands = Commands::new(store.clone());
+    let setup = crate::setup();
     // Ask for plenty: many matches are plain text or not downloaded.
     let results = commands.search(query, (count * 8).max(100))?;
     let mut senders: Vec<String> = Vec::new();
@@ -74,99 +57,29 @@ pub fn export(
         let Some(raw) = store.raw_message(&account, &message.id)? else {
             continue;
         };
-        let Some(original) = original_html(&raw) else {
+        let (Some(original), Some(rendered)) =
+            (original_html(&raw), render(&raw, Options { remote: true }))
+        else {
             continue;
         };
-        let Some(cleaned) = render(&raw, Options { remote: true }) else {
-            continue;
-        };
-        let dir = out.join(format!("{:03}", written.len()));
-        write_message(&dir, &account, message, &original, &cleaned)?;
-        senders.push(sender);
-        written.push(dir);
-    }
-    Ok(written)
-}
-
-/// A hand-written HTML file as a message folder `out/<name>`, cleaned as
-/// mail is: for narrowing a difference down to a few lines.
-pub fn case(out: &Path, html: &Path) -> Result<PathBuf> {
-    let name = html
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "case".into());
-    let original = std::fs::read_to_string(html)?;
-    let cleaned = postrinch_render::sanitize(&original, &[], Options { remote: true });
-    let dir = out.join(&name);
-    std::fs::create_dir_all(&dir)?;
-    let meta = Meta {
-        account: String::new(),
-        message: name.clone(),
-        thread: String::new(),
-        from: "case".into(),
-        subject: name,
-        received: 0,
-    };
-    std::fs::write(dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
-    std::fs::write(dir.join("original.html"), &original)?;
-    std::fs::write(dir.join("cleaned.html"), cleaned_page(&cleaned))?;
-    let probe = Cleaned {
-        html: cleaned.html.clone(),
-        body_style: cleaned.body_style.clone(),
-    };
-    std::fs::write(dir.join("cleaned.json"), serde_json::to_vec(&probe)?)?;
-    Ok(dir)
-}
-
-fn write_message(
-    dir: &Path,
-    account: &EmailAddress,
-    message: &Message,
-    original: &str,
-    cleaned: &postrinch_render::Rendered,
-) -> Result<()> {
-    std::fs::create_dir_all(dir)?;
-    let meta = Meta {
-        account: account.to_string(),
-        message: message.id.0.clone(),
-        thread: message.thread.0.clone(),
-        from: message
+        let from = message
             .headers
             .from
             .first()
             .map(|m| m.display_name())
-            .unwrap_or_default(),
-        subject: message.subject().to_owned(),
-        received: message.received.as_millis(),
-    };
-    std::fs::write(dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
-    std::fs::write(dir.join("original.html"), original)?;
-    std::fs::write(dir.join("cleaned.html"), cleaned_page(cleaned))?;
-    let probe = Cleaned {
-        html: cleaned.html.clone(),
-        body_style: cleaned.body_style.clone(),
-    };
-    std::fs::write(dir.join("cleaned.json"), serde_json::to_vec(&probe)?)?;
-    Ok(())
-}
-
-/// Postrinch's cleaned HTML as a page for Chrome: in the window's card
-/// (`HOST_CSS`), at the window's width, with the window's sans-serif
-/// font, so Chrome and rinch get the same input and differ only in how
-/// they lay it out.
-fn cleaned_page(cleaned: &postrinch_render::Rendered) -> String {
-    let fonts = crate::FONT_DIR;
-    format!(
-        r#"<!doctype html><html><head><meta charset="utf-8"><style>
-@font-face {{ font-family: 'Postrinch Sans'; src: url('file://{fonts}/IBMPlexSans-Regular.ttf'); font-weight: 400; }}
-@font-face {{ font-family: 'Postrinch Sans'; src: url('file://{fonts}/IBMPlexSans-Medium.ttf'); font-weight: 500; }}
-@font-face {{ font-family: 'Postrinch Sans'; src: url('file://{fonts}/IBMPlexSans-SemiBold.ttf'); font-weight: 600 900; }}
-@font-face {{ font-family: 'Postrinch Sans'; src: url('file://{fonts}/IBMPlexSans-Italic.ttf'); font-style: italic; }}
-html, body {{ margin: 0; background: #ffffff; }}
-{HOST_CSS}
-.mail-html {{ width: {WIDTH}px; box-sizing: border-box; border-radius: 0; font-family: 'Postrinch Sans', sans-serif; }}
-</style></head><body><div class="mail-html"><div class="mail-body" style="{style}">{html}</div></div></body></html>"#,
-        style = cleaned.body_style.replace('"', "&quot;"),
-        html = cleaned.html,
-    )
+            .unwrap_or_default();
+        let meta = Meta {
+            title: format!("{from} · {}", message.subject()),
+            detail: format!("{account} · message {}", message.id.0),
+        };
+        let cleaned = Cleaned {
+            html: rendered.html,
+            body_style: rendered.body_style,
+        };
+        let dir = out.join(format!("{:03}", written.len()));
+        case::write(&dir, &meta, &original, &cleaned, &setup)?;
+        senders.push(sender);
+        written.push(dir);
+    }
+    Ok(written)
 }

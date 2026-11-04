@@ -5,6 +5,7 @@ mod agents;
 mod appearance;
 mod changes;
 mod dates;
+mod links;
 mod loader;
 mod menus;
 mod pictures;

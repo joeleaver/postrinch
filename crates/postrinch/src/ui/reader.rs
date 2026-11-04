@@ -143,10 +143,13 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
 fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
     // The mail's own body (its style, its contents) inside the white card,
     // so a body with no padding of its own still sits off the card's edge.
-    let body_style = rendered.body_style.clone();
-    let body = rsx! { div { class: "mail-body", style: {body_style.clone()} } };
-    body.set_inner_html(&rendered.html);
-    let host = rsx! { div { class: "mail-html", {body} } };
+    // A click on a link in it opens the link (crate::links).
+    let (html, body_style) = (rendered.html.clone(), rendered.body_style.clone());
+    let host = rsx! {
+        div { class: "mail-html",
+            HtmlView { html: html, body_style: body_style, onlink: move |href: String| crate::links::open(&href) }
+        }
+    };
     let hidden = rendered.remote_hidden;
     let line = match hidden {
         1 => "A picture from the web is hidden, so the sender can\u{2019}t tell you opened this."

@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ammonia = "4.2"
+rinch-html = { workspace = true }
 base64 = "0.22"
-css-inline = { version = "0.23.1", default-features = false }
 mail-parser = "1.0"

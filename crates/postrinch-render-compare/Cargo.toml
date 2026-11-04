@@ -13,13 +13,10 @@ path = "src/main.rs"
 
 [dependencies]
 postrinch-commands = { workspace = true }
-postrinch-model = { workspace = true }
 postrinch-render = { workspace = true }
 postrinch-store = { workspace = true }
 clap = { version = "4", features = ["derive"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
 reqwest = { version = "0.13", features = ["blocking"] }
-rinch = { git = "https://github.com/joeleaver/rinch.git", features = ["desktop", "components", "theme", "debug"] }
-rinch-visual-test = { git = "https://github.com/joeleaver/rinch.git" }
-serde = { workspace = true }
-serde_json = { workspace = true }
+rinch = { workspace = true, features = ["desktop", "components", "theme", "debug", "html"] }
+rinch-html = { workspace = true }
+rinch-visual-test = { workspace = true, features = ["html-compare"] }

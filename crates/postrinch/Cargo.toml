@@ -21,7 +21,7 @@ open = "5"
 reqwest = { version = "0.13", features = ["blocking"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-rinch = { git = "https://github.com/joeleaver/rinch.git", features = ["desktop", "components", "theme", "clipboard"] }
+rinch = { workspace = true, features = ["desktop", "components", "theme", "clipboard", "html"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
