@@ -117,10 +117,11 @@ Planned crates (a Cargo workspace, names provisional):
 
 ### Rendering
 
-- **HTML mail is parsed and sanitized before rinch sees it**: an HTML5 parser (html5ever), an allow-list sanitizer, `<style>` kept and scoped, scripts, forms, frames and event attributes dropped.
+- **HTML mail is parsed and sanitized before rinch sees it** (`postrinch-render`): the message's HTML part (else its text, escaped), parsed with the HTML5 algorithm and kept only as an allow-list says (ammonia over html5ever): scripts, forms, frames, objects, event attributes and `javascript:` dropped; legacy layout attributes (`bgcolor`, `align`, `cellpadding`…) kept for rinch. Inline styles lose `position` other than static/relative, `z-index`, `behavior`, `expression()` and `url()`s that are not allowed. `<style>` sheets are dropped for now: scoping them to the message is still to do, and inline styles carry most mail. Pictures the message carries (`cid:`) become `data:` URLs.
+- **In the window** the loader renders a thread's downloaded messages when it loads the thread; the reader puts each one's HTML into a white card (`set_inner_html`), its `<body>` style on a box inside it, under a bar saying how many pictures from the web are hidden.
 - **rinch does the layout**: real table layout and legacy attributes (rinch#2079) and floats (rinch#2080) remove the need for the spike's table-to-grid rewrite. See [docs/research/html-rendering.md](docs/research/html-rendering.md).
-- **Remote content is off by default** (tracking pixels), per sender or per message on request, fetched without cookies.
-- **"Open in browser"** stays as the fallback for mail that still renders badly.
+- **Remote content is off by default** (tracking pixels). "Show pictures" loads one message's for this session; "Always from this sender" remembers the sender in `settings.json` (`pictures_from`). Only then does the sanitizer let an `http(s)` picture through, and the window fetches it itself (an image loader registered for `http` and `https` with rinch): no cookies, no referrer, 20 s and 15 MB at most.
+- **"Open in browser"** opens the message as Postrinch drew it (sanitized, pictures as chosen), from a file in the temporary folder: the fallback for mail that still renders badly. Links inside rendered mail do not open on click yet.
 
 ### Installing and updating
 
@@ -159,7 +160,7 @@ Planning and progress live in Overboard, project "Postrinch". There is no `.eml`
 Status as of 2026-11-03 (evening):
 
 1. ~~**Gmail read-only sync into rhypedb**~~ Done. Several accounts; headers first, page by page as Gmail lists them, the newest 100 whole; bodies backfilled newest first; an opened message downloads at once; quota paced and fair; retried across network drops (`GmailSync::keep_in_sync`).
-2. **Rendering on real mail.** Not started: the reader shows `body_text`. Waiting partly on rinch's email-rendering work.
+2. **Rendering on real mail.** Done for HTML and text mail (see **Rendering**). Still to do: `<style>` scoped to the message, links that open, flagging hidden text for agents, a corpus check on a few hundred real messages.
 3. **Search**: full text done (`Commands::search`, title-bar search with marked excerpts). Semantic search and the filter popover are not.
 4. **Calendar read-only sync.** Not started.
 5. **The command layer and the MCP server.** Read commands done (`postrinch-commands`: sidebar, listings, threads, search, accounts, label prefs), and changing mail (`act`, `label_choices`). The MCP server, bridge and agents are built (see **Agents**), with Settings › Agents and one-click setup for Claude Desktop, Claude Code, Cursor and Codex.

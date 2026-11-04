@@ -12,6 +12,7 @@ repository = "https://github.com/joeleaver/postrinch"
 postrinch-agents = { path = "crates/postrinch-agents" }
 postrinch-commands = { path = "crates/postrinch-commands" }
 postrinch-model = { path = "crates/postrinch-model" }
+postrinch-render = { path = "crates/postrinch-render" }
 postrinch-store = { path = "crates/postrinch-store" }
 postrinch-sync = { path = "crates/postrinch-sync" }
 postrinch-update = { path = "crates/postrinch-update" }

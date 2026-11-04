@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 postrinch-model = { workspace = true }
+postrinch-render = { workspace = true }
 postrinch-store = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

@@ -23,6 +23,7 @@ pub use actions::{LabelChoice, ThreadAction, ThreadRef};
 pub use error::{CommandError, CommandResult};
 pub use folders::{AccountFolders, Folder, FolderEntry, Sidebar};
 pub use labels::{AppLabels, Chip, LabelNode, LabelRole, LabelTree, app_of, role};
+pub use postrinch_render::Rendered;
 pub use search::{Excerpt, SearchResults};
 pub use threads::{CATEGORIES, Thread, ThreadPage, ThreadRow};
 

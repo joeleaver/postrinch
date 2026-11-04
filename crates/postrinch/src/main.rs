@@ -7,6 +7,7 @@ mod changes;
 mod dates;
 mod loader;
 mod menus;
+mod pictures;
 mod reading;
 mod state;
 mod sync;

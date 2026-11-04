@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; color: #333; line-height: 1.6; }
+    .container { max-width: 600px; margin: 0 auto; }
+    .header { background: #1a56db; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+    .content { padding: 24px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px; }
+    .summary-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    .summary-table td { padding: 8px 12px; border-bottom: 1px solid #e5e7eb; }
+    .summary-table td:first-child { font-weight: 600; color: #666; width: 160px; }
+    .amount { font-size: 24px; font-weight: 700; color: #1a56db; }
+    .status { display: inline-block; padding: 4px 12px; border-radius: 4px; font-weight: 600; font-size: 12px; color: white; background: #2b8a3e; }
+    .footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #999; text-align: center; }
+    .cta { display: inline-block; background: #1a56db; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; margin: 16px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 style="margin: 0; font-size: 20px;">Northwind Clinic</h1>
+      <p style="margin: 4px 0 0; opacity: 0.9;">Invoice Notification</p>
+    </div>
+    <div class="content">
+      <p>Dear Example Partner,</p>
+      <p>Please find your invoice details below:</p>
+
+      <table class="summary-table">
+        <tr>
+          <td>Invoice #</td>
+          <td><strong>INV-1042</strong></td>
+        </tr>
+        <tr>
+          <td>Period</td>
+          <td>October 2026</td>
+        </tr>
+        <tr><td style="padding:8px;border-bottom:1px solid #eee">Consults (42)</td><td style="padding:8px;border-bottom:1px solid #eee;text-align:right">$840.00</td></tr><tr><td style="padding:8px;border-bottom:1px solid #eee">Prescriptions (17)</td><td style="padding:8px;border-bottom:1px solid #eee;text-align:right">$340.00</td></tr>
+        <tr>
+          <td>Total Amount</td>
+          <td class="amount">$1,180.00</td>
+        </tr>
+        <tr>
+          <td>Due Date</td>
+          <td><strong>Nov 30, 2026</strong></td>
+        </tr>
+        <tr>
+          <td>Status</td>
+          <td><span class="status">Open</span></td>
+        </tr>
+      </table>
+
+      
+      <p>Amount due: <strong>$1,180.00</strong></p>
+      <p>Please log in to your partner portal to view the full invoice and make a payment.</p>
+      
+
+      <p>A PDF copy of this invoice is attached for your records.</p>
+
+      <div class="footer">
+        <p>Northwind Clinic - Clinic Services</p>
+        <p>This is an automated email. Please do not reply directly.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

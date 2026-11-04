@@ -108,6 +108,12 @@ pub struct State {
     pub agent_dialog: Signal<Option<crate::agents::AgentDialog>>,
     /// The agent the person asked to remove, until they confirm.
     pub agent_removing: Signal<Option<postrinch_agents::Agent>>,
+    /// The open thread's messages as they show, by message id.
+    pub rendered: Signal<std::collections::HashMap<String, postrinch_commands::Rendered>>,
+    /// Messages whose pictures from the web the person asked to see.
+    pub pictures_shown: Signal<HashSet<String>>,
+    /// Senders whose pictures always load (saved in Settings).
+    pub pictures_from: Signal<HashSet<String>>,
     /// Why sync is not running, when it is not.
     pub sync_off: Signal<Option<String>>,
     /// The last thing that went wrong loading, for the window to say.
@@ -158,6 +164,9 @@ impl State {
             agent_list: Signal::new(Vec::new()),
             agent_dialog: Signal::new(None),
             agent_removing: Signal::new(None),
+            rendered: Signal::new(Default::default()),
+            pictures_shown: Signal::new(HashSet::new()),
+            pictures_from: Signal::new(settings.pictures_from.iter().cloned().collect()),
             sync_off: Signal::new(None),
             error: Signal::new(None),
             update: Signal::new(crate::update::UpdateStatus::NotInstalled),
@@ -224,7 +233,13 @@ impl State {
         });
         Effect::new(move || {
             self.revision.get();
-            ask(Request::Thread(self.selected.get()));
+            ask(Request::Thread {
+                thread: self.selected.get(),
+                pictures: Box::new(crate::pictures::Pictures {
+                    messages: self.pictures_shown.get(),
+                    senders: self.pictures_from.get(),
+                }),
+            });
         });
         // An open thread's messages known only by their headers download
         // at once: the person is reading them.

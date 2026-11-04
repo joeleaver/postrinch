@@ -34,7 +34,11 @@ pub enum Request {
     /// A search's results, or none.
     Search(Option<String>),
     /// The open thread, or none.
-    Thread(Option<(EmailAddress, ProviderThreadId)>),
+    Thread {
+        thread: Option<(EmailAddress, ProviderThreadId)>,
+        /// Whose pictures from the web to load.
+        pictures: Box<crate::pictures::Pictures>,
+    },
     /// The labels an account's mail can be given, for the label menu.
     Labels(EmailAddress),
 }
@@ -46,7 +50,7 @@ impl Request {
             Request::Lists { .. } => 0,
             Request::Accounts => 1,
             Request::Search(_) => 2,
-            Request::Thread(_) => 3,
+            Request::Thread { .. } => 3,
             Request::Labels(_) => 4,
         }
     }
@@ -64,7 +68,7 @@ pub struct Loader {
 impl Loader {
     pub fn send(&self, request: Request) -> Result<(), mpsc::SendError<Request>> {
         match request {
-            Request::Thread(_) | Request::Labels(_) => self.quick.send(request),
+            Request::Thread { .. } | Request::Labels(_) => self.quick.send(request),
             _ => self.slow.send(request),
         }
     }
@@ -141,9 +145,21 @@ fn answer(commands: &Commands, state: State, request: Request) {
             Ok(results) => state.results.send(Some(results)),
             Err(e) => failed(e.to_string()),
         },
-        Request::Thread(None) => state.thread.send(None),
-        Request::Thread(Some((account, thread))) => match commands.read_thread(&account, &thread) {
-            Ok(thread) => state.thread.send(thread),
+        Request::Thread { thread: None, .. } => state.thread.send(None),
+        Request::Thread {
+            thread: Some((account, thread)),
+            pictures,
+        } => match commands.read_thread(&account, &thread) {
+            Ok(thread) => {
+                // Rendered before the thread is shown, so its messages are
+                // drawn once, as they look.
+                if let Some(thread) = &thread {
+                    state
+                        .rendered
+                        .send(crate::pictures::render(commands, thread, &pictures));
+                }
+                state.thread.send(thread);
+            }
             Err(e) => failed(e.to_string()),
         },
         Request::Labels(account) => match commands.label_choices(&account) {

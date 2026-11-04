@@ -265,6 +265,33 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .message-to { color: var(--muted); font-size: 13px; margin-top: -6px; }
 .message-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; color: var(--ink); }
 .message-note { color: var(--ink-2); font-style: italic; }
+/* A message as its sender drew it: on white, as mail is written for it,
+   in dark mode too. */
+.mail { display: flex; flex-direction: column; gap: 10px; }
+.mail-html {
+    padding: 12px;
+    border-radius: 6px;
+    background: #ffffff;
+    color: #222222;
+    font-family: sans-serif;
+    line-height: 1.4;
+    overflow-x: auto;
+}
+.pictures-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: var(--panel);
+    font-size: 13px;
+    color: var(--ink-2);
+}
+.pictures-line { flex: 1; min-width: 240px; }
+.mail-foot { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
+.mail-foot > span:first-child { flex: 1; }
+.mail-open { color: var(--accent); cursor: pointer; }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
     padding: 4px 10px;

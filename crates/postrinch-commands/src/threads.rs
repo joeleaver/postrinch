@@ -3,8 +3,10 @@
 use std::collections::{HashMap, HashSet};
 
 use postrinch_model::{
-    EmailAddress, LabelKind, Message, ProviderThreadId, SystemLabel, ThreadSummary,
+    EmailAddress, LabelKind, Message, ProviderMessageId, ProviderThreadId, SystemLabel,
+    ThreadSummary,
 };
+use postrinch_render::{Options as RenderOptions, Rendered};
 use serde::{Deserialize, Serialize};
 
 use crate::labels::Chip;
@@ -142,5 +144,21 @@ impl Commands {
         self.check(account)?;
         let messages = self.store.thread_messages(account, thread)?;
         Ok(ThreadSummary::from_messages(&messages).map(|summary| Thread { summary, messages }))
+    }
+
+    /// A downloaded message as it shows: its best part, sanitized (see
+    /// `postrinch-render`), with pictures from the web only when `remote`.
+    /// `None` for a message not downloaded or that does not parse.
+    pub fn render_message(
+        &self,
+        account: &EmailAddress,
+        message: &ProviderMessageId,
+        remote: bool,
+    ) -> CommandResult<Option<Rendered>> {
+        self.check(account)?;
+        let Some(raw) = self.store.raw_message(account, message)? else {
+            return Ok(None);
+        };
+        Ok(postrinch_render::render(&raw, RenderOptions { remote }))
     }
 }

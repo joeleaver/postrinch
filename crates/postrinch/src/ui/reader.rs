@@ -1,11 +1,12 @@
 //! The reading pane: the open thread, every message in it.
 
 use jiff::tz::TimeZone;
-use postrinch_commands::Thread;
+use postrinch_commands::{Rendered, Thread};
 use postrinch_model::Message;
 use rinch::prelude::*;
 
 use crate::dates;
+use crate::pictures::open_in_browser;
 use crate::state::State;
 use crate::ui::thread_actions::toolbar;
 
@@ -57,7 +58,7 @@ fn open_thread(state: State, thread: Thread) -> NodeHandle {
     let messages: Vec<NodeHandle> = thread
         .messages
         .iter()
-        .map(|m| message(__scope, m.clone(), dates::long(m.received, &tz)))
+        .map(|m| message(__scope, state, m.clone(), dates::long(m.received, &tz)))
         .collect();
     rsx! {
         div { class: "thread",
@@ -72,7 +73,7 @@ fn open_thread(state: State, thread: Thread) -> NodeHandle {
 }
 
 #[component]
-fn message(message: Message, when: String) -> NodeHandle {
+fn message(state: State, message: Message, when: String) -> NodeHandle {
     let (name, address) = match message.headers.from.first() {
         Some(from) => (from.display_name(), from.address.to_string()),
         None => ("(unknown sender)".to_owned(), String::new()),
@@ -86,12 +87,23 @@ fn message(message: Message, when: String) -> NodeHandle {
         .collect();
     let to = (!to.is_empty()).then(|| format!("to {}", to.join(", ")));
     let to = to.map(|line| rsx! { div { class: "message-to", {line} } });
+    let id = message.id.0.clone();
+    let shown = message.clone();
     let body = if message.downloaded {
         let text = message.body_text.trim().to_owned();
-        if text.is_empty() {
-            rsx! { div { class: "message-note", "This message has no text." } }
-        } else {
-            rsx! { div { class: "message-body", {text} } }
+        // As it renders, once the loader has rendered it; its text until then.
+        let unrendered = id.clone();
+        rsx! {
+            div {
+                for rendered in state.rendered.get().get(&id).cloned() {
+                    div { key: format!("{}|{}", rendered.remote_hidden, rendered.html.len()),
+                        {mail(__scope, state, shown.clone(), rendered.clone())}
+                    }
+                }
+                if !state.rendered.get().contains_key(&unrendered) {
+                    {plain(__scope, text.clone())}
+                }
+            }
         }
     } else {
         rsx! {
@@ -120,5 +132,62 @@ fn message(message: Message, when: String) -> NodeHandle {
             {body}
             div { class: "attachments", {attachments} }
         }
+    }
+}
+
+/// A message as Postrinch drew it: the hidden-pictures bar when pictures
+/// from the web were held back, the mail itself, and a way out to the
+/// browser.
+#[component]
+fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
+    // The mail's own body (its style, its contents) inside the white card,
+    // so a body with no padding of its own still sits off the card's edge.
+    let body_style = rendered.body_style.clone();
+    let body = rsx! { div { class: "mail-body", style: {body_style.clone()} } };
+    body.set_inner_html(&rendered.html);
+    let host = rsx! { div { class: "mail-html", {body} } };
+    let hidden = rendered.remote_hidden;
+    let line = match hidden {
+        1 => "A picture from the web is hidden, so the sender can\u{2019}t tell you opened this."
+            .to_owned(),
+        n => format!(
+            "{n} pictures from the web are hidden, so the sender can\u{2019}t tell you opened this."
+        ),
+    };
+    let (once, always) = (message.clone(), message.clone());
+    let bar = (hidden > 0).then(|| {
+        rsx! {
+            div { class: "pictures-bar", role: "status",
+                span { class: "pictures-line", {line.clone()} }
+                Button { variant: "default", size: "xs", onclick: move || state.show_pictures(&once), "Show pictures" }
+                Button { variant: "default", size: "xs", onclick: move || state.always_show_pictures(&always), "Always from this sender" }
+            }
+        }
+    });
+    let foot = rendered.from_html.then(|| {
+        let (message, rendered) = (message.clone(), rendered.clone());
+        rsx! {
+            div { class: "mail-foot",
+                span { "Shown as Postrinch draws it: scripts, forms and frames are left out." }
+                span { class: "mail-open", onclick: move || open_in_browser(&message, &rendered), "Open in browser" }
+            }
+        }
+    });
+    rsx! {
+        div { class: "mail",
+            {bar}
+            {host}
+            {foot}
+        }
+    }
+}
+
+/// A message's text, before it is rendered or when it cannot be.
+#[component]
+fn plain(text: String) -> NodeHandle {
+    if text.is_empty() {
+        rsx! { div { class: "message-note", "This message has no text." } }
+    } else {
+        rsx! { div { class: "message-body", {text.clone()} } }
     }
 }
