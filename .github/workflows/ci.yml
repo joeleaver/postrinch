@@ -1,8 +1,13 @@
 name: CI
 
+# Every push and pull request is tested on Linux. Windows and macOS run
+# only on a major release tag (`v1.0.0`, `v2.0.0`…): early in development
+# their minutes (twice and ten times Linux's) are not worth spending on
+# every push.
 on:
   push:
     branches: [main]
+    tags: ['v[0-9]+.0.0']
   pull_request:
 
 env:
@@ -14,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(startsWith(github.ref, 'refs/tags/') && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
