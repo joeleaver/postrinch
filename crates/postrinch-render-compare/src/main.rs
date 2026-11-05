@@ -166,7 +166,9 @@ fn run(step: Step) -> Result<()> {
 fn screenshot(out: &Path, dirs: &[PathBuf], width: u32) -> Result<()> {
     let profile = out.join(".chrome-profile");
     for dir in dirs {
-        chrome::case(dir, width, &profile)?;
+        // Pictures from the web, as "Show pictures" loads them: the exported
+        // cases allow them too. (Scripts never run in Chrome's copy.)
+        chrome::case(dir, width, &profile, true)?;
         eprintln!("chrome: {}", dir.display());
     }
     Ok(())
