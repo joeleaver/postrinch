@@ -43,7 +43,7 @@ pub fn fetch_web_pictures() {
     }
     if let Ok(client) = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
-        .user_agent("Mozilla/5.0 (compatible; Postrinch)")
+        .user_agent(postrinch_render::PICTURE_USER_AGENT)
         .build()
     {
         let web = std::sync::Arc::new(Web(client));

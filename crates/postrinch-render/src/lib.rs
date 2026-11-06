@@ -16,6 +16,41 @@ use mail_parser::{MessageParser, PartKind};
 
 pub use sanitize::{policy, sanitize};
 
+#[cfg(target_os = "linux")]
+macro_rules! platform {
+    () => {
+        "X11; Linux x86_64"
+    };
+}
+#[cfg(target_os = "windows")]
+macro_rules! platform {
+    () => {
+        "Windows NT 10.0; Win64; x64"
+    };
+}
+#[cfg(target_os = "macos")]
+macro_rules! platform {
+    () => {
+        "Macintosh; Intel Mac OS X 10_15_7"
+    };
+}
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+macro_rules! platform {
+    () => {
+        "Unknown"
+    };
+}
+
+/// The User-Agent pictures from the web are fetched with: a browser's shape
+/// with Postrinch's own name. Not "(compatible; …)": firewalls such as
+/// delanceyplace.com's drop that as a bot's.
+pub const PICTURE_USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (",
+    platform!(),
+    ") Postrinch/",
+    env!("CARGO_PKG_VERSION")
+);
+
 /// What a message shows as.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rendered {
@@ -158,4 +193,15 @@ pub fn message_text(raw: &[u8]) -> Option<MessageText> {
         text: text.visible,
         hidden: text.hidden,
     })
+}
+
+#[cfg(test)]
+mod user_agent_tests {
+    #[test]
+    fn picture_user_agent_is_not_a_bots() {
+        let ua = super::PICTURE_USER_AGENT;
+        assert!(ua.starts_with("Mozilla/5.0 ("));
+        assert!(ua.contains(") Postrinch/"));
+        assert!(!ua.contains("compatible"));
+    }
 }
