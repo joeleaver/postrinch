@@ -4041,7 +4041,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "dark-light",
  "dirs",
@@ -4065,7 +4065,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-agents"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
  "dirs",
@@ -4085,7 +4085,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-cli"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "clap",
  "dirs",
@@ -4102,7 +4102,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-commands"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "jiff",
  "postrinch-model",
@@ -4116,7 +4116,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-mcp"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "postrinch-agents",
  "postrinch-commands",
@@ -4132,7 +4132,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-model"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -4141,7 +4141,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-render"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
  "mail-parser",
@@ -4150,7 +4150,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-render-compare"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "clap",
  "postrinch-commands",
@@ -4164,7 +4164,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-store"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "postrinch-model",
  "rhypedb-engine",
@@ -4181,7 +4181,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-sync"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4208,7 +4208,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-update"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
  "dirs",
@@ -4849,7 +4849,7 @@ dependencies = [
 [[package]]
 name = "rinch"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "base64 0.22.1",
  "bytemuck",
@@ -4891,7 +4891,7 @@ dependencies = [
 [[package]]
 name = "rinch-android"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "android-activity",
  "base64 0.22.1",
@@ -4904,7 +4904,7 @@ dependencies = [
 [[package]]
 name = "rinch-clipboard"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "arboard",
  "js-sys",
@@ -4917,7 +4917,7 @@ dependencies = [
 [[package]]
 name = "rinch-components"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "rinch-core",
  "rinch-macros",
@@ -4929,7 +4929,7 @@ dependencies = [
 [[package]]
 name = "rinch-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -4939,7 +4939,7 @@ dependencies = [
 [[package]]
 name = "rinch-debug"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "serde",
  "serde_json",
@@ -4949,7 +4949,7 @@ dependencies = [
 [[package]]
 name = "rinch-dom"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "app_units",
  "atomic_refcell",
@@ -4993,7 +4993,7 @@ dependencies = [
 [[package]]
 name = "rinch-editable"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "rinch-words",
 ]
@@ -5001,7 +5001,7 @@ dependencies = [
 [[package]]
 name = "rinch-editor-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "regex",
  "rinch-core",
@@ -5012,7 +5012,7 @@ dependencies = [
 [[package]]
 name = "rinch-editor-view"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "rinch-core",
  "rinch-editor-core",
@@ -5022,7 +5022,7 @@ dependencies = [
 [[package]]
 name = "rinch-html"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "ammonia",
  "css-inline",
@@ -5037,7 +5037,7 @@ dependencies = [
 [[package]]
 name = "rinch-http"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "js-sys",
  "rinch-core",
@@ -5050,7 +5050,7 @@ dependencies = [
 [[package]]
 name = "rinch-macros"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5060,7 +5060,7 @@ dependencies = [
 [[package]]
 name = "rinch-platform"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "peniko",
  "vello",
@@ -5070,7 +5070,7 @@ dependencies = [
 [[package]]
 name = "rinch-tabler-icons"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "heck 0.5.0",
  "rinch-core",
@@ -5082,12 +5082,12 @@ dependencies = [
 [[package]]
 name = "rinch-theme"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 
 [[package]]
 name = "rinch-visual-test"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -5104,7 +5104,7 @@ dependencies = [
 [[package]]
 name = "rinch-words"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#76e3ee23e2f57e19514b4c09c021d438a16af0fe"
+source = "git+https://github.com/joeleaver/rinch.git#ebbc648dd307f8037da82b3b7adb48f1153b8584"
 dependencies = [
  "icu_segmenter",
  "regex",
@@ -6112,7 +6112,7 @@ dependencies = [
 [[package]]
 name = "taffy"
 version = "0.14.0"
-source = "git+https://github.com/joeleaver/taffy-fork?rev=6015309f18f5b584fc3a6ad90617b5dd3ea088f6#6015309f18f5b584fc3a6ad90617b5dd3ea088f6"
+source = "git+https://github.com/joeleaver/taffy-fork?rev=25caf91e87ad8ef2929ba4625f760e41e2765a80#25caf91e87ad8ef2929ba4625f760e41e2765a80"
 dependencies = [
  "arrayvec",
  "serde",
