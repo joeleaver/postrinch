@@ -163,7 +163,59 @@ fn run(step: Step) -> Result<()> {
     Ok(())
 }
 
+/// A fontconfig file for Chrome alone: the system's, with the window's sans
+/// (IBM Plex) first for the generic families. The window gives `sans-serif`,
+/// `system-ui` and `ui-sans-serif` to IBM Plex (rinch's `AppFont::sans_serif`),
+/// so a mail that names one itself must get IBM Plex in Chrome too, or the
+/// comparison measures the font and not the layout (issue #1). A CSS rule
+/// cannot remap a generic family, and `system-ui` follows fontconfig. Only
+/// the window's own IBM Plex faces are seen (a system copy is set aside), so
+/// bold text in Chrome takes SemiBold as the window does, not a Bold the window
+/// does not have.
+fn chrome_fonts(out: &Path) -> Result<PathBuf> {
+    let dir = out.join(".chrome-fonts");
+    std::fs::create_dir_all(&dir)?;
+    let fonts = std::fs::canonicalize(FONT_DIR)?;
+    // Each other folder the system's IBM Plex Sans faces are in, set aside by
+    // path (this fontconfig lets no `acceptfont` win over a `rejectfont`).
+    let listed = Command::new("fc-list")
+        .args(["IBM Plex Sans", "file"])
+        .output()?;
+    let mut others: Vec<String> = String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .filter_map(|line| Path::new(line.trim().trim_end_matches(':')).parent().map(Path::to_path_buf))
+        .filter(|parent| *parent != fonts)
+        .map(|parent| format!("<glob>{}/IBMPlexSans-*</glob>", parent.display()))
+        .collect();
+    others.sort();
+    others.dedup();
+    let reject = if others.is_empty() {
+        String::new()
+    } else {
+        format!("  <selectfont><rejectfont>{}</rejectfont></selectfont>\n", others.concat())
+    };
+    let fonts = fonts.display();
+    let generic = |family: &str| {
+        format!(
+            "  <match target=\"pattern\"><test name=\"family\"><string>{family}</string></test>\
+             <edit name=\"family\" mode=\"prepend\" binding=\"strong\"><string>IBM Plex Sans</string></edit></match>\n"
+        )
+    };
+    let conf = format!(
+        "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig>\n  \
+         <include ignore_missing=\"yes\">/etc/fonts/fonts.conf</include>\n  <dir>{fonts}</dir>\n{reject}{}</fontconfig>\n",
+        ["sans-serif", "sans", "system-ui", "ui-sans-serif"].map(generic).concat()
+    );
+    let path = dir.join("fonts.conf");
+    std::fs::write(&path, conf)?;
+    Ok(path)
+}
+
 fn screenshot(out: &Path, dirs: &[PathBuf], width: u32) -> Result<()> {
+    let fonts = chrome_fonts(out)?;
+    // SAFETY: set before Chrome is started, while this process runs no other
+    // thread; Chrome inherits it, nothing here reads it.
+    unsafe { std::env::set_var("FONTCONFIG_FILE", &fonts) };
     let profile = out.join(".chrome-profile");
     for dir in dirs {
         // Pictures from the web, as "Show pictures" loads them: the exported
