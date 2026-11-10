@@ -156,7 +156,12 @@ fn run(step: Step) -> Result<()> {
             println!("{}", report::report(&out, &dirs)?.display());
         }
         Step::Probe { width, dirs } => {
-            probe::fetch_web_pictures();
+            // Beside the cases: `<out>/.pictures`, shared by every redraw.
+            let cache = dirs
+                .first()
+                .and_then(|d| d.parent())
+                .map_or_else(|| PathBuf::from(".pictures"), |out| out.join(".pictures"));
+            probe::fetch_web_pictures(&cache);
             html_compare::probe::run(dirs, setup(width));
         }
     }
