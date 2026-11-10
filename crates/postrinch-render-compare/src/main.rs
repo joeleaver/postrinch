@@ -211,12 +211,25 @@ fn chrome_fonts(out: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Chrome's own font preferences, in its profile: Chrome takes the generic
+/// `sans-serif` from these (Arial on Linux) and never asks fontconfig, so
+/// `chrome_fonts` alone reaches only `system-ui` (rinch#2423). The profile
+/// is the tool's own, so its preferences are written whole.
+fn chrome_preferences(profile: &Path) -> Result<()> {
+    let dir = profile.join("Default");
+    std::fs::create_dir_all(&dir)?;
+    let prefs = r#"{"webkit":{"webprefs":{"fonts":{"sansserif":{"Zyyy":"IBM Plex Sans"}}}}}"#;
+    std::fs::write(dir.join("Preferences"), prefs)?;
+    Ok(())
+}
+
 fn screenshot(out: &Path, dirs: &[PathBuf], width: u32) -> Result<()> {
     let fonts = chrome_fonts(out)?;
     // SAFETY: set before Chrome is started, while this process runs no other
     // thread; Chrome inherits it, nothing here reads it.
     unsafe { std::env::set_var("FONTCONFIG_FILE", &fonts) };
     let profile = out.join(".chrome-profile");
+    chrome_preferences(&profile)?;
     for dir in dirs {
         // Pictures from the web, as "Show pictures" loads them: the exported
         // cases allow them too. (Scripts never run in Chrome's copy.)
