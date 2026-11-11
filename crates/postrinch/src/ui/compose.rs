@@ -114,10 +114,9 @@ fn form(state: State, compose: Compose) -> NodeHandle {
                 {field(__scope, "Bcc", bcc)}
                 {field(__scope, "Subject", subject)}
             }
+            // What the fields and buttons leave of the form, its text
+            // scrolling inside it, so the buttons always show (compose CSS).
             Textarea {
-                autosize: true,
-                min_rows: Some(14),
-                max_rows: Some(28),
                 value_fn: move || body.get(),
                 oninput: move |v: String| body.set(v),
             }
@@ -169,7 +168,13 @@ fn outside_line(draft: &Result<Draft, String>) -> String {
 }
 
 pub const CSS: &str = r#"
-.compose { display: flex; flex-direction: column; gap: 12px; }
+/* The form is as tall as the window leaves room for beside the title bar
+   and the dialog's own margins, and the body takes what the fields, notes
+   and buttons leave: long text scrolls inside it, so the buttons always
+   show. */
+.compose { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 240px); min-height: 360px; }
+.compose > .rinch-textarea { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.compose .rinch-textarea__input { flex: 1; min-height: 120px; resize: none; overflow-y: auto; }
 .compose-banner {
     display: flex;
     flex-direction: column;
