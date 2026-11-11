@@ -49,8 +49,8 @@ impl Commands {
         Self { store, only: None }
     }
 
-    /// Give the memory the store's reads freed back to the system.
-    pub fn release_free_memory(&self) {
-        self.store.release_free_memory();
+    /// Give the memory the store's reads took back to the system.
+    pub fn release_memory(&self) {
+        self.store.release_memory();
     }
 }

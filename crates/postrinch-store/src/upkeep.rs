@@ -1,5 +1,6 @@
-//! Keeping the database's files in shape: one full compaction after an
-//! upgrade of the engine that changed how it writes them.
+//! Keeping the database's files in shape: one rewrite of old links and a
+//! full compaction after an upgrade of the engine that changed how it
+//! writes them.
 //!
 //! rhypedb writes its newer files with what opening needs to know about
 //! them; files from before are read in full at every open until a
@@ -18,8 +19,13 @@ const COMPACTED_KEY: &str = "compacted";
 /// The file layout the last full compaction wrote. Raise it when an engine
 /// upgrade needs one more: 1, the files that say what opening needs
 /// (rhypedb 2d53f5f); 2, the files that list the objects they hold, so
-/// opening reads no object data (rhypedb ab8a3ed).
-const LAYOUT: u32 = 2;
+/// opening reads no object data (rhypedb ab8a3ed); 3, links without the
+/// whole-object copies older engines wrote into them, which lists read
+/// (rhypedb 122fd73, rewritten by `rewrite_covers` before the compaction).
+const LAYOUT: u32 = 3;
+/// How many times the link rewrite runs when it loses a write to a
+/// concurrent writer; each run carries on where the last stopped.
+const REWRITE_ATTEMPTS: usize = 5;
 
 impl Store {
     /// Whether the store has not yet had the full compaction its files need.
@@ -39,6 +45,21 @@ impl Store {
         if !self.needs_compaction()? {
             return Ok(false);
         }
+        let mut attempt = 1;
+        loop {
+            match self.db.rewrite_covers() {
+                Ok(stats) => {
+                    tracing::info!(
+                        "rewrote {} links and {} index entries",
+                        stats.rev_edges_rewritten,
+                        stats.index_entries_rewritten
+                    );
+                    break;
+                }
+                Err(EngineError::WriteConflict) if attempt < REWRITE_ATTEMPTS => attempt += 1,
+                Err(e) => return Err(e.into()),
+            }
+        }
         self.db.storage().compact().map_err(EngineError::from)?;
         let fields = || {
             FieldsBuilder::new()
@@ -52,7 +73,7 @@ impl Store {
             fields().build(),
             fields().build(),
         )?;
-        self.db.release_free_memory();
+        self.release_memory();
         Ok(true)
     }
 }

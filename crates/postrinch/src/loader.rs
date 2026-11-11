@@ -121,7 +121,7 @@ fn serve(commands: &Commands, state: State, rx: &Receiver<Request>) {
         // (the first lists at startup, then at most every RELEASE_EVERY), or
         // the window keeps its size from the biggest load it ever made.
         if released.is_none_or(|at| at.elapsed() >= RELEASE_EVERY) {
-            commands.release_free_memory();
+            commands.release_memory();
             released = Some(Instant::now());
         }
     }

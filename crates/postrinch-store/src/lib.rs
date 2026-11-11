@@ -86,11 +86,14 @@ impl Store {
         &self.root
     }
 
-    /// Give the memory freed since the last time back to the system. The
-    /// allocator keeps what loading lists and threads let go of, and the
-    /// process looks that much bigger until it is handed back.
-    pub fn release_free_memory(&self) {
+    /// Give memory back to the system: the heap freed since the last time
+    /// (the allocator keeps what loading lists and threads let go of) and
+    /// the database files' pages mapped in by reads, which come back from
+    /// the page cache when next read. Until then the process looks that
+    /// much bigger.
+    pub fn release_memory(&self) {
         self.db.release_free_memory();
+        self.db.release_file_pages();
     }
 
     /// How many writes have gone through since the store opened: what was
