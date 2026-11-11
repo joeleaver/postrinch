@@ -4737,7 +4737,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-authz"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#bf1bf0e09249198c4af20f712f57ae0766a6a8dc"
+source = "git+https://github.com/joeleaver/rhypedb#2d53f5f7e69f37d12535958c2e427218ce6535de"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -4750,7 +4750,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-embed"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#bf1bf0e09249198c4af20f712f57ae0766a6a8dc"
+source = "git+https://github.com/joeleaver/rhypedb#2d53f5f7e69f37d12535958c2e427218ce6535de"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -4758,7 +4758,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-engine"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#bf1bf0e09249198c4af20f712f57ae0766a6a8dc"
+source = "git+https://github.com/joeleaver/rhypedb#2d53f5f7e69f37d12535958c2e427218ce6535de"
 dependencies = [
  "arc-swap",
  "base64 0.22.1",
@@ -4770,6 +4770,7 @@ dependencies = [
  "rhypedb-subscribe",
  "rhypedb-vector",
  "rhypedb-wire",
+ "roaring",
  "rust-stemmers",
  "serde_json",
  "sha2 0.10.9",
@@ -4781,7 +4782,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-query"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#bf1bf0e09249198c4af20f712f57ae0766a6a8dc"
+source = "git+https://github.com/joeleaver/rhypedb#2d53f5f7e69f37d12535958c2e427218ce6535de"
 dependencies = [
  "bytes",
  "rhypedb-authz",
@@ -4794,7 +4795,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-schema"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#bf1bf0e09249198c4af20f712f57ae0766a6a8dc"
+source = "git+https://github.com/joeleaver/rhypedb#2d53f5f7e69f37d12535958c2e427218ce6535de"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -4802,7 +4803,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-storage"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#bf1bf0e09249198c4af20f712f57ae0766a6a8dc"
+source = "git+https://github.com/joeleaver/rhypedb#2d53f5f7e69f37d12535958c2e427218ce6535de"
 dependencies = [
  "ahash",
  "bytes",
@@ -4820,7 +4821,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-subscribe"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#bf1bf0e09249198c4af20f712f57ae0766a6a8dc"
+source = "git+https://github.com/joeleaver/rhypedb#2d53f5f7e69f37d12535958c2e427218ce6535de"
 dependencies = [
  "parking_lot",
  "serde",
@@ -4830,7 +4831,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-vector"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#bf1bf0e09249198c4af20f712f57ae0766a6a8dc"
+source = "git+https://github.com/joeleaver/rhypedb#2d53f5f7e69f37d12535958c2e427218ce6535de"
 dependencies = [
  "boxcar",
  "parking_lot",
@@ -4841,7 +4842,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-wire"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#bf1bf0e09249198c4af20f712f57ae0766a6a8dc"
+source = "git+https://github.com/joeleaver/rhypedb#2d53f5f7e69f37d12535958c2e427218ce6535de"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4854,7 +4855,7 @@ dependencies = [
 [[package]]
 name = "rinch"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "base64 0.22.1",
  "bytemuck",
@@ -4897,7 +4898,7 @@ dependencies = [
 [[package]]
 name = "rinch-android"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "android-activity",
  "base64 0.22.1",
@@ -4910,7 +4911,7 @@ dependencies = [
 [[package]]
 name = "rinch-clipboard"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "arboard",
  "js-sys",
@@ -4923,7 +4924,7 @@ dependencies = [
 [[package]]
 name = "rinch-components"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "rinch-core",
  "rinch-macros",
@@ -4935,7 +4936,7 @@ dependencies = [
 [[package]]
 name = "rinch-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -4945,7 +4946,7 @@ dependencies = [
 [[package]]
 name = "rinch-debug"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -4957,7 +4958,7 @@ dependencies = [
 [[package]]
 name = "rinch-dom"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "app_units",
  "atomic_refcell",
@@ -5001,7 +5002,7 @@ dependencies = [
 [[package]]
 name = "rinch-editable"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "rinch-words",
 ]
@@ -5009,7 +5010,7 @@ dependencies = [
 [[package]]
 name = "rinch-editor-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "regex",
  "rinch-core",
@@ -5020,7 +5021,7 @@ dependencies = [
 [[package]]
 name = "rinch-editor-view"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "rinch-core",
  "rinch-editor-core",
@@ -5030,7 +5031,7 @@ dependencies = [
 [[package]]
 name = "rinch-html"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "ammonia",
  "css-inline",
@@ -5047,7 +5048,7 @@ dependencies = [
 [[package]]
 name = "rinch-http"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "js-sys",
  "rinch-core",
@@ -5060,7 +5061,7 @@ dependencies = [
 [[package]]
 name = "rinch-macros"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5070,7 +5071,7 @@ dependencies = [
 [[package]]
 name = "rinch-platform"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "peniko",
  "vello",
@@ -5080,7 +5081,7 @@ dependencies = [
 [[package]]
 name = "rinch-tabler-icons"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "heck 0.5.0",
  "rinch-core",
@@ -5092,12 +5093,12 @@ dependencies = [
 [[package]]
 name = "rinch-theme"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 
 [[package]]
 name = "rinch-visual-test"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -5114,7 +5115,7 @@ dependencies = [
 [[package]]
 name = "rinch-words"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#de90a5586dd5dab01ef03775f7474109b72a3438"
+source = "git+https://github.com/joeleaver/rinch.git#74e210f105dc1142eb4dd8508b0f955ace4912b8"
 dependencies = [
  "icu_segmenter",
  "regex",
@@ -5169,6 +5170,16 @@ dependencies = [
  "quote",
  "serde_json",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "roaring"
+version = "0.10.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19e8d2cfa184d94d0726d650a9f4a1be7f9b76ac9fdb954219878dc00c1c1e7b"
+dependencies = [
+ "bytemuck",
+ "byteorder",
 ]
 
 [[package]]
@@ -6143,7 +6154,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

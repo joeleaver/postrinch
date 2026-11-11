@@ -53,6 +53,9 @@ enum Command {
     /// Rebuild an account's downloaded messages from the originals stored
     /// here, after a change to how Postrinch reads mail. Needs no network.
     Reparse { address: String },
+    /// Compact the store's files once after an engine upgrade, as the
+    /// window does when it opens (a no-op when already done).
+    Compact,
     /// Search all accounts' mail.
     Search {
         query: String,

@@ -74,7 +74,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    fill_thread_latest(&store);
+    upkeep(&store);
     let theme = ThemeProviderProps {
         primary_color: Some("blue".into()),
         default_radius: Some("md".into()),
@@ -104,18 +104,28 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Keep the latest activity of threads stored before threads kept it, in
-/// the background: lists are right meanwhile, only slower.
-fn fill_thread_latest(store: &Store) {
+/// The store's upkeep after it opens, on a thread of its own: the latest
+/// activity of threads stored before threads kept it filled in (lists are
+/// right meanwhile, only slower), then the one full compaction its files need
+/// after an engine upgrade (postrinch-store's upkeep.rs).
+fn upkeep(store: &Store) {
     let store = store.clone();
     let spawned = std::thread::Builder::new()
-        .name("fill-threads".into())
-        .spawn(move || match store.fill_thread_latest() {
-            Ok(0) => {}
-            Ok(n) => tracing::info!("kept the latest activity of {n} threads"),
-            Err(e) => tracing::warn!("keeping threads' latest activity: {e}"),
+        .name("store-upkeep".into())
+        .spawn(move || {
+            match store.fill_thread_latest() {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("kept the latest activity of {n} threads"),
+                Err(e) => tracing::warn!("keeping threads' latest activity: {e}"),
+            }
+            let started = std::time::Instant::now();
+            match store.compact_once() {
+                Ok(false) => {}
+                Ok(true) => tracing::info!("compacted the store in {:?}", started.elapsed()),
+                Err(e) => tracing::warn!("compacting the store: {e}"),
+            }
         });
     if let Err(e) = spawned {
-        tracing::warn!("cannot keep threads' latest activity: {e}");
+        tracing::warn!("cannot look after the store: {e}");
     }
 }

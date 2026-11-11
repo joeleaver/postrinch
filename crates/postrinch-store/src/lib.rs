@@ -24,6 +24,7 @@ mod outbox;
 mod outgoing;
 mod people;
 mod threads;
+mod upkeep;
 mod views;
 
 use std::collections::HashMap;

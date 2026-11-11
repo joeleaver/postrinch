@@ -64,6 +64,15 @@ pub(crate) async fn run(cli: Cli) -> Result<()> {
             eprintln!("{address}: rebuilt {rebuilt} messages from their originals");
             Ok(())
         }
+        Command::Compact => {
+            let started = std::time::Instant::now();
+            if cx.store.compact_once()? {
+                eprintln!("compacted the store in {:?}", started.elapsed());
+            } else {
+                eprintln!("the store needs no compaction");
+            }
+            Ok(())
+        }
         Command::Search { query, limit } => search(&cx, &query, limit),
         Command::Show {
             address,
