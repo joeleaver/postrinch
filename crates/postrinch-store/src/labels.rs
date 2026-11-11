@@ -20,7 +20,11 @@ pub(crate) fn decode(fields: &Fields) -> StoreResult<Label> {
 }
 
 impl Store {
-    /// Add a label to an account, or update its name and kind.
+    /// Add a label to an account, or update its name, kind, visibility and
+    /// colour. A label that already reads so is not written again: sync
+    /// refreshes every label on every pass, and a label is linked one-to-one
+    /// to its account, so a write is not free (rhypedb rewrites what links
+    /// to what changed).
     pub fn put_label(&self, account: &EmailAddress, label: &Label) -> StoreResult<()> {
         let account_id = self.account_id(account)?;
         let key = scoped(account, &label.provider_id);
@@ -40,6 +44,7 @@ impl Store {
         // Found by key or among the account's labels (rhypedb#27, see
         // duplicates.rs), so a lookup that misses never makes a copy.
         match self.find_label(account, &label.provider_id)? {
+            Some(existing) if decode(&existing)? == *label => {}
             Some(existing) => self.db_update(TYPE, existing.id(), update.build())?,
             None => {
                 self.upsert(TYPE, "key", &key, create.build(), update.build())?;
@@ -185,8 +190,13 @@ mod tests {
         // Sync refreshing the label leaves the person's changes alone.
         label.visibility = LabelVisibility::Show;
         store.put_label(&me, &label).unwrap();
-        assert_eq!(store.labels(&me).unwrap(), vec![label]);
+        assert_eq!(store.labels(&me).unwrap(), vec![label.clone()]);
         assert_eq!(store.label_prefs(&me).unwrap()["Label_1"], prefs);
+
+        // The same label again writes nothing.
+        let before = store.writes();
+        store.put_label(&me, &label).unwrap();
+        assert_eq!(store.writes(), before);
         assert!(store.set_label_prefs(&me, "Label_9", &prefs).is_err());
     }
 }
