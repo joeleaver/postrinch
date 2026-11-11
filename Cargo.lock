@@ -4046,7 +4046,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "dark-light",
  "dirs",
@@ -4070,7 +4070,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-agents"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "dirs",
@@ -4090,7 +4090,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-cli"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "clap",
  "dirs",
@@ -4107,7 +4107,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-commands"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "jiff",
  "postrinch-model",
@@ -4121,7 +4121,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-mcp"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "postrinch-agents",
  "postrinch-commands",
@@ -4137,7 +4137,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-model"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "serde",
  "serde_json",
@@ -4146,7 +4146,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-render"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "mail-parser",
@@ -4155,7 +4155,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-render-compare"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "clap",
  "postrinch-commands",
@@ -4169,7 +4169,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-store"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "postrinch-model",
  "rhypedb-engine",
@@ -4186,7 +4186,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-sync"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4213,7 +4213,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-update"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "base64 0.22.1",
  "dirs",
