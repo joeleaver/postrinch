@@ -86,6 +86,13 @@ impl Store {
         &self.root
     }
 
+    /// Give the memory freed since the last time back to the system. The
+    /// allocator keeps what loading lists and threads let go of, and the
+    /// process looks that much bigger until it is handed back.
+    pub fn release_free_memory(&self) {
+        self.db.release_free_memory();
+    }
+
     /// How many writes have gone through since the store opened: what was
     /// read when it had one value is out of date once it has another.
     pub fn writes(&self) -> u64 {

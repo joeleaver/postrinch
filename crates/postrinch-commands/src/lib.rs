@@ -48,4 +48,9 @@ impl Commands {
     pub fn new(store: Store) -> Self {
         Self { store, only: None }
     }
+
+    /// Give the memory the store's reads freed back to the system.
+    pub fn release_free_memory(&self) {
+        self.store.release_free_memory();
+    }
 }

@@ -15,6 +15,8 @@ use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
 use crate::changes;
 use crate::state::State;
 
+/// The least time between two hand-backs of freed memory (`serve`).
+const RELEASE_EVERY: Duration = Duration::from_secs(30);
 /// How many threads a search shows.
 const SEARCH_LIMIT: usize = 100;
 /// Loads slower than this are logged, to find what to make faster.
@@ -96,6 +98,7 @@ pub fn start(commands: Commands, state: State) -> Result<Loader, String> {
 }
 
 fn serve(commands: &Commands, state: State, rx: &Receiver<Request>) {
+    let mut released: Option<Instant> = None;
     while let Ok(first) = rx.recv() {
         // Everything asked for meanwhile; the newest of each kind wins.
         let mut latest: [Option<Request>; 5] = Default::default();
@@ -113,6 +116,13 @@ fn serve(commands: &Commands, state: State, rx: &Receiver<Request>) {
             if took > SLOW {
                 tracing::warn!("loading took {took:?}: {what}");
             }
+        }
+        // Lists and search let go of a lot; hand it back once they are in
+        // (the first lists at startup, then at most every RELEASE_EVERY), or
+        // the window keeps its size from the biggest load it ever made.
+        if released.is_none_or(|at| at.elapsed() >= RELEASE_EVERY) {
+            commands.release_free_memory();
+            released = Some(Instant::now());
         }
     }
 }
