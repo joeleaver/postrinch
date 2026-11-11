@@ -30,6 +30,9 @@ pub fn reading(state: State) -> NodeHandle {
                 {open_in_full(__scope, state, OpenInFull::Newest, "Only the newest", "Everything before it folds, unread or not.")}
                 {open_in_full(__scope, state, OpenInFull::All, "Every message", "Nothing folds.")}
             }
+            p { class: "settings-hint",
+                "Quoted text from earlier messages is folded too, under \u{201c}Show quoted text\u{201d}, whichever you choose."
+            }
             h2 { class: "settings-subheading", "Mark a conversation read" }
             div { class: "choices",
                 {mark_read(__scope, state, MarkRead::OnOpen, "When I open it", "The moment it shows in the reading pane.")}

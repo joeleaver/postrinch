@@ -216,8 +216,8 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
 }
 
 /// A message as Postrinch drew it: the hidden-pictures bar when pictures
-/// from the web were held back, the mail itself, and a way out to the
-/// browser.
+/// from the web were held back, the mail itself with the earlier messages it
+/// quotes folded under "Show quoted text", and a way out to the browser.
 #[component]
 fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
     // The mail's own body (its style, its contents) inside the white card,
@@ -225,16 +225,36 @@ fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
     // HTML mail is cleaned by the view at the card's width, and again when a
     // resize crosses one of its `@media` breakpoints (a narrow pane gets what
     // a phone shows); text mail is drawn as rendered. A click on a link opens
-    // it (crate::links).
+    // it (crate::links). The quote is hidden by a user style sheet, not
+    // removed (postrinch_render::quotes), so showing it only restyles.
+    let quote_shown = Signal::new(false);
+    let quoted = Signal::new(0usize);
     let view = if rendered.document.is_empty() {
         let (html, body_style) = (rendered.html.clone(), rendered.body_style.clone());
         rsx! { HtmlView { html: html, body_style: body_style, onlink: move |href: String| crate::links::open(&href) } }
     } else {
         let document = rendered.document.clone();
         let policy = postrinch_render::policy(rendered.remote);
-        rsx! { HtmlView { document: document, policy: policy, onlink: move |href: String| crate::links::open(&href) } }
+        rsx! {
+            HtmlView {
+                document: document,
+                policy: policy,
+                user_css_fn: move || postrinch_render::quote_sheet(quote_shown.get()),
+                onusermatches: move |counts: Vec<usize>| quoted.set(counts.iter().sum()),
+                onlink: move |href: String| crate::links::open(&href),
+            }
+        }
     };
     let host = rsx! { div { class: "mail-html", {view} } };
+    let quote_toggle = rsx! {
+        div {
+            class: "quote-toggle",
+            role: "button",
+            style: {move || if quoted.get() > 0 { "" } else { "display: none" }},
+            onclick: move || quote_shown.update(|shown| *shown = !*shown),
+            {move || if quote_shown.get() { "Hide quoted text" } else { "Show quoted text" }}
+        }
+    };
     let hidden = rendered.remote_hidden;
     let line = match hidden {
         1 => "A picture from the web is hidden, so the sender can\u{2019}t tell you opened this."
@@ -266,6 +286,7 @@ fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
         div { class: "mail",
             {bar}
             {host}
+            {quote_toggle}
             {foot}
         }
     }

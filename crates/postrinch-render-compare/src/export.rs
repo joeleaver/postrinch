@@ -83,6 +83,7 @@ pub fn export(
         let cleaned = Cleaned {
             html: rendered.html,
             body_style: rendered.body_style,
+            ..Cleaned::default()
         };
         let dir = out.join(format!("{:03}", written.len()));
         case::write(&dir, &meta, &original, &cleaned, &setup)?;

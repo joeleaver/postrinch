@@ -313,6 +313,17 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .message-folded:hover { background: var(--row-hover); }
 .folded-from { width: 160px; flex-shrink: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folded-snippet { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quote-toggle {
+    align-self: flex-start;
+    padding: 2px 10px;
+    border: 1px solid var(--field);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+}
+.quote-toggle:hover { background: var(--hover); }
 .answer-links { display: flex; gap: 14px; font-size: 13px; }
 .answer-link { color: var(--accent); cursor: pointer; }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; }

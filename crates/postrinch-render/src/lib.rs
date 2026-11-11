@@ -10,10 +10,12 @@
 //! asked for them, as loading them tells the sender the mail was opened
 //! (sanitize.rs). A message with no HTML part is its text, escaped.
 
+mod quotes;
 mod sanitize;
 
 use mail_parser::{MessageParser, PartKind};
 
+pub use quotes::{QUOTE_SELECTORS, quote_sheet, text_document};
 pub use sanitize::{policy, sanitize};
 
 #[cfg(target_os = "linux")]
@@ -66,7 +68,8 @@ pub struct Rendered {
     pub remote_hidden: usize,
     /// The HTML part as its sender wrote it, the pictures it carries
     /// inlined, for a view that cleans it at its own width (rinch's
-    /// `HtmlView` with [`policy`]); empty for a text message.
+    /// `HtmlView` with [`policy`]); a text message's text as a document,
+    /// its quoted lines marked ([`text_document`]).
     pub document: String,
     /// Whether pictures from the web were allowed: what [`policy`] needs.
     pub remote: bool,
@@ -108,7 +111,7 @@ pub fn render(raw: &[u8], options: Options) -> Option<Rendered> {
             body_style: String::new(),
             from_html: false,
             remote_hidden: 0,
-            document: String::new(),
+            document: text_document(&text),
             remote: options.remote,
         });
     };
