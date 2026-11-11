@@ -50,6 +50,7 @@ pub fn sanitize(html: &str, inline: &[(String, String)], options: Options) -> Re
         remote_hidden: hidden.load(Ordering::Relaxed),
         document: String::new(),
         remote: options.remote,
+        plain: false,
     }
 }
 

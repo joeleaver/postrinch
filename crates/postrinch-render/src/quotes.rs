@@ -29,15 +29,32 @@ pub const QUOTE_SELECTORS: &[&str] = &[
     "#divRplyFwdMsg ~ *",
 ];
 
-/// The user style sheet for a message: the quote hidden while folded,
-/// nothing once the person shows it.
-pub fn quote_sheet(shown: bool) -> String {
-    let declarations = if shown { "" } else { "display: none" };
-    QUOTE_SELECTORS
-        .iter()
-        .map(|selector| format!("{selector} {{ {declarations} }}\n"))
-        .collect()
+/// The user style sheet for a message: the quote hidden while folded;
+/// once the person shows it, nothing, or for a `plain` message (drawn in
+/// the window's colours, see [`crate::Rendered::plain`]) the quote's own
+/// colours replaced by the window's, so a dark window reads it too.
+pub fn quote_sheet(shown: bool, plain: bool) -> String {
+    let mut sheet = String::new();
+    for selector in QUOTE_SELECTORS {
+        let declarations = match (shown, plain) {
+            (false, _) => "display: none",
+            (true, false) => "",
+            (true, true) => PLAIN_QUOTE,
+        };
+        sheet.push_str(&format!("{selector} {{ {declarations} }}\n"));
+        // What is inside a quote too; not under a `~` selector, whose
+        // matching cost would grow with the sender's markup.
+        if plain && !selector.contains('~') {
+            let inside = if shown { PLAIN_QUOTE } else { "" };
+            sheet.push_str(&format!("{selector} * {{ {inside} }}\n"));
+        }
+    }
+    sheet
 }
+
+/// A shown quote in a plain message: the window's text colour, no
+/// background of its own.
+const PLAIN_QUOTE: &str = "color: inherit; background-color: transparent";
 
 /// A text message as a document for the mail view, as rinch draws text
 /// (`white-space: pre-wrap`), each run of quoted lines (`>`), with the
@@ -121,8 +138,27 @@ mod tests {
 
     #[test]
     fn the_sheet_hides_until_shown() {
-        assert!(quote_sheet(false).contains("div.gmail_quote { display: none }"));
-        assert!(!quote_sheet(true).contains("display: none"));
-        assert_eq!(quote_sheet(true).lines().count(), QUOTE_SELECTORS.len());
+        assert!(quote_sheet(false, false).contains("div.gmail_quote { display: none }"));
+        assert!(!quote_sheet(true, false).contains("display: none"));
+        assert_eq!(
+            quote_sheet(true, false).lines().count(),
+            QUOTE_SELECTORS.len()
+        );
+    }
+
+    #[test]
+    fn a_plain_message_shows_its_quote_in_the_windows_colours() {
+        let sheet = quote_sheet(true, true);
+        assert!(
+            sheet.contains("div.gmail_quote * { color: inherit; background-color: transparent }")
+        );
+        assert!(!sheet.contains("~ * *"));
+        // The same selectors either way, so showing only restyles.
+        let selectors = |s: &str| -> Vec<String> {
+            s.lines()
+                .map(|l| l.split(" {").next().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(selectors(&quote_sheet(false, true)), selectors(&sheet));
     }
 }

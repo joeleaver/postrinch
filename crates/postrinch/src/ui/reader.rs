@@ -10,7 +10,6 @@ use rinch::prelude::*;
 
 use crate::conversations::in_order;
 use crate::dates;
-use crate::pictures::open_in_browser;
 use crate::state::State;
 use crate::ui::thread_actions::toolbar;
 
@@ -216,8 +215,10 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
 }
 
 /// A message as Postrinch drew it: the hidden-pictures bar when pictures
-/// from the web were held back, the mail itself with the earlier messages it
-/// quotes folded under "Show quoted text", and a way out to the browser.
+/// from the web were held back, and the mail itself with the earlier
+/// messages it quotes folded under "Show quoted text". Mail with no colours
+/// of its own is drawn in the window's colours (dark ones too); other mail
+/// on the white it was designed on. View › Open in browser shows it there.
 #[component]
 fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
     // The mail's own body (its style, its contents) inside the white card,
@@ -228,6 +229,7 @@ fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
     // it (crate::links). The quote is hidden by a user style sheet, not
     // removed (postrinch_render::quotes), so showing it only restyles.
     let quote_shown = Signal::new(false);
+    let plain = rendered.plain;
     let quoted = Signal::new(0usize);
     let view = if rendered.document.is_empty() {
         let (html, body_style) = (rendered.html.clone(), rendered.body_style.clone());
@@ -239,13 +241,18 @@ fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
             HtmlView {
                 document: document,
                 policy: policy,
-                user_css_fn: move || postrinch_render::quote_sheet(quote_shown.get()),
+                user_css_fn: move || postrinch_render::quote_sheet(quote_shown.get(), plain),
                 onusermatches: move |counts: Vec<usize>| quoted.set(counts.iter().sum()),
                 onlink: move |href: String| crate::links::open(&href),
             }
         }
     };
-    let host = rsx! { div { class: "mail-html", {view} } };
+    let card = if rendered.plain {
+        "mail-html plain"
+    } else {
+        "mail-html"
+    };
+    let host = rsx! { div { class: card, {view} } };
     let quote_toggle = rsx! {
         div {
             class: "quote-toggle",
@@ -263,22 +270,13 @@ fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
             "{n} pictures from the web are hidden, so the sender can\u{2019}t tell you opened this."
         ),
     };
-    let (once, always) = (message.clone(), message.clone());
+    // Showing them is remembered for the sender, as the person asked.
     let bar = (hidden > 0).then(|| {
+        let sender = message.clone();
         rsx! {
             div { class: "pictures-bar", role: "status",
                 span { class: "pictures-line", {line.clone()} }
-                Button { variant: "default", size: "xs", onclick: move || state.show_pictures(&once), "Show pictures" }
-                Button { variant: "default", size: "xs", onclick: move || state.always_show_pictures(&always), "Always from this sender" }
-            }
-        }
-    });
-    let foot = rendered.from_html.then(|| {
-        let (message, rendered) = (message.clone(), rendered.clone());
-        rsx! {
-            div { class: "mail-foot",
-                span { "Shown as Postrinch draws it: scripts, forms and frames are left out." }
-                span { class: "mail-open", onclick: move || open_in_browser(&message, &rendered), "Open in browser" }
+                Button { variant: "default", size: "xs", onclick: move || state.show_pictures(&sender), "Show pictures" }
             }
         }
     });
@@ -287,7 +285,6 @@ fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
             {bar}
             {host}
             {quote_toggle}
-            {foot}
         }
     }
 }

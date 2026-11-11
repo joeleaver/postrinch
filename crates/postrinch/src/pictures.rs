@@ -1,6 +1,7 @@
 //! Showing a message as its sender drew it, and the pictures from the web
-//! in it: hidden until the person asks, for one message or always for one
-//! sender, because loading them tells the sender the mail was opened.
+//! in it: hidden until the person asks, because loading them tells the
+//! sender the mail was opened. Asking shows them from that sender from then
+//! on, remembered in the settings.
 
 use std::collections::{HashMap, HashSet};
 
@@ -13,7 +14,8 @@ use crate::state::State;
 /// Whose pictures from the web load.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Pictures {
-    /// Messages the person asked to see them for, by id.
+    /// Messages with no sender to remember whose pictures the person asked
+    /// to see, by id.
     pub messages: HashSet<String>,
     /// Senders whose pictures always load, by address key.
     pub senders: HashSet<String>,
@@ -53,17 +55,14 @@ pub fn render(
 }
 
 impl State {
-    /// Load this message's pictures from the web, this time.
+    /// Load pictures from the web from this message's sender, now and from
+    /// then on, and remember it; for a message with no sender, this one.
     pub fn show_pictures(self, message: &Message) {
-        let id = message.id.0.clone();
-        self.pictures_shown.update(|shown| {
-            shown.insert(id);
-        });
-    }
-
-    /// Always load pictures from this message's sender, and remember it.
-    pub fn always_show_pictures(self, message: &Message) {
         let Some(sender) = sender(message) else {
+            let id = message.id.0.clone();
+            self.pictures_shown.update(|shown| {
+                shown.insert(id);
+            });
             return;
         };
         self.pictures_from.update(|senders| {
@@ -76,6 +75,30 @@ impl State {
         }
         if let Err(e) = settings.save() {
             self.error.set(Some(format!("That was not saved: {e}")));
+        }
+    }
+}
+
+impl State {
+    /// View › Open in browser: the open message, or the open conversation's
+    /// newest message Postrinch has drawn, in the system's browser.
+    pub fn open_in_browser(self) {
+        let Some(thread) = self.thread.get() else {
+            return;
+        };
+        let rendered = self.rendered.get();
+        let chosen = match self.open_message_id() {
+            Some(id) => thread.messages.iter().find(|m| m.id == id),
+            None => thread
+                .messages
+                .iter()
+                .filter(|m| rendered.contains_key(&m.id.0))
+                .max_by_key(|m| m.received),
+        };
+        if let Some(message) = chosen
+            && let Some(drawn) = rendered.get(&message.id.0)
+        {
+            open_in_browser(message, drawn);
         }
     }
 }

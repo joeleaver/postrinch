@@ -10,11 +10,13 @@
 //! asked for them, as loading them tells the sender the mail was opened
 //! (sanitize.rs). A message with no HTML part is its text, escaped.
 
+mod plain;
 mod quotes;
 mod sanitize;
 
 use mail_parser::{MessageParser, PartKind};
 
+pub use plain::has_own_colours;
 pub use quotes::{QUOTE_SELECTORS, quote_sheet, text_document};
 pub use sanitize::{policy, sanitize};
 
@@ -73,6 +75,11 @@ pub struct Rendered {
     pub document: String,
     /// Whether pictures from the web were allowed: what [`policy`] needs.
     pub remote: bool,
+    /// Whether the message sets no colour or background of its own (text
+    /// mail, and HTML mail written as plain text): it can take the
+    /// window's colours, dark ones included, rather than the white card
+    /// mail is drawn on (see [`HOST_CSS`]).
+    pub plain: bool,
 }
 
 /// How to render.
@@ -88,7 +95,9 @@ pub struct Options {
 /// The CSS for the element a message's `html` goes in (class `mail-html`,
 /// holding a `mail-body` with the message's `body_style`): mail is drawn on
 /// white, as it is written for, in a dark window too. The window and the
-/// rendering comparison tool both use it, so they draw mail alike.
+/// rendering comparison tool both use it, so they draw mail alike. A
+/// [`Rendered::plain`] message is drawn in the window's own colours
+/// instead (the window's `.mail-html.plain`).
 pub const HOST_CSS: &str = r#"
 .mail-html {
     padding: 12px;
@@ -113,12 +122,14 @@ pub fn render(raw: &[u8], options: Options) -> Option<Rendered> {
             remote_hidden: 0,
             document: text_document(&text),
             remote: options.remote,
+            plain: true,
         });
     };
     let inline = inline_pictures(&parsed);
     let cleaned = sanitize(&html, &inline, options);
     Some(Rendered {
         from_html: true,
+        plain: !has_own_colours(&html),
         document: with_pictures(html, &inline),
         ..cleaned
     })

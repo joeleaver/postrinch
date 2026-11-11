@@ -274,6 +274,8 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
    in dark mode too. */
 .mail { display: flex; flex-direction: column; gap: 10px; }
 /* .mail-html, the card a message is drawn in: postrinch_render::HOST_CSS. */
+/* Mail with no colours of its own reads in the window's colours. */
+.mail-html.plain { background: var(--surface); color: var(--ink); }
 .pictures-bar {
     display: flex;
     align-items: center;
@@ -286,9 +288,6 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     color: var(--ink-2);
 }
 .pictures-line { flex: 1; min-width: 240px; }
-.mail-foot { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
-.mail-foot > span:first-child { flex: 1; }
-.mail-open { color: var(--accent); cursor: pointer; }
 /* The conversation's actions, at the top left, above the subject. */
 .thread-bar {
     display: flex;
