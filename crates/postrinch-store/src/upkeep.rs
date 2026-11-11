@@ -16,8 +16,10 @@ use crate::{Store, StoreResult};
 const INFO: &str = "StoreInfo";
 const COMPACTED_KEY: &str = "compacted";
 /// The file layout the last full compaction wrote. Raise it when an engine
-/// upgrade needs one more.
-const LAYOUT: u32 = 1;
+/// upgrade needs one more: 1, the files that say what opening needs
+/// (rhypedb 2d53f5f); 2, the files that list the objects they hold, so
+/// opening reads no object data (rhypedb ab8a3ed).
+const LAYOUT: u32 = 2;
 
 impl Store {
     /// Whether the store has not yet had the full compaction its files need.
