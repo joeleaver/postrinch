@@ -78,7 +78,6 @@ fn needs_you(state: State, queued: Queued) -> NodeHandle {
 }
 
 pub const CSS: &str = r#"
-.write { display: flex; flex-direction: column; padding: 4px 4px 10px; }
 .outgoing { display: flex; flex-direction: column; gap: 6px; padding: 0 4px 10px; }
 .outgoing-line { font-size: 12px; color: var(--muted); padding: 0 6px; }
 .needs-you {

@@ -19,6 +19,22 @@ html, body { margin: 0; height: 100%; background: transparent; }
 .logo-line { stroke: var(--logo-line); }
 .logo-outline { stroke: var(--logo-line); fill: var(--logo-line); }
 .title-status { display: flex; align-items: center; gap: 12px; padding-right: 8px; }
+/* Write, in the title bar beside search: the accent, so it is easy to find. */
+.title-write {
+    width: 30px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #ffffff;
+    cursor: pointer;
+}
+.title-write:hover { filter: brightness(1.1); }
+.title-write svg { width: 16px; height: 16px; }
 .title-search { width: 360px; margin-right: 8px; }
 .title-search .rinch-text-input__input {
     height: 26px;

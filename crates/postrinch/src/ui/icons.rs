@@ -16,6 +16,8 @@ pub enum Icon {
     Label,
     Star,
     Starred,
+    /// A pencil: write new mail.
+    Write,
 }
 
 #[component]
@@ -44,6 +46,12 @@ pub fn icon(which: Icon) -> NodeHandle {
         ),
         Icon::Star => one(__scope, STAR, "none"),
         Icon::Starred => one(__scope, STAR, "currentColor"),
+        Icon::Write => two(
+            __scope,
+            "M12 20h9",
+            "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
+            "none",
+        ),
     }
 }
 

@@ -123,12 +123,20 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     window
 }
 
-/// The right of the title bar: search, and anything that went wrong.
+/// The right of the title bar: Write (a pencil, after the title bar mockup),
+/// search, and anything that went wrong.
 #[component]
 fn title_status(state: State) -> NodeHandle {
     rsx! {
         div { class: "title-status",
             {about::update_pill(__scope, state)}
+            button {
+                class: "title-write",
+                title: "Write (C)",
+                aria-label: "Write",
+                onclick: move || state.write(postrinch_commands::Start::New),
+                {icons::icon(__scope, icons::Icon::Write)}
+            }
             div { class: "title-search",
                 TextInput {
                     size: "xs",
