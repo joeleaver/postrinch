@@ -171,7 +171,10 @@ fn more_label(page: Option<&ThreadPage>) -> String {
 /// or everything, last.
 #[component]
 fn tabs(state: State) -> NodeHandle {
-    let all = CATEGORIES.into_iter().map(Some).chain(std::iter::once(None));
+    let all = CATEGORIES
+        .into_iter()
+        .map(Some)
+        .chain(std::iter::once(None));
     let buttons: Vec<NodeHandle> = all
         .map(|category| {
             let name = match category {

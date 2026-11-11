@@ -120,13 +120,7 @@ mod tests {
                     .unwrap();
             }
         }
-        let store = (0..50)
-            .find_map(|_| {
-                Store::open(dir.path())
-                    .inspect_err(|_| std::thread::sleep(std::time::Duration::from_millis(100)))
-                    .ok()
-            })
-            .expect("the store reopens");
+        let store = Store::open(dir.path()).unwrap();
         // What an upsert did before labels were found despite rhypedb#27:
         // a second label with the same key, carrying a message.
         let account = store.account_id(&me).unwrap();

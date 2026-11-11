@@ -177,13 +177,7 @@ mod tests {
             store.put_message(&message("m2", Vec::new()), None).unwrap();
             store.person_id(&ada).unwrap()
         };
-        let store = (0..50)
-            .find_map(|_| {
-                Store::open(dir.path())
-                    .inspect_err(|_| std::thread::sleep(std::time::Duration::from_millis(100)))
-                    .ok()
-            })
-            .expect("the store reopens");
+        let store = Store::open(dir.path()).unwrap();
         // What a missed lookup made (rhypedb#27): a second Ada, named,
         // with a message of her own.
         let copy = FieldsBuilder::new()

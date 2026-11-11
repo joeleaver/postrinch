@@ -202,13 +202,7 @@ mod tests {
             store.put_saved_view(&view).unwrap();
             store.put_saved_view(&longer).unwrap();
         }
-        let store = (0..50)
-            .find_map(|_| {
-                Store::open(dir.path())
-                    .inspect_err(|_| std::thread::sleep(std::time::Duration::from_millis(100)))
-                    .ok()
-            })
-            .expect("the store reopens");
+        let store = Store::open(dir.path()).unwrap();
         let copy = FieldsBuilder::new()
             .str("name", "Bills")
             .str("query", "Message.filter(.starred == true)")

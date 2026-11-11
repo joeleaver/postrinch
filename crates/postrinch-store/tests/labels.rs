@@ -7,17 +7,6 @@ use common::{message, setup};
 use postrinch_model::{Label, LabelKind};
 use postrinch_store::Store;
 
-/// Reopen, waiting out a lock the engine may still hold (rhypedb#29).
-fn reopen(dir: &std::path::Path) -> Store {
-    for _ in 0..50 {
-        if let Ok(store) = Store::open(dir) {
-            return store;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    Store::open(dir).unwrap()
-}
-
 #[test]
 fn a_label_is_not_copied_after_a_reopen() {
     let (dir, store, me) = setup();
@@ -29,7 +18,7 @@ fn a_label_is_not_copied_after_a_reopen() {
     store.put_message(&m, None).unwrap();
     drop(store);
 
-    let store = reopen(dir.path());
+    let store = Store::open(dir.path()).unwrap();
     // Sync puts every label again, then stores messages carrying them.
     store
         .put_label(&me, &Label::new("Label_1", "Receipts", LabelKind::User))

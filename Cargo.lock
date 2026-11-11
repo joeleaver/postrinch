@@ -4737,7 +4737,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-authz"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#a8d5b9e516bb82d8360f8db127a81977b65617f9"
+source = "git+https://github.com/joeleaver/rhypedb#d794a4a173445f7be3529fdd3ccf5aa3af239b0a"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -4750,7 +4750,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-embed"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#a8d5b9e516bb82d8360f8db127a81977b65617f9"
+source = "git+https://github.com/joeleaver/rhypedb#d794a4a173445f7be3529fdd3ccf5aa3af239b0a"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -4758,7 +4758,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-engine"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#a8d5b9e516bb82d8360f8db127a81977b65617f9"
+source = "git+https://github.com/joeleaver/rhypedb#d794a4a173445f7be3529fdd3ccf5aa3af239b0a"
 dependencies = [
  "arc-swap",
  "base64 0.22.1",
@@ -4782,7 +4782,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-query"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#a8d5b9e516bb82d8360f8db127a81977b65617f9"
+source = "git+https://github.com/joeleaver/rhypedb#d794a4a173445f7be3529fdd3ccf5aa3af239b0a"
 dependencies = [
  "bytes",
  "rhypedb-authz",
@@ -4795,7 +4795,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-schema"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#a8d5b9e516bb82d8360f8db127a81977b65617f9"
+source = "git+https://github.com/joeleaver/rhypedb#d794a4a173445f7be3529fdd3ccf5aa3af239b0a"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -4803,7 +4803,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-storage"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#a8d5b9e516bb82d8360f8db127a81977b65617f9"
+source = "git+https://github.com/joeleaver/rhypedb#d794a4a173445f7be3529fdd3ccf5aa3af239b0a"
 dependencies = [
  "ahash",
  "bytes",
@@ -4815,6 +4815,7 @@ dependencies = [
  "parking_lot",
  "rand 0.9.5",
  "roaring",
+ "tempfile",
  "thiserror 2.0.21",
  "xxhash-rust",
 ]
@@ -4822,7 +4823,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-subscribe"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#a8d5b9e516bb82d8360f8db127a81977b65617f9"
+source = "git+https://github.com/joeleaver/rhypedb#d794a4a173445f7be3529fdd3ccf5aa3af239b0a"
 dependencies = [
  "parking_lot",
  "serde",
@@ -4832,7 +4833,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-vector"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#a8d5b9e516bb82d8360f8db127a81977b65617f9"
+source = "git+https://github.com/joeleaver/rhypedb#d794a4a173445f7be3529fdd3ccf5aa3af239b0a"
 dependencies = [
  "boxcar",
  "parking_lot",
@@ -4843,7 +4844,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-wire"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rhypedb#a8d5b9e516bb82d8360f8db127a81977b65617f9"
+source = "git+https://github.com/joeleaver/rhypedb#d794a4a173445f7be3529fdd3ccf5aa3af239b0a"
 dependencies = [
  "base64 0.22.1",
  "bytes",
