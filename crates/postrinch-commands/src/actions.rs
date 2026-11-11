@@ -94,7 +94,7 @@ impl Commands {
     }
 
     /// The changes `action` makes to a thread's messages (oldest first).
-    fn changes(
+    pub(crate) fn changes(
         &self,
         account: &EmailAddress,
         messages: &[Message],

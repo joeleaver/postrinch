@@ -36,7 +36,7 @@ use rhypedb_engine::database::Database;
 
 pub use error::{StoreError, StoreResult};
 pub use find::{Find, Found};
-pub use mailboxes::{LabelStats, ThreadEntry};
+pub use mailboxes::{LabelStats, MessageEntry, ThreadEntry};
 pub use outbox::OutboxEntry;
 pub use outgoing::{Outgoing, OutgoingKind};
 

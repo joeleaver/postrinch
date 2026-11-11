@@ -188,7 +188,11 @@ fn chrome_fonts(out: &Path) -> Result<PathBuf> {
         .output()?;
     let mut others: Vec<String> = String::from_utf8_lossy(&listed.stdout)
         .lines()
-        .filter_map(|line| Path::new(line.trim().trim_end_matches(':')).parent().map(Path::to_path_buf))
+        .filter_map(|line| {
+            Path::new(line.trim().trim_end_matches(':'))
+                .parent()
+                .map(Path::to_path_buf)
+        })
         .filter(|parent| *parent != fonts)
         .map(|parent| format!("<glob>{}/IBMPlexSans-*</glob>", parent.display()))
         .collect();
@@ -197,7 +201,10 @@ fn chrome_fonts(out: &Path) -> Result<PathBuf> {
     let reject = if others.is_empty() {
         String::new()
     } else {
-        format!("  <selectfont><rejectfont>{}</rejectfont></selectfont>\n", others.concat())
+        format!(
+            "  <selectfont><rejectfont>{}</rejectfont></selectfont>\n",
+            others.concat()
+        )
     };
     let fonts = fonts.display();
     let generic = |family: &str| {
@@ -209,7 +216,9 @@ fn chrome_fonts(out: &Path) -> Result<PathBuf> {
     let conf = format!(
         "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig>\n  \
          <include ignore_missing=\"yes\">/etc/fonts/fonts.conf</include>\n  <dir>{fonts}</dir>\n{reject}{}</fontconfig>\n",
-        ["sans-serif", "sans", "system-ui", "ui-sans-serif"].map(generic).concat()
+        ["sans-serif", "sans", "system-ui", "ui-sans-serif"]
+            .map(generic)
+            .concat()
     );
     let path = dir.join("fonts.conf");
     std::fs::write(&path, conf)?;

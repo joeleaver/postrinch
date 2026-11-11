@@ -5,12 +5,13 @@
 
 use std::collections::HashSet;
 
-use postrinch_commands::Thread;
+use postrinch_commands::{Grouping, Thread};
 use postrinch_model::{Message, ProviderThreadId};
-use rinch::{Effect, untracked};
+use rinch::{Effect, batch, untracked};
 use serde::{Deserialize, Serialize};
 
-use crate::state::State;
+use crate::state::{PAGE, State};
+use crate::ui::list::RowId;
 
 /// Whether the list shows conversations or messages.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +75,32 @@ pub fn in_order(order: Order, thread: &Thread) -> Vec<Message> {
 }
 
 impl State {
+    /// How the list groups mail, as set.
+    pub fn grouping(self) -> Grouping {
+        match self.show_mail.get() {
+            ShowMail::Conversations => Grouping::Conversations,
+            ShowMail::Messages => Grouping::Messages,
+        }
+    }
+
+    /// Open a row of the list.
+    pub fn open_row(self, row: RowId) {
+        self.select(Some(row));
+    }
+
+    /// Open a row, or none; a message opens on its own again.
+    pub fn select(self, row: Option<RowId>) {
+        batch(|| {
+            self.whole_conversation.set(false);
+            self.selected.set(row);
+        });
+    }
+
+    /// The open message, when mail is read one message at a time.
+    pub fn open_message_id(self) -> Option<postrinch_model::ProviderMessageId> {
+        self.selected.get().and_then(|(_, _, message)| message)
+    }
+
     /// Choose which messages open in full whenever another conversation
     /// opens.
     pub fn open_by_setting(self) {
@@ -117,7 +144,12 @@ impl State {
     }
 
     pub fn set_show_mail(self, choice: ShowMail) {
-        self.show_mail.set(choice);
+        batch(|| {
+            self.selected.set(None);
+            self.whole_conversation.set(false);
+            self.shown.set(PAGE);
+            self.show_mail.set(choice);
+        });
         self.save_settings(|s| s.show_mail = choice);
     }
 

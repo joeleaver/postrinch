@@ -192,3 +192,71 @@ fn actions_serialize_for_agents() {
     let archive: ThreadAction = serde_json::from_str(r#"{"action": "archive"}"#).unwrap();
     assert_eq!(archive, ThreadAction::Archive);
 }
+
+#[test]
+fn one_message_at_a_time_lists_each_inbox_message_newest_first() {
+    let (_dir, _store, commands, _me) = setup();
+    let inbox = Folder::Everywhere(SystemLabel::Inbox);
+    let page = commands.list_messages(&inbox, None, 0, 10).unwrap();
+    assert_eq!(page.total, 2, "m3 is only in Sent");
+    let ids: Vec<&str> = page
+        .threads
+        .iter()
+        .map(|r| r.message.as_ref().unwrap().0.as_str())
+        .collect();
+    assert_eq!(ids, ["m2", "m1"]);
+    assert_eq!(page.threads[0].summary.unread_count, 1);
+    assert_eq!(page.threads[1].summary.unread_count, 0);
+    assert_eq!(
+        commands
+            .list_messages(&inbox, None, 1, 10)
+            .unwrap()
+            .threads
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn archiving_one_message_leaves_the_rest_of_its_conversation() {
+    let (_dir, store, commands, me) = setup();
+    let inbox = Folder::Everywhere(SystemLabel::Inbox);
+    let m2 = [(me.clone(), ProviderMessageId("m2".into()))];
+    commands.act_messages(&m2, &ThreadAction::Archive).unwrap();
+    assert_eq!(sent(&store, &me), [vec!["m2"]]);
+    let page = commands.list_messages(&inbox, None, 0, 10).unwrap();
+    assert_eq!(page.threads.len(), 1);
+    assert_eq!(page.threads[0].message.as_ref().unwrap().0, "m1");
+    assert_eq!(commands.list_threads(&inbox, None, 0, 10).unwrap().total, 1);
+
+    // Unread and star go to the message named, not the latest.
+    let m1 = [(me.clone(), ProviderMessageId("m1".into()))];
+    commands
+        .act_messages(&m1, &ThreadAction::MarkUnread)
+        .unwrap();
+    commands.act_messages(&m1, &ThreadAction::Star).unwrap();
+    let flags: Vec<Flags> = state(&store, &me).into_iter().map(|(_, _, f)| f).collect();
+    assert_eq!(
+        flags,
+        [
+            Flags {
+                unread: true,
+                starred: true
+            },
+            UNREAD,
+            UNREAD
+        ]
+    );
+}
+
+#[test]
+fn search_by_message_lists_each_match() {
+    let (_dir, _store, commands, _me) = setup();
+    let by_thread = commands.search("thursday", 10).unwrap();
+    assert_eq!(by_thread.threads.len(), 1);
+    let by_message = commands
+        .search_grouped("thursday", 10, postrinch_commands::Grouping::Messages)
+        .unwrap();
+    assert_eq!(by_message.threads.len(), 3);
+    assert!(by_message.threads.iter().all(|r| r.message.is_some()));
+}

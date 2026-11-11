@@ -6,16 +6,17 @@ use std::cell::RefCell;
 use std::thread;
 use std::time::Instant;
 
-use postrinch_commands::{ThreadAction, ThreadRef};
+use postrinch_commands::ThreadAction;
 use rinch::{Effect, untracked};
 use serde::{Deserialize, Serialize};
 
 use crate::appearance::Settings;
 use crate::state::State;
+use crate::ui::list::RowId;
 
 thread_local! {
-    /// The opened thread, and when it is due to be marked read.
-    static DUE: RefCell<Option<(ThreadRef, Instant)>> = const { RefCell::new(None) };
+    /// The opened row, and when it is due to be marked read.
+    static DUE: RefCell<Option<(RowId, Instant)>> = const { RefCell::new(None) };
 }
 
 /// When an opened conversation is marked read.
@@ -76,17 +77,35 @@ impl State {
             let Some(thread) = self.thread.get() else {
                 return;
             };
-            let key = (thread.summary.account.clone(), thread.summary.id.clone());
             let ready = DUE.with(|d| {
                 let mut d = d.borrow_mut();
-                let ready = matches!(&*d, Some((k, at)) if *k == key && *at <= Instant::now());
+                let ready = match &*d {
+                    Some((row, at)) => {
+                        row.0 == thread.summary.account
+                            && row.1 == thread.summary.id
+                            && *at <= Instant::now()
+                    }
+                    None => false,
+                };
                 if ready {
-                    *d = None;
+                    d.take().map(|(row, _)| row)
+                } else {
+                    None
                 }
-                ready
             });
-            if ready && thread.summary.unread_count > 0 {
-                untracked(|| self.act(vec![key], ThreadAction::MarkRead));
+            let Some(row) = ready else {
+                return;
+            };
+            // One message at a time marks that message; else the conversation.
+            let unread = match &row.2 {
+                Some(id) => thread
+                    .messages
+                    .iter()
+                    .any(|m| &m.id == id && m.flags.unread),
+                None => thread.summary.unread_count > 0,
+            };
+            if unread {
+                untracked(|| self.act(vec![row], ThreadAction::MarkRead));
             }
         });
     }

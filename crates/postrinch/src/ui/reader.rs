@@ -20,9 +20,9 @@ pub fn reader(state: State) -> NodeHandle {
         article { class: "reader",
             // A keyed loop over the Option, not `if let`, so another thread
             // (or this one, changed) is drawn again (rinch#2105).
-            for (thread, order) in state.thread.get().map(|t| (t, state.order.get())) {
-                div { key: format!("{}|{order:?}", thread_key(thread)), class: "reader-frame",
-                    {open_thread(__scope, state, thread.clone(), order)}
+            for (thread, order, only) in state.thread.get().map(|t| (t, state.order.get(), alone(state))) {
+                div { key: format!("{}|{order:?}|{only:?}", thread_key(thread)), class: "reader-frame",
+                    {open_thread(__scope, state, thread.clone(), order, only.clone())}
                 }
             }
             if state.thread.get().is_none() {
@@ -30,6 +30,14 @@ pub fn reader(state: State) -> NodeHandle {
             }
         }
     }
+}
+
+/// The message shown alone, when mail is read one message at a time and
+/// the person has not asked for its whole conversation.
+fn alone(state: State) -> Option<ProviderMessageId> {
+    state
+        .open_message_id()
+        .filter(|_| !state.whole_conversation.get())
 }
 
 /// Changes whenever the thread, or anything shown of it, does.
@@ -46,20 +54,32 @@ fn thread_key(thread: &Thread) -> String {
 }
 
 #[component]
-fn open_thread(state: State, thread: Thread, order: crate::conversations::Order) -> NodeHandle {
+fn open_thread(
+    state: State,
+    thread: Thread,
+    order: crate::conversations::Order,
+    only: Option<ProviderMessageId>,
+) -> NodeHandle {
     let tz = TimeZone::system();
     let summary = &thread.summary;
     let count = match summary.message_count {
         1 => "1 message".to_owned(),
         n => format!("{n} messages"),
     };
-    let meta = format!("{count} · {}", summary.account);
+    let meta = match &only {
+        Some(_) => format!("One of {count} in this conversation · {}", summary.account),
+        None => format!("{count} · {}", summary.account),
+    };
+    let one_of_many = only.is_some() && summary.message_count > 1;
     let subject = if summary.subject.trim().is_empty() {
         "(no subject)".to_owned()
     } else {
         summary.subject.clone()
     };
-    let shown = in_order(order, &thread);
+    let mut shown = in_order(order, &thread);
+    if let Some(id) = &only {
+        shown.retain(|m| &m.id == id);
+    }
     let folded = {
         let shown = std::rc::Rc::new(shown.clone());
         move || shown.iter().any(|m| !state.is_open(m))
@@ -88,6 +108,12 @@ fn open_thread(state: State, thread: Thread, order: crate::conversations::Order)
             h2 { class: "thread-subject", {subject} }
             div { class: "thread-meta",
                 {meta}
+                span {
+                    class: "open-all",
+                    style: {if one_of_many { "" } else { "display: none" }},
+                    onclick: move || state.whole_conversation.set(true),
+                    "Show the conversation"
+                }
                 span {
                     class: "open-all",
                     style: {let folded = folded.clone(); move || if folded() { "" } else { "display: none" }},

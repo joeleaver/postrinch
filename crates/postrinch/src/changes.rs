@@ -15,13 +15,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use postrinch_commands::{Commands, Folder, ThreadAction, ThreadRef, ThreadRow};
+use postrinch_commands::{Commands, Folder, MessageRef, ThreadAction, ThreadRef, ThreadRow};
 use postrinch_model::{SystemLabel, ThreadSummary};
 use tokio::sync::Notify;
 
 use crate::reading::AfterMove;
 use crate::state::State;
-use crate::ui::list::{is_inbox, row_ids};
+use crate::ui::list::{RowId, id_of, is_inbox, row_ids};
 
 /// The newest action the changes thread has made, by its number.
 static MADE: AtomicU64 = AtomicU64::new(0);
@@ -30,12 +30,23 @@ thread_local! {
     static CHANGES: OnceCell<Sender<Change>> = const { OnceCell::new() };
 }
 
-/// An action, numbered in the order the person took them.
+/// An action, numbered in the order the person took them, on whole
+/// conversations or, one message at a time, on single messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Change {
     pub number: u64,
-    pub threads: Vec<ThreadRef>,
+    pub rows: Vec<RowId>,
     pub action: ThreadAction,
+}
+
+impl Change {
+    /// Whether the change reaches what `row` shows: its whole conversation
+    /// was changed, or the very message it is.
+    pub fn covers(&self, row: &RowId) -> bool {
+        self.rows
+            .iter()
+            .any(|(a, t, m)| *a == row.0 && *t == row.1 && (m.is_none() || *m == row.2))
+    }
 }
 
 /// The newest action made in the store; a load that begins after reading
@@ -67,7 +78,21 @@ fn serve(commands: &Commands, state: State, send: Option<&Notify>, rx: &Receiver
         let mut batch = vec![first];
         batch.extend(rx.try_iter());
         for change in batch {
-            if let Err(e) = commands.act(&change.threads, &change.action) {
+            let threads: Vec<ThreadRef> = change
+                .rows
+                .iter()
+                .filter(|(_, _, m)| m.is_none())
+                .map(|(a, t, _)| (a.clone(), t.clone()))
+                .collect();
+            let messages: Vec<MessageRef> = change
+                .rows
+                .iter()
+                .filter_map(|(a, _, m)| Some((a.clone(), m.clone()?)))
+                .collect();
+            let made = commands
+                .act(&threads, &change.action)
+                .and_then(|()| commands.act_messages(&messages, &change.action));
+            if let Err(e) = made {
                 tracing::error!("{:?} failed: {e}", change.action);
                 state
                     .error
@@ -83,11 +108,11 @@ fn serve(commands: &Commands, state: State, send: Option<&Notify>, rx: &Receiver
 }
 
 impl State {
-    /// Do `action` to `threads`: shown at once, made in the background.
-    /// When it takes the open thread out of the list, what opens next
-    /// follows the person's setting.
-    pub fn act(self, threads: Vec<ThreadRef>, action: ThreadAction) {
-        if threads.is_empty() {
+    /// Do `action` to `rows` (conversations, or single messages): shown at
+    /// once, made in the background. When it takes the open row out of the
+    /// list, what opens next follows the person's setting.
+    pub fn act(self, rows: Vec<RowId>, action: ThreadAction) {
+        if rows.is_empty() {
             return;
         }
         let sender = CHANGES.with(|c| c.get().cloned());
@@ -96,22 +121,22 @@ impl State {
             return;
         };
         let leaving = removes(&action, &self.listing());
+        let number = self.pending.with(|p| p.last().map_or(made(), |c| c.number)) + 1;
+        let change = Change {
+            number,
+            rows,
+            action,
+        };
         let next = match self.selected.get() {
-            Some(open) if leaving && threads.contains(&open) => match self.after_move.get() {
-                AfterMove::OpenNext => Some(next_after(self, &threads)),
+            Some(open) if leaving && change.covers(&open) => match self.after_move.get() {
+                AfterMove::OpenNext => Some(next_after(self, &change)),
                 AfterMove::BackToList => Some(None),
             },
             _ => None,
         };
-        let number = self.pending.with(|p| p.last().map_or(made(), |c| c.number)) + 1;
-        let change = Change {
-            number,
-            threads,
-            action,
-        };
         self.pending.update(|p| p.push(change.clone()));
         if let Some(next) = next {
-            self.selected.set(next);
+            self.select(next);
         }
         if sender.send(change).is_err() {
             self.error.set(Some("Changes cannot be made.".into()));
@@ -125,21 +150,19 @@ impl State {
         }
     }
 
-    /// Whether a pending action takes `thread` out of what is listed.
-    pub fn pending_removal(self, thread: &ThreadRef) -> bool {
+    /// Whether a pending action takes `row` out of what is listed.
+    pub fn pending_removal(self, row: &RowId) -> bool {
         let listing = self.listing();
         self.pending.with(|p| {
-            p.iter()
-                .filter(|c| c.threads.contains(thread))
-                .fold(false, |gone, c| {
-                    if removes(&c.action, &listing) {
-                        true
-                    } else if restores(&c.action) {
-                        false
-                    } else {
-                        gone
-                    }
-                })
+            p.iter().filter(|c| c.covers(row)).fold(false, |gone, c| {
+                if removes(&c.action, &listing) {
+                    true
+                } else if restores(&c.action) {
+                    false
+                } else {
+                    gone
+                }
+            })
         })
     }
 
@@ -153,11 +176,11 @@ impl State {
         }
     }
 
-    /// A row with the pending actions on its thread applied.
+    /// A row with the pending actions that reach it applied.
     pub fn patched(self, mut row: ThreadRow) -> ThreadRow {
-        let thread = (row.summary.account.clone(), row.summary.id.clone());
+        let id = id_of(&row);
         self.pending.with(|p| {
-            for change in p.iter().filter(|c| c.threads.contains(&thread)) {
+            for change in p.iter().filter(|c| c.covers(&id)) {
                 patch(&mut row.summary, &change.action);
             }
         });
@@ -212,15 +235,15 @@ fn restores(action: &ThreadAction) -> bool {
     )
 }
 
-/// The thread to open once `leaving` leaves the list: the one after the
-/// open one, else the one before it, else none.
-fn next_after(state: State, leaving: &[ThreadRef]) -> Option<ThreadRef> {
+/// The row to open once what `leaving` changes leaves the list: the one
+/// after the open one, else the one before it, else none.
+fn next_after(state: State, leaving: &Change) -> Option<RowId> {
     let ids = row_ids(state);
     let open = state.selected.get()?;
     let at = ids.iter().position(|id| *id == open)?;
     ids[at + 1..]
         .iter()
         .chain(ids[..at].iter().rev())
-        .find(|id| !leaving.contains(id))
+        .find(|id| !leaving.covers(id))
         .cloned()
 }

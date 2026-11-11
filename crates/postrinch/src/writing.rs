@@ -38,7 +38,7 @@ impl State {
     /// Write: new mail, or an answer to the open conversation's latest
     /// message.
     pub fn write(self, start: Start) {
-        self.answer(start, None);
+        self.answer(start, self.open_message_id().as_ref());
     }
 
     /// Write new mail, or answer `message` in the open conversation (its

@@ -45,7 +45,7 @@ fn step(state: State, by: isize) -> bool {
         Some(i) => (i as isize + by).clamp(0, rows.len() as isize - 1) as usize,
         None => 0,
     };
-    state.selected.set(Some(rows[next].clone()));
+    state.select(Some(rows[next].clone()));
     true
 }
 
@@ -56,7 +56,7 @@ fn back(state: State) -> bool {
     } else if state.search.get().is_some() {
         state.close_search();
     } else if state.selected.get().is_some() {
-        state.selected.set(None);
+        state.select(None);
     } else {
         return false;
     }

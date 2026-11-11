@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use postrinch_commands::{
     AccountInfo, Commands, Folder, LabelChoice, SearchResults, Sidebar, Thread, ThreadPage,
 };
-use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
+use postrinch_model::{EmailAddress, SystemLabel};
 use rinch::prelude::*;
 use rinch::{Effect, batch};
 
@@ -17,6 +17,7 @@ use crate::loader::{self, Request};
 use crate::reading::{AfterMove, MarkRead};
 use crate::sync::AccountSync;
 use crate::ui::LabelEdit;
+use crate::ui::list::RowId;
 
 /// The panes' widths until the person drags them.
 pub const SIDEBAR_WIDTH: f32 = 240.0;
@@ -68,7 +69,11 @@ pub struct State {
     pub show_all: Signal<bool>,
     /// Sidebar rows the person opened or closed (see `ui::labels`).
     pub toggled: Signal<HashSet<String>>,
-    pub selected: Signal<Option<(EmailAddress, ProviderThreadId)>>,
+    /// The open row: a conversation, or one message of it.
+    pub selected: Signal<Option<RowId>>,
+    /// Whether one message at a time shows the open message's whole
+    /// conversation, as the person asked.
+    pub whole_conversation: Signal<bool>,
     pub thread: Signal<Option<Thread>>,
     pub sync: Signal<Vec<AccountSync>>,
     /// Bumped whenever sync changed the store, so what is shown reloads.
@@ -163,6 +168,7 @@ impl State {
             show_all: Signal::new(false),
             toggled: Signal::new(HashSet::new()),
             selected: Signal::new(None),
+            whole_conversation: Signal::new(false),
             thread: Signal::new(None),
             sync: Signal::new(Vec::new()),
             revision: Signal::new(0),
@@ -232,6 +238,7 @@ impl State {
                 folder: self.folder.get(),
                 category: self.category.get(),
                 shown: self.shown.get(),
+                grouping: self.grouping(),
             });
         });
         let accounts = ask.clone();
@@ -251,13 +258,16 @@ impl State {
         let search = ask.clone();
         Effect::new(move || {
             self.revision.get();
-            search(Request::Search(self.search.get()));
+            search(Request::Search {
+                query: self.search.get(),
+                grouping: self.grouping(),
+            });
         });
         let labels = ask.clone();
         Effect::new(move || {
             self.revision.get();
             if self.labelling.get()
-                && let Some((account, _)) = self.selected.get()
+                && let Some((account, _, _)) = self.selected.get()
             {
                 labels(Request::Labels(account));
             }
@@ -265,7 +275,10 @@ impl State {
         Effect::new(move || {
             self.revision.get();
             ask(Request::Thread {
-                thread: self.selected.get(),
+                thread: self
+                    .selected
+                    .get()
+                    .map(|(account, thread, _)| (account, thread)),
                 pictures: Box::new(crate::pictures::Pictures {
                     messages: self.pictures_shown.get(),
                     senders: self.pictures_from.get(),

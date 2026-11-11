@@ -11,8 +11,9 @@ use postrinch_model::{
 use postrinch_store::Find;
 use serde::{Deserialize, Serialize};
 
+use crate::messages::message_row;
 use crate::query::{LabelName, Query, label_matches};
-use crate::{CommandError, CommandResult, Commands, ThreadRow};
+use crate::{CommandError, CommandResult, Commands, Grouping, ThreadRow};
 
 /// How much text an excerpt keeps before what matched, in chars: little,
 /// so the match itself shows in a narrow row.
@@ -59,6 +60,17 @@ impl Commands {
     /// `older_than:`, `category:`) plus `account:`. At most `limit`
     /// threads come back, newest first.
     pub fn search(&self, query: &str, limit: usize) -> CommandResult<SearchResults> {
+        self.search_grouped(query, limit, Grouping::Conversations)
+    }
+
+    /// [`Commands::search`], listing what matched as conversations or as
+    /// messages, each its own row.
+    pub fn search_grouped(
+        &self,
+        query: &str,
+        limit: usize,
+        grouping: Grouping,
+    ) -> CommandResult<SearchResults> {
         let text = query.trim();
         let mut results = SearchResults {
             query: text.to_owned(),
@@ -75,12 +87,16 @@ impl Commands {
         let find = self.to_find(&query, &accounts)?;
 
         let mut threads: Vec<(EmailAddress, ProviderThreadId, ProviderMessageId)> = Vec::new();
-        let mut seen: HashSet<(String, ProviderThreadId)> = HashSet::new();
+        let mut seen: HashSet<(String, String)> = HashSet::new();
         for found in self.store.find_messages(&find)? {
             let Some(thread) = self.store.found_thread(&found)? else {
                 continue;
             };
-            if seen.insert((found.account.key(), thread.clone())) {
+            let one = match grouping {
+                Grouping::Conversations => thread.0.clone(),
+                Grouping::Messages => found.id.0.clone(),
+            };
+            if seen.insert((found.account.key(), one)) {
                 threads.push((found.account, thread, found.id));
                 if threads.len() > limit {
                     break;
@@ -92,9 +108,15 @@ impl Commands {
         let terms = query.terms();
         let mut chips = HashMap::new();
         for (account, thread, matched) in threads {
-            if let Some(row) =
-                self.search_row(&account, &thread, Some(&matched), &terms, &mut chips)?
-            {
+            let row = match grouping {
+                Grouping::Conversations => {
+                    self.search_row(&account, &thread, Some(&matched), &terms, &mut chips)?
+                }
+                Grouping::Messages => {
+                    self.search_message_row(&account, &matched, &terms, &mut chips)?
+                }
+            };
+            if let Some(row) = row {
                 results.threads.push(row);
             }
         }
@@ -116,14 +138,17 @@ impl Commands {
     }
 
     /// Rows for messages the provider found that the local search did
-    /// not: their threads, leaving out those in `listed` and, unless the
-    /// query looks there, the trash and spam. Marked as found remotely.
+    /// not: their threads (or, by [`Grouping::Messages`], the messages
+    /// themselves), leaving out those in `listed` (thread or message ids,
+    /// as grouped) and, unless the query looks there, the trash and spam.
+    /// Marked as found remotely.
     pub fn remote_rows(
         &self,
         query: &str,
         account: &EmailAddress,
         found: &[ProviderMessageId],
-        listed: &HashSet<ProviderThreadId>,
+        listed: &HashSet<String>,
+        grouping: Grouping,
     ) -> CommandResult<Vec<ThreadRow>> {
         self.check(account)?;
         let now = Timestamp::from_millis(jiff::Timestamp::now().as_millisecond());
@@ -135,21 +160,29 @@ impl Commands {
         };
         let terms = query.terms();
         let mut chips = HashMap::new();
-        let mut seen: HashSet<ProviderThreadId> = listed.clone();
+        let mut seen: HashSet<String> = listed.clone();
         let mut rows = Vec::new();
         for id in found {
             let Some(message) = self.store.message(account, id)? else {
                 continue;
             };
-            if !seen.insert(message.thread.clone()) {
+            let one = match grouping {
+                Grouping::Conversations => message.thread.0.clone(),
+                Grouping::Messages => message.id.0.clone(),
+            };
+            if !seen.insert(one) {
                 continue;
             }
             if message.labels.iter().any(|l| set_aside.contains(l)) {
                 continue;
             }
-            if let Some(mut row) =
-                self.search_row(account, &message.thread, Some(id), &terms, &mut chips)?
-            {
+            let row = match grouping {
+                Grouping::Conversations => {
+                    self.search_row(account, &message.thread, Some(id), &terms, &mut chips)?
+                }
+                Grouping::Messages => self.search_message_row(account, id, &terms, &mut chips)?,
+            };
+            if let Some(mut row) = row {
                 row.remote = true;
                 rows.push(row);
             }
@@ -194,7 +227,30 @@ impl Commands {
             chips,
             excerpt,
             remote: false,
+            message: None,
         }))
+    }
+
+    /// A search result's row when messages are listed one at a time: the
+    /// message, with where it matched.
+    fn search_message_row(
+        &self,
+        account: &EmailAddress,
+        id: &ProviderMessageId,
+        terms: &[String],
+        chips: &mut HashMap<String, HashMap<String, crate::Chip>>,
+    ) -> CommandResult<Option<ThreadRow>> {
+        let Some(message) = self.store.message(account, id)? else {
+            return Ok(None);
+        };
+        let known = match chips.get(&account.key()) {
+            Some(known) => known,
+            None => {
+                let made = self.account_chips(account)?;
+                chips.entry(account.key()).or_insert(made)
+            }
+        };
+        Ok(message_row(&message, known, None, Some(terms)))
     }
 
     /// The accounts a query looks in: those this caller sees, narrowed by

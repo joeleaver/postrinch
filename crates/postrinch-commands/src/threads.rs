@@ -33,6 +33,11 @@ pub struct ThreadRow {
     /// Found by the provider's own search, in mail not downloaded here.
     #[serde(default)]
     pub remote: bool,
+    /// The one message the row stands for, when mail is listed one
+    /// message at a time ([`crate::Grouping::Messages`]); `None` for a
+    /// conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<ProviderMessageId>,
 }
 
 /// Gmail's inbox categories, in the order its tabs show them.
@@ -115,6 +120,7 @@ impl Commands {
                 chips,
                 excerpt: None,
                 remote: false,
+                message: None,
             });
         }
         Ok(ThreadPage {
@@ -125,7 +131,7 @@ impl Commands {
     }
 
     /// The provider's id for one of an account's system labels.
-    fn system_label_id(
+    pub(crate) fn system_label_id(
         &self,
         account: &EmailAddress,
         system: SystemLabel,

@@ -3,7 +3,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use postrinch_model::{EmailAddress, LabelKind, ProviderThreadId, SystemLabel, Timestamp};
+use postrinch_model::{
+    EmailAddress, LabelKind, ProviderMessageId, ProviderThreadId, SystemLabel, Timestamp,
+};
 
 use crate::keys::scoped;
 use crate::messages::{THREAD, TYPE};
@@ -32,7 +34,78 @@ pub struct ThreadEntry {
     pub latest: Timestamp,
 }
 
+/// A message in a mailbox listing, as one message at a time lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageEntry {
+    pub account: EmailAddress,
+    pub thread: ProviderThreadId,
+    pub message: ProviderMessageId,
+    pub received: Timestamp,
+}
+
 impl Store {
+    /// The messages that carry the label, newest first; spam and trash are
+    /// left out unless the label is one of them, as in
+    /// [`Store::label_threads`]. Empty for a label the account does not
+    /// have.
+    pub fn label_messages(
+        &self,
+        account: &EmailAddress,
+        label_provider_id: &str,
+    ) -> StoreResult<Vec<MessageEntry>> {
+        let Some(label) = self.find_label(account, label_provider_id)? else {
+            return Ok(Vec::new());
+        };
+        let kind: LabelKind = label.json("kind")?;
+        let set_aside = if is_set_aside(&kind) {
+            HashSet::new()
+        } else {
+            self.set_aside(account)?
+        };
+        let ids: Vec<u64> = self
+            .links(labels::TYPE, label.id(), "messages")?
+            .into_iter()
+            .filter(|m| !set_aside.contains(m))
+            .collect();
+        let prefix = scoped(account, "");
+        let mut threads: HashMap<u64, Option<ProviderThreadId>> = HashMap::new();
+        let mut entries = Vec::with_capacity(ids.len());
+        for fields in self.get_many(TYPE, &ids)? {
+            let Some(message) = fields.str("key")?.strip_prefix(&prefix).map(str::to_owned) else {
+                continue;
+            };
+            let Some(thread_id) = self.link(TYPE, fields.id(), "thread")? else {
+                continue;
+            };
+            let thread = match threads.get(&thread_id) {
+                Some(found) => found.clone(),
+                None => {
+                    let key = self.get(THREAD, thread_id)?.str("key")?;
+                    let found = key
+                        .strip_prefix(&prefix)
+                        .map(|t| ProviderThreadId(t.to_owned()));
+                    threads.insert(thread_id, found.clone());
+                    found
+                }
+            };
+            let Some(thread) = thread else {
+                continue;
+            };
+            entries.push(MessageEntry {
+                account: account.clone(),
+                thread,
+                message: ProviderMessageId(message),
+                received: Timestamp::from_millis(fields.datetime("received")?),
+            });
+        }
+        entries.sort_by(|a, b| {
+            b.received
+                .cmp(&a.received)
+                .then_with(|| a.message.cmp(&b.message))
+        });
+        Ok(entries)
+    }
+
     /// The threads in which some message carries the label, latest activity
     /// first. Empty for a label the account does not have.
     pub fn label_threads(

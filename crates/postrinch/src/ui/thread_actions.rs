@@ -10,12 +10,17 @@ use crate::changes::patch;
 use crate::state::State;
 use crate::ui::icons::{Icon, icon};
 
-/// The open conversation's summary, with pending actions on it applied.
+/// The open row's summary (its conversation, or the one message open), with
+/// the pending actions that reach it applied.
 pub fn open_summary(state: State) -> Option<ThreadSummary> {
-    let mut summary = state.thread.get()?.summary;
-    let key = (summary.account.clone(), summary.id.clone());
+    let thread = state.thread.get()?;
+    let row = state.selected.get()?;
+    let mut summary = match &row.2 {
+        Some(id) => ThreadSummary::from_messages(thread.messages.iter().filter(|m| &m.id == id))?,
+        None => thread.summary,
+    };
     state.pending.with(|p| {
-        for change in p.iter().filter(|c| c.threads.contains(&key)) {
+        for change in p.iter().filter(|c| c.covers(&row)) {
             patch(&mut summary, &change.action);
         }
     });

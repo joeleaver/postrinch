@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use postrinch_commands::{Commands, Remote, SearchResults, ThreadRow};
-use postrinch_model::{EmailAddress, ProviderThreadId};
+use postrinch_model::EmailAddress;
 use postrinch_sync::SyncError;
 use rinch::{Effect, untracked};
 
@@ -76,10 +76,15 @@ impl State {
             status: RemoteStatus::Asking { waiting },
             rows: Vec::new(),
         }));
-        let listed: Vec<(EmailAddress, ProviderThreadId)> = results
+        // What the local search listed, by thread or by message as grouped.
+        let grouping = self.grouping();
+        let listed: Vec<(EmailAddress, String)> = results
             .threads
             .iter()
-            .map(|r| (r.summary.account.clone(), r.summary.id.clone()))
+            .map(|r| {
+                let one = r.message.as_ref().map_or(&r.summary.id.0, |m| &m.0).clone();
+                (r.summary.account.clone(), one)
+            })
             .collect();
         let signal = self.remote;
         sync.runtime.clone().spawn(async move {
@@ -103,14 +108,14 @@ impl State {
                         continue;
                     }
                 };
-                let here: HashSet<ProviderThreadId> = listed
+                let here: HashSet<String> = listed
                     .iter()
                     .filter(|(a, _)| a == account)
                     .map(|(_, t)| t.clone())
                     .collect();
                 let (store, q, a) = (sync.store.clone(), query.clone(), account.clone());
                 let found = tokio::task::spawn_blocking(move || {
-                    Commands::new(store).remote_rows(&q, &a, &ids, &here)
+                    Commands::new(store).remote_rows(&q, &a, &ids, &here, grouping)
                 })
                 .await;
                 match found {

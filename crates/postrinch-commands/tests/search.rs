@@ -204,12 +204,20 @@ fn gmail_is_asked_only_for_words_in_mail_not_downloaded() {
     );
 
     // What Gmail found: listed threads and the trash left out, the rest marked.
-    let listed: HashSet<ProviderThreadId> = [ProviderThreadId("t1".into())].into();
+    let listed: HashSet<String> = ["t1".to_owned()].into();
     let ids: Vec<ProviderMessageId> = ["a2", "a3", "a4"]
         .iter()
         .map(|s| ProviderMessageId((*s).into()))
         .collect();
-    let rows = commands.remote_rows("thursday", &a, &ids, &listed).unwrap();
+    let rows = commands
+        .remote_rows(
+            "thursday",
+            &a,
+            &ids,
+            &listed,
+            postrinch_commands::Grouping::Conversations,
+        )
+        .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].summary.id.0, "t2");
     assert!(rows[0].remote);

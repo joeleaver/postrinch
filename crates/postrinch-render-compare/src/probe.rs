@@ -27,9 +27,9 @@ pub const FONTS: &[AppFont] = &[
 /// there after: a redraw, or a bisect, never asks the senders' servers again.
 /// A fetch that failed is kept as failed, so it is not retried either.
 pub fn fetch_web_pictures(cache: &std::path::Path) {
+    use rinch::image::ImageLoadResult::{self, Failed, Loaded};
     use std::hash::{Hash, Hasher};
     use std::io::Read;
-    use rinch::image::ImageLoadResult::{self, Failed, Loaded};
 
     struct Web {
         client: reqwest::blocking::Client,

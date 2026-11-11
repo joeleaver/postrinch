@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use postrinch_commands::{Commands, Folder};
+use postrinch_commands::{Commands, Folder, Grouping};
 use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
 
 use crate::changes;
@@ -28,11 +28,16 @@ pub enum Request {
         folder: Folder,
         category: Option<SystemLabel>,
         shown: usize,
+        /// Conversations, or one message at a time.
+        grouping: Grouping,
     },
     /// Settings' accounts.
     Accounts,
     /// A search's results, or none.
-    Search(Option<String>),
+    Search {
+        query: Option<String>,
+        grouping: Grouping,
+    },
     /// The open thread, or none.
     Thread {
         thread: Option<(EmailAddress, ProviderThreadId)>,
@@ -49,7 +54,7 @@ impl Request {
         match self {
             Request::Lists { .. } => 0,
             Request::Accounts => 1,
-            Request::Search(_) => 2,
+            Request::Search { .. } => 2,
             Request::Thread { .. } => 3,
             Request::Labels(_) => 4,
         }
@@ -119,6 +124,7 @@ fn answer(commands: &Commands, state: State, request: Request) {
             folder,
             category,
             shown,
+            grouping,
         } => match commands.sidebar() {
             Ok(sidebar) => {
                 // Every action made by now shows in what is read next.
@@ -128,7 +134,11 @@ fn answer(commands: &Commands, state: State, request: Request) {
                     Ok(outgoing) => state.outgoing.send(outgoing),
                     Err(e) => failed(e.to_string()),
                 }
-                match commands.list_threads(&folder, category, 0, shown) {
+                let page = match grouping {
+                    Grouping::Conversations => commands.list_threads(&folder, category, 0, shown),
+                    Grouping::Messages => commands.list_messages(&folder, category, 0, shown),
+                };
+                match page {
                     Ok(page) => {
                         state.page.send(Some(page));
                         state
@@ -144,11 +154,14 @@ fn answer(commands: &Commands, state: State, request: Request) {
             Ok(accounts) => state.accounts.send(accounts),
             Err(e) => failed(e.to_string()),
         },
-        Request::Search(None) => {
+        Request::Search { query: None, .. } => {
             state.search_error.send(None);
             state.results.send(None);
         }
-        Request::Search(Some(query)) => match commands.search(&query, SEARCH_LIMIT) {
+        Request::Search {
+            query: Some(query),
+            grouping,
+        } => match commands.search_grouped(&query, SEARCH_LIMIT, grouping) {
             Ok(results) => {
                 state.search_error.send(None);
                 state.results.send(Some(results));

@@ -1,7 +1,10 @@
-//! The thread list: one row per thread in the chosen folder.
+//! The thread list: one row per conversation in the chosen folder, or per
+//! message when the person reads mail one message at a time.
 
 use postrinch_commands::{CATEGORIES, Folder, Sidebar, ThreadPage, ThreadRow};
-use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel, ThreadSummary, Timestamp};
+use postrinch_model::{
+    EmailAddress, ProviderMessageId, ProviderThreadId, SystemLabel, ThreadSummary, Timestamp,
+};
 use rinch::prelude::*;
 
 use crate::dates;
@@ -46,7 +49,7 @@ pub fn thread_list(state: State) -> NodeHandle {
                 // only ever gains and loses rows, and never moves one:
                 // rinch puts moved rows in the wrong order (rinch#2129).
                 for (thread, latest) in row_keys(state) {
-                    div { key: format!("{}|{}|{}", thread.0.key(), thread.1.0, latest.as_millis()),
+                    div { key: format!("{}|{}|{}|{}", thread.0.key(), thread.1.0, thread.2.as_ref().map_or("", |m| m.0.as_str()), latest.as_millis()),
                         {row(__scope, state, thread.clone())}
                     }
                 }
@@ -68,8 +71,18 @@ pub fn thread_list(state: State) -> NodeHandle {
     }
 }
 
-/// Which thread a row shows.
-pub(crate) type RowId = (EmailAddress, ProviderThreadId);
+/// What a row shows: a thread, and the one message of it when mail is
+/// listed one message at a time.
+pub(crate) type RowId = (EmailAddress, ProviderThreadId, Option<ProviderMessageId>);
+
+/// A loaded row's id.
+pub(crate) fn id_of(row: &ThreadRow) -> RowId {
+    (
+        row.summary.account.clone(),
+        row.summary.id.clone(),
+        row.message.clone(),
+    )
+}
 
 /// The rows to show: the search's, with what Gmail found after them,
 /// while there is one, or the folder's.
@@ -97,11 +110,7 @@ fn with_rows<R>(state: State, f: impl FnOnce(&[ThreadRow]) -> R) -> R {
 
 /// The threads listed, less those a pending action takes out.
 pub(crate) fn row_ids(state: State) -> Vec<RowId> {
-    let ids: Vec<RowId> = with_rows(state, |rows| {
-        rows.iter()
-            .map(|r| (r.summary.account.clone(), r.summary.id.clone()))
-            .collect()
-    });
+    let ids: Vec<RowId> = with_rows(state, |rows| rows.iter().map(id_of).collect());
     ids.into_iter()
         .filter(|id| !state.pending_removal(id))
         .collect()
@@ -110,12 +119,7 @@ pub(crate) fn row_ids(state: State) -> Vec<RowId> {
 /// The threads listed with their latest activity, as the rows are keyed.
 fn row_keys(state: State) -> Vec<(RowId, Timestamp)> {
     let rows: Vec<(RowId, Timestamp)> = with_rows(state, |rows| {
-        rows.iter()
-            .map(|r| {
-                let id = (r.summary.account.clone(), r.summary.id.clone());
-                (id, r.summary.latest)
-            })
-            .collect()
+        rows.iter().map(|r| (id_of(r), r.summary.latest)).collect()
     });
     rows.into_iter()
         .filter(|(id, _)| !state.pending_removal(id))
@@ -124,11 +128,7 @@ fn row_keys(state: State) -> Vec<(RowId, Timestamp)> {
 
 /// The row's thread as now loaded, with pending actions on it applied.
 fn find_row(state: State, id: &RowId) -> Option<ThreadRow> {
-    let found = with_rows(state, |rows| {
-        rows.iter()
-            .find(|r| r.summary.account == id.0 && r.summary.id == id.1)
-            .cloned()
-    });
+    let found = with_rows(state, |rows| rows.iter().find(|r| id_of(r) == *id).cloned());
     found.map(|row| state.patched(row))
 }
 
@@ -137,10 +137,12 @@ fn search_line(state: State) -> String {
     match state.results.get() {
         Some(r) => {
             let n = r.threads.len();
-            let what = if n == 1 {
-                "conversation"
-            } else {
-                "conversations"
+            let messages = r.threads.first().is_some_and(|t| t.message.is_some());
+            let what = match (messages, n == 1) {
+                (false, true) => "conversation",
+                (false, false) => "conversations",
+                (true, true) => "message",
+                (true, false) => "messages",
             };
             let more = if r.more { "+" } else { "" };
             format!(
@@ -218,7 +220,7 @@ fn row(state: State, id: RowId) -> NodeHandle {
                 if state.selected.get().as_ref() == Some(&chosen) { class.push_str(" chosen"); }
                 class
             }},
-            onclick: move || state.selected.set(Some(id.clone())),
+            onclick: move || state.open_row(id.clone()),
             div { class: "row-top",
                 span {
                     class: "dot",
