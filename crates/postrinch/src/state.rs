@@ -48,7 +48,8 @@ pub enum SettingsSection {
 pub struct State {
     pub sidebar: Signal<Option<Sidebar>>,
     pub folder: Signal<Folder>,
-    /// Within an inbox, one of Gmail's categories, as its tabs show them.
+    /// Within an inbox, one of Gmail's categories, as its tabs show them
+    /// (Primary when an inbox opens), or `None` for all of it.
     pub category: Signal<Option<SystemLabel>>,
     /// How many of the folder's threads to show.
     pub shown: Signal<usize>,
@@ -156,7 +157,8 @@ impl State {
         Self {
             sidebar: Signal::new(None),
             folder: Signal::new(Folder::Everywhere(SystemLabel::Inbox)),
-            category: Signal::new(None),
+            // The window opens on all inboxes, at their Primary tab.
+            category: Signal::new(Some(SystemLabel::CategoryPersonal)),
             shown: Signal::new(PAGE),
             page: Signal::new(None),
             search_draft: Signal::new(String::new()),
@@ -354,7 +356,10 @@ impl State {
             self.search.set(None);
             self.shown.set(PAGE);
             self.selected.set(None);
-            self.category.set(None);
+            // An inbox opens at its Primary tab; other folders have none.
+            let inbox = crate::ui::list::is_inbox(&folder, self.sidebar.get().as_ref());
+            self.category
+                .set(inbox.then_some(SystemLabel::CategoryPersonal));
             self.folder.set(folder);
         });
     }

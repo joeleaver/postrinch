@@ -167,10 +167,11 @@ fn more_label(page: Option<&ThreadPage>) -> String {
     .unwrap_or_default()
 }
 
-/// Gmail's inbox tabs: everything, or one category.
+/// Gmail's inbox tabs: one category, Primary first (where an inbox opens),
+/// or everything, last.
 #[component]
 fn tabs(state: State) -> NodeHandle {
-    let all = std::iter::once(None).chain(CATEGORIES.into_iter().map(Some));
+    let all = CATEGORIES.into_iter().map(Some).chain(std::iter::once(None));
     let buttons: Vec<NodeHandle> = all
         .map(|category| {
             let name = match category {
