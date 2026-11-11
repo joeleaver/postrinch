@@ -66,8 +66,53 @@ impl Store {
             .str("name", view.name())
             .str("query", view.query());
         let update = FieldsBuilder::new().str("query", view.query());
-        self.upsert(TYPE, "name", view.name(), create.build(), update.build())?;
+        match self.find_views(view.name())?.first() {
+            Some(existing) => self.db_update(TYPE, *existing, update.build())?,
+            None => {
+                self.upsert(TYPE, "name", view.name(), create.build(), update.build())?;
+            }
+        }
         Ok(())
+    }
+
+    /// The views named `name`, oldest first: found by name and, failing
+    /// that, among all views, which are few (rhypedb#27: a name that is the
+    /// start of another can be missed after a reopen).
+    fn find_views(&self, name: &str) -> StoreResult<Vec<u64>> {
+        if let Some(found) = self.find(TYPE, "name", name)? {
+            return Ok(vec![found.id()]);
+        }
+        let mut ids: Vec<u64> = Vec::new();
+        for object in self.db.scan_type_projected(TYPE, &["name"])? {
+            let fields = Fields::new(TYPE, object);
+            if fields.str("name")? == name {
+                ids.push(fields.id());
+            }
+        }
+        ids.sort_unstable();
+        Ok(ids)
+    }
+
+    /// Keep the oldest of each name's views, removing copies made before
+    /// views were found despite rhypedb#27. Returns how many were removed.
+    pub fn merge_duplicate_views(&self) -> StoreResult<usize> {
+        let mut by_name: std::collections::HashMap<String, Vec<u64>> = Default::default();
+        for object in self.db.scan_type_projected(TYPE, &["name"])? {
+            let fields = Fields::new(TYPE, object);
+            by_name
+                .entry(fields.str("name")?)
+                .or_default()
+                .push(fields.id());
+        }
+        let mut removed = 0;
+        for (_, mut copies) in by_name.into_iter().filter(|(_, c)| c.len() > 1) {
+            copies.sort_unstable();
+            for copy in copies.into_iter().skip(1) {
+                self.db_delete(TYPE, copy)?;
+                removed += 1;
+            }
+        }
+        Ok(removed)
     }
 
     /// Every saved view, sorted by name.
@@ -84,8 +129,8 @@ impl Store {
 
     /// Remove a view by name. Removing one that is not there does nothing.
     pub fn remove_saved_view(&self, name: &str) -> StoreResult<()> {
-        if let Some(view) = self.find(TYPE, "name", name)? {
-            self.db_delete(TYPE, view.id())?;
+        for view in self.find_views(name)? {
+            self.db_delete(TYPE, view)?;
         }
         Ok(())
     }
@@ -143,5 +188,40 @@ mod tests {
         store.remove_saved_view("Unread").unwrap();
         store.remove_saved_view("Unread").unwrap();
         assert_eq!(store.saved_views().unwrap(), vec![starred]);
+    }
+
+    #[test]
+    fn copies_of_a_view_go_and_saving_finds_the_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let view = SavedView::new("Bills", "Message.filter(.starred == true)").unwrap();
+        // A name another starts with is what rhypedb#27 misses after a
+        // reopen.
+        let longer = SavedView::new("Bills paid", "Message.filter(.unread == false)").unwrap();
+        {
+            let store = Store::open(dir.path()).unwrap();
+            store.put_saved_view(&view).unwrap();
+            store.put_saved_view(&longer).unwrap();
+        }
+        let store = (0..50)
+            .find_map(|_| {
+                Store::open(dir.path())
+                    .inspect_err(|_| std::thread::sleep(std::time::Duration::from_millis(100)))
+                    .ok()
+            })
+            .expect("the store reopens");
+        let copy = FieldsBuilder::new()
+            .str("name", "Bills")
+            .str("query", "Message.filter(.starred == true)")
+            .build();
+        if store.db_create(TYPE, copy).is_err() {
+            // The engine caught it: rhypedb#27 is fixed.
+            return;
+        }
+        assert_eq!(store.merge_duplicate_views().unwrap(), 1);
+        assert_eq!(store.saved_views().unwrap(), vec![view, longer.clone()]);
+        // Saving finds the original even where the lookup by name misses.
+        let changed = SavedView::new("Bills", "Message.filter(.unread == true)").unwrap();
+        store.put_saved_view(&changed).unwrap();
+        assert_eq!(store.saved_views().unwrap(), vec![changed, longer]);
     }
 }
