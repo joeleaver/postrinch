@@ -4,7 +4,7 @@
 //! them (see `postrinch-commands`' writing.rs).
 
 use postrinch_commands::{Folder, Queued, Start};
-use postrinch_model::{Draft, Message};
+use postrinch_model::{Draft, Message, ProviderMessageId};
 
 use crate::actions::{commands, sync};
 use crate::state::State;
@@ -38,24 +38,33 @@ impl State {
     /// Write: new mail, or an answer to the open conversation's latest
     /// message.
     pub fn write(self, start: Start) {
+        self.answer(start, None);
+    }
+
+    /// Write new mail, or answer `message` in the open conversation (its
+    /// latest downloaded message when `None`).
+    pub fn answer(self, start: Start, message: Option<&ProviderMessageId>) {
         let Some(commands) = commands() else {
             return;
         };
         let (account, answering) = match (&start, self.thread.get()) {
             (Start::New, _) => (self.writing_account(), None),
             (_, Some(thread)) => {
-                let latest = thread
-                    .messages
-                    .iter()
-                    .rev()
-                    .find(|m| m.downloaded)
-                    .or(thread.messages.last());
-                let Some(latest) = latest else {
+                let chosen = match message {
+                    Some(id) => thread.messages.iter().find(|m| &m.id == id),
+                    None => thread
+                        .messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.downloaded)
+                        .or(thread.messages.last()),
+                };
+                let Some(chosen) = chosen else {
                     return;
                 };
                 (
                     Some(thread.summary.account.clone()),
-                    Some((thread.summary.id.clone(), latest.id.clone())),
+                    Some((thread.summary.id.clone(), chosen.id.clone())),
                 )
             }
             (_, None) => return,

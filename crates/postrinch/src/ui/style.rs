@@ -242,9 +242,14 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .reader {
     flex: 1;
     min-width: 0;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
     background: var(--panel);
 }
+/* The conversation's actions stay put; its messages scroll under them,
+   in a box of each conversation's own, so it opens at the top. */
+.reader-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.reader-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .reader-empty { padding: 40px; color: var(--muted); }
 .thread { padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; }
 .thread-subject { margin: 0; font-size: 20px; font-weight: 600; }
@@ -284,7 +289,32 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .mail-foot { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
 .mail-foot > span:first-child { flex: 1; }
 .mail-open { color: var(--accent); cursor: pointer; }
-.answer-bar { display: flex; gap: 8px; padding: 4px 0 12px; }
+/* The conversation's actions, at the top left, above the subject. */
+.thread-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 12px 28px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+}
+.thread-meta .open-all { margin-left: 10px; color: var(--accent); cursor: pointer; }
+.message-folded {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    cursor: pointer;
+}
+.message-folded:hover { background: var(--row-hover); }
+.folded-from { width: 160px; flex-shrink: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folded-snippet { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.answer-links { display: flex; gap: 14px; font-size: 13px; }
+.answer-link { color: var(--accent); cursor: pointer; }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
     padding: 4px 10px;

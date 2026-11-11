@@ -4,6 +4,7 @@ mod actions;
 mod agents;
 mod appearance;
 mod changes;
+mod conversations;
 mod dates;
 mod links;
 mod loader;

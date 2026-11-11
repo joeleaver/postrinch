@@ -36,6 +36,12 @@ pub struct Settings {
     pub mark_read: crate::reading::MarkRead,
     #[serde(default)]
     pub after_move: crate::reading::AfterMove,
+    #[serde(default)]
+    pub show_mail: crate::conversations::ShowMail,
+    #[serde(default)]
+    pub order: crate::conversations::Order,
+    #[serde(default)]
+    pub open_in_full: crate::conversations::OpenInFull,
     /// Senders whose pictures from the web always load (addresses, as
     /// `EmailAddress::key` gives them).
     #[serde(default)]

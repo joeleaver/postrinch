@@ -12,6 +12,7 @@ use rinch::{Effect, batch};
 use crate::actions::Notice;
 use crate::appearance::{Appearance, Settings, is_dark, system_prefers_dark};
 use crate::changes::Change;
+use crate::conversations::{OpenInFull, Opened, Order, ShowMail};
 use crate::loader::{self, Request};
 use crate::reading::{AfterMove, MarkRead};
 use crate::sync::AccountSync;
@@ -82,6 +83,13 @@ pub struct State {
     pub mark_read: Signal<MarkRead>,
     /// What opens after the open conversation is archived or trashed.
     pub after_move: Signal<AfterMove>,
+    /// Conversations or messages, which end at the top, and which messages
+    /// open in full, as saved.
+    pub show_mail: Signal<ShowMail>,
+    pub order: Signal<Order>,
+    pub open_in_full: Signal<OpenInFull>,
+    /// The open conversation's messages shown in full.
+    pub opened: Signal<Opened>,
     /// The labels the open conversation's account has, for the label menu.
     pub label_choices: Signal<Vec<LabelChoice>>,
     /// Whether the label menu is open.
@@ -163,6 +171,10 @@ impl State {
             appearance: Signal::new(settings.appearance),
             mark_read: Signal::new(settings.mark_read),
             after_move: Signal::new(settings.after_move),
+            show_mail: Signal::new(settings.show_mail),
+            order: Signal::new(settings.order),
+            open_in_full: Signal::new(settings.open_in_full),
+            opened: Signal::new(Opened::default()),
             label_choices: Signal::new(Vec::new()),
             labelling: Signal::new(false),
             pending: Signal::new(Vec::new()),

@@ -280,8 +280,6 @@ fn label_choice(state: State, choice: LabelChoice) -> NodeHandle {
 
 /// The toolbar's and the label menu's styles.
 pub const CSS: &str = r#"
-.thread-head { display: flex; align-items: flex-start; gap: 16px; }
-.thread-head .thread-subject { flex: 1; min-width: 0; }
 .thread-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .thread-actions-gap { width: 1px; height: 22px; margin: 0 4px; background: var(--line); }
 .icon-button {

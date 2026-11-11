@@ -65,6 +65,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     actions::init(commands.clone(), sync);
     update::start(state);
     state.mark_read_when_opened();
+    state.open_by_setting();
     crate::pictures::fetch_web_pictures();
     appearance::watch_system(state.system_dark);
     state.load(&commands);

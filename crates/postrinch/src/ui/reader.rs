@@ -1,10 +1,14 @@
-//! The reading pane: the open thread, every message in it.
+//! The reading pane: the open conversation, after the conversations
+//! mockups. Its actions sit in one bar at the top left, above the subject;
+//! its messages show newest or oldest first, as set, and those the setting
+//! does not open in full fold to one line.
 
 use jiff::tz::TimeZone;
 use postrinch_commands::{Rendered, Start, Thread};
-use postrinch_model::Message;
+use postrinch_model::{Message, ProviderMessageId};
 use rinch::prelude::*;
 
+use crate::conversations::in_order;
 use crate::dates;
 use crate::pictures::open_in_browser;
 use crate::state::State;
@@ -16,9 +20,9 @@ pub fn reader(state: State) -> NodeHandle {
         article { class: "reader",
             // A keyed loop over the Option, not `if let`, so another thread
             // (or this one, changed) is drawn again (rinch#2105).
-            for thread in state.thread.get() {
-                div { key: thread_key(thread),
-                    {open_thread(__scope, state, thread.clone())}
+            for (thread, order) in state.thread.get().map(|t| (t, state.order.get())) {
+                div { key: format!("{}|{order:?}", thread_key(thread)), class: "reader-frame",
+                    {open_thread(__scope, state, thread.clone(), order)}
                 }
             }
             if state.thread.get().is_none() {
@@ -42,7 +46,7 @@ fn thread_key(thread: &Thread) -> String {
 }
 
 #[component]
-fn open_thread(state: State, thread: Thread) -> NodeHandle {
+fn open_thread(state: State, thread: Thread, order: crate::conversations::Order) -> NodeHandle {
     let tz = TimeZone::system();
     let summary = &thread.summary;
     let count = match summary.message_count {
@@ -55,20 +59,68 @@ fn open_thread(state: State, thread: Thread) -> NodeHandle {
     } else {
         summary.subject.clone()
     };
-    let messages: Vec<NodeHandle> = thread
-        .messages
+    let shown = in_order(order, &thread);
+    let folded = {
+        let shown = std::rc::Rc::new(shown.clone());
+        move || shown.iter().any(|m| !state.is_open(m))
+    };
+    let messages: Vec<NodeHandle> = shown
         .iter()
-        .map(|m| message(__scope, state, m.clone(), dates::long(m.received, &tz)))
+        .map(|m| {
+            let when = dates::long(m.received, &tz);
+            let (full, line, open) = (m.clone(), m.clone(), m.clone());
+            rsx! {
+                div {
+                    if state.is_open(&open) {
+                        {message(__scope, state, full.clone(), when.clone())}
+                    } else {
+                        {folded_message(__scope, state, line.clone(), when.clone())}
+                    }
+                }
+            }
+        })
         .collect();
     rsx! {
-        div { class: "thread",
-            div { class: "thread-head",
-                h2 { class: "thread-subject", {subject} }
-                {toolbar(__scope, state)}
+        div { class: "reader-frame",
+            {action_bar(__scope, state, thread.clone())}
+            div { class: "reader-scroll",
+            div { class: "thread",
+            h2 { class: "thread-subject", {subject} }
+            div { class: "thread-meta",
+                {meta}
+                span {
+                    class: "open-all",
+                    style: {let folded = folded.clone(); move || if folded() { "" } else { "display: none" }},
+                    onclick: move || state.open_all(),
+                    "Open all"
+                }
             }
-            div { class: "thread-meta", {meta} }
             {messages}
-            {answer_bar(__scope, state, thread.clone())}
+            }
+            }
+        }
+    }
+}
+
+/// A message folded to one line: who, how it starts, when. A click opens
+/// it in full.
+#[component]
+fn folded_message(state: State, message: Message, when: String) -> NodeHandle {
+    let name = message
+        .headers
+        .from
+        .first()
+        .map_or_else(|| "(unknown sender)".to_owned(), |from| from.display_name());
+    let snippet = message.snippet.clone();
+    rsx! {
+        div {
+            class: "message-folded",
+            role: "button",
+            title: "Open this message",
+            onclick: move || state.open_message(&message),
+            span { class: "folded-from", {name} }
+            span { class: "folded-snippet", {snippet} }
+            span { class: "message-when", {when} }
         }
     }
 }
@@ -132,6 +184,7 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
             {to}
             {body}
             div { class: "attachments", {attachments} }
+            {answer_links(__scope, state, message.id.clone())}
         }
     }
 }
@@ -202,11 +255,11 @@ fn plain(text: String) -> NodeHandle {
     }
 }
 
-/// Answering the conversation, after the main mockup: Reply, Reply all and
-/// Forward; Edit draft when its latest message is one of the account's
-/// drafts.
+/// The conversation's actions, at the top left: Edit draft when its latest
+/// message is one of the account's drafts, Reply, Reply all and Forward,
+/// then what the toolbar does to the conversation.
 #[component]
-fn answer_bar(state: State, thread: Thread) -> NodeHandle {
+fn action_bar(state: State, thread: Thread) -> NodeHandle {
     let draft = thread.messages.last().cloned().filter(|m| {
         crate::actions::commands().is_some_and(|c| c.is_draft(&m.account, m).unwrap_or(false))
     });
@@ -216,11 +269,26 @@ fn answer_bar(state: State, thread: Thread) -> NodeHandle {
         }
     });
     rsx! {
-        div { class: "answer-bar",
+        div { class: "thread-bar",
             {edit}
             Button { variant: "default", size: "sm", onclick: move || state.write(Start::Reply), "Reply" }
             Button { variant: "default", size: "sm", onclick: move || state.write(Start::ReplyAll), "Reply all" }
             Button { variant: "default", size: "sm", onclick: move || state.write(Start::Forward), "Forward" }
+            span { class: "thread-actions-gap" }
+            {toolbar(__scope, state)}
+        }
+    }
+}
+
+/// Answering one message of the conversation, under it.
+#[component]
+fn answer_links(state: State, message: ProviderMessageId) -> NodeHandle {
+    let (reply, all, forward) = (message.clone(), message.clone(), message);
+    rsx! {
+        div { class: "answer-links",
+            span { class: "answer-link", onclick: move || state.answer(Start::Reply, Some(&reply)), "Reply" }
+            span { class: "answer-link", onclick: move || state.answer(Start::ReplyAll, Some(&all)), "Reply all" }
+            span { class: "answer-link", onclick: move || state.answer(Start::Forward, Some(&forward)), "Forward" }
         }
     }
 }
