@@ -70,7 +70,7 @@ impl Store {
         let prefix = scoped(account, "");
         let mut threads: HashMap<u64, Option<ProviderThreadId>> = HashMap::new();
         let mut entries = Vec::with_capacity(ids.len());
-        for fields in self.get_many(TYPE, &ids)? {
+        for fields in self.get_many_projected(TYPE, &ids, &["key", "received"])? {
             let Some(message) = fields.str("key")?.strip_prefix(&prefix).map(str::to_owned) else {
                 continue;
             };
@@ -136,7 +136,7 @@ impl Store {
 
         let prefix = scoped(account, "");
         let mut entries = Vec::with_capacity(threads.len());
-        for thread in self.get_many(THREAD, &threads)? {
+        for thread in self.get_many_projected(THREAD, &threads, &["key", "latest"])? {
             let key = thread.str("key")?;
             let Some(provider_id) = key.strip_prefix(&prefix) else {
                 continue;
@@ -217,7 +217,7 @@ impl Store {
         all.sort_unstable();
         all.dedup();
         let mut unread = HashSet::new();
-        for message in self.get_many(TYPE, &all)? {
+        for message in self.get_many_projected(TYPE, &all, &["unread"])? {
             if message.bool("unread")? {
                 unread.insert(message.id());
             }

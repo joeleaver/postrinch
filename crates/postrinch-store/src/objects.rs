@@ -45,6 +45,22 @@ impl Store {
             .collect())
     }
 
+    /// Like [`Store::get_many`], decoding only `fields`: for reading one or
+    /// two fields of many objects, where a full decode builds every field
+    /// only to drop it.
+    pub(crate) fn get_many_projected(
+        &self,
+        type_name: &'static str,
+        ids: &[u64],
+        fields: &[&str],
+    ) -> StoreResult<Vec<Fields>> {
+        let objects = self.db.get_many_projected(type_name, ids, fields)?;
+        Ok(objects
+            .into_iter()
+            .map(|o| Fields::new(type_name, o))
+            .collect())
+    }
+
     /// Create the object whose unique `field` is `key`, or update it if it
     /// exists. `create` is only used for a new object, so it can carry the
     /// to-one relations that are fixed at creation; `update` is applied to
@@ -79,12 +95,7 @@ impl Store {
 
     /// The ids `relation` on object `id` links to.
     pub(crate) fn links(&self, type_name: &str, id: u64, relation: &str) -> StoreResult<Vec<u64>> {
-        Ok(self
-            .db
-            .get_links(type_name, id, relation)?
-            .into_iter()
-            .map(|(target, _)| target)
-            .collect())
+        Ok(self.db.get_link_ids(type_name, id, relation)?)
     }
 
     /// The single object a to-one `relation` links to, if any.
