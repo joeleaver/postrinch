@@ -39,16 +39,17 @@ fn alone(state: State) -> Option<ProviderMessageId> {
         .filter(|_| !state.whole_conversation.get())
 }
 
-/// Changes whenever the thread, or anything shown of it, does.
+/// Changes whenever the thread, or anything shown of it, does. Not its
+/// unread count: the pane shows nothing of it, and marking the open thread
+/// read would draw every message again, its mail cleaned a second time.
 fn thread_key(thread: &Thread) -> String {
     let s = &thread.summary;
     let downloaded = thread.messages.iter().filter(|m| m.downloaded).count();
     format!(
-        "{}|{}|{}|{}|{downloaded}",
+        "{}|{}|{}|{downloaded}",
         s.account.key(),
         s.id.0,
-        s.message_count,
-        s.unread_count
+        s.message_count
     )
 }
 
