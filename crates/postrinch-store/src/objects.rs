@@ -98,6 +98,23 @@ impl Store {
         Ok(self.db.get_link_ids(type_name, id, relation)?)
     }
 
+    /// The messages that carry a label, each with its thread: one read of
+    /// the label's links, whose entries carry the message's thread (rhypedb
+    /// keeps a linked object's to-one relations in each of its links), not
+    /// one read per message. A message whose link lacks it is looked up.
+    pub(crate) fn label_message_threads(&self, label: u64) -> StoreResult<Vec<(u64, Option<u64>)>> {
+        let links = self.db.get_links(crate::labels::TYPE, label, "messages")?;
+        let mut found = Vec::with_capacity(links.len());
+        for (message, fields) in links {
+            let thread = match fields.get("thread") {
+                Some(Value::U64(thread)) => Some(*thread),
+                _ => self.link(crate::messages::TYPE, message, "thread")?,
+            };
+            found.push((message, thread));
+        }
+        Ok(found)
+    }
+
     /// The single object a to-one `relation` links to, if any.
     pub(crate) fn link(
         &self,

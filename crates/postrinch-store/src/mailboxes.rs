@@ -62,11 +62,12 @@ impl Store {
         } else {
             self.set_aside(account)?
         };
-        let ids: Vec<u64> = self
-            .links(labels::TYPE, label.id(), "messages")?
+        let thread_of: HashMap<u64, Option<u64>> = self
+            .label_message_threads(label.id())?
             .into_iter()
-            .filter(|m| !set_aside.contains(m))
+            .filter(|(m, _)| !set_aside.contains(m))
             .collect();
+        let ids: Vec<u64> = thread_of.keys().copied().collect();
         let prefix = scoped(account, "");
         let mut threads: HashMap<u64, Option<ProviderThreadId>> = HashMap::new();
         let mut entries = Vec::with_capacity(ids.len());
@@ -74,7 +75,7 @@ impl Store {
             let Some(message) = fields.str("key")?.strip_prefix(&prefix).map(str::to_owned) else {
                 continue;
             };
-            let Some(thread_id) = self.link(TYPE, fields.id(), "thread")? else {
+            let Some(thread_id) = thread_of.get(&fields.id()).copied().flatten() else {
                 continue;
             };
             let thread = match threads.get(&thread_id) {
@@ -113,8 +114,33 @@ impl Store {
         account: &EmailAddress,
         label_provider_id: &str,
     ) -> StoreResult<Vec<ThreadEntry>> {
+        self.label_threads_within(account, label_provider_id, None)
+    }
+
+    /// [`Store::label_threads`], keeping only threads in which some message
+    /// also carries `within` (an inbox tab's category): the two labels'
+    /// links are matched before any thread is read. Empty when `within` is
+    /// a label the account does not have.
+    pub fn label_threads_within(
+        &self,
+        account: &EmailAddress,
+        label_provider_id: &str,
+        within: Option<&str>,
+    ) -> StoreResult<Vec<ThreadEntry>> {
         let Some(label) = self.find_label(account, label_provider_id)? else {
             return Ok(Vec::new());
+        };
+        let within: Option<HashSet<u64>> = match within {
+            None => None,
+            Some(id) => match self.find_label(account, id)? {
+                Some(other) => Some(
+                    self.label_message_threads(other.id())?
+                        .into_iter()
+                        .filter_map(|(_, thread)| thread)
+                        .collect(),
+                ),
+                None => return Ok(Vec::new()),
+            },
         };
         let kind: LabelKind = label.json("kind")?;
         let set_aside = if is_set_aside(&kind) {
@@ -123,11 +149,13 @@ impl Store {
             self.set_aside(account)?
         };
         let mut threads: Vec<u64> = Vec::new();
-        for message in self.links(labels::TYPE, label.id(), "messages")? {
+        for (message, thread) in self.label_message_threads(label.id())? {
             if set_aside.contains(&message) {
                 continue;
             }
-            if let Some(thread) = self.link(TYPE, message, "thread")? {
+            if let Some(thread) = thread
+                && within.as_ref().is_none_or(|w| w.contains(&thread))
+            {
                 threads.push(thread);
             }
         }

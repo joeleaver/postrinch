@@ -1,6 +1,6 @@
 //! Listing a folder's threads and reading one.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use postrinch_model::{
     EmailAddress, LabelKind, Message, ProviderMessageId, ProviderThreadId, SystemLabel,
@@ -70,20 +70,15 @@ impl Commands {
         let mut entries = Vec::new();
         let mut account_chips: HashMap<String, HashMap<String, Chip>> = HashMap::new();
         for (account, label) in self.sources(folder)? {
-            let mut found = self.store.label_threads(&account, &label)?;
-            if let Some(category) = category {
-                let in_category: HashSet<ProviderThreadId> =
-                    match self.system_label_id(&account, category)? {
-                        Some(id) => self
-                            .store
-                            .label_threads(&account, &id)?
-                            .into_iter()
-                            .map(|e| e.thread)
-                            .collect(),
-                        None => HashSet::new(),
-                    };
-                found.retain(|e| in_category.contains(&e.thread));
-            }
+            let found = match category {
+                None => self.store.label_threads(&account, &label)?,
+                Some(category) => match self.system_label_id(&account, category)? {
+                    Some(id) => self
+                        .store
+                        .label_threads_within(&account, &label, Some(&id))?,
+                    None => Vec::new(),
+                },
+            };
             entries.extend(found);
             if let std::collections::hash_map::Entry::Vacant(slot) =
                 account_chips.entry(account.key())

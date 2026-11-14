@@ -15,6 +15,7 @@ use crate::changes::Change;
 use crate::conversations::{OpenInFull, Opened, Order, ShowMail};
 use crate::loader::{self, Request};
 use crate::reading::{AfterMove, MarkRead};
+use crate::recent;
 use crate::sync::AccountSync;
 use crate::ui::LabelEdit;
 use crate::ui::list::RowId;
@@ -236,11 +237,23 @@ impl State {
         let lists = ask.clone();
         Effect::new(move || {
             self.revision.get();
+            let (folder, category, grouping) =
+                (self.folder.get(), self.category.get(), self.grouping());
+            // Another list than before: show it as last loaded (or nothing,
+            // rather than the list left) until the loader answers.
+            let key = recent::ListKey {
+                folder: folder.clone(),
+                category,
+                grouping,
+            };
+            if let Some(page) = recent::want(key) {
+                self.page.set(page);
+            }
             lists(Request::Lists {
-                folder: self.folder.get(),
-                category: self.category.get(),
+                folder,
+                category,
                 shown: self.shown.get(),
-                grouping: self.grouping(),
+                grouping,
             });
         });
         let accounts = ask.clone();

@@ -25,7 +25,7 @@ const SLOW: Duration = Duration::from_millis(250);
 /// Something the window wants loaded.
 #[derive(Debug, Clone)]
 pub enum Request {
-    /// The sidebar and a page of the folder's threads.
+    /// A page of the folder's threads, then the sidebar.
     Lists {
         folder: Folder,
         category: Option<SystemLabel>,
@@ -135,31 +135,41 @@ fn answer(commands: &Commands, state: State, request: Request) {
             category,
             shown,
             grouping,
-        } => match commands.sidebar() {
-            Ok(sidebar) => {
-                // Every action made by now shows in what is read next.
-                let as_of = changes::made();
-                state.sidebar.send(Some(sidebar));
-                match commands.outgoing() {
-                    Ok(outgoing) => state.outgoing.send(outgoing),
-                    Err(e) => failed(e.to_string()),
-                }
-                let page = match grouping {
-                    Grouping::Conversations => commands.list_threads(&folder, category, 0, shown),
-                    Grouping::Messages => commands.list_messages(&folder, category, 0, shown),
-                };
-                match page {
-                    Ok(page) => {
+        } => {
+            // Every action made by now shows in what is read next.
+            let as_of = changes::made();
+            // The list first, what the person waits on; the sidebar's
+            // counts after.
+            let page = match grouping {
+                Grouping::Conversations => commands.list_threads(&folder, category, 0, shown),
+                Grouping::Messages => commands.list_messages(&folder, category, 0, shown),
+            };
+            match page {
+                Ok(page) => {
+                    let key = crate::recent::ListKey {
+                        folder,
+                        category,
+                        grouping,
+                    };
+                    // Not a list the person has since left.
+                    if crate::recent::loaded(key, &page) {
                         state.page.send(Some(page));
                         state
                             .pending
                             .update_send(move |p| p.retain(|c| c.number > as_of));
                     }
-                    Err(e) => failed(e.to_string()),
                 }
+                Err(e) => failed(e.to_string()),
             }
-            Err(e) => failed(e.to_string()),
-        },
+            match commands.sidebar() {
+                Ok(sidebar) => state.sidebar.send(Some(sidebar)),
+                Err(e) => failed(e.to_string()),
+            }
+            match commands.outgoing() {
+                Ok(outgoing) => state.outgoing.send(outgoing),
+                Err(e) => failed(e.to_string()),
+            }
+        }
         Request::Accounts => match commands.accounts() {
             Ok(accounts) => state.accounts.send(accounts),
             Err(e) => failed(e.to_string()),
