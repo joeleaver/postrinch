@@ -101,13 +101,17 @@ impl Store {
     /// The messages that carry a label, each with its thread: one read of
     /// the label's links, whose entries carry the message's thread (rhypedb
     /// keeps a linked object's to-one relations in each of its links), not
-    /// one read per message. A message whose link lacks it is looked up.
+    /// one read per message. Those copies are trusted only once rhypedb says
+    /// they are sound (a store older rhypedbs wrote may hold stale ones until
+    /// `compact_once` repairs it); until then, and for a link that lacks
+    /// one, the thread is looked up.
     pub(crate) fn label_message_threads(&self, label: u64) -> StoreResult<Vec<(u64, Option<u64>)>> {
+        let trusted = self.db.cover_peers_sound();
         let links = self.db.get_links(crate::labels::TYPE, label, "messages")?;
         let mut found = Vec::with_capacity(links.len());
         for (message, fields) in links {
             let thread = match fields.get("thread") {
-                Some(Value::U64(thread)) => Some(*thread),
+                Some(Value::U64(thread)) if trusted => Some(*thread),
                 _ => self.link(crate::messages::TYPE, message, "thread")?,
             };
             found.push((message, thread));
@@ -125,8 +129,9 @@ impl Store {
         Ok(self.links(type_name, id, relation)?.into_iter().next())
     }
 
-    /// Link and unlink so that `relation` on object `id` links to exactly
-    /// `wanted`.
+    /// Unlink and link so that `relation` on object `id` links to exactly
+    /// `wanted`. Unlinking first: linking a to-one relation replaces what it
+    /// linked to, so the old target would already be gone.
     pub(crate) fn set_links(
         &self,
         type_name: &str,
@@ -136,11 +141,11 @@ impl Store {
     ) -> StoreResult<()> {
         let have: BTreeSet<u64> = self.links(type_name, id, relation)?.into_iter().collect();
         let want: BTreeSet<u64> = wanted.iter().copied().collect();
-        for target in want.difference(&have) {
-            self.db_link(type_name, id, relation, *target)?;
-        }
         for target in have.difference(&want) {
             self.db_unlink(type_name, id, relation, *target)?;
+        }
+        for target in want.difference(&have) {
+            self.db_link(type_name, id, relation, *target)?;
         }
         Ok(())
     }

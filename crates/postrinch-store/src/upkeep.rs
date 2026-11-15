@@ -21,20 +21,24 @@ const COMPACTED_KEY: &str = "compacted";
 /// (rhypedb 2d53f5f); 2, the files that list the objects they hold, so
 /// opening reads no object data (rhypedb ab8a3ed); 3, links without the
 /// whole-object copies older engines wrote into them, which lists read
-/// (rhypedb 122fd73, rewritten by `rewrite_covers` before the compaction).
-const LAYOUT: u32 = 3;
+/// (rhypedb 122fd73, rewritten by `rewrite_covers` before the compaction);
+/// 4, links whose copies of a message's thread and other to-one peers are
+/// right, which older engines could leave stale (rhypedb v0.2.0, repaired by
+/// the same rewrite).
+const LAYOUT: u32 = 4;
 /// How many times the link rewrite runs when it loses a write to a
 /// concurrent writer; each run carries on where the last stopped.
 const REWRITE_ATTEMPTS: usize = 5;
 
 impl Store {
-    /// Whether the store has not yet had the full compaction its files need.
+    /// Whether the store has not yet had the full compaction its files need,
+    /// or its links' copies of their peers are not yet trusted.
     pub fn needs_compaction(&self) -> StoreResult<bool> {
         let key = Value::String(COMPACTED_KEY.into());
         Ok(match self.db.find_by_unique(INFO, "key", &key)? {
             Some(info) => Fields::new(INFO, info).u32("version")? < LAYOUT,
             None => true,
-        })
+        } || !self.db.cover_peers_sound())
     }
 
     /// Compact the whole database once, if it has not been since the
