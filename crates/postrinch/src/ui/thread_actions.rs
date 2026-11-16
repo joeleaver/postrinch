@@ -186,7 +186,8 @@ fn label_menu(state: State) -> NodeHandle {
                 state.labelling.set(false);
                 filter.set(String::new());
             },
-            position: "bottom-end",
+            // The button is at the list's left: the menu opens rightward.
+            position: "bottom-start",
             width: "280px",
             PopoverTarget {
                 button {
@@ -287,6 +288,11 @@ fn label_choice(state: State, choice: LabelChoice) -> NodeHandle {
 pub const CSS: &str = r#"
 .thread-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .thread-actions-gap { width: 1px; height: 22px; margin: 0 4px; background: var(--line); }
+/* The label menu's popover wraps its button in inline blocks, which sit on
+   the text's baseline, a little off the other buttons: lay them out as
+   boxes so the button centres like the rest. */
+.thread-actions .rinch-popover,
+.thread-actions .rinch-popover__target { display: flex; }
 .icon-button {
     width: 34px; height: 34px;
     display: flex; align-items: center; justify-content: center;
