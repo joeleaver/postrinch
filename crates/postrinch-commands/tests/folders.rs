@@ -229,3 +229,36 @@ fn accounts_say_how_much_mail_is_here() {
     // The fixtures are headers only.
     assert_eq!(accounts[0].downloaded, 0);
 }
+
+#[test]
+fn lists_come_newest_oldest_or_unread_first() {
+    use postrinch_commands::ListOrder;
+    let (_dir, commands, _a, _b) = setup();
+    let inbox = Folder::Everywhere(SystemLabel::Inbox);
+    let threads = |order| -> Vec<String> {
+        let page = commands
+            .list_threads_in(&inbox, None, order, 0, 10)
+            .unwrap();
+        page.threads
+            .iter()
+            .map(|t| t.summary.id.0.clone())
+            .collect()
+    };
+    assert_eq!(threads(ListOrder::NewestFirst), ["ta2", "tb1", "ta1"]);
+    assert_eq!(threads(ListOrder::OldestFirst), ["ta1", "tb1", "ta2"]);
+    // tb1 and ta1 have unread mail, newest of them first.
+    assert_eq!(threads(ListOrder::UnreadFirst), ["tb1", "ta1", "ta2"]);
+
+    let messages = |order| -> Vec<String> {
+        let page = commands
+            .list_messages_in(&inbox, None, order, 0, 10)
+            .unwrap();
+        page.threads
+            .iter()
+            .map(|t| t.message.as_ref().unwrap().0.clone())
+            .collect()
+    };
+    assert_eq!(messages(ListOrder::NewestFirst), ["a2", "b1", "a1"]);
+    assert_eq!(messages(ListOrder::OldestFirst), ["a1", "b1", "a2"]);
+    assert_eq!(messages(ListOrder::UnreadFirst), ["b1", "a1", "a2"]);
+}

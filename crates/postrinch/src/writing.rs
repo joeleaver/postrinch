@@ -3,8 +3,8 @@
 //! do. The command layer builds and queues drafts; sync's sender delivers
 //! them (see `postrinch-commands`' writing.rs).
 
-use postrinch_commands::{Folder, Queued, Start};
-use postrinch_model::{Draft, Message, ProviderMessageId};
+use postrinch_commands::{Commands, Folder, Queued, Start, Thread};
+use postrinch_model::{Draft, EmailAddress, Message, ProviderMessageId, ProviderThreadId};
 
 use crate::actions::{commands, sync};
 use crate::state::State;
@@ -47,34 +47,61 @@ impl State {
         let Some(commands) = commands() else {
             return;
         };
-        let (account, answering) = match (&start, self.thread.get()) {
-            (Start::New, _) => (self.writing_account(), None),
-            (_, Some(thread)) => {
-                let chosen = match message {
-                    Some(id) => thread.messages.iter().find(|m| &m.id == id),
-                    None => thread
-                        .messages
-                        .iter()
-                        .rev()
-                        .find(|m| m.downloaded)
-                        .or(thread.messages.last()),
-                };
-                let Some(chosen) = chosen else {
-                    return;
-                };
-                (
-                    Some(thread.summary.account.clone()),
-                    Some((thread.summary.id.clone(), chosen.id.clone())),
-                )
-            }
-            (_, None) => return,
-        };
-        let Some(account) = account else {
-            self.error.set(Some("Add an account to write from.".into()));
+        match (&start, self.thread.get()) {
+            (Start::New, _) => match self.writing_account() {
+                Some(account) => self.start_draft(&commands, &account, None, start),
+                None => self.error.set(Some("Add an account to write from.".into())),
+            },
+            (_, Some(thread)) => self.answer_in(&commands, start, &thread, message),
+            (_, None) => {}
+        }
+    }
+
+    /// Answer a row of the list, open or not: its one message when mail is
+    /// listed a message at a time, else its conversation's latest.
+    pub fn answer_row(self, start: Start, row: &crate::ui::list::RowId) {
+        let Some(commands) = commands() else {
             return;
         };
-        let answering_refs = answering.as_ref().map(|(t, m)| (t, m));
-        match commands.start_draft(&account, answering_refs, &start) {
+        match commands.read_thread(&row.0, &row.1) {
+            Ok(Some(thread)) => self.answer_in(&commands, start, &thread, row.2.as_ref()),
+            Ok(None) => {}
+            Err(e) => self.error.set(Some(e.to_string())),
+        }
+    }
+
+    /// Answer `message` of `thread`, or its latest downloaded message.
+    fn answer_in(
+        self,
+        commands: &Commands,
+        start: Start,
+        thread: &Thread,
+        message: Option<&ProviderMessageId>,
+    ) {
+        let chosen = match message {
+            Some(id) => thread.messages.iter().find(|m| &m.id == id),
+            None => thread
+                .messages
+                .iter()
+                .rev()
+                .find(|m| m.downloaded)
+                .or(thread.messages.last()),
+        };
+        let Some(chosen) = chosen else {
+            return;
+        };
+        let answering = (&thread.summary.id, &chosen.id);
+        self.start_draft(commands, &thread.summary.account, Some(answering), start);
+    }
+
+    fn start_draft(
+        self,
+        commands: &Commands,
+        account: &EmailAddress,
+        answering: Option<(&ProviderThreadId, &ProviderMessageId)>,
+        start: Start,
+    ) {
+        match commands.start_draft(account, answering, &start) {
             Ok(draft) => {
                 let title = match start {
                     Start::New => "New message".to_owned(),

@@ -32,6 +32,9 @@ pub struct ThreadEntry {
     /// message is in: a reply you sent moves the thread up the inbox, as in
     /// Gmail.
     pub latest: Timestamp,
+    /// Whether one of its messages here is unread. Only read when asked
+    /// for ([`Store::label_threads_sorting`]); `false` otherwise.
+    pub unread: bool,
 }
 
 /// A message in a mailbox listing, as one message at a time lists it.
@@ -41,6 +44,7 @@ pub struct MessageEntry {
     pub thread: ProviderThreadId,
     pub message: ProviderMessageId,
     pub received: Timestamp,
+    pub unread: bool,
 }
 
 impl Store {
@@ -71,7 +75,7 @@ impl Store {
         let prefix = scoped(account, "");
         let mut threads: HashMap<u64, Option<ProviderThreadId>> = HashMap::new();
         let mut entries = Vec::with_capacity(ids.len());
-        for fields in self.get_many_projected(TYPE, &ids, &["key", "received"])? {
+        for fields in self.get_many_projected(TYPE, &ids, &["key", "received", "unread"])? {
             let Some(message) = fields.str("key")?.strip_prefix(&prefix).map(str::to_owned) else {
                 continue;
             };
@@ -97,6 +101,7 @@ impl Store {
                 thread,
                 message: ProviderMessageId(message),
                 received: Timestamp::from_millis(fields.datetime("received")?),
+                unread: fields.bool("unread")?,
             });
         }
         entries.sort_by(|a, b| {
@@ -127,6 +132,19 @@ impl Store {
         label_provider_id: &str,
         within: Option<&str>,
     ) -> StoreResult<Vec<ThreadEntry>> {
+        self.label_threads_sorting(account, label_provider_id, within, false)
+    }
+
+    /// [`Store::label_threads_within`], also reading which threads have
+    /// unread mail here when `unread` is asked for (to list those first):
+    /// one more small read per message, so only then.
+    pub fn label_threads_sorting(
+        &self,
+        account: &EmailAddress,
+        label_provider_id: &str,
+        within: Option<&str>,
+        unread: bool,
+    ) -> StoreResult<Vec<ThreadEntry>> {
         let Some(label) = self.find_label(account, label_provider_id)? else {
             return Ok(Vec::new());
         };
@@ -149,6 +167,7 @@ impl Store {
             self.set_aside(account)?
         };
         let mut threads: Vec<u64> = Vec::new();
+        let mut messages: Vec<(u64, u64)> = Vec::new();
         for (message, thread) in self.label_message_threads(label.id())? {
             if set_aside.contains(&message) {
                 continue;
@@ -157,6 +176,19 @@ impl Store {
                 && within.as_ref().is_none_or(|w| w.contains(&thread))
             {
                 threads.push(thread);
+                messages.push((message, thread));
+            }
+        }
+        let mut unread_threads: HashSet<u64> = HashSet::new();
+        if unread {
+            let ids: Vec<u64> = messages.iter().map(|(m, _)| *m).collect();
+            let thread_of: HashMap<u64, u64> = messages.into_iter().collect();
+            for fields in self.get_many_projected(TYPE, &ids, &["unread"])? {
+                if fields.bool("unread")?
+                    && let Some(thread) = thread_of.get(&fields.id())
+                {
+                    unread_threads.insert(*thread);
+                }
             }
         }
         threads.sort_unstable();
@@ -174,6 +206,7 @@ impl Store {
                     account: account.clone(),
                     thread: ProviderThreadId(provider_id.to_owned()),
                     latest: Timestamp::from_millis(latest),
+                    unread: unread_threads.contains(&thread.id()),
                 });
             }
         }

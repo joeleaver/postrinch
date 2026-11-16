@@ -94,6 +94,8 @@ pub struct State {
     /// open in full, as saved.
     pub show_mail: Signal<ShowMail>,
     pub order: Signal<Order>,
+    /// The list's order, as saved.
+    pub list_order: Signal<postrinch_commands::ListOrder>,
     pub open_in_full: Signal<OpenInFull>,
     /// The open conversation's messages shown in full.
     pub opened: Signal<Opened>,
@@ -182,6 +184,7 @@ impl State {
             after_move: Signal::new(settings.after_move),
             show_mail: Signal::new(settings.show_mail),
             order: Signal::new(settings.order),
+            list_order: Signal::new(settings.list_order),
             open_in_full: Signal::new(settings.open_in_full),
             opened: Signal::new(Opened::default()),
             label_choices: Signal::new(Vec::new()),
@@ -237,14 +240,19 @@ impl State {
         let lists = ask.clone();
         Effect::new(move || {
             self.revision.get();
-            let (folder, category, grouping) =
-                (self.folder.get(), self.category.get(), self.grouping());
+            let (folder, category, grouping, order) = (
+                self.folder.get(),
+                self.category.get(),
+                self.grouping(),
+                self.list_order.get(),
+            );
             // Another list than before: show it as last loaded (or nothing,
             // rather than the list left) until the loader answers.
             let key = recent::ListKey {
                 folder: folder.clone(),
                 category,
                 grouping,
+                order,
             };
             if let Some(page) = recent::want(key) {
                 self.page.set(page);
@@ -254,6 +262,7 @@ impl State {
                 category,
                 shown: self.shown.get(),
                 grouping,
+                order,
             });
         });
         let accounts = ask.clone();

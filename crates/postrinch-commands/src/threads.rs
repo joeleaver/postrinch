@@ -13,7 +13,40 @@ use crate::labels::Chip;
 use crate::search::Excerpt;
 use crate::{CommandResult, Commands, Folder};
 
-/// A page of a folder's threads, latest activity first.
+/// The order a list is in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ListOrder {
+    /// Latest activity first.
+    #[default]
+    NewestFirst,
+    OldestFirst,
+    /// Those with unread mail first, each part newest first.
+    UnreadFirst,
+}
+
+impl ListOrder {
+    /// Order two rows: whether each is unread and when, then ties broken
+    /// by `tie` so a list keeps one order from one read to the next.
+    pub(crate) fn compare(
+        self,
+        a: (bool, postrinch_model::Timestamp),
+        b: (bool, postrinch_model::Timestamp),
+        tie: std::cmp::Ordering,
+    ) -> std::cmp::Ordering {
+        let unread = match self {
+            ListOrder::UnreadFirst => b.0.cmp(&a.0),
+            _ => std::cmp::Ordering::Equal,
+        };
+        let when = match self {
+            ListOrder::OldestFirst => a.1.cmp(&b.1),
+            _ => b.1.cmp(&a.1),
+        };
+        unread.then(when).then(tie)
+    }
+}
+
+/// A page of a folder's threads, in the order asked for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThreadPage {
     /// How many threads the folder has in all.
@@ -67,15 +100,31 @@ impl Commands {
         offset: usize,
         limit: usize,
     ) -> CommandResult<ThreadPage> {
+        self.list_threads_in(folder, category, ListOrder::NewestFirst, offset, limit)
+    }
+
+    /// [`Commands::list_threads`] in `order`.
+    pub fn list_threads_in(
+        &self,
+        folder: &Folder,
+        category: Option<SystemLabel>,
+        order: ListOrder,
+        offset: usize,
+        limit: usize,
+    ) -> CommandResult<ThreadPage> {
+        let unread = order == ListOrder::UnreadFirst;
         let mut entries = Vec::new();
         let mut account_chips: HashMap<String, HashMap<String, Chip>> = HashMap::new();
         for (account, label) in self.sources(folder)? {
             let found = match category {
-                None => self.store.label_threads(&account, &label)?,
+                None => self
+                    .store
+                    .label_threads_sorting(&account, &label, None, unread)?,
                 Some(category) => match self.system_label_id(&account, category)? {
-                    Some(id) => self
-                        .store
-                        .label_threads_within(&account, &label, Some(&id))?,
+                    Some(id) => {
+                        self.store
+                            .label_threads_sorting(&account, &label, Some(&id), unread)?
+                    }
                     None => Vec::new(),
                 },
             };
@@ -91,10 +140,12 @@ impl Commands {
             Folder::Everywhere(_) => None,
         };
         entries.sort_by(|a, b| {
-            b.latest
-                .cmp(&a.latest)
-                .then_with(|| a.account.key().cmp(&b.account.key()))
-                .then_with(|| a.thread.cmp(&b.thread))
+            let tie = a
+                .account
+                .key()
+                .cmp(&b.account.key())
+                .then_with(|| a.thread.cmp(&b.thread));
+            order.compare((a.unread, a.latest), (b.unread, b.latest), tie)
         });
         let total = entries.len();
         let mut threads = Vec::new();

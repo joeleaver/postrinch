@@ -40,6 +40,9 @@ pub struct Settings {
     pub show_mail: crate::conversations::ShowMail,
     #[serde(default)]
     pub order: crate::conversations::Order,
+    /// The list's order: newest, oldest or unread first.
+    #[serde(default)]
+    pub list_order: postrinch_commands::ListOrder,
     #[serde(default)]
     pub open_in_full: crate::conversations::OpenInFull,
     /// Senders whose pictures from the web always load (addresses, as

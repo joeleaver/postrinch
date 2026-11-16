@@ -262,14 +262,18 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     flex-direction: column;
     background: var(--panel);
 }
-/* The conversation's actions stay put; its messages scroll under them,
-   in a box of each conversation's own, so it opens at the top. */
+/* Each conversation scrolls in a box of its own, so it opens at the top. */
 .reader-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .reader-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .reader-empty { padding: 40px; color: var(--muted); }
-.thread { padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; }
-.thread-subject { margin: 0; font-size: 20px; font-weight: 600; }
-.thread-meta { font-size: 13px; color: var(--muted); }
+.thread { padding: 14px 28px 24px; display: flex; flex-direction: column; gap: 12px; }
+.thread-title { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13px; }
+.thread-subject {
+    flex: 1; min-width: 0; margin: 0;
+    font-size: 18px; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.thread-title .open-all { flex-shrink: 0; color: var(--accent); cursor: pointer; }
 .message {
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -279,7 +283,7 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     flex-direction: column;
     gap: 10px;
 }
-.message-head { display: flex; align-items: baseline; gap: 8px; }
+.message-head { display: flex; align-items: center; gap: 8px; }
 .message-from { font-weight: 600; }
 .message-address { color: var(--muted); font-size: 13px; }
 .message-when { margin-left: auto; color: var(--muted); font-size: 13px; }
@@ -304,17 +308,6 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     color: var(--ink-2);
 }
 .pictures-line { flex: 1; min-width: 240px; }
-/* The conversation's actions, at the top left, above the subject. */
-.thread-bar {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 12px 28px;
-    border-bottom: 1px solid var(--line);
-    background: var(--panel);
-}
-.thread-meta .open-all { margin-left: 10px; color: var(--accent); cursor: pointer; }
 .message-folded {
     display: flex;
     align-items: center;
@@ -339,8 +332,21 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     cursor: pointer;
 }
 .quote-toggle:hover { background: var(--hover); }
-.answer-links { display: flex; gap: 14px; font-size: 13px; }
-.answer-link { color: var(--accent); cursor: pointer; }
+/* Reply, Reply all and Forward: in a message's header, and on a list row
+   under the pointer, where they take the place of its date. */
+.answer-icons { display: flex; gap: 2px; margin: -6px -6px -6px 0; }
+.answer-icon {
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    border: 0; border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+}
+.answer-icon:hover { background: var(--hover); color: var(--ink); }
+.row .answer-icons { display: none; margin: -7px -8px -7px 0; }
+.row:hover .answer-icons { display: flex; }
+.row:hover .when { display: none; }
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
     padding: 4px 10px;

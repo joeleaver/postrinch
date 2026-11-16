@@ -18,6 +18,11 @@ pub enum Icon {
     Starred,
     /// A pencil: write new mail.
     Write,
+    Reply,
+    ReplyAll,
+    Forward,
+    /// Lines of falling length beside a down arrow: the list's order.
+    Sort,
 }
 
 #[component]
@@ -50,6 +55,25 @@ pub fn icon(which: Icon) -> NodeHandle {
             __scope,
             "M12 20h9",
             "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
+            "none",
+        ),
+        Icon::Reply => two(__scope, "M9 14L4 9l5-5", "M4 9h10a6 6 0 0 1 6 6v4", "none"),
+        Icon::ReplyAll => two(
+            __scope,
+            "M7 14L2 9l5-5M12 14L7 9l5-5",
+            "M7 9h8a6 6 0 0 1 6 6v4",
+            "none",
+        ),
+        Icon::Forward => two(
+            __scope,
+            "M15 14l5-5-5-5",
+            "M20 9H10a6 6 0 0 0-6 6v4",
+            "none",
+        ),
+        Icon::Sort => two(
+            __scope,
+            "M7 4v16M3 16l4 4 4-4",
+            "M14 6h7M14 12h5M14 18h3",
             "none",
         ),
     }

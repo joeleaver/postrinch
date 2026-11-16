@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::labels::Chip;
 use crate::search::excerpt;
-use crate::{CommandResult, Commands, Folder, ThreadAction, ThreadPage, ThreadRow};
+use crate::{CommandResult, Commands, Folder, ListOrder, ThreadAction, ThreadPage, ThreadRow};
 
 /// Whether mail is listed as conversations or as messages.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -33,6 +33,18 @@ impl Commands {
         &self,
         folder: &Folder,
         category: Option<SystemLabel>,
+        offset: usize,
+        limit: usize,
+    ) -> CommandResult<ThreadPage> {
+        self.list_messages_in(folder, category, ListOrder::NewestFirst, offset, limit)
+    }
+
+    /// [`Commands::list_messages`] in `order`.
+    pub fn list_messages_in(
+        &self,
+        folder: &Folder,
+        category: Option<SystemLabel>,
+        order: ListOrder,
         offset: usize,
         limit: usize,
     ) -> CommandResult<ThreadPage> {
@@ -65,10 +77,12 @@ impl Commands {
             Folder::Everywhere(_) => None,
         };
         entries.sort_by(|a, b| {
-            b.received
-                .cmp(&a.received)
-                .then_with(|| a.account.key().cmp(&b.account.key()))
-                .then_with(|| a.message.cmp(&b.message))
+            let tie = a
+                .account
+                .key()
+                .cmp(&b.account.key())
+                .then_with(|| a.message.cmp(&b.message));
+            order.compare((a.unread, a.received), (b.unread, b.received), tie)
         });
         let total = entries.len();
         let mut threads = Vec::new();

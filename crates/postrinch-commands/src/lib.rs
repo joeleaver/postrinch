@@ -32,7 +32,7 @@ pub use messages::{Grouping, MessageRef};
 pub use postrinch_render::Rendered;
 pub use query::{LabelName, Query, label_matches};
 pub use search::{Excerpt, Remote, SearchResults};
-pub use threads::{CATEGORIES, Thread, ThreadPage, ThreadRow};
+pub use threads::{CATEGORIES, ListOrder, Thread, ThreadPage, ThreadRow};
 pub use writing::{Queued, Start};
 
 /// The commands, over one store. Cheap to clone.

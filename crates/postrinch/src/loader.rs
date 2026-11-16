@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use postrinch_commands::{Commands, Folder, Grouping};
+use postrinch_commands::{Commands, Folder, Grouping, ListOrder};
 use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
 
 use crate::changes;
@@ -32,6 +32,7 @@ pub enum Request {
         shown: usize,
         /// Conversations, or one message at a time.
         grouping: Grouping,
+        order: ListOrder,
     },
     /// Settings' accounts.
     Accounts,
@@ -135,14 +136,17 @@ fn answer(commands: &Commands, state: State, request: Request) {
             category,
             shown,
             grouping,
+            order,
         } => {
             // Every action made by now shows in what is read next.
             let as_of = changes::made();
             // The list first, what the person waits on; the sidebar's
             // counts after.
             let page = match grouping {
-                Grouping::Conversations => commands.list_threads(&folder, category, 0, shown),
-                Grouping::Messages => commands.list_messages(&folder, category, 0, shown),
+                Grouping::Conversations => {
+                    commands.list_threads_in(&folder, category, order, 0, shown)
+                }
+                Grouping::Messages => commands.list_messages_in(&folder, category, order, 0, shown),
             };
             match page {
                 Ok(page) => {
@@ -150,6 +154,7 @@ fn answer(commands: &Commands, state: State, request: Request) {
                         folder,
                         category,
                         grouping,
+                        order,
                     };
                     // Not a list the person has since left.
                     if crate::recent::loaded(key, &page) {

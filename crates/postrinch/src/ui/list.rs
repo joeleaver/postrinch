@@ -33,12 +33,11 @@ pub fn thread_list(state: State) -> NodeHandle {
                     }
                 }
                 {crate::ui::search::search_notes(__scope, state)}
-            } else {
-                div { class: "list-head",
-                    h1 { {move || title(&state.folder.get(), state.sidebar.get().as_ref())} }
-                    span { class: "list-count", {move || unread_line(&state.folder.get(), state.sidebar.get().as_ref())} }
-                }
             }
+            // What the open conversation can have done to it, and the
+            // list's order. The folder's name and unread count are in the
+            // sidebar, so the list has no title of its own.
+            {crate::ui::list_head::list_actions(__scope, state)}
             if !searching() && is_inbox(&state.folder.get(), state.sidebar.get().as_ref()) {
                 {tabs(__scope, state)}
             }
@@ -215,6 +214,7 @@ fn row(state: State, id: RowId) -> NodeHandle {
     };
     let summary = move || thread.get().summary;
     let chosen = id.clone();
+    let answering = id.clone();
     let color = move || account_index(state.sidebar.get().as_ref(), &summary()).map(account_color);
     rsx! {
         div {
@@ -246,6 +246,7 @@ fn row(state: State, id: RowId) -> NodeHandle {
                     "📎"
                 }
                 span { class: "when", {move || dates::short(summary().latest, &dates::now())} }
+                {row_answers(__scope, state, answering.clone())}
             }
             div { class: "subject", {move || or_none(&summary().subject, "(no subject)")} }
             div { class: "row-bottom",
@@ -281,6 +282,32 @@ fn row(state: State, id: RowId) -> NodeHandle {
     }
 }
 
+/// Reply, Reply all and Forward for a row, shown in place of its date
+/// while the pointer is on it: they answer its latest message (its one
+/// message, listed a message at a time) without opening it.
+#[component]
+fn row_answers(state: State, id: RowId) -> NodeHandle {
+    use crate::ui::icons::{Icon, icon};
+    use postrinch_commands::Start;
+    let (reply, all, forward) = (id.clone(), id.clone(), id);
+    rsx! {
+        span { class: "answer-icons",
+            button { class: "answer-icon", title: "Reply", aria-label: "Reply",
+                onclick: move || state.answer_row(Start::Reply, &reply),
+                {icon(__scope, Icon::Reply)}
+            }
+            button { class: "answer-icon", title: "Reply all", aria-label: "Reply all",
+                onclick: move || state.answer_row(Start::ReplyAll, &all),
+                {icon(__scope, Icon::ReplyAll)}
+            }
+            button { class: "answer-icon", title: "Forward", aria-label: "Forward",
+                onclick: move || state.answer_row(Start::Forward, &forward),
+                {icon(__scope, Icon::Forward)}
+            }
+        }
+    }
+}
+
 /// A style that hides an element unless `show`.
 fn shown(show: bool) -> &'static str {
     if show { "" } else { "display: none" }
@@ -311,7 +338,7 @@ fn or_none(text: &str, none: &str) -> String {
     }
 }
 
-fn account_index(sidebar: Option<&Sidebar>, summary: &ThreadSummary) -> Option<usize> {
+pub(crate) fn account_index(sidebar: Option<&Sidebar>, summary: &ThreadSummary) -> Option<usize> {
     let accounts = &sidebar?.accounts;
     if accounts.len() < 2 {
         return None;
@@ -328,25 +355,5 @@ pub(crate) fn is_inbox(folder: &Folder, sidebar: Option<&Sidebar>) -> bool {
         Folder::Label { .. } => {
             sidebar.is_some_and(|s| s.accounts.iter().any(|a| &a.inbox.folder == folder))
         }
-    }
-}
-
-fn title(folder: &Folder, sidebar: Option<&Sidebar>) -> String {
-    match folder {
-        Folder::Everywhere(SystemLabel::Inbox) => "All inboxes".to_owned(),
-        _ => sidebar
-            .and_then(|s| s.entry(folder))
-            .map(|e| e.name.clone())
-            .unwrap_or_default(),
-    }
-}
-
-fn unread_line(folder: &Folder, sidebar: Option<&Sidebar>) -> String {
-    match sidebar
-        .and_then(|s| s.entry(folder))
-        .map_or(0, |e| e.unread)
-    {
-        0 => String::new(),
-        unread => format!("{} unread", thousands(unread)),
     }
 }

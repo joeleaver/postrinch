@@ -5,7 +5,7 @@
 
 use std::sync::Mutex;
 
-use postrinch_commands::{Folder, Grouping, ThreadPage};
+use postrinch_commands::{Folder, Grouping, ListOrder, ThreadPage};
 use postrinch_model::SystemLabel;
 
 /// How many lists are kept.
@@ -18,6 +18,7 @@ pub struct ListKey {
     pub folder: Folder,
     pub category: Option<SystemLabel>,
     pub grouping: Grouping,
+    pub order: ListOrder,
 }
 
 struct Recent {
@@ -76,6 +77,7 @@ mod tests {
             folder: Folder::Everywhere(system),
             category: None,
             grouping: Grouping::default(),
+            order: ListOrder::default(),
         }
     }
 
@@ -109,6 +111,7 @@ mod tests {
                         label: n.to_string(),
                     },
                     grouping: Grouping::default(),
+                    order: ListOrder::default(),
                 },
                 &page(n),
             );

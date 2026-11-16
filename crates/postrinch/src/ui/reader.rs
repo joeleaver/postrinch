@@ -1,7 +1,8 @@
-//! The reading pane: the open conversation, after the conversations
-//! mockups. Its actions sit in one bar at the top left, above the subject;
-//! its messages show newest or oldest first, as set, and those the setting
-//! does not open in full fold to one line.
+//! The reading pane: the open conversation, after the conversations and
+//! list header mockups. Its subject is at the top; what can be done to the
+//! conversation is above the list, and each message is answered from the
+//! icons in its own header. Its messages show newest or oldest first, as
+//! set, and those the setting does not open in full fold to one line.
 
 use jiff::tz::TimeZone;
 use postrinch_commands::{Rendered, Start, Thread};
@@ -11,7 +12,7 @@ use rinch::prelude::*;
 use crate::conversations::in_order;
 use crate::dates;
 use crate::state::State;
-use crate::ui::thread_actions::toolbar;
+use crate::ui::icons::{Icon, icon};
 
 #[component]
 pub fn reader(state: State) -> NodeHandle {
@@ -62,14 +63,23 @@ fn open_thread(
 ) -> NodeHandle {
     let tz = TimeZone::system();
     let summary = &thread.summary;
-    let count = match summary.message_count {
-        1 => "1 message".to_owned(),
-        n => format!("{n} messages"),
+    // Which account, by its colour, where the sidebar does not already say
+    // (a list of more than one account's mail).
+    let account = state.sidebar.with(|s| {
+        crate::ui::list::account_index(s.as_ref(), summary)
+            .filter(|_| {
+                matches!(
+                    state.folder.get(),
+                    postrinch_commands::Folder::Everywhere(_)
+                )
+            })
+            .map(crate::ui::account_color)
+    });
+    let dot = match account {
+        Some(c) => format!("background: {c}"),
+        None => "display: none".to_owned(),
     };
-    let meta = match &only {
-        Some(_) => format!("One of {count} in this conversation · {}", summary.account),
-        None => format!("{count} · {}", summary.account),
-    };
+    let account_name = summary.account.to_string();
     let one_of_many = only.is_some() && summary.message_count > 1;
     let subject = if summary.subject.trim().is_empty() {
         "(no subject)".to_owned()
@@ -102,12 +112,11 @@ fn open_thread(
         .collect();
     rsx! {
         div { class: "reader-frame",
-            {action_bar(__scope, state, thread.clone())}
             div { class: "reader-scroll",
             div { class: "thread",
-            h2 { class: "thread-subject", {subject} }
-            div { class: "thread-meta",
-                {meta}
+            div { class: "thread-title",
+                span { class: "dot", title: {account_name.clone()}, style: {dot.clone()} }
+                h2 { class: "thread-subject", {subject} }
                 span {
                     class: "open-all",
                     style: {if one_of_many { "" } else { "display: none" }},
@@ -206,11 +215,12 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
                 span { class: "message-from", {name} }
                 span { class: "message-address", {address} }
                 span { class: "message-when", {when} }
+                {edit_draft(__scope, state, message.clone())}
+                {answer_icons(__scope, state, message.id.clone())}
             }
             {to}
             {body}
             div { class: "attachments", {attachments} }
-            {answer_links(__scope, state, message.id.clone())}
         }
     }
 }
@@ -300,40 +310,39 @@ fn plain(text: String) -> NodeHandle {
     }
 }
 
-/// The conversation's actions, at the top left: Edit draft when its latest
-/// message is one of the account's drafts, Reply, Reply all and Forward,
-/// then what the toolbar does to the conversation.
+/// Edit draft, in the header of a message that is one of its account's
+/// drafts; nothing for any other.
 #[component]
-fn action_bar(state: State, thread: Thread) -> NodeHandle {
-    let draft = thread.messages.last().cloned().filter(|m| {
-        crate::actions::commands().is_some_and(|c| c.is_draft(&m.account, m).unwrap_or(false))
-    });
-    let edit = draft.map(|message| {
-        rsx! {
-            Button { variant: "filled", size: "sm", onclick: move || state.edit_draft(&message), "Edit draft" }
-        }
-    });
+fn edit_draft(state: State, message: Message) -> NodeHandle {
+    let draft = crate::actions::commands()
+        .is_some_and(|c| c.is_draft(&message.account, &message).unwrap_or(false));
+    if !draft {
+        return rsx! { span {} };
+    }
     rsx! {
-        div { class: "thread-bar",
-            {edit}
-            Button { variant: "default", size: "sm", onclick: move || state.write(Start::Reply), "Reply" }
-            Button { variant: "default", size: "sm", onclick: move || state.write(Start::ReplyAll), "Reply all" }
-            Button { variant: "default", size: "sm", onclick: move || state.write(Start::Forward), "Forward" }
-            span { class: "thread-actions-gap" }
-            {toolbar(__scope, state)}
-        }
+        Button { variant: "filled", size: "xs", onclick: move || state.edit_draft(&message), "Edit draft" }
     }
 }
 
-/// Answering one message of the conversation, under it.
+/// Reply, Reply all and Forward for one message, as icons at the right of
+/// its header.
 #[component]
-fn answer_links(state: State, message: ProviderMessageId) -> NodeHandle {
+fn answer_icons(state: State, message: ProviderMessageId) -> NodeHandle {
     let (reply, all, forward) = (message.clone(), message.clone(), message);
     rsx! {
-        div { class: "answer-links",
-            span { class: "answer-link", onclick: move || state.answer(Start::Reply, Some(&reply)), "Reply" }
-            span { class: "answer-link", onclick: move || state.answer(Start::ReplyAll, Some(&all)), "Reply all" }
-            span { class: "answer-link", onclick: move || state.answer(Start::Forward, Some(&forward)), "Forward" }
+        span { class: "answer-icons",
+            button { class: "answer-icon", title: "Reply (R)", aria-label: "Reply",
+                onclick: move || state.answer(Start::Reply, Some(&reply)),
+                {icon(__scope, Icon::Reply)}
+            }
+            button { class: "answer-icon", title: "Reply all (A)", aria-label: "Reply all",
+                onclick: move || state.answer(Start::ReplyAll, Some(&all)),
+                {icon(__scope, Icon::ReplyAll)}
+            }
+            button { class: "answer-icon", title: "Forward (F)", aria-label: "Forward",
+                onclick: move || state.answer(Start::Forward, Some(&forward)),
+                {icon(__scope, Icon::Forward)}
+            }
         }
     }
 }
