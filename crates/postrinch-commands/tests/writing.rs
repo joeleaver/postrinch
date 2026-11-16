@@ -153,3 +153,67 @@ fn sending_needs_someone_and_settles_a_proposal() {
     assert!(elsewhere.outgoing().unwrap().is_empty());
     assert!(elsewhere.send_draft(&draft, None).is_err());
 }
+
+/// A newsletter whose text part spells out every link's address, as many
+/// senders' do: an answer quotes what its reader sees, the HTML as drawn.
+#[test]
+fn answers_quote_html_mail_as_drawn_not_its_text_part() {
+    let (_dir, store, commands, me) = setup();
+    let raw = "From: News <news@example.org>\r\n\
+        To: me@example.org\r\n\
+        Subject: Today's letter\r\n\
+        Message-ID: <n1@example.org>\r\n\
+        MIME-Version: 1.0\r\n\
+        Content-Type: multipart/alternative; boundary=\"b\"\r\n\
+        \r\n\
+        --b\r\n\
+        Content-Type: text/plain; charset=utf-8\r\n\
+        \r\n\
+        View this email in your browser (https://example.org/archive?id=123)\r\n\
+        A story worth reading (https://example.org/track?u=abc&id=456)\r\n\
+        --b\r\n\
+        Content-Type: text/html; charset=utf-8\r\n\
+        \r\n\
+        <p><a href=\"https://example.org/archive?id=123\">View this email in your browser</a></p>\
+        <p>A <a href=\"https://example.org/track?u=abc&amp;id=456\">story</a> worth reading</p>\r\n\
+        --b--\r\n";
+    let message = Message {
+        account: me.clone(),
+        id: ProviderMessageId("n1".into()),
+        thread: ProviderThreadId("tn".into()),
+        headers: MessageHeaders {
+            message_id: Some("n1@example.org".into()),
+            subject: Some("Today's letter".into()),
+            from: vec![mailbox("News", "news@example.org")],
+            to: vec![mailbox("Me", "me@example.org")],
+            ..Default::default()
+        },
+        received: Timestamp::from_millis(1_762_200_000_000),
+        labels: vec!["INBOX".into()],
+        flags: Flags::default(),
+        snippet: String::new(),
+        body_text: "View this email in your browser (https://example.org/archive?id=123)\n\
+            A story worth reading (https://example.org/track?u=abc&id=456)"
+            .into(),
+        downloaded: true,
+        attachments: Vec::new(),
+        size: raw.len() as u64,
+    };
+    store.put_message(&message, Some(raw.as_bytes())).unwrap();
+    let (t, m) = (
+        ProviderThreadId("tn".into()),
+        ProviderMessageId("n1".into()),
+    );
+    for start in [Start::Reply, Start::Forward] {
+        let draft = commands
+            .start_draft(&me, answering(&t, &m), &start)
+            .unwrap();
+        assert!(
+            draft.body.contains("View this email in your browser"),
+            "{}",
+            draft.body
+        );
+        assert!(draft.body.contains("story"), "{}", draft.body);
+        assert!(!draft.body.contains("https://"), "{}", draft.body);
+    }
+}

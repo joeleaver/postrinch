@@ -74,7 +74,7 @@ impl Commands {
                     draft.to = h.to.clone();
                 }
                 draft.subject = prefixed("Re:", &subject);
-                draft.body = format!("\n\n{}", quote(message));
+                draft.body = format!("\n\n{}", quote(message, &self.quotable(message)?));
                 let mut references = h.references.clone();
                 references.extend(h.message_id.clone());
                 draft.answering = Answering {
@@ -85,11 +85,23 @@ impl Commands {
             }
             Start::Forward => {
                 draft.subject = prefixed("Fwd:", &subject);
-                draft.body = format!("\n\n{}", forwarded(message));
+                draft.body = format!("\n\n{}", forwarded(message, &self.quotable(message)?));
                 draft.answering.thread = Some(thread.clone());
             }
         }
         Ok(draft)
+    }
+
+    /// A message's text as an answer quotes it: what its reader sees, so an
+    /// HTML message is quoted as drawn rather than from its text part, which
+    /// senders often fill with every link's address. The text part when the
+    /// message has no HTML, or its original is not here.
+    fn quotable(&self, message: &Message) -> CommandResult<String> {
+        let seen = self
+            .message_text(&message.account, &message.id)?
+            .map(|t| t.text)
+            .filter(|t| !t.trim().is_empty());
+        Ok(seen.unwrap_or_else(|| message.body_text.clone()))
     }
 
     /// A draft kept with the provider, to carry on writing: sending or
@@ -210,9 +222,8 @@ fn when(at: Timestamp) -> String {
 }
 
 /// The answered message, quoted under a line saying who wrote it when.
-fn quote(message: &Message) -> String {
-    let quoted: Vec<String> = message
-        .body_text
+fn quote(message: &Message, text: &str) -> String {
+    let quoted: Vec<String> = text
         .trim_end()
         .lines()
         .map(|l| {
@@ -232,7 +243,7 @@ fn quote(message: &Message) -> String {
 }
 
 /// The forwarded message, under its headers.
-fn forwarded(message: &Message) -> String {
+fn forwarded(message: &Message, text: &str) -> String {
     let h = &message.headers;
     let list = |m: &[Mailbox]| {
         m.iter()
@@ -250,5 +261,5 @@ fn forwarded(message: &Message) -> String {
     if !h.cc.is_empty() {
         head.push(format!("Cc: {}", list(&h.cc)));
     }
-    format!("{}\n\n{}", head.join("\n"), message.body_text.trim_end())
+    format!("{}\n\n{}", head.join("\n"), text.trim_end())
 }
