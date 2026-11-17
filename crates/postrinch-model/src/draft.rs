@@ -37,8 +37,6 @@ pub enum AttachmentOrigin {
     Mail,
     /// An agent attached this file from this computer.
     File { path: String },
-    /// An agent made it and gave its bytes.
-    Agent,
 }
 
 /// A file attached to a draft. Its bytes are kept in the store's blob

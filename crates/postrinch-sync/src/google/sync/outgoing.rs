@@ -82,7 +82,6 @@ impl GmailSync {
                     .iter()
                     .map(|a| s.attachment_bytes(&a.blob).map(|b| (a.name.clone(), b)))
                     .collect::<Result<Vec<_>, _>>()
-                    .map_err(Into::into)
             })
             .await?;
         let mut bytes = Vec::with_capacity(files.len());

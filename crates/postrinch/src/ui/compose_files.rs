@@ -130,7 +130,6 @@ fn origin_line(origin: &AttachmentOrigin) -> Option<String> {
         AttachmentOrigin::File { path } => {
             Some(format!("from this computer: {}", home_short(path)))
         }
-        AttachmentOrigin::Agent => Some("made by the agent".into()),
     }
 }
 

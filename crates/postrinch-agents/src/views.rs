@@ -7,13 +7,17 @@
 
 use std::collections::HashMap;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use postrinch_commands::{
     Commands, Folder, FolderEntry, Start, ThreadAction, ThreadRef, ThreadRow,
 };
-use postrinch_model::{EmailAddress, Mailbox, Message, Proposal, Timestamp};
+use postrinch_model::{
+    AttachmentOrigin, DraftAttachment, EmailAddress, Mailbox, Message, Proposal, Timestamp,
+};
 use serde_json::{Value, json};
 
-use crate::wire::Call;
+use crate::wire::{Call, ProposedFile};
 
 /// The most body text one message carries, in chars.
 const BODY_CHARS: usize = 100_000;
@@ -130,7 +134,12 @@ pub(crate) fn run(commands: &Commands, call: Call, agent: &str) -> Result<Value,
             subject,
             body,
             reason,
+            attachments,
         } => {
+            let files = attachments
+                .into_iter()
+                .map(|f| proposed_file(commands, f))
+                .collect::<Result<Vec<_>, String>>()?;
             let mut draft = match &thread {
                 Some(thread) => {
                     let read = commands
@@ -165,6 +174,7 @@ pub(crate) fn run(commands: &Commands, call: Call, agent: &str) -> Result<Value,
             if let Some(subject) = subject {
                 draft.subject = subject;
             }
+            draft.attachments = files;
             draft.proposal = Some(Proposal {
                 agent: agent.to_owned(),
                 reason,
@@ -173,6 +183,30 @@ pub(crate) fn run(commands: &Commands, call: Call, agent: &str) -> Result<Value,
             Ok(json!({
                 "proposed": true,
                 "note": "It is open in Postrinch for the person to check. Nothing is sent until they press Send; they may change it or discard it.",
+            }))
+        }
+        Call::Attachment {
+            account,
+            message,
+            attachment,
+        } => {
+            let part = commands
+                .attachment(&account, &message, attachment)
+                .map_err(say)?
+                .ok_or_else(|| {
+                    format!(
+                        "Message {} has no attachment {attachment} here (it may not be downloaded yet).",
+                        message.0
+                    )
+                })?;
+            Ok(json!({
+                "attachment": attachment,
+                "size": part.bytes.len(),
+                "data": STANDARD.encode(&part.bytes),
+                "untrusted": {
+                    "name": part.filename,
+                    "type": part.mime_type,
+                },
             }))
         }
         Call::Act { threads, action } => {
@@ -188,6 +222,33 @@ pub(crate) fn run(commands: &Commands, call: Call, agent: &str) -> Result<Value,
             commands.act(&threads, &action).map_err(say)?;
             Ok(json!({ "done": threads.len() }))
         }
+    }
+}
+
+/// A file an agent attaches, kept for its proposal.
+fn proposed_file(commands: &Commands, file: ProposedFile) -> Result<DraftAttachment, String> {
+    match file {
+        ProposedFile::File { path, name, data } => {
+            let bytes = STANDARD
+                .decode(data)
+                .map_err(|_| format!("{name}: its bytes are not base64."))?;
+            commands
+                .attach_bytes(&name, None, &bytes, AttachmentOrigin::File { path })
+                .map_err(say)
+        }
+        ProposedFile::Mail {
+            account,
+            message,
+            attachment,
+        } => commands
+            .attach_from_message(&account, &message, attachment, AttachmentOrigin::Mail)
+            .map_err(say)?
+            .ok_or_else(|| {
+                format!(
+                    "Message {} has no attachment {attachment} here (it may not be downloaded yet).",
+                    message.0
+                )
+            }),
     }
 }
 
@@ -292,12 +353,15 @@ fn message(commands: &Commands, labels: &mut LabelNames, m: &Message) -> Value {
             "reply_to": people(&h.reply_to),
             "body": if m.downloaded { Value::String(body) } else { Value::Null },
             "hidden_text": hidden,
-            "attachments": m.attachments.iter().map(|a| json!({
-                "name": a.filename,
-                "type": a.mime_type,
-                "size": a.size,
-            })).collect::<Vec<_>>(),
         },
+        // Numbered as read_attachment takes them. Inline ones are pictures
+        // the body shows.
+        "attachments": m.attachments.iter().enumerate().map(|(i, a)| json!({
+            "attachment": i,
+            "size": a.size,
+            "inline": a.inline,
+            "untrusted": { "name": a.filename, "type": a.mime_type },
+        })).collect::<Vec<_>>(),
     })
 }
 

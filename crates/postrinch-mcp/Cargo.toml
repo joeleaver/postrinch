@@ -15,6 +15,8 @@ postrinch-agents = { workspace = true }
 postrinch-commands = { workspace = true }
 postrinch-model = { workspace = true }
 rmcp = { version = "3.5", default-features = false, features = ["server", "transport-io", "macros"] }
+base64 = "0.22"
+pdf-extract = "0.9"
 schemars = "1.0"
 serde = { workspace = true }
 serde_json = { workspace = true }

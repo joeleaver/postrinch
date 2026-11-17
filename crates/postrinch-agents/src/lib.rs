@@ -18,4 +18,4 @@ pub mod wire;
 
 pub use registry::{Agent, Agents, Reach, Setup};
 pub use setup::App;
-pub use wire::{Call, KEY_ENV};
+pub use wire::{Call, KEY_ENV, ProposedFile};

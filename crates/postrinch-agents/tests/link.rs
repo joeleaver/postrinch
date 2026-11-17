@@ -154,6 +154,11 @@ fn an_agent_reads_and_changes_only_what_it_was_given() {
             subject: None,
             body: "I can cover it.".into(),
             reason: Some("You asked me to answer Ada.".into()),
+            attachments: vec![postrinch_agents::ProposedFile::File {
+                path: "/home/me/rota.csv".into(),
+                name: "rota.csv".into(),
+                data: "VGh1cnNkYXksbWUK".into(),
+            }],
         })
         .unwrap();
     assert_eq!(proposed["proposed"], true);
@@ -168,6 +173,27 @@ fn an_agent_reads_and_changes_only_what_it_was_given() {
         draft.body
     );
     assert_eq!(draft.subject, "Re: Thursday rota");
+    let file = &draft.attachments[0];
+    assert_eq!((file.name.as_str(), file.size), ("rota.csv", 12));
+    assert_eq!(
+        file.origin,
+        postrinch_model::AttachmentOrigin::File {
+            path: "/home/me/rota.csv".into()
+        }
+    );
+    assert_eq!(
+        Commands::new(store.clone())
+            .draft_attachment_bytes(file)
+            .unwrap(),
+        b"Thursday,me\n"
+    );
+    // Another account's files are out of reach, as its mail is.
+    let theirs = client.call(&Call::Attachment {
+        account: home.clone(),
+        message: postrinch_model::ProviderMessageId("m1".into()),
+        attachment: 0,
+    });
+    assert!(theirs.unwrap_err().contains("No account"));
     let elsewhere = client.call(&Call::Propose {
         account: home.clone(),
         thread: None,
@@ -177,6 +203,7 @@ fn an_agent_reads_and_changes_only_what_it_was_given() {
         subject: None,
         body: "x".into(),
         reason: None,
+        attachments: Vec::new(),
     });
     assert!(elsewhere.unwrap_err().contains("No account"));
 

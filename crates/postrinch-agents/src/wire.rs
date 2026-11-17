@@ -6,7 +6,7 @@
 //! [`Response`] with the same id.
 
 use postrinch_commands::{Folder, ThreadAction, ThreadRef};
-use postrinch_model::{EmailAddress, Mailbox, ProviderThreadId, SystemLabel};
+use postrinch_model::{EmailAddress, Mailbox, ProviderMessageId, ProviderThreadId, SystemLabel};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -110,6 +110,37 @@ pub enum Call {
         subject: Option<String>,
         body: String,
         reason: Option<String>,
+        /// Files to attach.
+        #[serde(default)]
+        attachments: Vec<ProposedFile>,
+    },
+    /// A message's attachment, by its place in the message (as read_thread
+    /// numbers them), its bytes in base64.
+    Attachment {
+        account: EmailAddress,
+        message: ProviderMessageId,
+        attachment: usize,
+    },
+}
+
+/// A file an agent attaches to a proposal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "from", rename_all = "snake_case")]
+pub enum ProposedFile {
+    /// A file on this computer, read by the agent's own server (whose
+    /// permissions are the agent's), sent with the path it came from so
+    /// the person sees it.
+    File {
+        path: String,
+        name: String,
+        /// The bytes, base64.
+        data: String,
+    },
+    /// An attachment of a message in an account this agent may see.
+    Mail {
+        account: EmailAddress,
+        message: ProviderMessageId,
+        attachment: usize,
     },
 }
 

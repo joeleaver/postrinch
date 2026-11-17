@@ -8,6 +8,7 @@
 // A GUI client that launches this on Windows shows no console window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod files;
 mod tools;
 
 use std::sync::Arc;
