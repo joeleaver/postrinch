@@ -261,6 +261,15 @@ mod tests {
     }
 
     #[test]
+    fn a_pdf_comes_back_as_its_text() {
+        let pdf = include_bytes!("../testdata/prices.pdf");
+        let read = reading(fetched("p.pdf", "application/pdf", pdf)).unwrap();
+        let answer: Value = serde_json::from_str(&text_of(&read)).unwrap();
+        let text = answer["untrusted"]["text"].as_str().unwrap();
+        assert!(text.contains("Spring prices"), "{text:?}");
+    }
+
+    #[test]
     fn other_files_are_saved_not_read() {
         let err = reading(fetched("a.zip", "application/zip", b"PK")).unwrap_err();
         assert!(err.contains("save_attachment"), "{err}");
