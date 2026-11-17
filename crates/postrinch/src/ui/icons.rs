@@ -23,6 +23,14 @@ pub enum Icon {
     Forward,
     /// Lines of falling length beside a down arrow: the list's order.
     Sort,
+    Paperclip,
+    /// A down arrow onto a line: save a file.
+    Save,
+    Picture,
+    Warning,
+    Close,
+    /// A page with a folded corner: a file.
+    File,
 }
 
 #[component]
@@ -76,6 +84,21 @@ pub fn icon(which: Icon) -> NodeHandle {
             "M14 6h7M14 12h5M14 18h3",
             "none",
         ),
+        Icon::Paperclip => one(
+            __scope,
+            "M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7",
+            "none",
+        ),
+        Icon::Save => two(__scope, "M12 4v11M7 10l5 5 5-5", "M5 20h14", "none"),
+        Icon::Picture => two(
+            __scope,
+            "M3 4h18v16H3z",
+            "M21 17l-5-5-9 8M9 8a2 2 0 1 0 0 4a2 2 0 1 0 0-4",
+            "none",
+        ),
+        Icon::Warning => two(__scope, "M12 3l9 16H3z", "M12 10v4M12 17h.01", "none"),
+        Icon::Close => one(__scope, "M6 6l12 12M18 6L6 18", "none"),
+        Icon::File => two(__scope, "M6 3h9l4 4v14H6z", "M14 3v5h5", "none"),
     }
 }
 

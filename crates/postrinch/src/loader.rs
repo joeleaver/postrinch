@@ -214,6 +214,9 @@ fn answer(commands: &Commands, state: State, request: Request) {
                     state
                         .rendered
                         .send(crate::pictures::render(commands, thread, &pictures));
+                    state
+                        .thumbnails
+                        .send(crate::attachments::thumbnails(commands, thread));
                 }
                 state.thread.send(thread);
             }

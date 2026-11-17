@@ -134,6 +134,9 @@ pub struct State {
     pub agent_removing: Signal<Option<postrinch_agents::Agent>>,
     /// The open thread's messages as they show, by message id.
     pub rendered: Signal<std::collections::HashMap<String, postrinch_commands::Rendered>>,
+    /// The open thread's attached pictures, small, by
+    /// `crate::attachments::key`.
+    pub thumbnails: Signal<std::collections::HashMap<String, String>>,
     /// Messages whose pictures from the web the person asked to see.
     pub pictures_shown: Signal<HashSet<String>>,
     /// Senders whose pictures always load (saved in Settings).
@@ -205,6 +208,7 @@ impl State {
             agent_dialog: Signal::new(None),
             agent_removing: Signal::new(None),
             rendered: Signal::new(Default::default()),
+            thumbnails: Signal::new(Default::default()),
             pictures_shown: Signal::new(HashSet::new()),
             pictures_from: Signal::new(settings.pictures_from.iter().cloned().collect()),
             composing: Signal::new(None),

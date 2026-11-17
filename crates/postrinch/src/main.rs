@@ -3,6 +3,7 @@
 mod actions;
 mod agents;
 mod appearance;
+mod attachments;
 mod changes;
 mod conversations;
 mod dates;

@@ -24,6 +24,10 @@ pub const LIGHT: &str = r#"
     --notice-line: #c9d8f3;
     --warn-bg: #fdf4e3;
     --warn-line: #f0cf96;
+    --red-tint: #f9dedc;
+    --red-ink: #8c1d18;
+    --green-tint: #d7f0e0;
+    --green-ink: #1d5b36;
     --rinch-primary-color: #2456b8;
     /* A title bar in the window's own colours, not rinch's blue one. */
     --rinch-titlebar-bg: var(--surface);
@@ -57,6 +61,10 @@ pub const DARK: &str = r#"
     --notice-line: #2f4670;
     --warn-bg: #3a2c12;
     --warn-line: #6b5120;
+    --red-tint: #4a2626;
+    --red-ink: #f2b8b5;
+    --green-tint: #1f3d2c;
+    --green-ink: #a8dcbc;
     --rinch-titlebar-hover: rgba(231, 233, 238, 0.08);
     --rinch-titlebar-active: rgba(231, 233, 238, 0.14);
 }

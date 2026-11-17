@@ -5,10 +5,12 @@
 //! buttons are in the dialog's footer, which stays put as a long draft
 //! scrolls.
 
-use postrinch_model::{Draft, EmailAddress, format_mailboxes, parse_mailboxes};
+use postrinch_model::{Draft, DraftAttachment, EmailAddress, format_mailboxes, parse_mailboxes};
 use rinch::prelude::*;
 
 use crate::state::State;
+use crate::ui::compose_files::{self, attached_files};
+use crate::ui::icons::{Icon, icon};
 use crate::writing::Compose;
 
 /// The open form's fields, for the buttons in the dialog's footer, which
@@ -22,6 +24,7 @@ struct Form {
     bcc: Signal<String>,
     subject: Signal<String>,
     body: Signal<String>,
+    files: Signal<Vec<DraftAttachment>>,
 }
 
 impl Form {
@@ -35,6 +38,7 @@ impl Form {
         out.bcc = parse_mailboxes(&self.bcc.get()).map_err(|e| format!("Bcc: {e}."))?;
         out.subject = self.subject.get();
         out.body = self.body.get();
+        out.attachments = self.files.get();
         Ok(out)
     }
 }
@@ -57,9 +61,25 @@ pub fn compose_dialog(state: State) -> NodeHandle {
         rsx! {
             div { class: "compose-footer",
                 Button { variant: "subtle", color: "red", size: "sm", onclick: move || state.discard_composed(), "Discard" }
+                button {
+                    class: "compose-attach",
+                    onclick: move || {
+                        if let Some(form) = open.get() {
+                            compose_files::pick(state, form.files);
+                        }
+                    },
+                    {icon(__scope, Icon::Paperclip)}
+                    span { "Attach…" }
+                }
                 span { class: "compose-footer-gap" }
                 Button { variant: "default", size: "sm", onclick: move || act(false), "Keep as draft" }
-                Button { variant: "filled", size: "sm", onclick: move || act(true), "Send" }
+                // Off while the files are more than Gmail sends (a keyed
+                // loop, as a Button's `disabled` is read once).
+                for over in std::iter::once(open.get().is_some_and(|f| compose_files::too_large(&f.files.get()))) {
+                    span { key: over.to_string(), class: "compose-send",
+                        Button { variant: "filled", size: "sm", disabled: over, onclick: move || act(true), "Send" }
+                    }
+                }
             }
         }
     });
@@ -91,6 +111,8 @@ fn form(state: State, compose: Compose, open: Signal<Option<Form>>) -> NodeHandl
     let bcc = Signal::new(format_mailboxes(&draft.bcc));
     let subject = Signal::new(draft.subject.clone());
     let body = Signal::new(draft.body.clone());
+    let files = Signal::new(draft.attachments.clone());
+    let dragging = Signal::new(false);
     let fields = Form {
         draft: draft.clone(),
         from,
@@ -99,6 +121,7 @@ fn form(state: State, compose: Compose, open: Signal<Option<Form>>) -> NodeHandl
         bcc,
         subject,
         body,
+        files,
     };
     open.set(Some(fields.clone()));
     let accounts: Vec<SelectOption> = state.sidebar.with(|s| {
@@ -143,7 +166,20 @@ fn form(state: State, compose: Compose, open: Signal<Option<Form>>) -> NodeHandl
         rsx! { h2 { class: "dialog-title", {title} } }
     });
     rsx! {
+        // Files dropped anywhere on the form are attached; while they are
+        // dragged over it, it says so.
         div { class: "compose",
+            onfiledragenter: move || dragging.set(true),
+            onfiledragleave: move || dragging.set(false),
+            ondropfiles: move |dropped: Vec<rinch::file::LocalFile>| {
+                dragging.set(false);
+                compose_files::attach(state, files, dropped);
+            },
+            div { class: "compose-drop",
+                style: {move || if dragging.get() { "" } else { "display: none" }},
+                {icon(__scope, Icon::Paperclip)}
+                span { class: "compose-drop-title", "Drop to attach" }
+            }
             {banner}
             {heading}
             div { class: "compose-fields",
@@ -163,6 +199,7 @@ fn form(state: State, compose: Compose, open: Signal<Option<Form>>) -> NodeHandl
                 value_fn: move || body.get(),
                 oninput: move |v: String| body.set(v),
             }
+            {attached_files(__scope, files)}
             div { class: "compose-warn",
                 style: {move || if outside.get().is_empty() { "display: none".to_owned() } else { String::new() }},
                 {move || outside.get()}
@@ -204,7 +241,18 @@ fn outside_line(draft: &Result<Draft, String>) -> String {
 }
 
 pub const CSS: &str = r#"
-.compose { display: flex; flex-direction: column; gap: 12px; }
+.compose { position: relative; display: flex; flex-direction: column; gap: 12px; }
+.compose-drop {
+    position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+    z-index: 5;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    border: 2px dashed var(--accent);
+    border-radius: 10px;
+    background: var(--accent-tint);
+    color: var(--accent-ink);
+}
+.compose-drop svg { width: 34px; height: 34px; }
+.compose-drop-title { font-size: 15px; font-weight: 600; }
 .compose-banner {
     display: flex;
     flex-direction: column;

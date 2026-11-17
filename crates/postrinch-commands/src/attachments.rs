@@ -127,10 +127,16 @@ pub fn size_text(bytes: u64) -> String {
     } else if b < KB * KB {
         format!("{:.0} KB", (b / KB).max(1.0))
     } else if b < KB * KB * KB {
-        format!("{:.1} MB", b / KB / KB)
+        format!("{} MB", one_place(b / KB / KB))
     } else {
-        format!("{:.1} GB", b / KB / KB / KB)
+        format!("{} GB", one_place(b / KB / KB / KB))
     }
+}
+
+/// A number to one decimal place, without a trailing `.0`.
+fn one_place(n: f64) -> String {
+    let text = format!("{n:.1}");
+    text.strip_suffix(".0").map(str::to_owned).unwrap_or(text)
 }
 
 /// The type a file's name suggests.
@@ -220,6 +226,6 @@ mod tests {
     fn sizes_read_as_people_say_them() {
         assert_eq!(size_text(86_016), "84 KB");
         assert_eq!(size_text(4_823_449), "4.6 MB");
-        assert_eq!(size_text(25 * 1024 * 1024), "25.0 MB");
+        assert_eq!(size_text(25 * 1024 * 1024), "25 MB");
     }
 }

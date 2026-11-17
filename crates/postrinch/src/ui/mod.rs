@@ -3,7 +3,9 @@
 mod about;
 mod agent_dialogs;
 mod agents_settings;
+mod attachment_cards;
 mod compose;
+mod compose_files;
 mod icons;
 mod keys;
 mod label_edit;
@@ -103,7 +105,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {outgoing::CSS} }
                 style { {about::CSS} }
                 style { {thread_actions::CSS} }
-                style { {list_head::CSS} }
+                style { {list_head::CSS} {attachment_cards::CSS} {compose_files::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}
                 if state.view.get() == View::Mail {

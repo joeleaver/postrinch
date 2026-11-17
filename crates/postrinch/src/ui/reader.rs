@@ -200,15 +200,8 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
             }
         }
     };
-    let attachments: Vec<NodeHandle> = message
-        .attachments
-        .iter()
-        .filter(|a| !a.inline)
-        .map(|a| {
-            let name = a.filename.clone().unwrap_or_else(|| a.mime_type.clone());
-            rsx! { span { class: "chip", {format!("📎 {name}")} } }
-        })
-        .collect();
+    let attachments =
+        crate::ui::attachment_cards::attachment_cards(__scope, state, message.clone());
     rsx! {
         div { class: "message",
             div { class: "message-head",
@@ -220,7 +213,7 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
             }
             {to}
             {body}
-            div { class: "attachments", {attachments} }
+            {attachments}
         }
     }
 }

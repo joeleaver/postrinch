@@ -347,7 +347,6 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .row .answer-icons { display: none; margin: -7px -8px -7px 0; }
 .row:hover .answer-icons { display: flex; }
 .row:hover .when { display: none; }
-.attachments { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
     padding: 4px 10px;
     border: 1px solid var(--line);
