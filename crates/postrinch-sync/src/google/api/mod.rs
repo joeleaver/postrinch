@@ -273,13 +273,44 @@ impl GmailApi {
         &self,
         method: reqwest::Method,
         account: &EmailAddress,
-        (cost, priority): (Cost, Priority),
+        cost: (Cost, Priority),
         path: &str,
         query: &[(&str, &str)],
         json: Option<&serde_json::Value>,
         resend: bool,
     ) -> SyncResult<bytes::Bytes> {
-        let url = format!("{}/{path}", self.base);
+        let payload = json.map(Payload::Json);
+        self.request_with(method, account, cost, path, query, payload, resend)
+            .await
+    }
+
+    /// [`Self::request`] with any [`Payload`]: an upload goes to Gmail's
+    /// upload address for `path`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn request_with(
+        &self,
+        method: reqwest::Method,
+        account: &EmailAddress,
+        (cost, priority): (Cost, Priority),
+        path: &str,
+        query: &[(&str, &str)],
+        payload: Option<Payload<'_>>,
+        resend: bool,
+    ) -> SyncResult<bytes::Bytes> {
+        let mut query = query.to_vec();
+        let url = match payload {
+            Some(Payload::Upload { .. }) => {
+                query.push(("uploadType", "multipart"));
+                format!("{}/{path}", upload_base(&self.base))
+            }
+            _ => format!("{}/{path}", self.base),
+        };
+        let query = query.as_slice();
+        // An upload's body, made once for every attempt.
+        let upload = match payload {
+            Some(Payload::Upload { metadata, raw }) => Some(related(metadata, raw)),
+            _ => None,
+        };
         let mut refreshed = false;
         let mut attempt = 0;
         loop {
@@ -287,8 +318,14 @@ impl GmailApi {
             self.quota.acquire(&account.key(), cost, priority).await;
             let token = self.auth.access_token(account).await?;
             let mut request = self.http.request(method.clone(), &url);
-            if let Some(body) = json {
-                request = request.json(body);
+            match (payload, &upload) {
+                (Some(Payload::Json(body)), _) => request = request.json(body),
+                (_, Some(body)) => {
+                    request = request
+                        .header(reqwest::header::CONTENT_TYPE, RELATED_TYPE)
+                        .body(body.clone());
+                }
+                _ => {}
             }
             let response = match request.bearer_auth(&token).query(query).send().await {
                 Ok(r) => r,
@@ -342,6 +379,70 @@ impl GmailApi {
             }
             return Err(SyncError::api("Gmail", status.as_u16(), message));
         }
+    }
+}
+
+/// What a request carries.
+#[derive(Clone, Copy)]
+pub(crate) enum Payload<'a> {
+    Json(&'a serde_json::Value),
+    /// A whole message as bytes, beside the JSON that says where it goes:
+    /// Gmail's "multipart" upload, for messages too large to send as JSON.
+    Upload {
+        metadata: &'a serde_json::Value,
+        raw: &'a [u8],
+    },
+}
+
+const BOUNDARY: &str = "postrinch-upload-7f3a9c1e5b";
+const RELATED_TYPE: &str = "multipart/related; boundary=postrinch-upload-7f3a9c1e5b";
+
+/// Gmail's upload address for its API at `base`.
+fn upload_base(base: &str) -> String {
+    match base.find("/gmail/v1") {
+        Some(at) => format!("{}/upload{}", &base[..at], &base[at..]),
+        None => format!("{base}/upload"),
+    }
+}
+
+/// A `multipart/related` body: the JSON, then the message.
+fn related(metadata: &serde_json::Value, raw: &[u8]) -> bytes::Bytes {
+    let mut body = Vec::with_capacity(raw.len() + 512);
+    body.extend_from_slice(
+        format!(
+            "--{BOUNDARY}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata}\r\n\
+             --{BOUNDARY}\r\nContent-Type: message/rfc822\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(raw);
+    body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
+    body.into()
+}
+
+#[cfg(test)]
+mod upload_tests {
+    use super::*;
+
+    #[test]
+    fn uploads_go_to_gmail_s_upload_address() {
+        assert_eq!(
+            upload_base("https://gmail.googleapis.com/gmail/v1/users/me"),
+            "https://gmail.googleapis.com/upload/gmail/v1/users/me"
+        );
+        assert_eq!(
+            upload_base("http://127.0.0.1:9/x"),
+            "http://127.0.0.1:9/x/upload"
+        );
+        let body = related(
+            &serde_json::json!({"threadId": "t"}),
+            b"Subject: hi\r\n\r\nbody",
+        );
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.starts_with("--postrinch-upload-7f3a9c1e5b\r\n"));
+        assert!(text.contains("{\"threadId\":\"t\"}"));
+        assert!(text.contains("message/rfc822\r\n\r\nSubject: hi"));
+        assert!(text.ends_with("--postrinch-upload-7f3a9c1e5b--\r\n"));
     }
 }
 

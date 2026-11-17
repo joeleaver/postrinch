@@ -215,3 +215,64 @@ async fn drafts_are_kept_replaced_and_cleared_when_sent() {
         "sent, so the draft goes"
     );
 }
+
+#[tokio::test]
+async fn attachments_go_with_the_message_and_a_large_one_is_uploaded() {
+    let f = fixture().await;
+    Mock::given(method("POST"))
+        .and(path("/gmail/messages/send"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"id": "s1", "threadId": "t1"})),
+        )
+        .mount(&f.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/gmail/upload/messages/send"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"id": "s2", "threadId": "t1"})),
+        )
+        .mount(&f.server)
+        .await;
+    let attach = |name: &str, bytes: &[u8]| postrinch_model::DraftAttachment {
+        name: name.into(),
+        mime_type: "application/octet-stream".into(),
+        size: bytes.len() as u64,
+        blob: f.store.put_attachment(bytes).unwrap(),
+        origin: Default::default(),
+    };
+    let mut small = reply(&f);
+    small.attachments = vec![attach("sheet.csv", b"one,two\n")];
+    let mut large = reply(&f);
+    // Random-looking bytes, so the message stays large once encoded.
+    let big: Vec<u8> = (0..4_000_000u32)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect();
+    large.attachments = vec![attach("scan.tiff", &big)];
+    f.store.queue_outgoing(&small, OutgoingKind::Send).unwrap();
+    f.store.queue_outgoing(&large, OutgoingKind::Send).unwrap();
+
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 2);
+    let sent = requests_to(&f, "POST", "/gmail/messages/send").await;
+    assert_eq!(sent.len(), 1);
+    let raw = sent_raw(&sent[0]);
+    assert!(
+        raw.contains("filename=\"sheet.csv\"") || raw.contains("filename=sheet.csv"),
+        "{raw}"
+    );
+
+    let uploads: Vec<_> = f
+        .server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.url.path() == "/gmail/upload/messages/send")
+        .collect();
+    assert_eq!(uploads.len(), 1);
+    let upload = &uploads[0];
+    assert!(upload.url.query().unwrap().contains("uploadType=multipart"));
+    let body = String::from_utf8_lossy(&upload.body);
+    assert!(body.contains("{\"threadId\":\"t1\"}"));
+    assert!(body.contains("message/rfc822"));
+    assert!(body.contains("scan.tiff"));
+}

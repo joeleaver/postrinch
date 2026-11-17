@@ -22,8 +22,14 @@ pub const MARKER_HEADER: &str = "X-Postrinch-Id";
 
 /// The message a draft makes, from `from_name` at its account, with
 /// `message_id` (without brackets) as its `Message-ID` and its
-/// [`MARKER_HEADER`].
-pub fn build_message(draft: &Draft, from_name: Option<&str>, message_id: &str) -> Vec<u8> {
+/// [`MARKER_HEADER`]. `files` are the bytes of the draft's attachments, in
+/// their order.
+pub fn build_message(
+    draft: &Draft,
+    from_name: Option<&str>,
+    message_id: &str,
+    files: &[Vec<u8>],
+) -> Vec<u8> {
     let from = Mailbox::new(from_name.map(str::to_owned), draft.account.clone());
     let mut message = MessageBuilder::new()
         .from(address(&from))
@@ -49,6 +55,13 @@ pub fn build_message(draft: &Draft, from_name: Option<&str>, message_id: &str) -
     }
     if !draft.answering.references.is_empty() {
         message = message.references(draft.answering.references.clone());
+    }
+    for (attachment, bytes) in draft.attachments.iter().zip(files) {
+        message = message.attachment(
+            attachment.mime_type.clone(),
+            attachment.name.clone(),
+            bytes.as_slice(),
+        );
     }
     message
         .write_to_vec()
@@ -80,7 +93,7 @@ mod tests {
         draft.answering.references = vec!["m0@example.org".into(), "m1@example.org".into()];
         draft.answering.thread = Some(ProviderThreadId("t1".into()));
 
-        let raw = build_message(&draft, Some("Ada Lovelace"), "out1@example.org");
+        let raw = build_message(&draft, Some("Ada Lovelace"), "out1@example.org", &[]);
         let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
         assert_eq!(parsed.subject(), Some("Re: Thursday — the rota"));
         assert_eq!(parsed.message_id(), Some("out1@example.org"));
@@ -102,5 +115,26 @@ mod tests {
         );
         let body = parsed.body_text(0).unwrap().replace("\r\n", "\n");
         assert_eq!(body.trim_end(), draft.body);
+    }
+
+    #[test]
+    fn attachments_go_as_files() {
+        let mut draft = Draft::new(EmailAddress::parse("ada@example.org").unwrap());
+        draft.to = vec![mailbox(None, "bob@example.org")];
+        draft.subject = "The sheet".into();
+        draft.body = "Attached.".into();
+        draft.attachments = vec![postrinch_model::DraftAttachment {
+            name: "price sheet.csv".into(),
+            mime_type: "text/csv".into(),
+            size: 8,
+            blob: "x".into(),
+            origin: Default::default(),
+        }];
+        let raw = build_message(&draft, None, "out2@example.org", &[b"one,two\n".to_vec()]);
+        let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+        let file = parsed.attachments().next().unwrap();
+        assert_eq!(file.attachment_name(), Some("price sheet.csv"));
+        assert_eq!(&*file.decoded(), b"one,two\n");
+        assert_eq!(parsed.body_text(0).unwrap().trim_end(), "Attached.");
     }
 }

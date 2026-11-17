@@ -63,15 +63,19 @@ struct IdList {
     messages: Vec<Taken>,
 }
 
-/// The JSON Gmail takes for a message: its raw bytes and, for a reply, the
-/// thread to file it in.
-fn message_json(raw: &[u8], thread: Option<&str>) -> serde_json::Value {
-    let mut message = json!({ "raw": URL_SAFE_NO_PAD.encode(raw) });
+/// The JSON Gmail takes for a message, without its bytes: for a reply,
+/// the thread to file it in.
+fn message_json(thread: Option<&str>) -> serde_json::Value {
+    let mut message = json!({});
     if let Some(thread) = thread {
         message["threadId"] = json!(thread);
     }
     message
 }
+
+/// Messages larger than this go up as uploads: Gmail takes about 5 MB of
+/// JSON, and base64 makes a message a third larger.
+const JSON_MAX_RAW: usize = 3_500_000;
 
 fn read<T: for<'de> Deserialize<'de>>(body: &[u8], what: &str) -> SyncResult<T> {
     serde_json::from_slice(body)
@@ -79,6 +83,39 @@ fn read<T: for<'de> Deserialize<'de>>(body: &[u8], what: &str) -> SyncResult<T> 
 }
 
 impl GmailApi {
+    /// Give Gmail a message: `metadata` with its bytes inside (under
+    /// `message` when `in_message`), or, for a large message, as an
+    /// upload beside it. Never retried on a dropped connection.
+    #[allow(clippy::too_many_arguments)]
+    async fn post_message(
+        &self,
+        method: Method,
+        account: &EmailAddress,
+        cost: (Cost, super::Priority),
+        path: &str,
+        mut metadata: serde_json::Value,
+        in_message: bool,
+        raw: &[u8],
+    ) -> SyncResult<bytes::Bytes> {
+        if raw.len() > JSON_MAX_RAW {
+            let payload = super::Payload::Upload {
+                metadata: &metadata,
+                raw,
+            };
+            return self
+                .request_with(method, account, cost, path, &[], Some(payload), false)
+                .await;
+        }
+        let encoded = json!(URL_SAFE_NO_PAD.encode(raw));
+        if in_message {
+            metadata["message"]["raw"] = encoded;
+        } else {
+            metadata["raw"] = encoded;
+        }
+        self.request(method, account, cost, path, &[], Some(&metadata), false)
+            .await
+    }
+
     /// Send a message. Never sent twice by a retry here: a connection that
     /// drops is an error, and [`GmailApi::find_sent`] tells whether Gmail
     /// took it before the next attempt.
@@ -88,16 +125,15 @@ impl GmailApi {
         raw: &[u8],
         thread: Option<&str>,
     ) -> SyncResult<Taken> {
-        let body = message_json(raw, thread);
         let answer = self
-            .request(
+            .post_message(
                 Method::POST,
                 account,
                 (Cost::SendMessage, FG),
                 "messages/send",
-                &[],
-                Some(&body),
+                message_json(thread),
                 false,
+                raw,
             )
             .await?;
         read(&answer, "messages/send")
@@ -151,7 +187,7 @@ impl GmailApi {
         thread: Option<&str>,
         replacing: Option<&str>,
     ) -> SyncResult<Taken> {
-        let body = json!({ "message": message_json(raw, thread) });
+        let body = json!({ "message": message_json(thread) });
         let existing = match replacing {
             Some(message) => self.draft_of(account, message).await?,
             None => None,
@@ -161,26 +197,26 @@ impl GmailApi {
                 let path = format!("drafts/{draft}");
                 let mut body = body;
                 body["id"] = json!(draft);
-                self.request(
+                self.post_message(
                     Method::PUT,
                     account,
                     (Cost::Draft, FG),
                     &path,
-                    &[],
-                    Some(&body),
-                    false,
+                    body,
+                    true,
+                    raw,
                 )
                 .await?
             }
             None => {
-                self.request(
+                self.post_message(
                     Method::POST,
                     account,
                     (Cost::Draft, FG),
                     "drafts",
-                    &[],
-                    Some(&body),
-                    false,
+                    body,
+                    true,
+                    raw,
                 )
                 .await?
             }

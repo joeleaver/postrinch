@@ -10,12 +10,14 @@
 //! asked for them, as loading them tells the sender the mail was opened
 //! (sanitize.rs). A message with no HTML part is its text, escaped.
 
+mod parts;
 mod plain;
 mod quotes;
 mod sanitize;
 
 use mail_parser::{MessageParser, PartKind};
 
+pub use parts::{Part, attachment};
 pub use plain::has_own_colours;
 pub use quotes::{QUOTE_SELECTORS, quote_sheet, text_document};
 pub use sanitize::{policy, sanitize};

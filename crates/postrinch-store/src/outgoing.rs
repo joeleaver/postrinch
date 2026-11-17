@@ -48,6 +48,19 @@ pub struct Outgoing {
 }
 
 impl Store {
+    /// Keep the bytes of a file attached to a draft, returning their
+    /// SHA-256 for its [`postrinch_model::DraftAttachment`]. Stored once
+    /// however many drafts attach them; kept while queued mail refers to
+    /// them (see [`Store::collect_garbage`]).
+    pub fn put_attachment(&self, bytes: &[u8]) -> StoreResult<String> {
+        Ok(self.blobs.put(bytes)?)
+    }
+
+    /// The bytes of a draft's attachment, if they are still here.
+    pub fn attachment_bytes(&self, blob: &str) -> StoreResult<Option<Vec<u8>>> {
+        Ok(self.blobs.get(blob)?)
+    }
+
     /// Record outgoing mail; it is sent (or kept, or shown) from here.
     pub fn queue_outgoing(&self, draft: &Draft, kind: OutgoingKind) -> StoreResult<u64> {
         let _order = self.outbox_lock.lock().unwrap_or_else(|e| e.into_inner());

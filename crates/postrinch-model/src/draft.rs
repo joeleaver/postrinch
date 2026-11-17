@@ -25,6 +25,38 @@ pub struct Proposal {
     pub reason: Option<String>,
 }
 
+/// Where a draft's attachment came from, shown beside it: what an agent
+/// attached is the person's to check before it goes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum AttachmentOrigin {
+    /// The person picked or dropped it, or it came with a draft they kept.
+    #[default]
+    Person,
+    /// It came with the message being forwarded, or from another message.
+    Mail,
+    /// An agent attached this file from this computer.
+    File { path: String },
+    /// An agent made it and gave its bytes.
+    Agent,
+}
+
+/// A file attached to a draft. Its bytes are kept in the store's blob
+/// directory under `blob`, so a draft stays small wherever it is copied.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DraftAttachment {
+    pub name: String,
+    pub mime_type: String,
+    pub size: u64,
+    /// The SHA-256 of its bytes, in hex.
+    pub blob: String,
+    #[serde(default)]
+    pub origin: AttachmentOrigin,
+}
+
+/// The most a message's attachments may come to: Gmail sends up to 25 MB.
+pub const MAX_ATTACHED: u64 = 25 * 1024 * 1024;
+
 /// A message being written.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Draft {
@@ -40,6 +72,8 @@ pub struct Draft {
     /// The provider's draft this one replaces, when it was opened from one.
     pub replaces: Option<ProviderMessageId>,
     pub proposal: Option<Proposal>,
+    #[serde(default)]
+    pub attachments: Vec<DraftAttachment>,
 }
 
 impl Draft {
@@ -55,7 +89,13 @@ impl Draft {
             answering: Answering::default(),
             replaces: None,
             proposal: None,
+            attachments: Vec::new(),
         }
+    }
+
+    /// What its attachments come to, in bytes.
+    pub fn attached(&self) -> u64 {
+        self.attachments.iter().map(|a| a.size).sum()
     }
 
     /// Everyone it goes to.

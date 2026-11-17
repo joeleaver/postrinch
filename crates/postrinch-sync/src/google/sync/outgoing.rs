@@ -75,7 +75,30 @@ impl GmailSync {
         from_name: Option<&str>,
     ) -> SyncResult<()> {
         let message_id = outgoing_message_id(outgoing);
-        let raw = build_message(&outgoing.draft, from_name, &message_id);
+        let wanted = outgoing.draft.attachments.clone();
+        let files = self
+            .with_store(move |s| {
+                wanted
+                    .iter()
+                    .map(|a| s.attachment_bytes(&a.blob).map(|b| (a.name.clone(), b)))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(Into::into)
+            })
+            .await?;
+        let mut bytes = Vec::with_capacity(files.len());
+        for (name, file) in files {
+            // Gone from this computer: the person must take it out or attach
+            // it again, so this is a refusal, not a failure to retry.
+            let file = file.ok_or_else(|| {
+                SyncError::api(
+                    "Postrinch",
+                    400,
+                    format!("{name} is no longer on this computer"),
+                )
+            })?;
+            bytes.push(file);
+        }
+        let raw = build_message(&outgoing.draft, from_name, &message_id, &bytes);
         let thread = outgoing
             .draft
             .answering

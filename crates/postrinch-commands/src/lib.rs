@@ -9,6 +9,7 @@
 
 mod accounts;
 mod actions;
+mod attachments;
 mod error;
 mod filters;
 mod folders;
@@ -24,11 +25,13 @@ use postrinch_store::Store;
 
 pub use accounts::AccountInfo;
 pub use actions::{LabelChoice, ThreadAction, ThreadRef};
+pub use attachments::{file_name, is_program, mime_for, size_text};
 pub use error::{CommandError, CommandResult};
 pub use filters::Filters;
 pub use folders::{AccountFolders, Folder, FolderEntry, Sidebar};
 pub use labels::{AppLabels, Chip, LabelNode, LabelRole, LabelTree, app_of, role};
 pub use messages::{Grouping, MessageRef};
+pub use postrinch_render::Part;
 pub use postrinch_render::Rendered;
 pub use query::{LabelName, Query, label_matches};
 pub use search::{Excerpt, Remote, SearchResults};

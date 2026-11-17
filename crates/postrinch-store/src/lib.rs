@@ -103,11 +103,12 @@ impl Store {
     }
 
     /// Delete raw messages no stored message refers to any more (after a
-    /// message or an account is removed). Blobs written in the last
+    /// message or an account is removed), and attachments no queued mail
+    /// refers to. Blobs written in the last
     /// `grace` are kept, for writers still between storing a blob and the
     /// message that refers to it. Returns how many were deleted.
     pub fn collect_garbage(&self, grace: Duration) -> StoreResult<usize> {
-        let referenced: std::collections::HashSet<String> = self
+        let mut referenced: std::collections::HashSet<String> = self
             .db
             .scan_type_projected(messages::TYPE, &["raw_sha256"])?
             .into_iter()
@@ -115,6 +116,9 @@ impl Store {
             .map(|f| f.opt_str("raw_sha256"))
             .filter_map(|r| r.transpose())
             .collect::<StoreResult<_>>()?;
+        for outgoing in self.outgoing()? {
+            referenced.extend(outgoing.draft.attachments.into_iter().map(|a| a.blob));
+        }
         Ok(self.blobs.retain(|hash| referenced.contains(hash), grace)?)
     }
 }

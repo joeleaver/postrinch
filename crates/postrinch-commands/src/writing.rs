@@ -9,8 +9,8 @@
 use std::collections::HashSet;
 
 use postrinch_model::{
-    Answering, Draft, EmailAddress, Mailbox, Message, ProviderMessageId, ProviderThreadId,
-    SystemLabel, Timestamp,
+    Answering, AttachmentOrigin, Draft, EmailAddress, Mailbox, Message, ProviderMessageId,
+    ProviderThreadId, SystemLabel, Timestamp,
 };
 use postrinch_store::{Outgoing, OutgoingKind};
 use serde::{Deserialize, Serialize};
@@ -87,6 +87,7 @@ impl Commands {
                 draft.subject = prefixed("Fwd:", &subject);
                 draft.body = format!("\n\n{}", forwarded(message, &self.quotable(message)?));
                 draft.answering.thread = Some(thread.clone());
+                draft.attachments = self.carried(message, AttachmentOrigin::Mail)?;
             }
         }
         Ok(draft)
@@ -121,6 +122,7 @@ impl Commands {
             references: h.references.clone(),
         };
         draft.replaces = Some(message.id.clone());
+        draft.attachments = self.carried(message, AttachmentOrigin::Person)?;
         Ok(draft)
     }
 
@@ -132,6 +134,7 @@ impl Commands {
         if draft.recipients().next().is_none() {
             return Err(CommandError::Invalid("Add someone to send it to.".into()));
         }
+        self.check_attached(draft)?;
         self.store.queue_outgoing(draft, OutgoingKind::Send)?;
         self.settle(settles)
     }
@@ -139,6 +142,7 @@ impl Commands {
     /// Keep a draft with the provider, to finish later.
     pub fn keep_draft(&self, draft: &Draft, settles: Option<u64>) -> CommandResult<()> {
         self.check(&draft.account)?;
+        self.check_attached(draft)?;
         self.store.queue_outgoing(draft, OutgoingKind::Keep)?;
         self.settle(settles)
     }
@@ -150,6 +154,7 @@ impl Commands {
         if draft.proposal.is_none() {
             return Err(CommandError::Invalid("A proposal names its agent.".into()));
         }
+        self.check_attached(draft)?;
         Ok(self.store.queue_outgoing(draft, OutgoingKind::Proposed)?)
     }
 

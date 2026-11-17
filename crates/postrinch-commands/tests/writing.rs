@@ -217,3 +217,75 @@ fn answers_quote_html_mail_as_drawn_not_its_text_part() {
         assert!(!draft.body.contains("https://"), "{}", draft.body);
     }
 }
+
+#[test]
+fn a_forward_carries_the_files_and_nothing_goes_over_gmail_s_limit() {
+    let (_dir, store, commands, me) = setup();
+    let raw = "From: Dana <dana@example.org>\r\n\
+        To: me@example.org\r\n\
+        Subject: Proofs\r\n\
+        Message-ID: <p1@example.org>\r\n\
+        MIME-Version: 1.0\r\n\
+        Content-Type: multipart/mixed; boundary=\"b\"\r\n\
+        \r\n\
+        --b\r\n\
+        Content-Type: text/plain\r\n\
+        \r\n\
+        Proofs attached.\r\n\
+        --b\r\n\
+        Content-Type: text/csv; name=\"prices.csv\"\r\n\
+        Content-Disposition: attachment; filename=\"prices.csv\"\r\n\
+        Content-Transfer-Encoding: base64\r\n\
+        \r\n\
+        b25lLHR3bwo=\r\n\
+        --b--\r\n";
+    let message = Message {
+        account: me.clone(),
+        id: ProviderMessageId("p1".into()),
+        thread: ProviderThreadId("tp".into()),
+        headers: MessageHeaders {
+            message_id: Some("p1@example.org".into()),
+            subject: Some("Proofs".into()),
+            from: vec![mailbox("Dana", "dana@example.org")],
+            ..Default::default()
+        },
+        received: Timestamp::from_millis(1_762_200_000_000),
+        labels: vec!["INBOX".into()],
+        flags: Flags::default(),
+        snippet: String::new(),
+        body_text: "Proofs attached.".into(),
+        downloaded: true,
+        attachments: vec![postrinch_model::AttachmentInfo {
+            filename: Some("prices.csv".into()),
+            mime_type: "text/csv".into(),
+            size: 8,
+            content_id: None,
+            inline: false,
+        }],
+        size: raw.len() as u64,
+    };
+    store.put_message(&message, Some(raw.as_bytes())).unwrap();
+    let (t, m) = (
+        ProviderThreadId("tp".into()),
+        ProviderMessageId("p1".into()),
+    );
+    let reply = commands
+        .start_draft(&me, answering(&t, &m), &Start::Reply)
+        .unwrap();
+    assert!(reply.attachments.is_empty(), "a reply carries no files");
+
+    let mut forward = commands
+        .start_draft(&me, answering(&t, &m), &Start::Forward)
+        .unwrap();
+    assert_eq!(forward.attachments.len(), 1);
+    let file = &forward.attachments[0];
+    assert_eq!((file.name.as_str(), file.size), ("prices.csv", 8));
+    assert_eq!(file.origin, postrinch_model::AttachmentOrigin::Mail);
+    assert_eq!(commands.draft_attachment_bytes(file).unwrap(), b"one,two\n");
+
+    forward.to = vec![mailbox("Printer", "printer@example.org")];
+    forward.attachments[0].size = postrinch_model::MAX_ATTACHED + 1;
+    let refused = commands.send_draft(&forward, None).unwrap_err();
+    assert!(matches!(refused, CommandError::Invalid(_)), "{refused}");
+    assert!(store.outgoing().unwrap().is_empty());
+}
