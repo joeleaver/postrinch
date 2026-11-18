@@ -61,6 +61,13 @@ pub(crate) enum Cost {
     SendMessage,
     /// `drafts.create`, `drafts.update` or `drafts.delete`.
     Draft,
+    /// `settings.filters` and `settings.forwardingAddresses` calls, and
+    /// `labels.create`.
+    Settings,
+    /// `messages.insert`.
+    InsertMessage,
+    /// `messages.delete`.
+    DeleteMessage,
 }
 
 impl Cost {
@@ -75,6 +82,9 @@ impl Cost {
             Cost::Trash => 5.0,
             Cost::SendMessage => 100.0,
             Cost::Draft => 15.0,
+            Cost::Settings => 5.0,
+            Cost::InsertMessage => 25.0,
+            Cost::DeleteMessage => 10.0,
         }
     }
 }

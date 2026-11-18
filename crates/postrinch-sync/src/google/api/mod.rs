@@ -8,9 +8,13 @@ use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 
 mod outgoing;
+mod settings;
 mod snippet;
 mod types;
 
+#[cfg(test)]
+pub(crate) use settings::Criteria;
+pub(crate) use settings::FilterResource;
 pub(crate) use types::*;
 
 use super::GoogleAuth;

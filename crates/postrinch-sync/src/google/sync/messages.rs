@@ -58,6 +58,9 @@ impl GmailSync {
             Err(e) if e.is_not_found() => return self.remove(account, id).await,
             Err(e) => return Err(e),
         };
+        if self.is_settings(account, &meta.label_ids) {
+            return self.remove(account, id).await;
+        }
         let mut result = self.store_headers(account, &meta, labels).await;
         if is_unknown_label(&result) {
             self.reload_labels(account, labels).await?;
@@ -104,6 +107,9 @@ impl GmailSync {
             Err(e) if e.is_not_found() => return self.remove(account, id).await,
             Err(e) => return Err(e),
         };
+        if self.is_settings(account, &raw.label_ids) {
+            return self.remove(account, id).await;
+        }
         let raw = Arc::new(raw);
         let mut result = self.store_raw(account, &raw, labels).await;
         if is_unknown_label(&result) {
@@ -151,6 +157,9 @@ impl GmailSync {
             Err(e) if e.is_not_found() => return self.remove(account, id).await,
             Err(e) => return Err(e),
         };
+        if self.is_settings(account, &minimal.label_ids) {
+            return self.remove(account, id).await;
+        }
         let mut result = self.store_labels(account, &minimal, labels).await;
         if is_unknown_label(&result) {
             self.reload_labels(account, labels).await?;

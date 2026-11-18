@@ -4423,6 +4423,7 @@ dependencies = [
  "mail-builder",
  "mail-parser",
  "postrinch-model",
+ "postrinch-rules",
  "postrinch-store",
  "rand 0.10.3",
  "reqwest",

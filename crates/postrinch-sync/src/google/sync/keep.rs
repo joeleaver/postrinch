@@ -231,6 +231,14 @@ impl GmailSync {
             })
         };
         let report = self.sync(account, progress.clone()).await?;
+        if self.rules_due(account).await {
+            // Rules trouble is the rules' to show; mail keeps syncing.
+            match self.sync_rules(account).await {
+                Ok(_) => self.rules_checked(account),
+                Err(SyncError::NeedsSignIn(reason)) => return Err(SyncError::NeedsSignIn(reason)),
+                Err(e) => tracing::warn!("{account}: keeping rules in Gmail: {e}"),
+            }
+        }
         events(SyncEvent::Synced {
             account: account.clone(),
             report,

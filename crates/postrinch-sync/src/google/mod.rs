@@ -19,9 +19,9 @@ pub use api::GmailApi;
 pub(crate) use api::chain as error_chain;
 pub use auth::GoogleAuth;
 pub use config::ClientConfig;
-pub use oauth::{Endpoints, SCOPES};
+pub use oauth::{Endpoints, SCOPES, SETTINGS_SCOPE};
 pub use secrets::{Keychain, MemorySecrets, SecretStore};
 pub use sync::{
-    GmailSync, KeepOptions, Phase, Progress, ProgressFn, SendReport, SyncEvent, SyncEventFn,
-    SyncReport,
+    GmailSync, KeepOptions, Phase, Progress, ProgressFn, RulesReport, SETTINGS_LABEL, SendReport,
+    SyncEvent, SyncEventFn, SyncReport,
 };

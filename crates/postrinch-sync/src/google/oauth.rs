@@ -19,7 +19,12 @@ pub const SCOPES: &[&str] = &[
     "email",
     "https://mail.google.com/",
     "https://www.googleapis.com/auth/calendar",
+    SETTINGS_SCOPE,
 ];
+
+/// Making Gmail filters for rules. Not required: without it, rules run in
+/// Postrinch (docs/rules.md, 7).
+pub const SETTINGS_SCOPE: &str = "https://www.googleapis.com/auth/gmail.settings.basic";
 
 /// The scopes Postrinch cannot work without. Google lets a person untick
 /// scopes on the consent screen; a grant without these is refused.

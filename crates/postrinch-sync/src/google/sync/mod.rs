@@ -17,12 +17,14 @@ mod keep;
 mod messages;
 mod outbox;
 mod outgoing;
+mod rules;
 mod search;
 
 pub use keep::{KeepOptions, SyncEvent, SyncEventFn};
 pub use outbox::SendReport;
+pub use rules::{RulesReport, SETTINGS_LABEL};
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use postrinch_model::{AccountState, EmailAddress};
@@ -96,6 +98,11 @@ pub struct GmailSync {
     store: Store,
     /// How many of the newest messages a full sync downloads whole.
     whole_first: usize,
+    /// Each account's settings-message label id, by account key: messages
+    /// under it are Postrinch's own and are not stored.
+    settings_labels: Arc<std::sync::Mutex<HashMap<String, String>>>,
+    /// When each account's rules were last brought in step with Gmail.
+    rules_checked: Arc<std::sync::Mutex<HashMap<String, std::time::Instant>>>,
 }
 
 impl GmailSync {
@@ -104,6 +111,8 @@ impl GmailSync {
             api,
             store,
             whole_first: full::WHOLE_FIRST,
+            settings_labels: Arc::default(),
+            rules_checked: Arc::default(),
         }
     }
 
@@ -197,6 +206,9 @@ impl GmailSync {
             .iter()
             .filter_map(to_label)
             .collect();
+        if let Some(settings) = labels.iter().find(|l| l.name == rules::SETTINGS_LABEL) {
+            self.note_settings_label(account, &settings.provider_id);
+        }
         let account = account.clone();
         self.with_store(move |s| {
             let keep: HashSet<String> = labels.iter().map(|l| l.provider_id.clone()).collect();
@@ -211,6 +223,25 @@ impl GmailSync {
             Ok(Arc::new(keep))
         })
         .await
+    }
+
+    /// Remember the account's settings-message label.
+    fn note_settings_label(&self, account: &EmailAddress, id: &str) {
+        self.settings_labels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(account.key(), id.to_owned());
+    }
+
+    /// Whether a message with these Gmail label ids is a settings message.
+    pub(super) fn is_settings(&self, account: &EmailAddress, label_ids: &[String]) -> bool {
+        let known = self
+            .settings_labels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        known
+            .get(&account.key())
+            .is_some_and(|id| label_ids.contains(id))
     }
 
     async fn cursor(&self, account: &EmailAddress) -> SyncResult<Option<Cursor>> {
