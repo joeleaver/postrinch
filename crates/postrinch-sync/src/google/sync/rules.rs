@@ -108,23 +108,26 @@ impl GmailSync {
             }
         }
 
-        // Gmail's filters, when the grant lets Postrinch see them.
-        let filters = match self.api.filters(account).await {
+        // Gmail's filters, which the mail scope lists; making them needs
+        // the settings scope.
+        let listed = match self.api.filters(account).await {
             Ok(f) => Some(f),
             Err(SyncError::Api { status: 403, .. }) => None,
             Err(e) => return Err(e),
         };
-        let forwarding = match &filters {
+        let server = listed.is_some() && self.api.may_make_filters(account).await?;
+        let forwarding = match &listed {
             Some(_) => self.api.forwarding(account).await.unwrap_or_default(),
             None => Vec::new(),
         };
+        let filters = listed.clone().filter(|_| server);
         let (mut settings, local) = self.rules_here(account).await?;
         let before = settings.clone();
         if let Some(filters) = &filters {
             self.make_filters(account, &mut settings, filters, &mut label_ids, &mut report)
                 .await?;
         }
-        let elsewhere = match &filters {
+        let elsewhere = match &listed {
             Some(all) => {
                 let ours: Vec<&str> = settings.made.iter().map(|m| m.id.as_str()).collect();
                 let names: HashMap<&str, &str> = label_ids
@@ -176,7 +179,6 @@ impl GmailSync {
             message = Some(id);
         }
         let account = account.clone();
-        let server = filters.is_some();
         self.with_store(move |s| {
             s.update_rules(&account, |stored, l| {
                 // Rules saved here while this pass ran win; the filters

@@ -47,7 +47,7 @@ pub(crate) struct FilterAction {
     pub forward: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct FilterList {
     #[serde(default)]
     filter: Vec<FilterResource>,
@@ -62,7 +62,7 @@ pub(crate) struct Forwarding {
     pub verification_status: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ForwardingList {
     #[serde(default)]
@@ -82,10 +82,40 @@ struct Ids {
 
 impl GmailApi {
     pub(crate) async fn filters(&self, account: &EmailAddress) -> SyncResult<Vec<FilterResource>> {
-        let list: FilterList = self
-            .get(account, (Cost::Settings, FG), "settings/filters", &[])
-            .await?;
+        let list: FilterList = self.settings_list(account, "settings/filters").await?;
         Ok(list.filter)
+    }
+
+    /// A settings listing: Gmail answers an empty body when there is
+    /// nothing to list.
+    async fn settings_list<T: Default + for<'de> Deserialize<'de>>(
+        &self,
+        account: &EmailAddress,
+        path: &str,
+    ) -> SyncResult<T> {
+        let body = self
+            .request(
+                Method::GET,
+                account,
+                (Cost::Settings, FG),
+                path,
+                &[],
+                None,
+                true,
+            )
+            .await?;
+        if body.iter().all(u8::is_ascii_whitespace) {
+            return Ok(T::default());
+        }
+        read(&body, path)
+    }
+
+    /// Whether the account lets Postrinch make filters: its grant has the
+    /// settings scope. Listing them needs only the mail scope.
+    pub(crate) async fn may_make_filters(&self, account: &EmailAddress) -> SyncResult<bool> {
+        self.auth
+            .has_scope(account, crate::google::oauth::SETTINGS_SCOPE)
+            .await
     }
 
     /// Make a filter that runs `query` and changes labels or forwards.
@@ -150,12 +180,7 @@ impl GmailApi {
     /// The addresses Gmail has verified for forwarding.
     pub(crate) async fn forwarding(&self, account: &EmailAddress) -> SyncResult<Vec<String>> {
         let list: ForwardingList = self
-            .get(
-                account,
-                (Cost::Settings, FG),
-                "settings/forwardingAddresses",
-                &[],
-            )
+            .settings_list(account, "settings/forwardingAddresses")
             .await?;
         Ok(list
             .forwarding_addresses

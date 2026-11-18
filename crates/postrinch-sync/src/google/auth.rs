@@ -33,6 +33,9 @@ pub struct GoogleAuth {
     /// Held across a refresh, so concurrent callers wait for one refresh
     /// instead of each starting their own.
     cache: Mutex<HashMap<String, AccessToken>>,
+    /// The scopes each account's grant has, as Google last said, by
+    /// account key.
+    scopes: std::sync::Mutex<HashMap<String, String>>,
 }
 
 impl GoogleAuth {
@@ -54,6 +57,7 @@ impl GoogleAuth {
             },
             secrets,
             cache: Mutex::new(HashMap::new()),
+            scopes: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -130,6 +134,7 @@ impl GoogleAuth {
             return Err(e);
         }
 
+        self.note_scopes(&address, &tokens.scope);
         self.cache.lock().await.insert(
             address.key(),
             AccessToken {
@@ -158,6 +163,7 @@ impl GoogleAuth {
             .await?
             .ok_or(SyncError::NeedsSignIn(SignInReason::NoCredential))?;
         let tokens = self.oauth.refresh(&refresh_token).await?;
+        self.note_scopes(account, &tokens.scope);
         let token = tokens.access_token.clone();
         cache.insert(
             account.key(),
@@ -167,6 +173,26 @@ impl GoogleAuth {
             },
         );
         Ok(token)
+    }
+
+    fn note_scopes(&self, account: &EmailAddress, scopes: &str) {
+        if !scopes.is_empty() {
+            self.scopes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(account.key(), scopes.to_owned());
+        }
+    }
+
+    /// Whether the account's grant has `scope`. When Google has not said
+    /// which scopes it has, it is taken to: a call that needs it is then
+    /// refused, and says so.
+    pub async fn has_scope(&self, account: &EmailAddress, scope: &str) -> SyncResult<bool> {
+        self.access_token(account).await?;
+        let scopes = self.scopes.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(scopes
+            .get(&account.key())
+            .is_none_or(|s| s.split_whitespace().any(|g| g == scope)))
     }
 
     /// Forget the cached access token, as when an API call is answered 401.
