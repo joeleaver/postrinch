@@ -11,6 +11,7 @@ postrinch-agents = { workspace = true }
 postrinch-commands = { workspace = true }
 postrinch-model = { workspace = true }
 postrinch-render = { workspace = true }
+postrinch-rules = { workspace = true }
 postrinch-store = { workspace = true }
 postrinch-sync = { workspace = true }
 postrinch-update = { workspace = true }

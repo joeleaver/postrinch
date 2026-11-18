@@ -136,6 +136,9 @@ pub enum Test {
     InInbox,
     /// Arrived more than this many days ago.
     OlderThanDays(u32),
+    /// Gmail's own search, as a filter imported from Gmail had it: only
+    /// Gmail can run it, so here it matches nothing.
+    GmailSearch(String),
 }
 
 impl Test {
@@ -379,6 +382,11 @@ fn check_test(test: &Test, when: When) -> Result<(), RuleError> {
         Test::HasLabel(l) => {
             if l.is_empty() {
                 return bad("Pick a label.");
+            }
+        }
+        Test::GmailSearch(q) => {
+            if q.trim().is_empty() {
+                return bad("A Gmail search can't be empty.");
             }
         }
         Test::HasAttachment | Test::Unread | Test::Starred | Test::InInbox => {}

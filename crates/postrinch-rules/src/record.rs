@@ -23,6 +23,10 @@ pub struct Settings {
     /// Rules Gmail would not take, and why, in a sentence.
     #[serde(default)]
     pub refused: BTreeMap<u32, String>,
+    /// Filters made in Gmail itself and imported as rules, by the rule
+    /// they became: each is deleted once Gmail has that rule's filters.
+    #[serde(default)]
+    pub retire: Vec<(u32, String)>,
 }
 
 /// A filter Postrinch made in Gmail.
@@ -40,6 +44,9 @@ pub struct Elsewhere {
     pub id: String,
     /// What it does, in a line: Gmail's own words for it.
     pub line: String,
+    /// The rule it becomes when imported (id 0, for saving as new).
+    #[serde(default)]
+    pub rule: Option<crate::Rule>,
 }
 
 /// What this computer knows about running an account's rules.

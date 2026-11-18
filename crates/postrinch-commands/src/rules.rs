@@ -80,6 +80,32 @@ impl Commands {
         })?)
     }
 
+    /// Turn a filter made in Gmail into a rule at the end of the list;
+    /// the old filter goes once Gmail has the rule's. Returns its id.
+    pub fn import_filter(&self, account: &EmailAddress, filter: &str) -> CommandResult<u32> {
+        self.check(account)?;
+        let (_, local) = self.store.rules(account)?;
+        let Some(mut rule) = local
+            .elsewhere
+            .iter()
+            .find(|e| e.id == filter)
+            .and_then(|e| e.rule.clone())
+        else {
+            return Err(CommandError::Invalid("That Gmail filter is gone.".into()));
+        };
+        rule.check()
+            .map_err(|e| CommandError::Invalid(e.to_string()))?;
+        Ok(self.store.update_rules(account, |settings, local| {
+            rule.id = settings.rules.take_id();
+            let id = rule.id;
+            settings.rules.put(rule);
+            settings.retire.push((id, filter.to_owned()));
+            local.elsewhere.retain(|e| e.id != filter);
+            local.dirty = true;
+            id
+        })?)
+    }
+
     pub fn delete_rule(&self, account: &EmailAddress, id: u32) -> CommandResult<()> {
         self.check(account)?;
         self.store.update_rules(account, |settings, local| {

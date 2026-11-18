@@ -39,6 +39,7 @@ pub enum View {
 pub enum SettingsSection {
     Accounts,
     Reading,
+    Rules,
     Agents,
     Appearance,
     About,
@@ -155,6 +156,8 @@ pub struct State {
     pub update: Signal<crate::update::UpdateStatus>,
     /// A newer version downloaded and verified, waiting for a restart.
     pub update_ready: Signal<Option<String>>,
+    /// Settings › Rules and its editor.
+    pub rules: crate::rules_ui::RulesUi,
 }
 
 impl State {
@@ -218,6 +221,7 @@ impl State {
             error: Signal::new(None),
             update: Signal::new(crate::update::UpdateStatus::NotInstalled),
             update_ready: Signal::new(None),
+            rules: crate::rules_ui::RulesUi::new(),
         }
     }
 
@@ -274,6 +278,19 @@ impl State {
             self.revision.get();
             if self.view.get() == View::Settings {
                 accounts(Request::Accounts);
+            }
+        });
+        Effect::new(move || {
+            if self.view.get() == View::Settings
+                && self.settings_section.get() == SettingsSection::Rules
+            {
+                let accounts: Vec<EmailAddress> = self
+                    .accounts
+                    .get()
+                    .into_iter()
+                    .map(|a| a.account.address)
+                    .collect();
+                self.rules.load(&accounts);
             }
         });
         Effect::new(move || {

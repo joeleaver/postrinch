@@ -4268,6 +4268,7 @@ dependencies = [
  "postrinch-commands",
  "postrinch-model",
  "postrinch-render",
+ "postrinch-rules",
  "postrinch-store",
  "postrinch-sync",
  "postrinch-update",

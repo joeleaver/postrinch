@@ -102,6 +102,7 @@ pub fn toolbar(state: State) -> NodeHandle {
             span { class: "thread-actions-gap" }
             {label_menu(__scope, state)}
             {action_button(__scope, state, Kind::Star)}
+            {crate::ui::rule_from_message::rule_menu(__scope, state)}
         }
     }
 }

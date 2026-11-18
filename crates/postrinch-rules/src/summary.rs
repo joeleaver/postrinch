@@ -90,6 +90,10 @@ fn condition(c: &Condition, label: &dyn Fn(&str) -> String) -> String {
             format!("smaller than {}", size(*n)),
             format!("not smaller than {}", size(*n)),
         ),
+        Test::GmailSearch(q) => (
+            format!("Gmail search {}", quoted(q)),
+            format!("not Gmail search {}", quoted(q)),
+        ),
         Test::Unread => ("unread".into(), "read".into()),
         Test::Starred => ("starred".into(), "not starred".into()),
         Test::HasLabel(l) => (

@@ -17,6 +17,9 @@ mod outgoing;
 mod palette;
 mod reader;
 mod reading_settings;
+mod rule_editor;
+mod rule_from_message;
+mod rules_page;
 mod search;
 mod settings;
 mod sidebar;
@@ -65,6 +68,14 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
         state,
         sync.as_ref().map(|s| s.send.clone()),
     );
+    if let Some(sync) = &sync {
+        crate::rules_ui::set_sender(sync.send.clone());
+    }
+    crate::rules::start(
+        (*commands).clone(),
+        sync.as_ref().map(|s| s.send.clone()),
+        state.revision,
+    );
     actions::init(commands.clone(), sync);
     update::start(state);
     state.mark_read_when_opened();
@@ -105,6 +116,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {outgoing::CSS} }
                 style { {about::CSS} }
                 style { {thread_actions::CSS} }
+                style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {compose_files::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}

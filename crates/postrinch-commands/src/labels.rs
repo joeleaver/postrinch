@@ -96,6 +96,12 @@ pub struct Chip {
     pub color: Option<String>,
 }
 
+/// Whether a label is one the person sees: theirs, not Postrinch's own
+/// (rule markers, the settings message's label).
+fn shows(label: &Label) -> bool {
+    label.kind == LabelKind::User && !label.name.starts_with(postrinch_rules::MARKER_PREFIX)
+}
+
 /// The chips an account's labels show as on thread rows, by provider id:
 /// labels that work as tags and show in the sidebar. A folder-like label
 /// is where the mail lives, which the folder list already says.
@@ -105,7 +111,7 @@ pub(crate) fn chips(
     stats: &HashMap<String, LabelStats>,
 ) -> HashMap<String, Chip> {
     let mut chips = HashMap::new();
-    for label in labels.iter().filter(|l| l.kind == LabelKind::User) {
+    for label in labels.iter().filter(|l| shows(l)) {
         let prefs = prefs.get(&label.provider_id).cloned().unwrap_or_default();
         let stats = stats.get(&label.provider_id).copied().unwrap_or_default();
         let shown = prefs
@@ -206,7 +212,7 @@ pub fn label_tree(
 ) -> LabelTree {
     let mut tree = LabelTree::default();
     let mut apps: Vec<AppLabels> = Vec::new();
-    for label in labels.iter().filter(|l| l.kind == LabelKind::User) {
+    for label in labels.iter().filter(|l| shows(l)) {
         let prefs = prefs.get(&label.provider_id).cloned().unwrap_or_default();
         let stats = stats.get(&label.provider_id).copied().unwrap_or_default();
         let entry = FolderEntry {

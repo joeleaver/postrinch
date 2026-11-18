@@ -31,11 +31,19 @@ pub enum Icon {
     Close,
     /// A page with a folded corner: a file.
     File,
+    /// Three dots: more actions.
+    More,
 }
 
 #[component]
 pub fn icon(which: Icon) -> NodeHandle {
     match which {
+        // Three small filled circles, drawn as closed arcs.
+        Icon::More => one(
+            __scope,
+            "M4 12a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0M10.5 12a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0M17 12a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0",
+            "currentColor",
+        ),
         Icon::Archive => two(__scope, "M3 4h18v5H3z", "M5 9v10h14V9M10 13h4", "none"),
         Icon::Inbox => two(
             __scope,

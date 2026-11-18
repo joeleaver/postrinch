@@ -162,6 +162,7 @@ fn test(test: &Test, message: &Message, now: Timestamp) -> bool {
         Test::Starred => message.flags.starred,
         Test::HasLabel(l) => message.has_label(l),
         Test::InInbox => message.has_label(INBOX),
+        Test::GmailSearch(_) => false,
         Test::OlderThanDays(d) => {
             now.as_millis() - message.received.as_millis() > i64::from(*d) * DAY_MILLIS
         }

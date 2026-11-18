@@ -281,6 +281,7 @@ fn term(condition: &Condition) -> Option<String> {
         Test::HasAttachment if !condition.negate => "has:attachment".into(),
         Test::AttachmentType(t) => format!("filename:{}", word_list(t.trim_start_matches('.'))?),
         Test::AttachmentName(n) => format!("filename:{}", file_name(n)?),
+        Test::GmailSearch(q) => format!("({})", q.trim()),
         Test::LargerThan(n) => format!("larger:{n}"),
         Test::SmallerThan(n) => format!("smaller:{n}"),
         // Gmail's meaning is broader (domains), different (To only, its

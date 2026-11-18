@@ -153,6 +153,7 @@ fn report(
         }
         // A pass that found nothing new changes nothing the window shows.
         SyncEvent::Synced { account, report } => {
+            crate::rules::due_now(account.clone());
             let changed = report.headers + report.fetched + report.relabelled + report.removed > 0;
             (
                 account,

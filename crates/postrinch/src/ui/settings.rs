@@ -1,4 +1,4 @@
-//! Settings: Accounts, Reading, Agents, Appearance and About, after their mockups. Other
+//! Settings: Accounts, Reading, Rules, Agents, Appearance and About, after their mockups. Other
 //! sections arrive with what they configure.
 
 use postrinch_commands::AccountInfo;
@@ -13,6 +13,8 @@ use crate::ui::account_color;
 use crate::ui::agent_dialogs::agent_dialogs;
 use crate::ui::agents_settings::agents_page;
 use crate::ui::reading_settings::reading;
+use crate::ui::rule_editor::rule_editor;
+use crate::ui::rules_page::rules_page;
 
 #[component]
 pub fn settings(state: State) -> NodeHandle {
@@ -22,6 +24,7 @@ pub fn settings(state: State) -> NodeHandle {
                 div { class: "settings-title", "Settings" }
                 {section_link(__scope, state, SettingsSection::Accounts, "Accounts")}
                 {section_link(__scope, state, SettingsSection::Reading, "Reading")}
+                {section_link(__scope, state, SettingsSection::Rules, "Rules")}
                 {section_link(__scope, state, SettingsSection::Agents, "Agents")}
                 {section_link(__scope, state, SettingsSection::Appearance, "Appearance")}
                 {section_link(__scope, state, SettingsSection::About, "About")}
@@ -30,12 +33,14 @@ pub fn settings(state: State) -> NodeHandle {
             match state.settings_section.get() {
                 SettingsSection::Accounts => {accounts(__scope, state)},
                 SettingsSection::Reading => {reading(__scope, state)},
+                SettingsSection::Rules => {rules_page(__scope, state)},
                 SettingsSection::Agents => {agents_page(__scope, state)},
                 SettingsSection::Appearance => {appearance(__scope, state)},
                 SettingsSection::About => {about(__scope, state)},
             }
             {confirm_removal(__scope, state)}
             {agent_dialogs(__scope, state)}
+            {rule_editor(__scope, state)}
         }
     }
 }

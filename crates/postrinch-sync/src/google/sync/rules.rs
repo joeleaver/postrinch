@@ -136,6 +136,7 @@ impl GmailSync {
                     .map(|f| Elsewhere {
                         id: f.id.clone(),
                         line: describe(f, &names),
+                        rule: Some(as_rule(f, &names)),
                     })
                     .collect()
             }
@@ -236,9 +237,26 @@ impl GmailSync {
                 }
             }
             if !refused {
-                return Ok(());
+                break;
             }
         }
+        // Filters imported as rules go once Gmail runs the rule instead.
+        let plan = settings.plan(true, filters.len().saturating_sub(settings.made.len()));
+        let mut keep = Vec::new();
+        for (rule, old) in std::mem::take(&mut settings.retire) {
+            let wanted: Vec<&Filter> = plan.filters.iter().filter(|f| f.rule == rule).collect();
+            let made = !wanted.is_empty()
+                && wanted
+                    .iter()
+                    .all(|w| settings.made.iter().any(|m| &m.filter == *w));
+            if made {
+                self.api.delete_filter(account, &old).await?;
+                report.deleted += 1;
+            } else if settings.rules.get(rule).is_some() && !settings.refused.contains_key(&rule) {
+                keep.push((rule, old));
+            }
+        }
+        settings.retire = keep;
         Ok(())
     }
 
@@ -352,6 +370,86 @@ fn describe(f: &FilterResource, names: &HashMap<&str, &str>) -> String {
     format!("{} \u{2192} {}", what.join(" "), does.join(", "))
 }
 
+/// A filter made in Gmail, as the rule importing it makes: what the
+/// vocabulary says exactly where it can, the rest as Gmail search.
+fn as_rule(f: &FilterResource, names: &HashMap<&str, &str>) -> postrinch_rules::Rule {
+    use postrinch_rules::{Action, Category, Condition, Rule, Test};
+    let c = &f.criteria;
+    let mut conditions = Vec::new();
+    let exact = |a: &str| EmailAddress::parse(a).is_ok() && !a.contains(['*', '(', ')', ' ']);
+    if let Some(from) = &c.from {
+        conditions.push(Condition::is(if exact(from) {
+            Test::FromAddress(from.trim().into())
+        } else {
+            Test::GmailSearch(format!("from:({from})"))
+        }));
+    }
+    if let Some(to) = &c.to {
+        conditions.push(Condition::is(if exact(to) {
+            Test::RecipientAddress(to.trim().into())
+        } else {
+            Test::GmailSearch(format!("to:({to})"))
+        }));
+    }
+    if let Some(subject) = &c.subject {
+        let plain = postrinch_rules::words(subject).join(" ") == subject.trim().to_lowercase();
+        conditions.push(Condition::is(if plain {
+            Test::SubjectWords(subject.trim().into())
+        } else {
+            Test::GmailSearch(format!("subject:({subject})"))
+        }));
+    }
+    if let Some(q) = &c.query {
+        conditions.push(Condition::is(Test::GmailSearch(q.clone())));
+    }
+    if let Some(q) = &c.negated_query {
+        conditions.push(Condition::not(Test::GmailSearch(q.clone())));
+    }
+    if c.has_attachment {
+        conditions.push(Condition::is(Test::HasAttachment));
+    }
+    if let (Some(size), Some(cmp)) = (c.size, &c.size_comparison) {
+        conditions.push(Condition::is(if cmp == "larger" {
+            Test::LargerThan(size)
+        } else {
+            Test::SmallerThan(size)
+        }));
+    }
+    let mut actions = Vec::new();
+    let mut name = None;
+    for id in &f.action.add_label_ids {
+        actions.push(match id.as_str() {
+            "STARRED" => Action::Star,
+            "IMPORTANT" => Action::MarkImportant,
+            "TRASH" => Action::Trash,
+            other => match Category::ALL.iter().find(|c| c.label_id() == other) {
+                Some(c) => Action::Category(*c),
+                None => {
+                    name = name.or_else(|| names.get(other).map(|n| (*n).to_owned()));
+                    Action::AddLabel(other.to_owned())
+                }
+            },
+        });
+    }
+    for id in &f.action.remove_label_ids {
+        match id.as_str() {
+            "INBOX" => actions.push(Action::SkipInbox),
+            "UNREAD" => actions.push(Action::MarkRead),
+            "SPAM" => actions.push(Action::NeverSpam),
+            "IMPORTANT" => actions.push(Action::NeverImportant),
+            _ => {}
+        }
+    }
+    if let Some(to) = &f.action.forward {
+        actions.push(Action::Forward(to.clone()));
+    }
+    Rule {
+        conditions,
+        actions,
+        ..Rule::new(0, &name.unwrap_or_else(|| "Made in Gmail".to_owned()))
+    }
+}
+
 /// The settings message: the rules as JSON, from and to the account.
 fn write_settings(account: &EmailAddress, settings: &Settings) -> Vec<u8> {
     let json = serde_json::to_string_pretty(settings).expect("settings serialize");
@@ -431,5 +529,18 @@ mod tests {
             describe(&f, &names),
             "from:(notifications@github.com) \u{2192} label GitHub, skip the inbox"
         );
+        let rule = as_rule(&f, &names);
+        assert_eq!(rule.name, "GitHub");
+        assert_eq!(
+            rule.conditions,
+            [Condition::is(Test::FromAddress(
+                "notifications@github.com".into()
+            ))]
+        );
+        assert_eq!(
+            rule.actions,
+            [Action::AddLabel("Label_5".into()), Action::SkipInbox]
+        );
+        assert!(rule.check().is_ok());
     }
 }
