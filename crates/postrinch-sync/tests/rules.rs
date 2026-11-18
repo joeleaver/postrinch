@@ -197,3 +197,31 @@ async fn a_refused_forward_runs_here_with_a_reason() {
     assert!(settings.made.is_empty());
     assert!(settings.refused[&4].contains("books@example.com"));
 }
+
+#[tokio::test]
+async fn a_deleted_rules_marker_goes() {
+    let f = fixture().await;
+    get(
+        &f.server,
+        "labels",
+        json!({"labels": [
+            {"id": "Label_S", "name": "[Postrinch]/Settings", "type": "user"},
+            {"id": "Label_M", "name": "[Postrinch]/r7", "type": "user"}
+        ]}),
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path("/gmail/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&f.server)
+        .await;
+    get(&f.server, "settings/filters", json!({})).await;
+    get(&f.server, "settings/forwardingAddresses", json!({})).await;
+    Mock::given(method("DELETE"))
+        .and(path("/gmail/labels/Label_M"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&f.server)
+        .await;
+    f.sync.sync_rules(&f.me).await.unwrap();
+}

@@ -143,6 +143,22 @@ impl GmailSync {
             None => Vec::new(),
         };
 
+        // Markers of rules that are gone, once no filter adds them.
+        if filters.is_some() {
+            for (name, id) in &label_ids {
+                let Some(n) = name
+                    .strip_prefix(postrinch_rules::MARKER_PREFIX)
+                    .and_then(|rest| rest.strip_prefix('r'))
+                    .and_then(|n| n.parse::<u32>().ok())
+                else {
+                    continue;
+                };
+                if settings.rules.get(n).is_none() {
+                    self.api.delete_label(account, id).await?;
+                }
+            }
+        }
+
         // Write the settings message when anything in it changed.
         let mut message = local.message.clone();
         if local.dirty || settings != before {

@@ -191,6 +191,27 @@ impl GmailApi {
         Ok(read::<Id>(&answer, "labels")?.id)
     }
 
+    /// Delete a label of Postrinch's own; one already gone is no error.
+    pub(crate) async fn delete_label(&self, account: &EmailAddress, id: &str) -> SyncResult<()> {
+        let path = format!("labels/{id}");
+        match self
+            .request(
+                Method::DELETE,
+                account,
+                (Cost::Settings, FG),
+                &path,
+                &[],
+                None,
+                true,
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) if e.is_not_found() => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
     /// The ids of the messages carrying `label`, newest first.
     pub(crate) async fn labelled(
         &self,
