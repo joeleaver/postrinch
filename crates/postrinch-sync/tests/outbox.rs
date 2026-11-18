@@ -152,8 +152,9 @@ async fn a_failure_that_may_pass_holds_the_rest_back() {
     f.store
         .change_messages(&f.me, &[id("m1")], &MessageChange::read())
         .unwrap();
+    // A different change, so it is not sent in the same call.
     f.store
-        .change_messages(&f.me, &[id("m2")], &MessageChange::read())
+        .change_messages(&f.me, &[id("m2")], &MessageChange::starred(true))
         .unwrap();
 
     assert!(f.sync.send_outbox(&f.me).await.is_err());
@@ -168,12 +169,12 @@ async fn a_failure_that_may_pass_holds_the_rest_back() {
     assert_eq!(posted(&f, "/gmail/messages/batchModify").await.len(), 1);
     // Still applied here meanwhile.
     assert!(
-        !f.store
+        f.store
             .message(&f.me, &id("m2"))
             .unwrap()
             .unwrap()
             .flags
-            .unread
+            .starred
     );
 }
 
@@ -193,4 +194,104 @@ async fn a_finished_sync_forgets_what_was_sent_before_it() {
     mock_history(&f.server, "100", json!({"historyId": "101"})).await;
     f.sync.sync(&f.me, quiet()).await.unwrap();
     assert!(f.store.outbox(&f.me).unwrap().is_empty());
+}
+
+/// The fixture with `n` messages in the inbox, `m0`, `m1`, ...
+async fn with_many(n: usize) -> Fixture {
+    let f = with_mail().await;
+    for i in 0..n {
+        let message = Message {
+            account: f.me.clone(),
+            id: id(&format!("m{i}")),
+            thread: ProviderThreadId(format!("t-m{i}")),
+            headers: MessageHeaders::default(),
+            received: Timestamp::from_millis(1),
+            labels: vec!["INBOX".into()],
+            flags: Flags::default(),
+            snippet: String::new(),
+            body_text: String::new(),
+            attachments: Vec::new(),
+            size: 1,
+            downloaded: true,
+        };
+        f.store.put_message(&message, None).unwrap();
+    }
+    f
+}
+
+#[tokio::test]
+async fn one_message_changes_in_a_row_go_in_few_calls() {
+    let f = with_many(1100).await;
+    answer(&f, "^/gmail/messages/batchModify$", 204).await;
+    let archive = MessageChange::remove_label("INBOX");
+    for i in 0..1100 {
+        f.store
+            .change_messages(&f.me, &[id(&format!("m{i}"))], &archive)
+            .unwrap();
+    }
+    let report = f.sync.send_outbox(&f.me).await.unwrap();
+    assert_eq!(report.sent, 1100);
+    let calls = posted(&f, "/gmail/messages/batchModify").await;
+    let sizes: Vec<usize> = calls
+        .iter()
+        .map(|c| c["ids"].as_array().unwrap().len())
+        .collect();
+    assert_eq!(sizes, [1000, 100]);
+    assert_eq!(f.sync.waiting(&f.me).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn a_different_change_between_keeps_the_order() {
+    let f = with_mail().await;
+    answer(&f, "^/gmail/messages/batchModify$", 204).await;
+    let archive = MessageChange::remove_label("INBOX");
+    let back = MessageChange::add_label("INBOX");
+    for change in [&archive, &back, &archive] {
+        f.store.change_messages(&f.me, &[id("m1")], change).unwrap();
+    }
+    f.store
+        .change_messages(&f.me, &[id("m2")], &archive)
+        .unwrap();
+    f.sync.send_outbox(&f.me).await.unwrap();
+    let calls = posted(&f, "/gmail/messages/batchModify").await;
+    let seen: Vec<(Value, Value)> = calls
+        .iter()
+        .map(|c| (c["ids"].clone(), c["removeLabelIds"].clone()))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            (json!(["m1"]), json!(["INBOX"])),
+            (json!(["m1"]), json!([])),
+            (json!(["m1", "m2"]), json!(["INBOX"])),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_refused_run_is_sent_one_by_one() {
+    let f = with_mail().await;
+    // Gmail refuses any call that names m2, and takes the rest.
+    Mock::given(method("POST"))
+        .and(path_regex("^/gmail/messages/batchModify$"))
+        .and(wiremock::matchers::body_string_contains("m2"))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(json!({"error": {"message": "Invalid id"}})),
+        )
+        .mount(&f.server)
+        .await;
+    answer(&f, "^/gmail/messages/batchModify$", 204).await;
+    Mock::given(method("GET"))
+        .and(path_regex("^/gmail/messages/m2$"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({})))
+        .mount(&f.server)
+        .await;
+    mock_labels(&f.server).await;
+    let archive = MessageChange::remove_label("INBOX");
+    for m in ["m1", "m2"] {
+        f.store.change_messages(&f.me, &[id(m)], &archive).unwrap();
+    }
+    let report = f.sync.send_outbox(&f.me).await.unwrap();
+    assert_eq!((report.sent, report.refused.len()), (1, 1));
+    assert_eq!(f.sync.waiting(&f.me).await.unwrap(), 0);
 }

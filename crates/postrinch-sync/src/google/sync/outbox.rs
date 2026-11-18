@@ -36,6 +36,40 @@ pub(super) fn now() -> Timestamp {
     Timestamp::from_millis(millis)
 }
 
+/// Waiting entries in order, in runs that make the same change, each run
+/// naming at most [`BATCH`] messages.
+fn groups(waiting: Vec<OutboxEntry>) -> Vec<Vec<OutboxEntry>> {
+    let mut all: Vec<Vec<OutboxEntry>> = Vec::new();
+    for entry in waiting {
+        match all.last_mut() {
+            Some(run)
+                if run[0].change == entry.change
+                    && run.iter().map(|e| e.messages.len()).sum::<usize>()
+                        + entry.messages.len()
+                        <= BATCH =>
+            {
+                run.push(entry);
+            }
+            _ => all.push(vec![entry]),
+        }
+    }
+    all
+}
+
+/// A run of entries as one: their messages, each once, and their change.
+fn merged(run: &[OutboxEntry]) -> OutboxEntry {
+    let mut one = run[0].clone();
+    one.messages.clear();
+    for entry in run {
+        for m in &entry.messages {
+            if !one.messages.contains(m) {
+                one.messages.push(m.clone());
+            }
+        }
+    }
+    one
+}
+
 /// Whether Gmail refused a change for good: a malformed request, or a
 /// message or label it does not have. Anything else (offline, a rate limit
 /// that outlasted the retries, Gmail unwell) may pass.
@@ -62,38 +96,79 @@ impl GmailSync {
         .await
     }
 
-    /// Send the account's waiting changes, oldest first. One that fails
-    /// for a reason that may pass stays to be tried again, and the ones
-    /// after it wait behind it, so Gmail gets them in the order they were
-    /// made; the error is returned. One Gmail refuses for good is dropped,
-    /// and the messages it named are read again so what is shown matches
-    /// Gmail.
+    /// Send the account's waiting changes, oldest first. Entries in a row
+    /// that make the same change go together, up to [`BATCH`] messages, so
+    /// a thousand archives cost one call rather than a thousand; nothing
+    /// different falls between them, so Gmail still gets changes in the
+    /// order they were made. One that fails for a reason that may pass
+    /// stays to be tried again, and the ones after it wait behind it; the
+    /// error is returned. One Gmail refuses for good is dropped, and the
+    /// messages it named are read again so what is shown matches Gmail.
     pub async fn send_outbox(&self, account: &EmailAddress) -> SyncResult<SendReport> {
         let mut report = SendReport::default();
         let owner = account.clone();
         let entries = self.with_store(move |s| s.outbox(&owner)).await?;
-        for entry in entries.into_iter().filter(|e| e.sent.is_none()) {
-            let id = entry.id;
-            match self.send_change(account, &entry).await {
+        let waiting: Vec<OutboxEntry> = entries.into_iter().filter(|e| e.sent.is_none()).collect();
+        for group in groups(waiting) {
+            if group.len() == 1 {
+                self.send_one(account, &group[0], &mut report).await?;
+                continue;
+            }
+            match self.send_change(account, &merged(&group)).await {
                 Ok(()) => {
-                    self.with_store(move |s| s.outbox_sent(id)).await?;
-                    report.sent += 1;
+                    let ids: Vec<u64> = group.iter().map(|e| e.id).collect();
+                    self.with_store(move |s| ids.iter().try_for_each(|id| s.outbox_sent(*id)))
+                        .await?;
+                    report.sent += group.len();
                 }
+                // Which one Gmail would not take is for each alone to say.
                 Err(e) if refused_for_good(&e) => {
-                    tracing::warn!("{account}: Gmail refused a change: {e}");
-                    self.with_store(move |s| s.outbox_drop(id)).await?;
-                    self.read_again(account, &entry).await?;
-                    report.refused.push(e.to_string());
+                    for entry in &group {
+                        self.send_one(account, entry, &mut report).await?;
+                    }
                 }
                 Err(e) => {
-                    let error = e.to_string();
-                    self.with_store(move |s| s.outbox_failed(id, &error))
-                        .await?;
+                    let (ids, error): (Vec<u64>, String) =
+                        (group.iter().map(|e| e.id).collect(), e.to_string());
+                    self.with_store(move |s| {
+                        ids.iter().try_for_each(|id| s.outbox_failed(*id, &error))
+                    })
+                    .await?;
                     return Err(e);
                 }
             }
         }
         Ok(report)
+    }
+
+    /// Send one entry, as [`Self::send_outbox`] says.
+    async fn send_one(
+        &self,
+        account: &EmailAddress,
+        entry: &OutboxEntry,
+        report: &mut SendReport,
+    ) -> SyncResult<()> {
+        let id = entry.id;
+        match self.send_change(account, entry).await {
+            Ok(()) => {
+                self.with_store(move |s| s.outbox_sent(id)).await?;
+                report.sent += 1;
+                Ok(())
+            }
+            Err(e) if refused_for_good(&e) => {
+                tracing::warn!("{account}: Gmail refused a change: {e}");
+                self.with_store(move |s| s.outbox_drop(id)).await?;
+                self.read_again(account, entry).await?;
+                report.refused.push(e.to_string());
+                Ok(())
+            }
+            Err(e) => {
+                let error = e.to_string();
+                self.with_store(move |s| s.outbox_failed(id, &error))
+                    .await?;
+                Err(e)
+            }
+        }
     }
 
     /// One entry, as Gmail's calls: the trash first, then labels and flags.
