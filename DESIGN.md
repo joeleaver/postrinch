@@ -171,7 +171,8 @@ Mail is hostile input, for the renderer and for the agent.
 4. **Threading for IMAP accounts.** `References`/`In-Reply-To` with subject fallback (JWZ), and how a thread spanning two accounts shows in the combined inbox.
 5. ~~**Sending mail through the outbox.**~~ **Decided 2026-11-04:** see **Writing**. Mail is queued here at once and shown as sending until Gmail has it; an agent proposes and only the person's Send sends.
 6. **How much mail to keep locally.** Everything, or a window plus headers, for a 15-year Gmail account.
-7. **License.** rinch and rhypedb are MIT/Apache-2.0; Postrinch probably follows.
+7. **Mail rules.** One set per account, run on the server where it matches exactly the same mail and in Postrinch where not, split through a hidden marker label when only some actions compile. The vocabulary, what Gmail and Sieve can express, order, catch-up and limits: [docs/rules.md](docs/rules.md). Creating Gmail filters needs a new scope, `gmail.settings.basic`, asked for only when a rule first needs it.
+8. **License.** rinch and rhypedb are MIT/Apache-2.0; Postrinch probably follows.
 
 ## First steps
 
