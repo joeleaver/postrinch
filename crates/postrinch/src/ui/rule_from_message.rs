@@ -16,6 +16,8 @@ use crate::ui::icons::{Icon, icon};
 #[derive(Debug, Clone, PartialEq)]
 struct Suggestion {
     line: String,
+    /// What the rule it starts is called.
+    name: String,
     condition: Condition,
     /// Conversations it would have caught, once counted.
     count: Option<usize>,
@@ -64,12 +66,14 @@ fn suggestions(message: &Message) -> Vec<Suggestion> {
         let address = from.address.to_string();
         all.push(Suggestion {
             line: format!("From {address}"),
+            name: from.display_name(),
             condition: Condition::is(Test::FromAddress(address)),
             count: None,
         });
         let domain = from.address.domain().to_owned();
         all.push(Suggestion {
             line: format!("From anyone at {domain}"),
+            name: domain.clone(),
             condition: Condition::is(Test::FromDomain(domain)),
             count: None,
         });
@@ -77,6 +81,7 @@ fn suggestions(message: &Message) -> Vec<Suggestion> {
     if let Some(words) = subject_words(message.subject()) {
         all.push(Suggestion {
             line: format!("With \u{201c}{words}\u{201d} in the subject"),
+            name: words.clone(),
             condition: Condition::is(Test::SubjectPhrase(words)),
             count: None,
         });
@@ -122,13 +127,13 @@ pub fn rule_menu(state: State) -> NodeHandle {
             });
         }
     };
-    let start = move |condition: Option<Condition>| {
+    let start = move |chosen: Option<(Condition, String)>| {
         open.set(false);
-        let Some((account, message)) = latest(state) else {
+        let Some((account, _)) = latest(state) else {
             return;
         };
         let mut draft = Draft::new();
-        if let Some(c) = condition {
+        if let Some((c, name)) = chosen {
             let named = Rule {
                 conditions: vec![c],
                 ..Rule::new(0, "")
@@ -137,12 +142,7 @@ pub fn rule_menu(state: State) -> NodeHandle {
             draft.looks = from.looks;
             draft.rows = from.rows + 1;
             draft.does[0].id = draft.rows;
-            draft.name = message
-                .headers
-                .from
-                .first()
-                .map(|f| f.display_name())
-                .unwrap_or_default();
+            draft.name = name;
         }
         state.settings_section.set(SettingsSection::Rules);
         state.view.set(View::Settings);
@@ -173,8 +173,8 @@ pub fn rule_menu(state: State) -> NodeHandle {
                             class: "rule-menu-item",
                             role: "menuitem",
                             onclick: {
-                                let c = s.condition.clone();
-                                move || start(Some(c.clone()))
+                                let chosen = (s.condition.clone(), s.name.clone());
+                                move || start(Some(chosen.clone()))
                             },
                             span { {s.line.clone()} }
                             span { class: "rule-menu-count", {move || count_line(found, &s.line)} }

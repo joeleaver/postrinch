@@ -30,6 +30,7 @@ pub fn rule_editor(state: State) -> NodeHandle {
             onclose: move || ui.close(),
             title: "",
             size: "xl",
+            class: "rule-editor-modal",
             for _open in ui.draft.get().map(|d| d.id) {
                 div { key: format!("{_open}"), class: "rule-editor",
                     {editor_body(__scope, state)}
@@ -123,9 +124,9 @@ fn editor_body(state: State) -> NodeHandle {
                             }
                             span { "of these are true" }
                         }
-                        for row in draft_get(ui, |d| d.looks.clone(), Vec::new()) {
-                            div { key: format!("{}|{}|{}", row.id, row.field, row.how),
-                                {looks_row(__scope, state, row.clone())}
+                        for (id, field, how) in looks_shape(ui) {
+                            div { key: format!("{id}|{field}|{how}"),
+                                {looks_row(__scope, state, id, field, how)}
                             }
                         }
                         button {
@@ -136,9 +137,9 @@ fn editor_body(state: State) -> NodeHandle {
                     }
                     div { class: "rule-section",
                         span { class: "rule-form-label", "Then" }
-                        for row in draft_get(ui, |d| d.does.clone(), Vec::new()) {
-                            div { key: format!("{}|{}", row.id, row.what),
-                                {does_row(__scope, state, row.clone())}
+                        for (id, what) in does_shape(ui) {
+                            div { key: format!("{id}|{what}"),
+                                {does_row(__scope, state, id, what)}
                             }
                         }
                         button {
@@ -186,10 +187,34 @@ fn when_chip(
     }
 }
 
+/// The condition rows by id and kind, without what is typed in them: a
+/// row is built again only when its kind changes, never as it is typed in.
+fn looks_shape(ui: RulesUi) -> Vec<(u32, &'static str, &'static str)> {
+    draft_get(
+        ui,
+        |d| d.looks.iter().map(|l| (l.id, l.field, l.how)).collect(),
+        Vec::new(),
+    )
+}
+
+fn does_shape(ui: RulesUi) -> Vec<(u32, &'static str)> {
+    draft_get(
+        ui,
+        |d| d.does.iter().map(|r| (r.id, r.what)).collect(),
+        Vec::new(),
+    )
+}
+
 #[component]
-fn looks_row(state: State, row: Looks) -> NodeHandle {
+fn looks_row(state: State, id: u32, field: &'static str, how: &'static str) -> NodeHandle {
     let ui = state.rules;
-    let id = row.id;
+    let row: Looks = draft_get(ui, |d| d.looks.iter().find(|l| l.id == id).cloned(), None)
+        .unwrap_or(Looks {
+            id,
+            field,
+            how,
+            value: String::new(),
+        });
     let value = Signal::new(row.value.clone());
     let set = move |v: String| {
         value.set(v.clone());
@@ -277,9 +302,15 @@ fn label_select(
 }
 
 #[component]
-fn does_row(state: State, row: Does) -> NodeHandle {
+fn does_row(state: State, id: u32, what: &'static str) -> NodeHandle {
     let ui = state.rules;
-    let id = row.id;
+    let row: Does =
+        draft_get(ui, |d| d.does.iter().find(|r| r.id == id).cloned(), None).unwrap_or(Does {
+            id,
+            what,
+            value: String::new(),
+            prompt: String::new(),
+        });
     let value = Signal::new(row.value.clone());
     let prompt = Signal::new(row.prompt.clone());
     let set = move |v: String| {
@@ -446,6 +477,7 @@ fn existing_label(ui: RulesUi) -> String {
 }
 
 pub const CSS: &str = r#"
+.rule-editor-modal .rinch-modal--xl { width: 1040px; max-width: calc(100vw - 48px); }
 .rule-editor-body { display: flex; flex-direction: column; gap: 12px; }
 .rule-editor-head { display: flex; align-items: center; gap: 12px; }
 .rule-editor-account { font-size: 13px; color: var(--muted); }
@@ -458,13 +490,14 @@ pub const CSS: &str = r#"
 .rule-seg { height: 28px; padding: 0 12px; border: none; border-radius: 5px; background: transparent; color: var(--ink-2); font-size: 13px; cursor: pointer; }
 .rule-seg.chosen { background: var(--accent-tint); color: var(--accent-ink); }
 .rule-section { display: flex; flex-direction: column; gap: 8px; }
-.rule-line-row { display: flex; align-items: flex-start; gap: 8px; }
+.rule-line-row { display: flex; align-items: center; gap: 8px; }
 .rule-pick { width: 150px; flex-shrink: 0; }
 .rule-pick.wide { width: 190px; }
-.rule-value { flex: 1; min-width: 0; }
+.rule-value { flex: 1; min-width: 160px; }
+.rule-value .rinch-text-input, .rule-value .rinch-select, .rule-agent .rinch-text-input { width: 100%; }
 .rule-value-none { display: block; }
 .rule-agent { display: flex; flex-direction: column; gap: 6px; }
-.rule-remove { width: 28px; height: 30px; border: none; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+.rule-remove { flex-shrink: 0; width: 28px; height: 30px; border: none; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
 .rule-remove:hover { background: var(--hover); }
 .rule-add { align-self: flex-start; border: none; background: transparent; color: var(--accent); font-size: 13px; padding: 4px 0; cursor: pointer; }
 .rule-hint { font-size: 12px; color: var(--muted); line-height: 1.4; }

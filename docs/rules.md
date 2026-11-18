@@ -221,9 +221,33 @@ carried a nonsense word, all removed afterwards (messages to the trash).
   `gmail.settings.basic` together and Google granted both, with the
   unverified-app warning, as the Testing consent screen shows for any scope.
 
-## Next
+## Built (2026-11-18)
 
-1. Mockups of the rules list and the rule editor.
-2. Build: the vocabulary and compiler with tests, Gmail filter sync and the
-   settings message, the local runner with catch-up; Sieve with IMAP
-   accounts.
+- **`postrinch-rules`**, no I/O: the rule model, the matcher, the Gmail
+  compiler and what is kept (`Settings`, shared through the settings
+  message; `Local`, this computer's). As built, a negated condition
+  compiles to `-term` in the filter's `query` rather than to
+  `negatedQuery`; "has no attachment" stays local. A filter adds one user
+  label, so each further label and the marker takes a filter of its own.
+- **A rule counts as Gmail's only once all its filters are made**, and
+  mail that arrived before they were goes through it here, so a rule just
+  saved or refused never misses mail in between.
+- **Rules for mail that has been here a while look at the inbox**, hourly:
+  the editor says "Mail has been in the inbox a while".
+- **Sync** (`postrinch-sync`, `google/sync/rules.rs`) reads and writes the
+  settings message under `[Postrinch]/Settings` (never stored as mail),
+  makes and deletes filters and markers, records refusals, lists filters
+  made in Gmail and verified forwarding addresses. It runs when the rules
+  changed here, or every ten minutes; trouble with it never stops mail.
+- **Import** turns a Gmail filter into a rule, with parts outside the
+  vocabulary as a "Gmail search" condition (Gmail only; here it matches
+  nothing), and deletes the old filter once the rule's are made.
+- **Ask an agent** starts an agent connected to Claude Code from
+  Postrinch, unattended (`claude -p`, allowed only its Postrinch tools),
+  one at a time, ten minutes at most. Its answer goes to the log: what it
+  can do is label, archive, star or propose a reply. Other apps cannot be
+  started without a window.
+- **Not yet:** Sieve (with IMAP accounts); forwarding by a rule that
+  Postrinch runs (only Gmail forwards); remind me later and notify; trying
+  a refused rule again before the rules next change; `deliveredto:` with a
+  real `+tag` delivery.
