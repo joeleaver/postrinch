@@ -20,6 +20,7 @@ use postrinch_model::{EmailAddress, Flags, MessageChange, ProviderMessageId, Tim
 use crate::codec::{Fields, FieldsBuilder};
 use crate::keys::scoped;
 use crate::messages::TYPE as MESSAGE;
+use crate::outbox_cache::OutboxCache;
 use crate::{Store, StoreError, StoreResult, labels};
 
 pub(crate) const TYPE: &str = "OutboxEntry";
@@ -72,15 +73,28 @@ impl Store {
         let _order = self.outbox_lock.lock().unwrap_or_else(|e| e.into_inner());
         let seq = self.next_seq()?;
         let key = scoped(account, &format!("{seq:020}"));
+        let created = now();
         let fields = FieldsBuilder::new()
             .str("key", key.clone())
             .str("account", account.to_string())
             .u64("seq", seq)
             .json("messages", &messages)
             .json("change", change)
-            .datetime("created", now().as_millis())
+            .datetime("created", created.as_millis())
             .u32("attempts", 0);
-        self.upsert(TYPE, "key", &key, fields.clone().build(), fields.build())?;
+        let id = self.upsert(TYPE, "key", &key, fields.clone().build(), fields.build())?;
+        let entry = OutboxEntry {
+            id,
+            account: account.clone(),
+            seq,
+            messages: messages.to_vec(),
+            change: change.clone(),
+            created,
+            attempts: 0,
+            error: None,
+            sent: None,
+        };
+        self.with_outbox(|o| o.insert(entry))?;
 
         // Written after the entry, so a crash between the two leaves a
         // change the provider will still be sent, and whose result sync
@@ -94,36 +108,60 @@ impl Store {
 
     /// The account's entries, waiting or sent, in the order they were made.
     pub fn outbox(&self, account: &EmailAddress) -> StoreResult<Vec<OutboxEntry>> {
-        let mut entries: Vec<OutboxEntry> = self
-            .outbox_all()?
-            .into_iter()
-            .filter(|e| e.account == *account)
-            .collect();
-        entries.sort_by_key(|e| e.seq);
-        Ok(entries)
+        let key = account.key();
+        self.with_outbox(|o| o.of_account(&key))
+    }
+
+    /// Work with the outbox in memory, reading it from the database the
+    /// first time (outbox_cache.rs).
+    fn with_outbox<T>(&self, work: impl FnOnce(&mut OutboxCache) -> T) -> StoreResult<T> {
+        let mut held = self.outbox_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let cache = match held.as_mut() {
+            Some(cache) => cache,
+            None => held.insert(OutboxCache::new(self.outbox_all()?)),
+        };
+        Ok(work(cache))
     }
 
     /// The provider took the entry.
     pub fn outbox_sent(&self, entry: u64) -> StoreResult<()> {
+        let sent = now();
         let fields = FieldsBuilder::new()
-            .datetime("sent", now().as_millis())
+            .datetime("sent", sent.as_millis())
             .null("error");
-        self.db_update(TYPE, entry, fields.build())
+        self.db_update(TYPE, entry, fields.build())?;
+        self.with_outbox(|o| {
+            o.update(entry, |e| {
+                e.sent = Some(sent);
+                e.error = None;
+            });
+        })
     }
 
     /// Sending the entry failed, for `error`; it is tried again later.
     pub fn outbox_failed(&self, entry: u64, error: &str) -> StoreResult<()> {
-        let attempts = self.get(TYPE, entry)?.u32("attempts")?;
+        let attempts = match self.with_outbox(|o| o.get(entry).map(|e| e.attempts))? {
+            Some(n) => n,
+            None => self.get(TYPE, entry)?.u32("attempts")?,
+        }
+        .saturating_add(1);
         let fields = FieldsBuilder::new()
-            .u32("attempts", attempts.saturating_add(1))
+            .u32("attempts", attempts)
             .str("error", error);
-        self.db_update(TYPE, entry, fields.build())
+        self.db_update(TYPE, entry, fields.build())?;
+        self.with_outbox(|o| {
+            o.update(entry, |e| {
+                e.attempts = attempts;
+                e.error = Some(error.to_owned());
+            });
+        })
     }
 
     /// Drop an entry without sending it: one the provider refused for good.
     /// What it changed stays until sync brings the provider's state back.
     pub fn outbox_drop(&self, entry: u64) -> StoreResult<()> {
-        self.db_delete(TYPE, entry)
+        self.db_delete(TYPE, entry)?;
+        self.with_outbox(|o| o.remove(entry))
     }
 
     /// Forget the account's entries sent by `started`: the start of a sync
@@ -134,6 +172,7 @@ impl Store {
         for entry in self.outbox(account)? {
             if entry.sent.is_some_and(|sent| sent <= started) {
                 self.db_delete(TYPE, entry.id)?;
+                self.with_outbox(|o| o.remove(entry.id))?;
                 forgotten += 1;
             }
         }
@@ -151,10 +190,8 @@ impl Store {
         labels: &mut Vec<String>,
         flags: &mut Flags,
     ) -> StoreResult<()> {
-        for entry in self.outbox(account)? {
-            if !entry.messages.contains(message) {
-                continue;
-            }
+        let key = account.key();
+        for entry in self.with_outbox(|o| o.of_message(&key, message))? {
             let mut change = entry.change;
             change
                 .add_labels
@@ -173,12 +210,7 @@ impl Store {
     }
 
     pub(crate) fn next_seq(&self) -> StoreResult<u64> {
-        Ok(self
-            .outbox_all()?
-            .iter()
-            .map(|e| e.seq + 1)
-            .max()
-            .unwrap_or(1))
+        self.with_outbox(|o| o.max_seq() + 1)
     }
 
     /// A stored message's labels and flags, as stored.

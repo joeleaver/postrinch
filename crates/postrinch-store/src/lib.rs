@@ -21,6 +21,7 @@ mod mailboxes;
 mod messages;
 mod objects;
 mod outbox;
+mod outbox_cache;
 mod outgoing;
 mod people;
 mod rules;
@@ -61,6 +62,8 @@ pub struct Store {
     root: PathBuf,
     /// Held while an outbox entry takes the next sequence number.
     outbox_lock: Arc<Mutex<()>>,
+    /// The outbox in memory, once read (outbox_cache.rs).
+    outbox_cache: Arc<Mutex<Option<outbox_cache::OutboxCache>>>,
     /// Held while a thread's latest activity is read and written, as sync
     /// stores several messages of one thread at once.
     thread_lock: Arc<Mutex<()>>,

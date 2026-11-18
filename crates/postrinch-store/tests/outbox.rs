@@ -168,3 +168,41 @@ fn trashed_mail_leaves_every_other_mailbox() {
     assert_eq!(store.label_threads(&me, "INBOX").unwrap().len(), 2);
     assert_eq!(store.label_threads(&me, "Label_1").unwrap().len(), 1);
 }
+
+#[test]
+fn the_outbox_in_memory_is_what_a_fresh_open_reads() {
+    let (dir, store, me) = one_message();
+    store
+        .put_message(&message(&me, "m2", "t2", 200, "Lunch", "b"), None)
+        .unwrap();
+    for change in [
+        MessageChange::read(),
+        MessageChange::remove_label("INBOX"),
+        MessageChange::starred(true),
+    ] {
+        store
+            .change_messages(&me, &[id("m1"), id("m2")], &change)
+            .unwrap();
+    }
+    let first = store.outbox(&me).unwrap();
+    store.outbox_sent(first[0].id).unwrap();
+    store.outbox_failed(first[1].id, "offline").unwrap();
+    store.outbox_drop(first[2].id).unwrap();
+    let here = store.outbox(&me).unwrap();
+    drop(store);
+    let again = Store::open(dir.path()).unwrap();
+    let fresh = again.outbox(&me).unwrap();
+    assert_eq!(here, fresh);
+    assert_eq!(fresh.len(), 2);
+    assert!(fresh[0].sent.is_some());
+    assert_eq!(
+        (fresh[1].attempts, fresh[1].error.as_deref()),
+        (1, Some("offline"))
+    );
+    // The next change follows the highest number, as before.
+    again
+        .change_messages(&me, &[id("m1")], &MessageChange::unread())
+        .unwrap();
+    let last = again.outbox(&me).unwrap();
+    assert!(last[2].seq > fresh[1].seq);
+}

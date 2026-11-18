@@ -56,6 +56,7 @@ pub(crate) fn open(root: &Path) -> StoreResult<Store> {
         blobs: blobs::Blobs::open(root.join("blobs"))?,
         root: root.to_path_buf(),
         outbox_lock: Arc::default(),
+        outbox_cache: Arc::default(),
         thread_lock: Arc::default(),
         rules_lock: Arc::default(),
         writes: Arc::default(),
