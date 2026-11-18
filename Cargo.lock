@@ -4383,6 +4383,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "postrinch-rules"
+version = "0.1.20"
+dependencies = [
+ "postrinch-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "postrinch-store"
 version = "0.1.20"
 dependencies = [

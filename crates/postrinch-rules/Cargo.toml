@@ -1,0 +1,15 @@
+[package]
+name = "postrinch-rules"
+description = "Postrinch's mail rules: what a rule says, matching it here, and compiling it to Gmail filters. No I/O."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+postrinch-model = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
