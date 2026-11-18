@@ -98,25 +98,13 @@ impl Store {
         Ok(self.db.get_link_ids(type_name, id, relation)?)
     }
 
-    /// The messages that carry a label, each with its thread: one read of
-    /// the label's links, whose entries carry the message's thread (rhypedb
-    /// keeps a linked object's to-one relations in each of its links), not
-    /// one read per message. Those copies are trusted only once rhypedb says
-    /// they are sound (a store older rhypedbs wrote may hold stale ones until
-    /// `compact_once` repairs it); until then, and for a link that lacks
-    /// one, the thread is looked up.
+    /// The messages that carry a label, each with its thread, in one read
+    /// of the label's links: rhypedb keeps each message's thread in its
+    /// link, and looks up any it cannot trust (rhypedb#52).
     pub(crate) fn label_message_threads(&self, label: u64) -> StoreResult<Vec<(u64, Option<u64>)>> {
-        let trusted = self.db.cover_peers_sound();
-        let links = self.db.get_links(crate::labels::TYPE, label, "messages")?;
-        let mut found = Vec::with_capacity(links.len());
-        for (message, fields) in links {
-            let thread = match fields.get("thread") {
-                Some(Value::U64(thread)) if trusted => Some(*thread),
-                _ => self.link(crate::messages::TYPE, message, "thread")?,
-            };
-            found.push((message, thread));
-        }
-        Ok(found)
+        Ok(self
+            .db
+            .get_link_peer_ids(crate::labels::TYPE, label, "messages", "thread")?)
     }
 
     /// The single object a to-one `relation` links to, if any.

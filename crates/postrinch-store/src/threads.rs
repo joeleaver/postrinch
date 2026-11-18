@@ -24,15 +24,6 @@ impl Store {
         }
     }
 
-    /// When a thread's latest message arrived: as kept, or else worked out
-    /// from its messages. `None` for a thread with no messages.
-    pub(crate) fn thread_latest(&self, thread: &crate::codec::Fields) -> StoreResult<Option<i64>> {
-        match thread.opt_datetime("latest")? {
-            Some(latest) => Ok(Some(latest)),
-            None => self.latest_of_messages(thread.id()),
-        }
-    }
-
     /// Keep the latest activity of every thread that lacks it: those of a
     /// store written before threads kept it. Run once, in the background;
     /// returns how many were filled.
@@ -72,7 +63,7 @@ impl Store {
         Ok(latest)
     }
 
-    fn latest_of_messages(&self, thread: u64) -> StoreResult<Option<i64>> {
+    pub(crate) fn latest_of_messages(&self, thread: u64) -> StoreResult<Option<i64>> {
         let messages = self.links(THREAD, thread, "messages")?;
         let mut latest = None;
         for message in self.get_many(TYPE, &messages)? {

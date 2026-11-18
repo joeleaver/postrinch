@@ -4988,7 +4988,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-authz"
 version = "0.2.0"
-source = "git+https://github.com/joeleaver/rhypedb#789e8bc75351c5b3040b0583e75b0c72806793b0"
+source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -5001,7 +5001,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-embed"
 version = "0.2.0"
-source = "git+https://github.com/joeleaver/rhypedb#789e8bc75351c5b3040b0583e75b0c72806793b0"
+source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -5009,7 +5009,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-engine"
 version = "0.2.0"
-source = "git+https://github.com/joeleaver/rhypedb#789e8bc75351c5b3040b0583e75b0c72806793b0"
+source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
 dependencies = [
  "arc-swap",
  "base64 0.22.1",
@@ -5033,7 +5033,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-query"
 version = "0.2.0"
-source = "git+https://github.com/joeleaver/rhypedb#789e8bc75351c5b3040b0583e75b0c72806793b0"
+source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
 dependencies = [
  "bytes",
  "rhypedb-authz",
@@ -5046,7 +5046,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-schema"
 version = "0.2.0"
-source = "git+https://github.com/joeleaver/rhypedb#789e8bc75351c5b3040b0583e75b0c72806793b0"
+source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -5054,7 +5054,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-storage"
 version = "0.2.0"
-source = "git+https://github.com/joeleaver/rhypedb#789e8bc75351c5b3040b0583e75b0c72806793b0"
+source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
 dependencies = [
  "ahash",
  "bytes",
@@ -5074,7 +5074,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-subscribe"
 version = "0.2.0"
-source = "git+https://github.com/joeleaver/rhypedb#789e8bc75351c5b3040b0583e75b0c72806793b0"
+source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
 dependencies = [
  "parking_lot",
  "serde",
@@ -5084,7 +5084,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-vector"
 version = "0.2.0"
-source = "git+https://github.com/joeleaver/rhypedb#789e8bc75351c5b3040b0583e75b0c72806793b0"
+source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
 dependencies = [
  "boxcar",
  "parking_lot",
@@ -5095,7 +5095,7 @@ dependencies = [
 [[package]]
 name = "rhypedb-wire"
 version = "0.2.0"
-source = "git+https://github.com/joeleaver/rhypedb#789e8bc75351c5b3040b0583e75b0c72806793b0"
+source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
 dependencies = [
  "base64 0.22.1",
  "bytes",

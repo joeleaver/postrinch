@@ -10,6 +10,7 @@ use postrinch_model::{
 use crate::keys::scoped;
 use crate::messages::{THREAD, TYPE};
 use crate::{Store, StoreResult, labels};
+use rhypedb_engine::object::Value;
 
 /// How a label is used, counted over its messages.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -196,17 +197,28 @@ impl Store {
 
         let prefix = scoped(account, "");
         let mut entries = Vec::with_capacity(threads.len());
-        for thread in self.get_many_projected(THREAD, &threads, &["key", "latest"])? {
-            let key = thread.str("key")?;
+        // By column, not an object per thread: tens of thousands of them.
+        let columns = self
+            .db
+            .get_many_columns(THREAD, &threads, &["key", "latest"])?;
+        for (id, row) in columns.rows() {
+            let Some(Value::String(key)) = &row[0] else {
+                continue;
+            };
             let Some(provider_id) = key.strip_prefix(&prefix) else {
                 continue;
             };
-            if let Some(latest) = self.thread_latest(&thread)? {
+            let latest = match &row[1] {
+                Some(Value::DateTime(ms)) => Some(*ms),
+                // A store written before threads kept it.
+                _ => self.latest_of_messages(id)?,
+            };
+            if let Some(latest) = latest {
                 entries.push(ThreadEntry {
                     account: account.clone(),
                     thread: ProviderThreadId(provider_id.to_owned()),
                     latest: Timestamp::from_millis(latest),
-                    unread: unread_threads.contains(&thread.id()),
+                    unread: unread_threads.contains(&id),
                 });
             }
         }
