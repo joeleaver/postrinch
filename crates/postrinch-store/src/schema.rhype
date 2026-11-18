@@ -151,3 +151,13 @@ type Outgoing {
     // Whether the provider refused it for good.
     refused: Bool
 }
+
+// One account's mail rules (postrinch-rules): `settings` as the account's
+// settings message holds them, shared by every computer; `local` what this
+// computer alone knows (how far its runner got, the filters made in Gmail
+// itself). Keyed by EmailAddress::key().
+type AccountRules {
+    account: String @unique
+    settings: Json
+    local: Json
+}

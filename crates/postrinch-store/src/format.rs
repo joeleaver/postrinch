@@ -57,6 +57,7 @@ pub(crate) fn open(root: &Path) -> StoreResult<Store> {
         root: root.to_path_buf(),
         outbox_lock: Arc::default(),
         thread_lock: Arc::default(),
+        rules_lock: Arc::default(),
         writes: Arc::default(),
         stats: Arc::default(),
         undownloaded: Arc::default(),

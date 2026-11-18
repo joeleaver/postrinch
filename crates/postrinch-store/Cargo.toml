@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 postrinch-model = { workspace = true }
+postrinch-rules = { workspace = true }
 rhypedb-engine = { workspace = true }
 rhypedb-query = { workspace = true }
 rhypedb-schema = { workspace = true }

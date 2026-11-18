@@ -4325,6 +4325,7 @@ dependencies = [
  "jiff",
  "postrinch-model",
  "postrinch-render",
+ "postrinch-rules",
  "postrinch-store",
  "serde",
  "serde_json",
@@ -4397,6 +4398,7 @@ name = "postrinch-store"
 version = "0.1.20"
 dependencies = [
  "postrinch-model",
+ "postrinch-rules",
  "rhypedb-engine",
  "rhypedb-query",
  "rhypedb-schema",

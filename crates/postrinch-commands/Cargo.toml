@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 postrinch-model = { workspace = true }
 postrinch-render = { workspace = true }
+postrinch-rules = { workspace = true }
 postrinch-store = { workspace = true }
 jiff = "0.2"
 serde = { workspace = true }
