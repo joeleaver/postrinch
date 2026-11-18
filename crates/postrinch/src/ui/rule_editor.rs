@@ -478,6 +478,8 @@ fn existing_label(ui: RulesUi) -> String {
 
 pub const CSS: &str = r#"
 .rule-editor-modal .rinch-modal--xl { width: 1040px; max-width: calc(100vw - 48px); }
+/* The pickers open below their rows: the dialog must not clip them. */
+.rule-editor-modal .rinch-modal, .rule-editor-modal .rinch-modal__body { overflow: visible; }
 .rule-editor-body { display: flex; flex-direction: column; gap: 12px; }
 .rule-editor-head { display: flex; align-items: center; gap: 12px; }
 .rule-editor-account { font-size: 13px; color: var(--muted); }

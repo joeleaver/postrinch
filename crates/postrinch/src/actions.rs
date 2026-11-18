@@ -99,6 +99,7 @@ impl State {
             .await;
             let text = match opened {
                 Ok(account) => {
+                    sync.sync_engine().recheck_rules(&account.address);
                     sync.wake.notify_one();
                     Notice {
                         text: format!("{} is signed in. Its mail is on the way.", account.address),

@@ -225,3 +225,17 @@ async fn a_deleted_rules_marker_goes() {
         .await;
     f.sync.sync_rules(&f.me).await.unwrap();
 }
+
+#[tokio::test]
+async fn an_account_without_rules_is_left_alone() {
+    let f = fixture().await;
+    get(&f.server, "labels", json!({"labels": []})).await;
+    get(&f.server, "settings/filters", json!({})).await;
+    get(&f.server, "settings/forwardingAddresses", json!({})).await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&f.server)
+        .await;
+    f.sync.sync_rules(&f.me).await.unwrap();
+}

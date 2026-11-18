@@ -49,6 +49,15 @@ impl GmailSync {
                 .is_none_or(|t| t.elapsed() >= CHECK_EVERY)
     }
 
+    /// Look at the account's rules again next pass, as after it signs in
+    /// again and may now let Postrinch make filters.
+    pub fn recheck_rules(&self, account: &EmailAddress) {
+        self.rules_checked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&account.key());
+    }
+
     pub(super) fn rules_checked(&self, account: &EmailAddress) {
         self.rules_checked
             .lock()
@@ -66,22 +75,19 @@ impl GmailSync {
             .iter()
             .map(|l| (l.name.clone(), l.id.clone()))
             .collect();
-        let settings_label = match label_ids.get(SETTINGS_LABEL) {
-            Some(id) => id.clone(),
-            None => {
-                let id = self
-                    .api
-                    .create_hidden_label(account, SETTINGS_LABEL)
-                    .await?;
-                label_ids.insert(SETTINGS_LABEL.into(), id.clone());
-                id
-            }
-        };
-        self.note_settings_label(account, &settings_label);
+        // The settings label is made only when there are rules to keep:
+        // an account nobody wrote rules for is left as it was.
+        let mut settings_label = label_ids.get(SETTINGS_LABEL).cloned();
+        if let Some(id) = &settings_label {
+            self.note_settings_label(account, id);
+        }
 
         // The rules another computer wrote, unless this one has changes of
         // its own to write.
-        let found = self.api.labelled(account, &settings_label).await?;
+        let found = match &settings_label {
+            Some(id) => self.api.labelled(account, id).await?,
+            None => Vec::new(),
+        };
         let (_, local) = self.rules_here(account).await?;
         if let Some(newest) = found.first()
             && local.message.as_deref() != Some(newest)
@@ -129,7 +135,13 @@ impl GmailSync {
         }
         let elsewhere = match &listed {
             Some(all) => {
-                let ours: Vec<&str> = settings.made.iter().map(|m| m.id.as_str()).collect();
+                // Ours now, and ours before this pass (deleted in it).
+                let ours: Vec<&str> = settings
+                    .made
+                    .iter()
+                    .chain(&before.made)
+                    .map(|m| m.id.as_str())
+                    .collect();
                 let names: HashMap<&str, &str> = label_ids
                     .iter()
                     .map(|(n, i)| (i.as_str(), n.as_str()))
@@ -165,13 +177,20 @@ impl GmailSync {
         // Write the settings message when anything in it changed.
         let mut message = local.message.clone();
         if local.dirty || settings != before {
+            let label = match settings_label.take() {
+                Some(id) => id,
+                None => {
+                    let id = self
+                        .api
+                        .create_hidden_label(account, SETTINGS_LABEL)
+                        .await?;
+                    self.note_settings_label(account, &id);
+                    id
+                }
+            };
             let id = self
                 .api
-                .insert(
-                    account,
-                    &write_settings(account, &settings),
-                    &settings_label,
-                )
+                .insert(account, &write_settings(account, &settings), &label)
                 .await?;
             for old in found.iter().filter(|old| **old != id) {
                 self.api.delete_message(account, old).await?;

@@ -247,7 +247,16 @@ carried a nonsense word, all removed afterwards (messages to the trash).
   one at a time, ten minutes at most. Its answer goes to the log: what it
   can do is label, archive, star or propose a reply. Other apps cannot be
   started without a window.
-- **Not yet:** Sieve (with IMAP accounts); forwarding by a rule that
+- **Tried live, 2026-11-18,** on joe@joeleaver.com from a test window on a
+  copy of the store: Allow (signing in again with `gmail.settings.basic`),
+  then a rule Gmail ran (a filter starred the test mail as it arrived) and
+  one Postrinch ran (it labelled the mail within a minute), then deleting
+  both, which deleted the filter. Learnt on the way: the mail scope lists
+  filters, so only the grant's scopes say whether Postrinch may make them;
+  Gmail answers an empty body when there are no filters; the settings label
+  is now made only when there are rules to keep.
+- **Not yet:** Sieve (with IMAP accounts); a split rule (marker) and an agent
+  run against real Gmail; forwarding by a rule that
   Postrinch runs (only Gmail forwards); remind me later and notify; trying
   a refused rule again before the rules next change; `deliveredto:` with a
   real `+tag` delivery.
