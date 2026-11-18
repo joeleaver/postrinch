@@ -7,9 +7,9 @@ where the server can run it, in Postrinch where it cannot, split between the
 two when it has to be; the person never has to notice or care.
 
 This page is the contract the compiler, the editor and the local runner are
-built against. Rows marked **(test)** are what the Gmail documentation
-leaves unclear; each is settled by trying it on a test account before the
-compiler relies on it.
+built against. What the Gmail documentation left unclear was tried on a real
+account on 2026-11-18 (**Tested**, at the end); the tables below already
+follow from it.
 
 ## The principle that decides every table
 
@@ -24,10 +24,8 @@ Two consequences:
 - The vocabulary below chooses its words so that the common ones compile
   exactly. "From is ann@example.com" and "from contains the word invoice" are
   different conditions because Gmail treats them differently.
-- The editor never shows where a rule runs, as decided. The rule's details
-  pane may say, in small type, "runs while Postrinch is open" for a rule that
-  is entirely local: that is a fact about reliability the person may want,
-  not a choice they make. **(Joe to confirm.)**
+- The editor never shows where a rule runs, not even as a note on a rule
+  that is entirely local (Joe, 2026-11-18).
 
 ## 1. Conditions
 
@@ -39,21 +37,25 @@ list may hold a group, one level deep (the editor need not offer deeper).
 | Condition | Match | Gmail filter | Sieve | Notes |
 |---|---|---|---|---|
 | From | is address | `from` = `"ann@example.com"` | `address :is "from"` | exact |
-| From | domain is | `from:(*@example.com)` **(test)** | `address :domain :is "from"` | Gmail's `from:example.com` also matches `notexample.com`-style tokens; only the form the test proves exact goes to the server |
+| From | domain is | no: local | `address :domain :is "from"` | every Gmail form (`from:example.com`, `@example.com`, `*@example.com`) also matches subdomains, `example.com.evil.net`, and "example.com" in the name or local part |
 | From | name contains word | `from` = `Ann` | `header :contains "from"` (substring) | Gmail matches words; Sieve substrings. Sieve gets it only as `:regex` with word boundaries, where offered |
-| To / Cc / Bcc / any recipient | same three as From | `to:` `cc:` `bcc:` in `query`; the `to` field is to-or-cc | `address :is ["to","cc"]` | Gmail's `to` field means To or Cc: "any recipient" maps there, "To only" goes in `query` as `to:` **(test)** |
-| Sent to my alias | address is | `deliveredto:` in `query` | `envelope :is "to"` (needs `envelope`) | for `+tag` and alias addresses |
-| Subject | contains words | `subject` | `header :contains "subject"` | words vs substring, as for names |
+| Any recipient | address is | `to` field, or `to:` | `address :is ["to","cc","bcc"]` | Gmail's `to:` matches To, Cc and Bcc |
+| Cc / Bcc | address is | `cc:` / `bcc:` | `address :is "cc"` | each matches only its own header |
+| To (only) | address is | no: local | `address :is "to"` | Gmail has no To-only operator |
+| Sent to my alias | address is | `deliveredto:` | `envelope :is "to"` (needs `envelope`) | reads the Delivered-To header Gmail adds on delivery; to try with a real `+tag` delivery before relying on it |
+| Subject | contains words | `subject` | `header :regex` with word boundaries | Gmail matches whole words, no stemming: `invoice` misses "invoices" and "reinvoice" |
 | Subject / body / anywhere | contains phrase | `"…"` in `subject` or `query` | `body :text :contains` (needs `body`) | |
 | Body or anywhere | contains words | `query` | `body :text :contains` | Gmail also searches attachment names here; Postrinch matches that too, so "anywhere" is defined as Gmail's meaning |
 | Mailing list | is | `list:` in `query` | `header :contains "list-id"` | |
 | Has an attachment | — | `hasAttachment` | none in base Sieve: local | Sieve has no portable MIME test (`mime` ext, RFC 5703, is rare) |
-| Attachment name | contains / ends with | `filename:` in `query` | local | `filename:pdf` matches type too **(test)** |
+| Attachment type | is (extension) | `filename:pdf` | local | any case; not names that merely contain "pdf" |
+| Attachment name | is | `filename:report.pdf` | local | |
+| Attachment name | contains | no: local | local | |
 | Size | larger / smaller than | `size` + `sizeComparison` | `size :over` / `:under` | Gmail measures the whole message; so does Sieve; Postrinch uses the stored raw size |
 | Header | any name, contains / is | no: local | `header :contains "x-…"` | |
 | Text with wildcards or a pattern | matches | no: local | `:matches`, or `:regex` where offered | Gmail filters have no wildcards or regex |
 | From someone I know | — | no: local | no: local | "I've written to them", or a contact once contacts exist |
-| Gmail's category | is | local **(test)** | n/a | Gmail chooses the category itself; whether a filter sees it on arrival is not documented |
+| Gmail's category | is | no: local | n/a | a `category:primary` filter caught mail sent from the account but not arriving mail Gmail had put in Primary |
 | Looks like (semantic) | — | local | local | waits for embeddings |
 
 ### State conditions: what has happened to it since
@@ -129,7 +131,8 @@ The marker solves three things at once:
   does not repeat the work. Two computers catching up in the same minute can
   still both act; that is harmless for labels and archiving, and an agent
   action records its own result (a label) before running so the second
-  finds it. **(Open: whether that window matters enough to lock.)**
+  finds it. There is no lock (Joe, 2026-11-18): a rare repeat is cheaper
+  than a lock between computers.
 
 A shape-2 rule that is all local has no marker: its actions are idempotent
 (labels, flags, archive), or record what they did, as above.
@@ -163,14 +166,16 @@ the compiler does it.
 - **Gmail allows 1,000 filters** per account; "any of" and "stop" multiply
   them. The compiler counts before saving; past the limit, the rules that
   cost most run locally.
-- **Query length** has a limit Google does not publish **(test)**; a query
-  past it is split or goes local.
+- **Query length:** Gmail accepted filter queries of up to 10,000
+  characters without complaint; no limit was found. Whether a very long
+  query still matches as written was not tried; the compiler keeps queries
+  under 1,500 characters and splits longer ones into several filters.
 - **Sieve script size** is the server's `MAXSCRIPTSIZE` (ManageSieve
   capability); same treatment.
 - **The server refuses** (a scope withdrawn, a forwarding address no longer
   verified, the quota): the rule runs locally and keeps trying the server
-  each sync. The rule's details show why, in a sentence. **(Joe to confirm
-  that this quiet note is acceptable.)**
+  each sync. The rule's details show why, in a sentence (Joe agreed,
+  2026-11-18).
 
 ## 7. What has to change outside the rules code
 
@@ -198,11 +203,27 @@ the filter into a rule, saves that rule's filter, and only then deletes the
 old one. A filter whose query uses operators outside this vocabulary keeps
 that part as a "Gmail search" condition, which runs on Gmail only.
 
+## Tested
+
+On joe@joeleaver.com, 2026-11-18, with synthetic messages and filters that
+carried a nonsense word, all removed afterwards (messages to the trash).
+
+- **Search** (`messages.list` over inserted messages): the domain, recipient,
+  attachment and word rows above.
+- **Filters on arrival:** `messages.import` runs filters as delivery does,
+  so it is how the compiler's integration tests deliver test mail with any
+  sender. A `from:(*@example.com)` filter caught `ann@sub.example.com`; a
+  filter's `to` field caught a message where the address was only in Cc.
+- **Category:** a `category:primary` filter labelled a message the account
+  sent itself, but not imported mail Gmail put in Primary
+  (`CATEGORY_PERSONAL`).
+- **Scope:** the probe asked for `mail.google.com` and
+  `gmail.settings.basic` together and Google granted both, with the
+  unverified-app warning, as the Testing consent screen shows for any scope.
+
 ## Next
 
-1. Run the **(test)** rows on a test account; fix this page from what they
-   show.
-2. Mockups of the rules list and the rule editor.
-3. Build: the vocabulary and compiler with tests, Gmail filter sync and the
+1. Mockups of the rules list and the rule editor.
+2. Build: the vocabulary and compiler with tests, Gmail filter sync and the
    settings message, the local runner with catch-up; Sieve with IMAP
    accounts.
