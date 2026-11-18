@@ -4257,7 +4257,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "base64 0.22.1",
  "dark-light",
@@ -4284,7 +4284,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-agents"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "base64 0.22.1",
  "dirs",
@@ -4304,7 +4304,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-cli"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "clap",
  "dirs",
@@ -4321,7 +4321,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-commands"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "jiff",
  "postrinch-model",
@@ -4336,7 +4336,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-mcp"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "base64 0.22.1",
  "pdf-extract",
@@ -4354,7 +4354,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-model"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "serde",
  "serde_json",
@@ -4363,7 +4363,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-render"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "base64 0.22.1",
  "mail-parser",
@@ -4372,7 +4372,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-render-compare"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "clap",
  "postrinch-commands",
@@ -4386,7 +4386,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-rules"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "postrinch-model",
  "serde",
@@ -4396,7 +4396,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-store"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "postrinch-model",
  "postrinch-rules",
@@ -4414,7 +4414,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-sync"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -4442,7 +4442,7 @@ dependencies = [
 
 [[package]]
 name = "postrinch-update"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "base64 0.22.1",
  "dirs",
