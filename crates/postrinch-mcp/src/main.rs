@@ -9,6 +9,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod files;
+mod rules_tools;
 mod tools;
 
 use std::sync::Arc;

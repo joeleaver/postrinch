@@ -8,7 +8,7 @@ use std::sync::Arc;
 use postrinch_agents::setup::{
     bridge_path, command_snippet, entry_name, json_snippet, toml_snippet,
 };
-use postrinch_agents::{Agent, Agents, App, Reach, Setup, serve, wire};
+use postrinch_agents::{Agent, Agents, App, Changed, Reach, Setup, serve, wire};
 use postrinch_commands::Commands;
 use postrinch_model::EmailAddress;
 use tokio::sync::Notify;
@@ -42,17 +42,25 @@ pub struct Ready {
 }
 
 /// Listen for agents. A change an agent makes reloads what the window shows
-/// and wakes sync's sender, as the window's own changes do.
-pub fn start(commands: Commands, state: State, send: Option<Arc<Notify>>) {
+/// and wakes sync's sender, as the window's own changes do; a change to
+/// rules also wakes sync, to give Gmail the rules, and the rules runner.
+/// `sync` is its sender and its wake.
+pub fn start(commands: Commands, state: State, sync: Option<(Arc<Notify>, Arc<Notify>)>) {
     let Some(path) = Agents::default_path() else {
         state.agents_off.set(Some(
             "Agents cannot connect: this system has no settings folder.".into(),
         ));
         return;
     };
-    let on_change: serve::OnChange = Arc::new(move || {
-        if let Some(send) = &send {
+    let on_change: serve::OnChange = Arc::new(move |changed: &Changed| {
+        if let Some((send, wake)) = &sync {
             send.notify_one();
+            if matches!(changed, Changed::Rules(_)) {
+                wake.notify_one();
+            }
+        }
+        if let Changed::Rules(account) = changed {
+            crate::rules::due_now(account.clone());
         }
         state.revision.update_send(|n| *n += 1);
     });

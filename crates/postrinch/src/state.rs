@@ -281,6 +281,8 @@ impl State {
             }
         });
         Effect::new(move || {
+            // Again when an agent changes them.
+            self.revision.get();
             if self.view.get() == View::Settings
                 && self.settings_section.get() == SettingsSection::Rules
             {

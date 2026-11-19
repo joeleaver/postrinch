@@ -77,6 +77,23 @@ pub struct Local {
     /// Addresses Gmail has verified for forwarding, when last listed.
     #[serde(default)]
     pub forwarding: Vec<String>,
+    /// Rules agents proposed, waiting for the person to save or discard.
+    #[serde(default)]
+    pub proposed: Vec<Proposed>,
+}
+
+/// A rule an agent proposed: one that forwards mail or asks an agent,
+/// which only the person may save.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Proposed {
+    /// Unique among the account's proposals.
+    pub id: u32,
+    /// The rule, its id 0 for a new one.
+    pub rule: crate::Rule,
+    /// The agent's name.
+    pub agent: String,
+    /// Why, in the agent's words.
+    pub reason: Option<String>,
 }
 
 /// What Postrinch has to do itself for each rule, given what Gmail

@@ -9,10 +9,12 @@ repository.workspace = true
 [dependencies]
 postrinch-commands = { workspace = true }
 postrinch-model = { workspace = true }
+postrinch-rules = { workspace = true }
 base64 = "0.22"
 dirs = "7"
 jiff = "0.2"
 rand = "0.10"
+schemars = "1.0"
 serde = { workspace = true }
 # Keep the order of keys in the apps' settings files Postrinch changes.
 serde_json = { workspace = true, features = ["preserve_order"] }

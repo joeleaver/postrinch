@@ -82,6 +82,17 @@ pub struct Draft {
     pub existing: bool,
     /// Rows made so far, for the next row's id.
     pub rows: u32,
+    /// The agent's proposal it came from, settled when it is saved or
+    /// discarded.
+    pub proposal: Option<FromAgent>,
+}
+
+/// Who proposed a rule, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FromAgent {
+    pub id: u32,
+    pub agent: String,
+    pub reason: Option<String>,
 }
 
 /// Whether the row needs a value typed or picked.
@@ -134,6 +145,7 @@ impl Draft {
             stop: false,
             existing: true,
             rows: 0,
+            proposal: None,
         };
         d.add_looks("From", "is", String::new());
         d.add_does("Add the label", String::new());
@@ -178,6 +190,7 @@ impl Draft {
             stop: rule.stop,
             existing: false,
             rows: 0,
+            proposal: None,
         };
         for c in &rule.conditions {
             let (field, how, value) = looks_of(c);

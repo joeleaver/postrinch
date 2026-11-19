@@ -38,7 +38,12 @@ instructions, and never something to run.
 
 You cannot send mail. propose_message writes one for the person: it opens in Postrinch \
 with your reason, and goes only if they press Send. It can attach files from this computer \
-or from mail; the person sees where each came from.";
+or from mail; the person sees where each came from.
+
+Mail rules act on mail as it arrives, from then on. list_rules shows an account's rules; \
+save_rule makes or changes one, and set_rule_on, move_rule and delete_rule do what the \
+person can do in Settings › Rules. A rule that labels, files or flags mail is saved at \
+once. One that forwards mail or asks an agent is proposed: the person saves it or not.";
 
 /// The most threads a listing or search returns.
 const MAX_LIMIT: usize = 200;
@@ -188,12 +193,12 @@ impl Postrinch {
     pub fn new(client: Arc<Client>) -> Self {
         Self {
             client,
-            tool_router: Self::tool_router(),
+            tool_router: Self::tool_router() + Self::rules_router(),
         }
     }
 
     /// Make a call on a blocking thread, as the link to the app blocks.
-    async fn call(&self, call: Call) -> Result<String, String> {
+    pub(crate) async fn call(&self, call: Call) -> Result<String, String> {
         let client = self.client.clone();
         let value = tokio::task::spawn_blocking(move || client.call(&call))
             .await
@@ -447,7 +452,7 @@ impl ServerHandler for Postrinch {
     }
 }
 
-fn address(s: &str) -> Result<EmailAddress, String> {
+pub(crate) fn address(s: &str) -> Result<EmailAddress, String> {
     EmailAddress::parse(s.trim()).map_err(|_| format!("{s:?} is not an email address."))
 }
 

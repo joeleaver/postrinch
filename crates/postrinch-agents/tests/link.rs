@@ -77,7 +77,7 @@ fn an_agent_reads_and_changes_only_what_it_was_given() {
         listener,
         Commands::new(store.clone()),
         agents_path.clone(),
-        Arc::new(move || {
+        Arc::new(move |_: &postrinch_agents::Changed| {
             counter.fetch_add(1, Ordering::SeqCst);
         }),
     )

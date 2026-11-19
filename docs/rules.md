@@ -247,6 +247,17 @@ carried a nonsense word, all removed afterwards (messages to the trash).
   one at a time, ten minutes at most. Its answer goes to the log: what it
   can do is label, archive, star or propose a reply. Other apps cannot be
   started without a window.
+- **Agents' tools** (`postrinch-mcp`): `list_rules`, `save_rule`,
+  `set_rule_on`, `move_rule` and `delete_rule` do what the Rules page does,
+  in the accounts the agent may see. Rules travel in a plain shape
+  (`postrinch-agents`' `rule_shape.rs`: `{"test": "from_domain", "value":
+  …}`, `{"action": "add_label", "value": "Receipts"}`), labels by name. A
+  rule that labels, files or flags mail is saved at once. One that
+  forwards or asks an agent, new or now matching different mail, is only
+  proposed: it waits on this computer (`Local.proposed`), shows in the
+  sidebar beside proposed messages, and opens in the editor with the
+  agent's reason, for the person to save or discard. As in the editor,
+  forwarding goes only to an address Gmail has verified.
 - **Tried live, 2026-11-18,** on joe@joeleaver.com from a test window on a
   copy of the store: Allow (signing in again with `gmail.settings.basic`),
   then a rule Gmail ran (a filter starred the test mail as it arrived) and

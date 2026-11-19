@@ -1,7 +1,8 @@
-//! The sidebar's word on mail written here: agents' proposals waiting for
-//! the person, what is still sending, and what the provider refused.
+//! The sidebar's word on mail written here: agents' proposals (messages
+//! and rules) waiting for the person, what is still sending, and what the
+//! provider refused.
 
-use postrinch_commands::Queued;
+use postrinch_commands::{Queued, RuleProposal};
 use postrinch_store::OutgoingKind;
 use rinch::prelude::*;
 
@@ -11,11 +12,16 @@ use crate::state::State;
 pub fn outgoing_lines(state: State) -> NodeHandle {
     rsx! {
         div { class: "outgoing",
-            style: {move || if state.outgoing.with(|all| all.is_empty()) { "display: none".to_owned() } else { String::new() }},
+            style: {move || if state.outgoing.with(|all| all.is_empty()) && state.rules.proposals.with(|all| all.is_empty()) { "display: none".to_owned() } else { String::new() }},
             // Keyed by what each is, so a line is built once.
             for queued in state.outgoing.get().into_iter().filter(|q| q.kind == OutgoingKind::Proposed || q.refused) {
                 div { key: format!("{}|{}", queued.id, queued.refused),
                     {needs_you(__scope, state, queued.clone())}
+                }
+            }
+            for proposal in state.rules.proposals.get() {
+                div { key: format!("{}|{}", proposal.account.key(), proposal.proposed.id),
+                    {rule_proposed(__scope, state, proposal.clone())}
                 }
             }
             div {
@@ -71,6 +77,24 @@ fn needs_you(state: State, queued: Queued) -> NodeHandle {
     };
     rsx! {
         div { class: class, role: "button", onclick: move || state.open_proposal(&queued),
+            span { class: "needs-you-title", {title} }
+            span { class: "needs-you-detail", {detail} }
+        }
+    }
+}
+
+/// A rule an agent proposed: opens it in the rule editor.
+#[component]
+fn rule_proposed(state: State, proposal: RuleProposal) -> NodeHandle {
+    let title = format!("{} proposed a rule for you", proposal.proposed.agent);
+    let detail = proposal.proposed.rule.name.clone();
+    rsx! {
+        div { class: "needs-you", role: "button",
+            onclick: move || {
+                state.view.set(crate::state::View::Settings);
+                state.settings_section.set(crate::state::SettingsSection::Rules);
+                state.rules.open_proposal(&proposal);
+            },
             span { class: "needs-you-title", {title} }
             span { class: "needs-you-detail", {detail} }
         }

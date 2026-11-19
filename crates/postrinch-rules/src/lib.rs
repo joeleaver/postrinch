@@ -15,7 +15,7 @@ mod rule;
 mod summary;
 mod words;
 
-pub use record::{Elsewhere, Local, Made, Running, Settings};
+pub use record::{Elsewhere, Local, Made, Proposed, Running, Settings};
 pub use rule::{
     Action, Category, Condition, MARKER_PREFIX, Match, Rule, RuleError, RuleSet, Test, When,
 };

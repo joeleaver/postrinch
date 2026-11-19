@@ -10,6 +10,8 @@ use postrinch_model::{EmailAddress, Mailbox, ProviderMessageId, ProviderThreadId
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::rule_shape::RuleShape;
+
 /// Where the app listens, unless [`ADDR_ENV`] says otherwise.
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7465";
 /// Overrides [`DEFAULT_ADDR`], for the app and the bridge alike.
@@ -121,6 +123,37 @@ pub enum Call {
         message: ProviderMessageId,
         attachment: usize,
     },
+    /// The account's rules, in the order they run.
+    Rules {
+        account: EmailAddress,
+    },
+    /// Make a rule, or change the one with `rule_id`. One that forwards mail or
+    /// asks an agent is proposed to the person instead.
+    SaveRule {
+        account: EmailAddress,
+        /// The rule's id (`id` names the request).
+        rule_id: Option<u32>,
+        rule: RuleShape,
+        /// Also do it now to the matching mail already here.
+        #[serde(default)]
+        apply_to_existing: bool,
+        reason: Option<String>,
+    },
+    DeleteRule {
+        account: EmailAddress,
+        rule_id: u32,
+    },
+    SetRuleOn {
+        account: EmailAddress,
+        rule_id: u32,
+        on: bool,
+    },
+    /// Move a rule to place `to` (0 first) in the order rules run.
+    MoveRule {
+        account: EmailAddress,
+        rule_id: u32,
+        to: usize,
+    },
 }
 
 /// A file an agent attaches to a proposal.
@@ -144,10 +177,24 @@ pub enum ProposedFile {
     },
 }
 
+/// What a call changed, for the window to show and sync to send.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Changed {
+    Mail,
+    Rules(EmailAddress),
+}
+
 impl Call {
-    /// Whether the call changes mail.
-    pub fn changes(&self) -> bool {
-        matches!(self, Call::Act { .. } | Call::Propose { .. })
+    /// What the call changes, if anything.
+    pub fn changes(&self) -> Option<Changed> {
+        match self {
+            Call::Act { .. } | Call::Propose { .. } => Some(Changed::Mail),
+            Call::SaveRule { account, .. }
+            | Call::DeleteRule { account, .. }
+            | Call::SetRuleOn { account, .. }
+            | Call::MoveRule { account, .. } => Some(Changed::Rules(account.clone())),
+            _ => None,
+        }
     }
 }
 

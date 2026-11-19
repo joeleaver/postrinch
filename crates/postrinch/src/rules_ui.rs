@@ -1,7 +1,7 @@
 //! Settings › Rules' state, and what its buttons do: through the commands,
 //! then waking sync so Gmail gets the rules and the runner so they act.
 
-use postrinch_commands::{AlreadyHere, LabelChoice, RulesPage};
+use postrinch_commands::{AlreadyHere, LabelChoice, RuleProposal, RulesPage};
 use postrinch_model::{EmailAddress, Timestamp};
 use rinch::prelude::*;
 
@@ -11,7 +11,7 @@ use crate::actions::{commands, sync};
 
 /// Counts drafts looked up, so an answer for an older one is dropped.
 static ASKED: AtomicU64 = AtomicU64::new(0);
-use crate::rule_draft::Draft;
+use crate::rule_draft::{Draft, FromAgent};
 
 /// The rules page's signals. `Copy`, like the window's state.
 #[derive(Clone, Copy)]
@@ -35,6 +35,8 @@ pub struct RulesUi {
     /// The rule being dragged, and the row it is over.
     pub dragging: Signal<Option<u32>>,
     pub over: Signal<Option<usize>>,
+    /// Rules agents proposed, waiting for the person, in every account.
+    pub proposals: Signal<Vec<RuleProposal>>,
 }
 
 impl RulesUi {
@@ -51,6 +53,7 @@ impl RulesUi {
             confirm_forward: Signal::new(false),
             dragging: Signal::new(None),
             over: Signal::new(None),
+            proposals: Signal::new(Vec::new()),
         }
     }
 
@@ -163,6 +166,9 @@ impl RulesUi {
         }
         match commands.save_rule(&account, rule.clone()) {
             Ok(id) => {
+                if let Some(proposal) = &draft.proposal {
+                    self.settle(&account, proposal.id);
+                }
                 if draft.existing {
                     let commands = (*commands).clone();
                     let saved = postrinch_rules::Rule { id, ..rule };
@@ -181,6 +187,40 @@ impl RulesUi {
             }
             Err(e) => self.error.set(Some(e.to_string())),
         }
+    }
+
+    /// Open an agent's proposed rule in the editor.
+    pub fn open_proposal(self, proposal: &RuleProposal) {
+        let p = &proposal.proposed;
+        let mut draft = Draft::of(&p.rule);
+        draft.proposal = Some(FromAgent {
+            id: p.id,
+            agent: p.agent.clone(),
+            reason: p.reason.clone(),
+        });
+        self.edit(proposal.account.clone(), draft);
+    }
+
+    /// Discard the proposal the editor has open.
+    pub fn discard(self) {
+        let (Some(draft), Some(account)) = (self.draft.get(), self.editing_account.get()) else {
+            return;
+        };
+        if let Some(proposal) = &draft.proposal {
+            self.settle(&account, proposal.id);
+        }
+        self.close();
+    }
+
+    /// The proposal is saved or discarded.
+    fn settle(self, account: &EmailAddress, id: u32) {
+        if let Some(commands) = commands()
+            && let Err(e) = commands.settle_rule_proposal(account, id)
+        {
+            tracing::warn!("{account}: settling a proposed rule: {e}");
+        }
+        self.proposals
+            .update(|all| all.retain(|p| !(&p.account == account && p.proposed.id == id)));
     }
 
     pub fn delete(self) {

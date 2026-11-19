@@ -18,6 +18,7 @@ mod palette;
 mod reader;
 mod reading_settings;
 mod rule_editor;
+mod rule_editor_notes;
 mod rule_from_message;
 mod rules_page;
 mod search;
@@ -66,7 +67,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     agents::start(
         (*commands).clone(),
         state,
-        sync.as_ref().map(|s| s.send.clone()),
+        sync.as_ref().map(|s| (s.send.clone(), s.wake.clone())),
     );
     if let Some(sync) = &sync {
         crate::rules_ui::set_sender(sync.send.clone());

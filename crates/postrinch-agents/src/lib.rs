@@ -11,11 +11,13 @@
 
 pub mod client;
 pub mod registry;
+pub mod rule_shape;
 pub mod serve;
 pub mod setup;
 mod views;
+mod views_rules;
 pub mod wire;
 
 pub use registry::{Agent, Agents, Reach, Setup};
 pub use setup::App;
-pub use wire::{Call, KEY_ENV, ProposedFile};
+pub use wire::{Call, Changed, KEY_ENV, ProposedFile};

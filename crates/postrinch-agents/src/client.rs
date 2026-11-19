@@ -66,7 +66,7 @@ impl Client {
                     *open = None;
                     // A call that changes mail is not sent twice: it may
                     // have been made before the connection dropped.
-                    if attempt == 1 || call.changes() {
+                    if attempt == 1 || call.changes().is_some() {
                         tracing::warn!("the connection to Postrinch failed: {e}");
                         return Err("The connection to Postrinch was lost. Try again.".into());
                     }

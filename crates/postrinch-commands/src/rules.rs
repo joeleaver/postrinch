@@ -29,6 +29,9 @@ pub struct RulesPage {
     /// Whether the account lets Postrinch make filters; `None` until sync
     /// has asked.
     pub server: Option<bool>,
+    /// The rules Gmail runs, all their filters made, by id.
+    #[serde(default)]
+    pub in_gmail: Vec<u32>,
 }
 
 /// A conversation a rule matches.
@@ -53,7 +56,9 @@ impl Commands {
     pub fn rules_page(&self, account: &EmailAddress) -> CommandResult<RulesPage> {
         self.check(account)?;
         let (settings, local) = self.store.rules(account)?;
+        let running = settings.running(local.server == Some(true), local.elsewhere.len());
         Ok(RulesPage {
+            in_gmail: running.since.keys().copied().collect(),
             rules: settings.rules.rules,
             refused: settings.refused.into_iter().collect(),
             elsewhere: local.elsewhere,

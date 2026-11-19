@@ -17,15 +17,27 @@ use postrinch_model::{
 };
 use serde_json::{Value, json};
 
+use crate::registry::Agents;
+use crate::views_rules;
 use crate::wire::{Call, ProposedFile};
 
 /// The most body text one message carries, in chars.
 const BODY_CHARS: usize = 100_000;
 
 /// Run a call and shape its answer.
-pub(crate) fn run(commands: &Commands, call: Call, agent: &str) -> Result<Value, String> {
+pub(crate) fn run(
+    commands: &Commands,
+    call: Call,
+    agent: &str,
+    agents: &Agents,
+) -> Result<Value, String> {
     let mut labels = LabelNames::default();
     match call {
+        Call::Rules { .. }
+        | Call::SaveRule { .. }
+        | Call::DeleteRule { .. }
+        | Call::SetRuleOn { .. }
+        | Call::MoveRule { .. } => views_rules::run(commands, call, agent, agents),
         Call::Accounts => {
             let accounts = commands.accounts().map_err(say)?;
             Ok(Value::Array(
@@ -274,7 +286,7 @@ fn label_id(commands: &Commands, threads: &[ThreadRef], label: String) -> Result
 }
 
 /// An error as one sentence.
-fn say(e: postrinch_commands::CommandError) -> String {
+pub(crate) fn say(e: postrinch_commands::CommandError) -> String {
     let mut text = e.to_string();
     if let Some(first) = text.get_mut(..1) {
         first.make_ascii_uppercase();

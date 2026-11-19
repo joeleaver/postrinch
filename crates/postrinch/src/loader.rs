@@ -174,6 +174,10 @@ fn answer(commands: &Commands, state: State, request: Request) {
                 Ok(outgoing) => state.outgoing.send(outgoing),
                 Err(e) => failed(e.to_string()),
             }
+            match commands.rule_proposals() {
+                Ok(proposals) => state.rules.proposals.send(proposals),
+                Err(e) => failed(e.to_string()),
+            }
         }
         Request::Accounts => match commands.accounts() {
             Ok(accounts) => state.accounts.send(accounts),

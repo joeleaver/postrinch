@@ -16,10 +16,11 @@ use serde::Serialize;
 
 use crate::registry::{Agent, Agents, Reach};
 use crate::views;
-use crate::wire::{Greeting, Hello, MAX_LINE, Outcome, Request, Response};
+use crate::wire::{Changed, Greeting, Hello, MAX_LINE, Outcome, Request, Response};
 
-/// Called after an agent changed mail: the window shows it and sync sends it.
-pub type OnChange = Arc<dyn Fn() + Send + Sync>;
+/// Called after an agent changed mail or rules: the window shows it and
+/// sync sends it.
+pub type OnChange = Arc<dyn Fn(&Changed) + Send + Sync>;
 
 /// Listen at `addr` (see [`crate::wire::addr`]) in the background.
 pub fn start(
@@ -94,7 +95,7 @@ impl Link {
             Err(_) => String::new(),
         };
         let agent = match self.agent(&key) {
-            Ok(agent) => agent,
+            Ok((agent, _)) => agent,
             Err(reason) => return send(&mut out, &Greeting::Refused { reason }),
         };
         tracing::info!("agent {:?} connected", agent.name);
@@ -120,7 +121,7 @@ impl Link {
                 }
             };
             let outcome = match self.agent(&key) {
-                Ok(agent) => self.run(&agent, request.call),
+                Ok((agent, agents)) => self.run(&agent, &agents, request.call),
                 Err(reason) => Outcome::Error(reason),
             };
             send(
@@ -134,7 +135,7 @@ impl Link {
     }
 
     /// The agent a key belongs to, read from the file now.
-    fn agent(&self, key: &str) -> Result<Agent, String> {
+    fn agent(&self, key: &str) -> Result<(Agent, Agents), String> {
         let mut agents = Agents::load(&self.agents_path).map_err(|e| {
             tracing::error!("{e}");
             "Postrinch could not read its agents file.".to_owned()
@@ -147,19 +148,19 @@ impl Link {
         if let Err(e) = agents.touch(&agent.id) {
             tracing::warn!("{e}");
         }
-        Ok(agent)
+        Ok((agent, agents))
     }
 
-    fn run(&self, agent: &Agent, call: crate::wire::Call) -> Outcome {
+    fn run(&self, agent: &Agent, agents: &Agents, call: crate::wire::Call) -> Outcome {
         let commands = match &agent.reach {
             Reach::Every => self.commands.clone(),
             Reach::Only(accounts) => self.commands.limited_to(accounts),
         };
         let changes = call.changes();
-        match views::run(&commands, call, &agent.name) {
+        match views::run(&commands, call, &agent.name, agents) {
             Ok(value) => {
-                if changes {
-                    (self.on_change)();
+                if let Some(changed) = changes {
+                    (self.on_change)(&changed);
                 }
                 Outcome::Ok(value)
             }

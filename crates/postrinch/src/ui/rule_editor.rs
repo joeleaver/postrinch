@@ -11,12 +11,13 @@ use crate::rule_draft::{
 };
 use crate::rules_ui::RulesUi;
 use crate::state::State;
+use crate::ui::rule_editor_notes as notes;
 
 fn options(names: &[&str]) -> Vec<SelectOption> {
     names.iter().map(|n| SelectOption::new(*n, *n)).collect()
 }
 
-fn draft_get<T>(ui: RulesUi, read: impl FnOnce(&Draft) -> T, or: T) -> T {
+pub(super) fn draft_get<T>(ui: RulesUi, read: impl FnOnce(&Draft) -> T, or: T) -> T {
     ui.draft.with(|d| d.as_ref().map(read)).unwrap_or(or)
 }
 
@@ -44,7 +45,7 @@ pub fn rule_editor(state: State) -> NodeHandle {
             size: "sm",
             div { class: "dialog",
                 h2 { class: "dialog-title", "This rule sends mail out of your account" }
-                p { class: "dialog-hint", {move || forward_text(ui)} }
+                p { class: "dialog-hint", {move || notes::forward_text(ui)} }
                 p { class: "dialog-hint", "Turning the rule off or deleting it stops the forwarding." }
                 div { class: "dialog-actions",
                     Button { variant: "default", size: "sm", onclick: move || ui.confirm_forward.set(false), "Cancel" }
@@ -56,42 +57,28 @@ pub fn rule_editor(state: State) -> NodeHandle {
     }
 }
 
-fn forward_text(ui: RulesUi) -> String {
-    let rule = draft_get(ui, Draft::rule, postrinch_rules::Rule::new(0, ""));
-    let to: Vec<String> = rule
-        .actions
-        .iter()
-        .filter_map(|a| match a {
-            postrinch_rules::Action::Forward(to) => Some(to.clone()),
-            _ => None,
-        })
-        .collect();
-    let line = summarize_conditions(&rule);
-    format!(
-        "Every message {line} will be forwarded to {} as it arrives, without asking each time.",
-        to.join(" and ")
-    )
-}
-
-fn summarize_conditions(rule: &postrinch_rules::Rule) -> String {
-    let whole = postrinch_rules::summarize(rule, &|l| l.to_owned(), &|a| a.to_owned());
-    let conditions = whole.split(" \u{2192} ").next().unwrap_or("").to_owned();
-    let mut chars = conditions.chars();
-    match chars.next() {
-        Some(c) => c.to_lowercase().chain(chars).collect(),
-        None => String::new(),
-    }
-}
-
 #[component]
 fn editor_body(state: State) -> NodeHandle {
     let ui = state.rules;
     let name = Signal::new(draft_get(ui, |d| d.name.clone(), String::new()));
     let is_new = draft_get(ui, |d| d.id == 0, true);
+    let proposal = draft_get(ui, |d| d.proposal.clone(), None);
+    let proposed = proposal.is_some();
+    let banner = proposal.as_ref().map(|p| notes::banner(__scope, &p.agent));
+    let reason = proposal
+        .and_then(|p| p.reason)
+        .map(|r| notes::reason(__scope, r));
+    let title = match (proposed, is_new) {
+        (true, true) => "Proposed rule",
+        (true, false) => "Proposed change",
+        (false, true) => "New rule",
+        (false, false) => "Edit rule",
+    };
     rsx! {
         div { class: "rule-editor-body",
+            {banner}
             div { class: "rule-editor-head",
-                h2 { class: "dialog-title", {if is_new { "New rule" } else { "Edit rule" }} }
+                h2 { class: "dialog-title", {title} }
                 span { class: "spacer" }
                 span { class: "rule-editor-account", {move || ui.editing_account.get().map(|a| a.to_string()).unwrap_or_default()} }
             }
@@ -156,11 +143,15 @@ fn editor_body(state: State) -> NodeHandle {
                 }
                 {already_here(__scope, state)}
             }
+            {reason}
             for error in ui.error.get() {
                 p { key: error.clone(), class: "rule-error", {error.clone()} }
             }
             div { class: "dialog-actions rule-editor-foot",
-                if !is_new {
+                if proposed {
+                    Button { variant: "subtle", color: "red", size: "sm", onclick: move || ui.discard(), "Discard" }
+                }
+                if !is_new && !proposed {
                     Button { variant: "subtle", color: "red", size: "sm", onclick: move || ui.delete(), "Delete rule" }
                 }
                 span { class: "spacer" }
