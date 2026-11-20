@@ -261,11 +261,28 @@ impl Commands {
         query: &Either,
         every: bool,
     ) -> CommandResult<(Vec<Found>, Vec<EmailAddress>)> {
+        self.found_in(query, every, &[])
+    }
+
+    /// [`Commands::found`] in only these accounts (every account for none).
+    pub(crate) fn found_in(
+        &self,
+        query: &Either,
+        every: bool,
+        only: &[EmailAddress],
+    ) -> CommandResult<(Vec<Found>, Vec<EmailAddress>)> {
         let mut accounts: Vec<EmailAddress> = Vec::new();
         let mut found: Vec<Found> = Vec::new();
         let mut seen: HashSet<(String, String)> = HashSet::new();
         for one in &query.queries {
-            let these = self.search_accounts(one)?;
+            let mut these = self.search_accounts(one)?;
+            if !only.is_empty() {
+                these.retain(|a| only.contains(a));
+                // The store reads no accounts as every account.
+                if these.is_empty() {
+                    continue;
+                }
+            }
             let mut find = self.to_find(one, &these)?;
             find.every = every;
             for f in self.store.find_messages(&find)? {

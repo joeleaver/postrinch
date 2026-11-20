@@ -13,7 +13,7 @@ use postrinch_model::{EmailAddress, ProviderMessageId, ProviderThreadId, Timesta
 
 use crate::codec::Fields;
 use crate::messages::{CONTENT, THREAD, TYPE};
-use crate::{Store, StoreResult, labels};
+use crate::{Store, StoreResult, ThreadEntry, labels};
 
 /// How many full-text matches are looked at when nothing narrows them
 /// first. Matches past this many are the least relevant ones.
@@ -72,6 +72,7 @@ pub struct Found {
     pub account: EmailAddress,
     pub id: ProviderMessageId,
     pub received: Timestamp,
+    pub unread: bool,
     /// Full-text relevance (BM25, higher is better); 0 without words.
     pub score: f32,
     pub(crate) object: u64,
@@ -204,6 +205,7 @@ impl Store {
                 account: account.clone(),
                 id: ProviderMessageId(id.to_owned()),
                 received: Timestamp::from_millis(received),
+                unread,
                 score: scores.get(&fields.id()).copied().unwrap_or(0.0),
                 object: fields.id(),
             });
@@ -220,6 +222,38 @@ impl Store {
         Ok(Some(ProviderThreadId(
             self.get(THREAD, thread)?.str("provider_id")?,
         )))
+    }
+
+    /// The conversations found messages are in, each once, as a listing
+    /// has them (latest activity first), unread when a found message is.
+    pub fn found_threads(&self, found: &[Found]) -> StoreResult<Vec<ThreadEntry>> {
+        let mut by_account: HashMap<String, (EmailAddress, Vec<u64>)> = HashMap::new();
+        let mut unread_threads = HashSet::new();
+        for f in found {
+            let Some(thread) = self.link(TYPE, f.object, "thread")? else {
+                continue;
+            };
+            if f.unread {
+                unread_threads.insert(thread);
+            }
+            by_account
+                .entry(f.account.key())
+                .or_insert_with(|| (f.account.clone(), Vec::new()))
+                .1
+                .push(thread);
+        }
+        let mut entries = Vec::new();
+        for (account, mut threads) in by_account.into_values() {
+            threads.sort_unstable();
+            threads.dedup();
+            entries.extend(self.thread_entries(&account, &threads, &unread_threads)?);
+        }
+        entries.sort_by(|a, b| {
+            b.latest
+                .cmp(&a.latest)
+                .then_with(|| a.thread.cmp(&b.thread))
+        });
+        Ok(entries)
     }
 
     /// The accounts, by the key their objects' keys start with.

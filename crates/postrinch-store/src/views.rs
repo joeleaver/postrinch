@@ -1,91 +1,46 @@
+//! Views the person made or changed, each a `SavedView` object: its
+//! `name` field holds the view's key (unique), `settings` the whole view.
+//! A built-in view is stored only once changed. The commands check that a
+//! view's query reads before it gets here.
+
 use postrinch_model::SavedView;
-use rhypedb_query::ast::{Query, Source, Step};
 
 use crate::codec::{Fields, FieldsBuilder};
-use crate::{Store, StoreError, StoreResult};
+use crate::{Store, StoreResult};
 
 const TYPE: &str = "SavedView";
-const MESSAGE: &str = "Message";
-
-/// Check that `query` is one a view can be: it parses, reads `Message`
-/// objects, and only narrows, ranks or pages them. A view never writes and
-/// never leaves the `Message` type.
-fn check_query(query: &str) -> StoreResult<()> {
-    let parsed: Query = rhypedb_query::parser::parse_query(query)
-        .map_err(|e| StoreError::InvalidView(e.to_string()))?;
-    let type_name = match &parsed.source {
-        Source::All { type_name } | Source::Filter { type_name, .. } => type_name,
-        Source::Get { .. } => {
-            return Err(StoreError::InvalidView(
-                "a view selects messages, not one object by id".into(),
-            ));
-        }
-        Source::Create { .. } | Source::CreateBatch { .. } => {
-            return Err(StoreError::InvalidView(
-                "a view cannot create objects".into(),
-            ));
-        }
-    };
-    if type_name != MESSAGE {
-        return Err(StoreError::InvalidView(format!(
-            "a view selects {MESSAGE}, not {type_name}"
-        )));
-    }
-    for step in &parsed.steps {
-        match step {
-            Step::Filter { .. }
-            | Step::Matches { .. }
-            | Step::Similar { .. }
-            | Step::Limit { .. }
-            | Step::Offset { .. } => {}
-            Step::Traverse { field_name } => {
-                return Err(StoreError::InvalidView(format!(
-                    "a view cannot follow .{field_name} away from messages"
-                )));
-            }
-            Step::Update { .. } | Step::Delete | Step::Link { .. } | Step::Unlink { .. } => {
-                return Err(StoreError::InvalidView(
-                    "a view cannot change anything".into(),
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn decode(fields: &Fields) -> StoreResult<SavedView> {
-    SavedView::new(&fields.str("name")?, &fields.str("query")?)
-        .map_err(|e| StoreError::corrupt(TYPE, fields.id(), e))
-}
+/// The field that holds a view's key.
+const KEY: &str = "name";
 
 impl Store {
-    /// Save a view, replacing the query of any view with the same name.
-    pub fn put_saved_view(&self, view: &SavedView) -> StoreResult<()> {
-        check_query(view.query())?;
-        let create = FieldsBuilder::new()
-            .str("name", view.name())
-            .str("query", view.query());
-        let update = FieldsBuilder::new().str("query", view.query());
-        match self.find_views(view.name())?.first() {
-            Some(existing) => self.db_update(TYPE, *existing, update.build())?,
+    /// Save a view, replacing the one with the same key.
+    pub fn put_view(&self, view: &SavedView) -> StoreResult<()> {
+        let fields = || {
+            FieldsBuilder::new()
+                .str(KEY, &view.key)
+                .str("query", &view.query)
+                .json("settings", view)
+        };
+        match self.find_views(&view.key)?.first() {
+            Some(existing) => self.db_update(TYPE, *existing, fields().build())?,
             None => {
-                self.upsert(TYPE, "name", view.name(), create.build(), update.build())?;
+                self.upsert(TYPE, KEY, &view.key, fields().build(), fields().build())?;
             }
         }
         Ok(())
     }
 
-    /// The views named `name`, oldest first: found by name and, failing
-    /// that, among all views, which are few (rhypedb#27: a name that is the
+    /// The views with this key, oldest first: found by key and, failing
+    /// that, among all views, which are few (rhypedb#27: a key that is the
     /// start of another can be missed after a reopen).
-    fn find_views(&self, name: &str) -> StoreResult<Vec<u64>> {
-        if let Some(found) = self.find(TYPE, "name", name)? {
+    fn find_views(&self, key: &str) -> StoreResult<Vec<u64>> {
+        if let Some(found) = self.find(TYPE, KEY, key)? {
             return Ok(vec![found.id()]);
         }
         let mut ids: Vec<u64> = Vec::new();
-        for object in self.db.scan_type_projected(TYPE, &["name"])? {
+        for object in self.db.scan_type_projected(TYPE, &[KEY])? {
             let fields = Fields::new(TYPE, object);
-            if fields.str("name")? == name {
+            if fields.str(KEY)? == key {
                 ids.push(fields.id());
             }
         }
@@ -93,19 +48,19 @@ impl Store {
         Ok(ids)
     }
 
-    /// Keep the oldest of each name's views, removing copies made before
+    /// Keep the oldest of each key's views, removing copies made before
     /// views were found despite rhypedb#27. Returns how many were removed.
     pub fn merge_duplicate_views(&self) -> StoreResult<usize> {
-        let mut by_name: std::collections::HashMap<String, Vec<u64>> = Default::default();
-        for object in self.db.scan_type_projected(TYPE, &["name"])? {
+        let mut by_key: std::collections::HashMap<String, Vec<u64>> = Default::default();
+        for object in self.db.scan_type_projected(TYPE, &[KEY])? {
             let fields = Fields::new(TYPE, object);
-            by_name
-                .entry(fields.str("name")?)
+            by_key
+                .entry(fields.str(KEY)?)
                 .or_default()
                 .push(fields.id());
         }
         let mut removed = 0;
-        for (_, mut copies) in by_name.into_iter().filter(|(_, c)| c.len() > 1) {
+        for (_, mut copies) in by_key.into_iter().filter(|(_, c)| c.len() > 1) {
             copies.sort_unstable();
             for copy in copies.into_iter().skip(1) {
                 self.db_delete(TYPE, copy)?;
@@ -115,21 +70,28 @@ impl Store {
         Ok(removed)
     }
 
-    /// Every saved view, sorted by name.
-    pub fn saved_views(&self) -> StoreResult<Vec<SavedView>> {
-        let mut views = self
+    /// Every stored view, in the order they were first saved. Objects from
+    /// before views had settings (an earlier query language) are left out.
+    pub fn views(&self) -> StoreResult<Vec<SavedView>> {
+        let mut objects: Vec<Fields> = self
             .db
             .scan_type(TYPE)?
             .into_iter()
-            .map(|o| decode(&Fields::new(TYPE, o)))
-            .collect::<StoreResult<Vec<_>>>()?;
-        views.sort_by(|a, b| a.name().cmp(b.name()));
+            .map(|o| Fields::new(TYPE, o))
+            .collect();
+        objects.sort_by_key(Fields::id);
+        let mut views = Vec::new();
+        for fields in objects {
+            if let Some(view) = fields.opt_json::<SavedView>("settings")? {
+                views.push(view);
+            }
+        }
         Ok(views)
     }
 
-    /// Remove a view by name. Removing one that is not there does nothing.
-    pub fn remove_saved_view(&self, name: &str) -> StoreResult<()> {
-        for view in self.find_views(name)? {
+    /// Remove a view by key. Removing one that is not there does nothing.
+    pub fn remove_view(&self, key: &str) -> StoreResult<()> {
+        for view in self.find_views(key)? {
             self.db_delete(TYPE, view)?;
         }
         Ok(())
@@ -139,83 +101,69 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use postrinch_model::Timestamp;
 
-    #[test]
-    fn accepts_reads_of_messages() {
-        for q in [
-            "Message",
-            "Message.filter(.unread == true)",
-            "Message.filter(.starred == true).limit(50)",
-            "Message.matches(.search_text, \"invoice\", k: 20)",
-        ] {
-            check_query(q).unwrap_or_else(|e| panic!("{q}: {e}"));
-        }
-    }
-
-    #[test]
-    fn refuses_writes_other_types_and_traversals() {
-        for q in [
-            "Message.filter(.unread == true).delete()",
-            "Message.filter(.unread == true).update({ unread: false })",
-            "Person.filter(.name == \"Ada\")",
-            "Message.get(1)",
-            "Message.from",
-            "Message.filter(",
-        ] {
-            assert!(
-                matches!(check_query(q), Err(StoreError::InvalidView(_))),
-                "{q} should be refused"
-            );
-        }
+    fn view(name: &str, query: &str, made: i64) -> SavedView {
+        SavedView::new(name, query, Timestamp::from_millis(made)).unwrap()
     }
 
     #[test]
     fn put_replace_list_remove() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path()).unwrap();
-        let unread = SavedView::new("Unread", "Message.filter(.unread == true)").unwrap();
-        let starred = SavedView::new("Starred", "Message.filter(.starred == true)").unwrap();
-        store.put_saved_view(&unread).unwrap();
-        store.put_saved_view(&starred).unwrap();
-        let narrower =
-            SavedView::new("Unread", "Message.filter(.unread == true).limit(10)").unwrap();
-        store.put_saved_view(&narrower).unwrap();
+        let clients = view("Clients", "label:clients", 1);
+        let receipts = view("Receipts", "label:receipts", 2);
+        store.put_view(&clients).unwrap();
+        store.put_view(&receipts).unwrap();
+        let mut renamed = clients.clone();
+        renamed.rename("Customers").unwrap();
+        store.put_view(&renamed).unwrap();
 
-        assert_eq!(
-            store.saved_views().unwrap(),
-            vec![starred.clone(), narrower]
-        );
-        store.remove_saved_view("Unread").unwrap();
-        store.remove_saved_view("Unread").unwrap();
-        assert_eq!(store.saved_views().unwrap(), vec![starred]);
+        assert_eq!(store.views().unwrap(), vec![renamed, receipts.clone()]);
+        store.remove_view(&clients.key).unwrap();
+        store.remove_view(&clients.key).unwrap();
+        assert_eq!(store.views().unwrap(), vec![receipts]);
     }
 
     #[test]
     fn copies_of_a_view_go_and_saving_finds_the_original() {
         let dir = tempfile::tempdir().unwrap();
-        let view = SavedView::new("Bills", "Message.filter(.starred == true)").unwrap();
-        // A name another starts with is what rhypedb#27 misses after a
+        let first = view("Bills", "label:bills", 1);
+        // A key another starts with is what rhypedb#27 misses after a
         // reopen.
-        let longer = SavedView::new("Bills paid", "Message.filter(.unread == false)").unwrap();
+        let longer = view("Bills paid", "label:paid", 10);
         {
             let store = Store::open(dir.path()).unwrap();
-            store.put_saved_view(&view).unwrap();
-            store.put_saved_view(&longer).unwrap();
+            store.put_view(&first).unwrap();
+            store.put_view(&longer).unwrap();
         }
         let store = Store::open(dir.path()).unwrap();
         let copy = FieldsBuilder::new()
-            .str("name", "Bills")
-            .str("query", "Message.filter(.starred == true)")
+            .str(KEY, &first.key)
+            .str("query", "label:bills")
+            .json("settings", &first)
             .build();
         if store.db_create(TYPE, copy).is_err() {
             // The engine caught it: rhypedb#27 is fixed.
             return;
         }
         assert_eq!(store.merge_duplicate_views().unwrap(), 1);
-        assert_eq!(store.saved_views().unwrap(), vec![view, longer.clone()]);
-        // Saving finds the original even where the lookup by name misses.
-        let changed = SavedView::new("Bills", "Message.filter(.unread == true)").unwrap();
-        store.put_saved_view(&changed).unwrap();
-        assert_eq!(store.saved_views().unwrap(), vec![changed, longer]);
+        assert_eq!(store.views().unwrap(), vec![first.clone(), longer.clone()]);
+        let mut changed = first;
+        changed.set_query("label:bills is:unread").unwrap();
+        store.put_view(&changed).unwrap();
+        assert_eq!(store.views().unwrap(), vec![changed, longer]);
+    }
+
+    #[test]
+    fn views_from_before_settings_are_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let old = FieldsBuilder::new()
+            .str(KEY, "Unread")
+            .str("query", "Message.filter(.unread == true)")
+            .build();
+        store.db_create(TYPE, old).unwrap();
+        assert!(store.views().unwrap().is_empty());
     }
 }

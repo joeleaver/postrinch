@@ -28,7 +28,6 @@ rinch-visual-test = { git = "https://github.com/joeleaver/rinch.git" }
 # (rhypedb#52, #55). The ONNX/fastembed stack stays off until
 # semantic search turns it on deliberately.
 rhypedb-engine = { git = "https://github.com/joeleaver/rhypedb", rev = "f5bc105", default-features = false }
-rhypedb-query = { git = "https://github.com/joeleaver/rhypedb", rev = "f5bc105", default-features = false }
 rhypedb-schema = { git = "https://github.com/joeleaver/rhypedb", rev = "f5bc105" }
 
 serde = { version = "1", features = ["derive"] }

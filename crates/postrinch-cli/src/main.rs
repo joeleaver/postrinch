@@ -62,6 +62,9 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// List the views, each with what the sidebar counts beside it and
+    /// how long listing it took.
+    Views,
     /// Show a message's headers and text.
     Show { address: String, message_id: String },
     /// Make, list and remove the agents that may connect through

@@ -31,8 +31,6 @@ pub enum StoreError {
         dir: std::path::PathBuf,
         found: String,
     },
-    #[error("not a usable view query: {0}")]
-    InvalidView(String),
     /// A stored object does not decode to what the schema promises: a bug,
     /// or a database written by a different version of Postrinch.
     #[error("stored {type_name} {object_id} is malformed: {detail}")]

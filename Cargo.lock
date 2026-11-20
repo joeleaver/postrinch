@@ -4403,7 +4403,6 @@ dependencies = [
  "postrinch-model",
  "postrinch-rules",
  "rhypedb-engine",
- "rhypedb-query",
  "rhypedb-schema",
  "serde",
  "serde_json",
@@ -5002,19 +5001,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rhypedb-authz"
-version = "0.2.0"
-source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
-dependencies = [
- "base64 0.22.1",
- "ed25519-dalek",
- "rhypedb-schema",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "rhypedb-embed"
 version = "0.2.0"
 source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
@@ -5044,19 +5030,6 @@ dependencies = [
  "thiserror 2.0.21",
  "unicode-normalization",
  "unicode-segmentation",
-]
-
-[[package]]
-name = "rhypedb-query"
-version = "0.2.0"
-source = "git+https://github.com/joeleaver/rhypedb?rev=f5bc105#f5bc1052277c779ceccd249cff6719921a331e59"
-dependencies = [
- "bytes",
- "rhypedb-authz",
- "rhypedb-engine",
- "rhypedb-schema",
- "serde_json",
- "thiserror 2.0.21",
 ]
 
 [[package]]

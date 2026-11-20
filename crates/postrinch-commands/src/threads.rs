@@ -7,44 +7,14 @@ use postrinch_model::{
     ThreadSummary,
 };
 use postrinch_render::{Options as RenderOptions, Rendered};
+use postrinch_store::ThreadEntry;
 use serde::{Deserialize, Serialize};
 
 use crate::labels::Chip;
 use crate::search::Excerpt;
 use crate::{CommandResult, Commands, Folder};
 
-/// The order a list is in.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ListOrder {
-    /// Latest activity first.
-    #[default]
-    NewestFirst,
-    OldestFirst,
-    /// Those with unread mail first, each part newest first.
-    UnreadFirst,
-}
-
-impl ListOrder {
-    /// Order two rows: whether each is unread and when, then ties broken
-    /// by `tie` so a list keeps one order from one read to the next.
-    pub(crate) fn compare(
-        self,
-        a: (bool, postrinch_model::Timestamp),
-        b: (bool, postrinch_model::Timestamp),
-        tie: std::cmp::Ordering,
-    ) -> std::cmp::Ordering {
-        let unread = match self {
-            ListOrder::UnreadFirst => b.0.cmp(&a.0),
-            _ => std::cmp::Ordering::Equal,
-        };
-        let when = match self {
-            ListOrder::OldestFirst => a.1.cmp(&b.1),
-            _ => b.1.cmp(&a.1),
-        };
-        unread.then(when).then(tie)
-    }
-}
+pub use postrinch_model::ListOrder;
 
 /// A page of a folder's threads, in the order asked for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,7 +84,6 @@ impl Commands {
     ) -> CommandResult<ThreadPage> {
         let unread = order == ListOrder::UnreadFirst;
         let mut entries = Vec::new();
-        let mut account_chips: HashMap<String, HashMap<String, Chip>> = HashMap::new();
         for (account, label) in self.sources(folder)? {
             let found = match category {
                 None => self
@@ -129,16 +98,24 @@ impl Commands {
                 },
             };
             entries.extend(found);
-            if let std::collections::hash_map::Entry::Vacant(slot) =
-                account_chips.entry(account.key())
-            {
-                slot.insert(self.account_chips(&account)?);
-            }
         }
         let listed = match folder {
             Folder::Label { label, .. } => Some(label.as_str()),
             Folder::Everywhere(_) => None,
         };
+        self.thread_page(entries, order, offset, limit, listed)
+    }
+
+    /// A page of `entries` in `order`, from `offset`, at most `limit`
+    /// rows; their chips leave out `listed`, the label being listed.
+    pub(crate) fn thread_page(
+        &self,
+        mut entries: Vec<ThreadEntry>,
+        order: ListOrder,
+        offset: usize,
+        limit: usize,
+        listed: Option<&str>,
+    ) -> CommandResult<ThreadPage> {
         entries.sort_by(|a, b| {
             let tie = a
                 .account
@@ -149,12 +126,18 @@ impl Commands {
         });
         let total = entries.len();
         let mut threads = Vec::new();
+        let mut account_chips: HashMap<String, HashMap<String, Chip>> = HashMap::new();
         for entry in entries.iter().skip(offset).take(limit) {
             let messages = self.store.thread_messages(&entry.account, &entry.thread)?;
             let Some(summary) = ThreadSummary::from_messages(&messages) else {
                 continue;
             };
-            let known = &account_chips[&entry.account.key()];
+            let known = match account_chips.entry(entry.account.key()) {
+                std::collections::hash_map::Entry::Occupied(known) => known.into_mut(),
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(self.account_chips(&entry.account)?)
+                }
+            };
             let chips = summary
                 .labels
                 .iter()

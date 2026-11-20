@@ -106,9 +106,12 @@ type StoreInfo {
     version: u32
 }
 
+// A view the person made or changed (views.rs): `name` holds its key,
+// `settings` the whole view. `query` repeats the view's search.
 type SavedView {
     name: String @unique
     query: String
+    settings: Json
 }
 
 // A change made here to some messages (MessageChange), waiting to reach

@@ -74,6 +74,7 @@ pub(crate) async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Search { query, limit } => search(&cx, &query, limit),
+        Command::Views => views(&cx),
         Command::Show {
             address,
             message_id,
@@ -215,6 +216,25 @@ fn progress(address: &EmailAddress) -> ProgressFn {
         }
         let _ = std::io::stderr().flush();
     })
+}
+
+fn views(cx: &Context) -> Result<()> {
+    let commands = postrinch_commands::Commands::new(cx.store.clone());
+    for entry in commands.views()? {
+        let view = &entry.view;
+        let started = std::time::Instant::now();
+        let page = commands.list_view(view, view.order, 0, 50)?;
+        let listed = started.elapsed();
+        let started = std::time::Instant::now();
+        let count = commands.view_counts(std::slice::from_ref(view))?;
+        let counted = started.elapsed();
+        let count = count.first().map_or("-".to_owned(), |(_, n)| n.to_string());
+        println!(
+            "{:?}\t{}\t{}\t{} conversations, counts {count}\tlisted in {listed:?}, counted in {counted:?}",
+            entry.place, view.name, view.query, page.total
+        );
+    }
+    Ok(())
 }
 
 fn search(cx: &Context, query: &str, limit: usize) -> Result<()> {

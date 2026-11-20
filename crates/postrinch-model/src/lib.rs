@@ -25,4 +25,4 @@ pub use label::{Label, LabelColor, LabelKind, LabelPrefs, LabelVisibility, Syste
 pub use message::{AttachmentInfo, Flags, Message, MessageHeaders, ProviderMessageId};
 pub use thread::{ProviderThreadId, ThreadSummary};
 pub use time::Timestamp;
-pub use view::{SavedView, ViewError};
+pub use view::{ListOrder, SavedView, ViewCount, ViewError};

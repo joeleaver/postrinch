@@ -194,13 +194,23 @@ impl Store {
         }
         threads.sort_unstable();
         threads.dedup();
+        self.thread_entries(account, &threads, &unread_threads)
+    }
 
+    /// An account's threads (by object id, each once) as a listing has
+    /// them, latest activity first, `unread` saying which have unread mail.
+    pub(crate) fn thread_entries(
+        &self,
+        account: &EmailAddress,
+        threads: &[u64],
+        unread_threads: &HashSet<u64>,
+    ) -> StoreResult<Vec<ThreadEntry>> {
         let prefix = scoped(account, "");
         let mut entries = Vec::with_capacity(threads.len());
         // By column, not an object per thread: tens of thousands of them.
         let columns = self
             .db
-            .get_many_columns(THREAD, &threads, &["key", "latest"])?;
+            .get_many_columns(THREAD, threads, &["key", "latest"])?;
         for (id, row) in columns.rows() {
             let Some(Value::String(key)) = &row[0] else {
                 continue;
