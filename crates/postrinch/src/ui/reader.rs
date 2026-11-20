@@ -178,9 +178,11 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
         let unrendered = id.clone();
         rsx! {
             div {
-                for rendered in state.rendered.get().get(&id).cloned() {
-                    div { key: format!("{}|{}", rendered.remote_hidden, rendered.html.len()),
-                        {mail(__scope, state, shown.clone(), rendered.clone())}
+                // Redrawn when the window turns light or dark, for mail
+                // drawn in its colours.
+                for drawn in state.rendered.get().get(&id).cloned().map(|r| { let dark = r.plain && state.dark(); (r, dark) }) {
+                    div { key: format!("{}|{}|{}", drawn.0.remote_hidden, drawn.0.html.len(), drawn.1),
+                        {mail(__scope, state, shown.clone(), drawn.0.clone(), drawn.1)}
                     }
                 }
                 if !state.rendered.get().contains_key(&unrendered) {
@@ -215,11 +217,12 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
 
 /// A message as Postrinch drew it: the hidden-pictures bar when pictures
 /// from the web were held back, and the mail itself with the earlier
-/// messages it quotes folded under "Show quoted text". Mail with no colours
-/// of its own is drawn in the window's colours (dark ones too); other mail
-/// on the white it was designed on. View › Open in browser shows it there.
+/// messages it quotes folded under "Show quoted text". Mail with no design
+/// of its own is drawn in the window's colours, and under `dark` redrawn in
+/// dark ones (postrinch_render::for_dark); other mail on the white it was
+/// designed on. View › Open in browser shows it there.
 #[component]
-fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
+fn mail(state: State, message: Message, rendered: Rendered, dark: bool) -> NodeHandle {
     // The mail's own body (its style, its contents) inside the white card,
     // so a body with no padding of its own still sits off the card's edge.
     // HTML mail is cleaned by the view at the card's width, and again when a
@@ -234,7 +237,11 @@ fn mail(state: State, message: Message, rendered: Rendered) -> NodeHandle {
         let (html, body_style) = (rendered.html.clone(), rendered.body_style.clone());
         rsx! { HtmlView { html: html, body_style: body_style, onlink: move |href: String| crate::links::open(&href) } }
     } else {
-        let document = rendered.document.clone();
+        let document = if dark {
+            postrinch_render::for_dark(&rendered.document, crate::ui::palette::DARK_MAIL)
+        } else {
+            rendered.document.clone()
+        };
         let policy = postrinch_render::policy(rendered.remote);
         rsx! {
             HtmlView {
