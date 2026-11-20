@@ -109,6 +109,9 @@ fn form(state: State, compose: Compose, open: Signal<Option<Form>>) -> NodeHandl
     let to = Signal::new(format_mailboxes(&draft.to));
     let cc = Signal::new(format_mailboxes(&draft.cc));
     let bcc = Signal::new(format_mailboxes(&draft.bcc));
+    // Cc and Bcc wait behind links on the To line, unless the draft has them.
+    let show_cc = Signal::new(!draft.cc.is_empty());
+    let show_bcc = Signal::new(!draft.bcc.is_empty());
     let subject = Signal::new(draft.subject.clone());
     let body = Signal::new(draft.body.clone());
     let files = Signal::new(draft.attachments.clone());
@@ -187,10 +190,23 @@ fn form(state: State, compose: Compose, open: Signal<Option<Form>>) -> NodeHandl
                     span { class: "compose-label", "From" }
                     Select { data: accounts, value_fn: move || from.get(), onchange: move |v: String| from.set(v) }
                 }
-                {field(__scope, "To", to)}
-                {field(__scope, "Cc", cc)}
-                {field(__scope, "Bcc", bcc)}
-                {field(__scope, "Subject", subject)}
+                div { class: "compose-row",
+                    span { class: "compose-label", "To" }
+                    TextInput { value_fn: move || to.get(), oninput: move |v: String| to.set(v) }
+                    if !show_cc.get() {
+                        button { class: "compose-more", onclick: move || show_cc.set(true), "Cc" }
+                    }
+                    if !show_bcc.get() {
+                        button { class: "compose-more", onclick: move || show_bcc.set(true), "Bcc" }
+                    }
+                }
+                if show_cc.get() {
+                    {field(__scope, "Cc", "", cc)}
+                }
+                if show_bcc.get() {
+                    {field(__scope, "Bcc", "", bcc)}
+                }
+                {field(__scope, "", "Subject", subject)}
             }
             Textarea {
                 autosize: true,
@@ -213,11 +229,11 @@ fn form(state: State, compose: Compose, open: Signal<Option<Form>>) -> NodeHandl
 }
 
 #[component]
-fn field(label: &'static str, value: Signal<String>) -> NodeHandle {
+fn field(label: &'static str, placeholder: &'static str, value: Signal<String>) -> NodeHandle {
     rsx! {
         div { class: "compose-row",
             span { class: "compose-label", {label} }
-            TextInput { value_fn: move || value.get(), oninput: move |v: String| value.set(v) }
+            TextInput { placeholder: placeholder, value_fn: move || value.get(), oninput: move |v: String| value.set(v) }
         }
     }
 }
@@ -264,10 +280,20 @@ pub const CSS: &str = r#"
     font-size: 13px;
 }
 .compose-banner-title { font-size: 15px; font-weight: 600; color: var(--ink); }
-.compose-fields { display: flex; flex-direction: column; border-bottom: 1px solid var(--line-soft); }
-.compose-row { display: flex; align-items: center; gap: 12px; min-height: 40px; border-top: 1px solid var(--line-soft); }
-.compose-row > :last-child { flex: 1; }
-.compose-label { width: 60px; color: var(--muted); }
+.compose-fields { display: flex; flex-direction: column; }
+/* Flat lines, not boxes: the fields show only as text on rules. */
+.compose-row { display: flex; align-items: center; gap: 10px; height: 34px; border-bottom: 1px solid var(--line-soft); }
+.compose-row > .rinch-text-input, .compose-row > .rinch-select { flex: 1; }
+.compose-label { width: 44px; flex: none; color: var(--muted); font-size: 13px; }
+.compose-row .rinch-text-input__input, .compose-row .rinch-select__input {
+    height: 32px; min-height: 32px; padding: 0 4px; border: none; border-radius: 0;
+    background: transparent; font-size: 14px;
+}
+.compose-more {
+    height: 24px; padding: 0 6px; border: none; border-radius: 5px;
+    background: transparent; color: var(--muted); font-size: 13px; cursor: pointer;
+}
+.compose-more:hover { background: var(--hover); color: var(--accent); }
 .compose-warn { padding: 8px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--trouble); font-size: 13px; }
 .compose-aside { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; border-radius: 8px; background: var(--panel); }
 .compose-aside-title { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
