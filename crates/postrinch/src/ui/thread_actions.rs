@@ -50,7 +50,7 @@ pub fn in_inbox(state: State) -> bool {
 
 /// Whether the person is looking at the trash.
 fn in_trash(state: State) -> bool {
-    state.folder.get() == Folder::Everywhere(SystemLabel::Trash)
+    state.shows_label(SystemLabel::Trash)
 }
 
 /// Archive, or back to the inbox for a conversation out of it: what `e`

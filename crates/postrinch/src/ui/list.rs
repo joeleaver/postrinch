@@ -1,9 +1,9 @@
-//! The thread list: one row per conversation in the chosen folder, or per
+//! The thread list: one row per conversation in the open view, or per
 //! message when the person reads mail one message at a time.
 
-use postrinch_commands::{CATEGORIES, Folder, Sidebar, ThreadPage, ThreadRow};
+use postrinch_commands::{Sidebar, ThreadPage, ThreadRow};
 use postrinch_model::{
-    EmailAddress, ProviderMessageId, ProviderThreadId, SystemLabel, ThreadSummary, Timestamp,
+    EmailAddress, ProviderMessageId, ProviderThreadId, ThreadSummary, Timestamp,
 };
 use rinch::prelude::*;
 
@@ -34,13 +34,11 @@ pub fn thread_list(state: State) -> NodeHandle {
                 }
                 {crate::ui::search::search_notes(__scope, state)}
             }
-            // What the open conversation can have done to it, and the
-            // list's order. The folder's name and unread count are in the
-            // sidebar, so the list has no title of its own.
-            {crate::ui::list_head::list_actions(__scope, state)}
-            if !searching() && is_inbox(&state.folder.get(), state.sidebar.get().as_ref()) {
-                {tabs(__scope, state)}
+            if !searching() {
+                {crate::ui::view_head::view_head(__scope, state)}
             }
+            // What the open conversation can have done to it.
+            {crate::ui::list_head::list_actions(__scope, state)}
             div { class: "rows",
                 // Keyed by thread and its latest activity: a row is built
                 // once and follows its thread's other changes in place, and
@@ -166,36 +164,6 @@ fn more_label(page: Option<&ThreadPage>) -> String {
     .unwrap_or_default()
 }
 
-/// Gmail's inbox tabs: one category, Primary first (where an inbox opens),
-/// or everything, last.
-#[component]
-fn tabs(state: State) -> NodeHandle {
-    let all = CATEGORIES
-        .into_iter()
-        .map(Some)
-        .chain(std::iter::once(None));
-    let buttons: Vec<NodeHandle> = all
-        .map(|category| {
-            let name = match category {
-                None => "All",
-                Some(SystemLabel::CategoryPersonal) => "Primary",
-                Some(SystemLabel::CategoryUpdates) => "Updates",
-                Some(SystemLabel::CategoryPromotions) => "Promotions",
-                Some(SystemLabel::CategorySocial) => "Social",
-                Some(_) => "Forums",
-            };
-            rsx! {
-                button {
-                    class: {move || if state.category.get() == category { "tab chosen" } else { "tab" }},
-                    onclick: move || state.open_category(category),
-                    {name}
-                }
-            }
-        })
-        .collect();
-    rsx! { div { class: "tabs", role: "tablist", {buttons} } }
-}
-
 #[component]
 fn row(state: State, id: RowId) -> NodeHandle {
     let first = find_row(state, &id);
@@ -255,6 +223,11 @@ fn row(state: State, id: RowId) -> NodeHandle {
                     span {
                         key: format!("{chip:?}"),
                         class: "label-chip",
+                        title: "Show only this label's mail here",
+                        onclick: {
+                            let term = chip.search.clone();
+                            move || state.add_filter(term.clone())
+                        },
                         style: {match &chip.color {
                             Some(c) => format!("border-color: {c}; color: {c}"),
                             None => String::new(),
@@ -358,14 +331,4 @@ pub(crate) fn account_index(sidebar: Option<&Sidebar>, summary: &ThreadSummary) 
     accounts
         .iter()
         .position(|a| a.account.address == summary.account)
-}
-
-/// Whether a folder is an inbox, which gets Gmail's category tabs.
-pub(crate) fn is_inbox(folder: &Folder, sidebar: Option<&Sidebar>) -> bool {
-    match folder {
-        Folder::Everywhere(system) => *system == SystemLabel::Inbox,
-        Folder::Label { .. } => {
-            sidebar.is_some_and(|s| s.accounts.iter().any(|a| &a.inbox.folder == folder))
-        }
-    }
 }

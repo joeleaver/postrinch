@@ -1,8 +1,6 @@
 //! The menu bar, drawn in the title bar. Every item is something the
 //! window can already do; items arrive with the features behind them.
 
-use postrinch_commands::Folder;
-use postrinch_model::SystemLabel;
 use rinch::menu::{Menu, MenuItem};
 use rinch::prelude::*;
 
@@ -31,27 +29,22 @@ pub fn menus(state: State) -> Vec<(&'static str, Menu)> {
         )
         .separator()
         .item(MenuItem::new("Manage accounts…").on_click(move || state.view.set(View::Settings)));
-    let go = |folder: Folder| {
-        move || {
-            state.view.set(View::Mail);
-            state.open_folder(folder.clone());
-        }
-    };
+    let go = |key: &'static str| move || state.open_view(key);
     let view = Menu::new()
         .item(
-            MenuItem::new("All inboxes")
+            MenuItem::new("Inbox")
                 .shortcut("Ctrl+1")
-                .on_click(go(Folder::Everywhere(SystemLabel::Inbox))),
+                .on_click(go("inbox")),
         )
         .item(
             MenuItem::new("Sent")
                 .shortcut("Ctrl+2")
-                .on_click(go(Folder::Everywhere(SystemLabel::Sent))),
+                .on_click(go("sent")),
         )
         .item(
             MenuItem::new("Drafts")
                 .shortcut("Ctrl+3")
-                .on_click(go(Folder::Everywhere(SystemLabel::Drafts))),
+                .on_click(go("drafts")),
         )
         .separator()
         .item(MenuItem::new("Open in browser").on_click(move || state.open_in_browser()))

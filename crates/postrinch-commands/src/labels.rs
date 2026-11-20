@@ -94,12 +94,25 @@ pub struct Chip {
     pub label: String,
     pub name: String,
     pub color: Option<String>,
+    /// The search term that finds the label's mail (`label:"Work/Acme"`).
+    #[serde(default)]
+    pub search: String,
 }
 
 /// Whether a label is one the person sees: theirs, not Postrinch's own
 /// (rule markers, the settings message's label).
 fn shows(label: &Label) -> bool {
     label.kind == LabelKind::User && !label.name.starts_with(postrinch_rules::MARKER_PREFIX)
+}
+
+/// The search term for a label by its provider's name, quoted when it has
+/// spaces.
+pub fn label_term(name: &str) -> String {
+    if name.contains(char::is_whitespace) {
+        format!("label:\"{name}\"")
+    } else {
+        format!("label:{name}")
+    }
 }
 
 /// The chips an account's labels show as on thread rows, by provider id:
@@ -137,6 +150,7 @@ pub(crate) fn chips(
                 label: label.provider_id.clone(),
                 name,
                 color,
+                search: label_term(&label.name),
             },
         );
     }

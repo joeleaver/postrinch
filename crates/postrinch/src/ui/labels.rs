@@ -1,4 +1,4 @@
-//! The sidebar's labels: the person's own as a tree, then other apps'
+//! Settings › Labels: the person's own labels as a tree, then other apps'
 //! under the app that made them, collapsed. Hidden labels come back with
 //! "Show all labels".
 
@@ -224,8 +224,23 @@ fn row(
     }
 }
 
+/// Settings › Labels: every account's labels, to make, rename, colour,
+/// pin or hide. Mail is found by label in Filters and in views.
 #[component]
-pub fn labels_section(state: State) -> NodeHandle {
+pub fn labels_page(state: State) -> NodeHandle {
+    rsx! {
+        main { class: "settings-main",
+            h1 { class: "settings-heading", "Labels" }
+            p { class: "settings-hint",
+                "To see mail by label, pick labels in Filters beside the search box, or make a view of them. Click a label here to rename it or change its colour; right-click it for more."
+            }
+            div { class: "labels-page", {labels_section(__scope, state)} }
+        }
+    }
+}
+
+#[component]
+fn labels_section(state: State) -> NodeHandle {
     let rows = Memo::new(move || {
         let show_all = state.show_all.get();
         let toggled = state.toggled.get();
@@ -263,11 +278,10 @@ pub fn new_label(state: State, under: Option<(EmailAddress, String)>) {
     let (account, parent) = match under {
         Some(under) => under,
         None => {
-            let shown = match state.folder.get() {
-                Folder::Label { account, .. } => Some(account),
-                _ => None,
-            };
-            match shown.or_else(|| sidebar_accounts(state).into_iter().next()) {
+            match state
+                .shown_account()
+                .or_else(|| sidebar_accounts(state).into_iter().next())
+            {
                 Some(account) => (account, String::new()),
                 None => return,
             }
@@ -315,7 +329,6 @@ fn label_line(state: State, rows: Memo<Rc<Vec<LabelRow>>>, line: LabelRow) -> No
         RowKind::Label => "folder",
         RowKind::ShowAll => "show-all",
     };
-    let chosen = line.folder.clone();
     // The chevron opens and closes; the name opens the label, or does what
     // the chevron does when there is no label to open.
     let id = line.id.clone();
@@ -335,11 +348,23 @@ fn label_line(state: State, rows: Memo<Rc<Vec<LabelRow>>>, line: LabelRow) -> No
         }
         None => rsx! { span { class: "chevron" } },
     };
-    let folder = line.folder.clone();
+    let editing = match (&line.folder, &line.editable) {
+        (Some(Folder::Label { account, label }), Some((prefs, _, provider_name))) => {
+            Some(LabelEdit {
+                account: account.clone(),
+                label: label.clone(),
+                provider_name: provider_name.clone(),
+                prefs: prefs.clone(),
+                mode: EditMode::Rename,
+            })
+        }
+        _ => None,
+    };
     let (kind, has_children) = (line.kind, line.open.is_some());
-    let open_it = move || match (kind, folder.clone()) {
+    // A label opens to be renamed or coloured.
+    let open_it = move || match (kind, editing.clone()) {
         (RowKind::ShowAll, _) => state.show_all.update(|on| *on = !*on),
-        (_, Some(folder)) => state.open_folder(folder),
+        (_, Some(edit)) => state.editing.set(Some(edit)),
         _ if has_children => toggle(),
         _ => {}
     };
@@ -361,10 +386,7 @@ fn label_line(state: State, rows: Memo<Rc<Vec<LabelRow>>>, line: LabelRow) -> No
     };
     let body = rsx! {
         div {
-            class: {move || {
-                let here = chosen.as_ref().is_some_and(|f| *f == state.folder.get());
-                if here { format!("{class_for} chosen") } else { class_for.to_owned() }
-            }},
+            class: class_for,
             style: {indent.clone()},
             {chevron}
             span { class: "folder-name", onclick: open_it,

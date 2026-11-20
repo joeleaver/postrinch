@@ -143,7 +143,13 @@ fn counts_and_everything_else() {
         .map(|e| e.view)
         .collect();
     let counts = commands.view_counts(&views).unwrap();
-    let count = |key: &str| counts.iter().find(|(k, _)| k == key).map(|c| c.1);
+    let count = |key: &str| {
+        let view = views.iter().find(|v| v.key == key).unwrap();
+        counts
+            .iter()
+            .find(|t| t.key == key)
+            .and_then(|t| t.shown(view.count))
+    };
     assert_eq!(count("inbox"), Some(1));
     assert_eq!(count("primary"), Some(1));
     assert_eq!(count(&clients.key), Some(1));

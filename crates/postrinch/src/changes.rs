@@ -15,13 +15,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use postrinch_commands::{Commands, Folder, MessageRef, ThreadAction, ThreadRef, ThreadRow};
+use postrinch_commands::{Commands, MessageRef, ThreadAction, ThreadRef, ThreadRow};
 use postrinch_model::{SystemLabel, ThreadSummary};
 use tokio::sync::Notify;
 
 use crate::reading::AfterMove;
 use crate::state::State;
-use crate::ui::list::{RowId, id_of, is_inbox, row_ids};
+use crate::ui::list::{RowId, id_of, row_ids};
 
 /// The newest action the changes thread has made, by its number.
 static MADE: AtomicU64 = AtomicU64::new(0);
@@ -168,11 +168,11 @@ impl State {
 
     /// What the list shows now, as far as filing goes.
     fn listing(self) -> Listing {
-        let folder = self.folder.get();
         Listing {
             searching: self.search.get().is_some(),
-            inbox: is_inbox(&folder, self.sidebar.get().as_ref()),
-            folder,
+            inbox: self.shows_label(SystemLabel::Inbox),
+            trash: self.shows_label(SystemLabel::Trash),
+            labels: self.shown_label_ids(),
         }
     }
 
@@ -207,22 +207,22 @@ pub fn patch(summary: &mut ThreadSummary, action: &ThreadAction) {
 
 /// What the list shows, as far as filing goes.
 struct Listing {
-    folder: Folder,
-    inbox: bool,
     searching: bool,
+    /// The view shows the inbox, or the trash.
+    inbox: bool,
+    trash: bool,
+    /// The person's labels the view names, by the provider's ids.
+    labels: Vec<String>,
 }
 
 /// Whether `action` takes a thread out of the listing.
 fn removes(action: &ThreadAction, listing: &Listing) -> bool {
-    let in_trash = matches!(listing.folder, Folder::Everywhere(SystemLabel::Trash));
     let filed = !listing.searching;
     match action {
-        ThreadAction::Trash => !filed || !in_trash,
-        ThreadAction::Untrash => filed && in_trash,
+        ThreadAction::Trash => !filed || !listing.trash,
+        ThreadAction::Untrash => filed && listing.trash,
         ThreadAction::Archive => filed && listing.inbox,
-        ThreadAction::RemoveLabel(label) => {
-            filed && matches!(&listing.folder, Folder::Label { label: l, .. } if l == label)
-        }
+        ThreadAction::RemoveLabel(label) => filed && listing.labels.contains(label),
         _ => false,
     }
 }

@@ -67,12 +67,7 @@ fn open_thread(
     // (a list of more than one account's mail).
     let account = state.sidebar.with(|s| {
         crate::ui::list::account_index(s.as_ref(), summary)
-            .filter(|_| {
-                matches!(
-                    state.folder.get(),
-                    postrinch_commands::Folder::Everywhere(_)
-                )
-            })
+            .filter(|_| state.shown_account().is_none())
             .map(crate::ui::account_color)
     });
     let dot = match account {

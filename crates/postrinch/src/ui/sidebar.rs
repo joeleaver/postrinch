@@ -1,13 +1,14 @@
-//! The sidebar: unified folders, each account's inbox, labels, and sync.
+//! The sidebar, after the views mockup: the inbox and its tabs, a thin
+//! line with + to make a view, the person's own views, another line, then
+//! Everything else, All mail, Sent and Drafts; and sync below.
 
-use postrinch_commands::FolderEntry;
-use postrinch_model::EmailAddress;
+use postrinch_commands::Place;
+use postrinch_model::{EmailAddress, SavedView};
 use rinch::prelude::*;
 
 use crate::state::State;
 use crate::sync::thousands;
 use crate::ui::account_color;
-use crate::ui::labels::labels_section;
 
 #[component]
 pub fn sidebar(state: State) -> NodeHandle {
@@ -18,17 +19,33 @@ pub fn sidebar(state: State) -> NodeHandle {
             {crate::ui::outgoing::outgoing_lines(__scope, state)}
             div { class: "folders",
                 div { class: "folder-group",
-                    // Keyed by what a row is, not its count: rows are built
-                    // once and their counts follow the sidebar in place.
-                    for slot in folder_slots(state) {
-                        div { key: format!("{slot:?}"),
-                            {folder_row(__scope, state, slot.clone())}
+                    {views_in(__scope, state, Place::Top)}
+                    div { class: "view-line",
+                        span { class: "view-rule" }
+                        button {
+                            class: "view-add",
+                            title: "New view",
+                            aria-label: "New view",
+                            onclick: move || state.new_view(),
+                            "+"
                         }
                     }
+                    {views_in(__scope, state, Place::Yours)}
+                    // A second line only when there are views of the person's
+                    // own between the two.
+                    div {
+                        class: "view-line",
+                        style: {move || if has_own(state) { "" } else { "display: none" }},
+                        span { class: "view-rule" }
+                    }
+                    {views_in(__scope, state, Place::Bottom)}
+                    div {
+                        class: "show-all",
+                        style: {move || if any_hidden(state) { "" } else { "display: none" }},
+                        onclick: move || state.show_hidden.update(|on| *on = !*on),
+                        {move || if state.show_hidden.get() { "Leave out hidden views" } else { "Show hidden views" }}
+                    }
                 }
-            }
-            div { class: "labels",
-                {labels_section(__scope, state)}
             }
             div { class: "sync",
                 div { class: "section-title", "Sync" }
@@ -47,85 +64,105 @@ pub fn sidebar(state: State) -> NodeHandle {
     }
 }
 
-/// A row of the sidebar's folders, without what changes as mail arrives.
-#[derive(Debug, Clone, PartialEq)]
-struct FolderSlot {
-    entry: FolderEntry,
-    dot: Option<&'static str>,
-    indented: bool,
+fn any_hidden(state: State) -> bool {
+    state.views.with(|v| v.iter().any(|e| e.view.hidden))
 }
 
-/// All inboxes with each account's inbox under it, then Sent and Drafts,
-/// then the labels the person pinned.
-fn folder_slots(state: State) -> Vec<FolderSlot> {
-    state.sidebar.with(|sidebar| {
-        let Some(sidebar) = sidebar else {
-            return Vec::new();
-        };
-        let slot = |entry: &FolderEntry, dot, indented| FolderSlot {
-            entry: FolderEntry {
-                unread: 0,
-                ..entry.clone()
-            },
-            dot,
-            indented,
-        };
-        let mut slots = Vec::new();
-        let mut everywhere = sidebar.everywhere.iter();
-        if let Some(all) = everywhere.next() {
-            slots.push(slot(all, None, false));
-            for (i, account) in sidebar.accounts.iter().enumerate() {
-                slots.push(slot(&account.inbox, Some(account_color(i)), true));
+fn has_own(state: State) -> bool {
+    state
+        .views
+        .with(|v| v.iter().any(|e| e.place == Place::Yours && !e.view.hidden))
+}
+
+/// The views listed in one part of the sidebar. Keyed by what a row shows
+/// but its count: a row is built once and its count follows in place.
+#[component]
+fn views_in(state: State, place: Place) -> NodeHandle {
+    let listed = move || {
+        let counts = state.view_counts.get();
+        let show_hidden = state.show_hidden.get();
+        state.views.with(|views| {
+            views
+                .iter()
+                .filter(|e| e.place == place && crate::views::listed(&e.view, &counts, show_hidden))
+                .map(|e| e.view.clone())
+                .collect::<Vec<_>>()
+        })
+    };
+    rsx! {
+        div { class: "view-group",
+            for view in listed() {
+                div { key: format!("{}|{}|{:?}|{:?}|{}", view.key, view.name, view.accounts, view.count, view.hidden),
+                    {view_row(__scope, state, view.clone())}
+                }
             }
         }
-        for entry in everywhere {
-            slots.push(slot(entry, None, false));
-        }
-        for account in &sidebar.accounts {
-            for entry in &account.labels.pinned {
-                slots.push(slot(entry, None, false));
-            }
-        }
-        slots
-    })
+    }
 }
 
 #[component]
-fn folder_row(state: State, slot: FolderSlot) -> NodeHandle {
-    let FolderSlot {
-        entry,
-        dot,
-        indented,
-    } = slot;
-    let folder = entry.folder.clone();
-    let chosen = entry.folder.clone();
-    let counted = entry.folder.clone();
-    let unread = Memo::new(move || {
-        state.sidebar.with(|s| {
-            s.as_ref()
-                .and_then(|s| s.entry(&counted))
-                .map_or(0, |e| e.unread)
+fn view_row(state: State, view: SavedView) -> NodeHandle {
+    let key = view.key.clone();
+    let chosen = view.key.clone();
+    let counted = view.clone();
+    let hidden = view.hidden;
+    let count = Memo::new(move || {
+        state.view_counts.with(|c| {
+            c.get(&counted.key)
+                .and_then(|t| t.shown(counted.count))
+                .unwrap_or(0)
         })
     });
-    let dot =
-        dot.map(|color| rsx! { span { class: "dot", style: {format!("background: {color}")} } });
+    // A view of one account says which, by the account's colour (once
+    // the accounts are loaded).
+    let one = match view.accounts.as_slice() {
+        [one] => Some(one.clone()),
+        _ => None,
+    };
+    let dot_style = Memo::new(
+        move || match one.as_ref().and_then(|a| account_dot(state, a)) {
+            Some(color) => format!("background: {color}"),
+            None => "display: none".to_owned(),
+        },
+    );
     rsx! {
         div {
             class: {move || {
                 let mut class = String::from("folder");
-                if indented { class.push_str(" indented"); }
-                if state.folder.get() == chosen { class.push_str(" chosen"); }
+                if state.open_view.get() == chosen && state.search.get().is_none() {
+                    class.push_str(" chosen");
+                }
+                if hidden {
+                    class.push_str(" hidden-view");
+                }
                 class
             }},
-            onclick: move || state.open_folder(folder.clone()),
-            span { class: "folder-name", {dot} span { class: "name-text", {entry.name.clone()} } }
+            onclick: move || state.open_view(&key),
+            span { class: "folder-name",
+                span { class: "name-text", {view.name.clone()} }
+                span { class: "dot", style: {move || dot_style.get()} }
+            }
             span {
                 class: "count",
-                style: {move || if unread.get() > 0 { "" } else { "display: none" }},
-                {move || thousands(unread.get())}
+                style: {move || if count.get() > 0 { "" } else { "display: none" }},
+                {move || thousands(count.get())}
             }
         }
     }
+}
+
+/// The colour that marks an account, when there is more than one.
+fn account_dot(state: State, account: &EmailAddress) -> Option<&'static str> {
+    state.sidebar.with(|s| {
+        let accounts = &s.as_ref()?.accounts;
+        if accounts.len() < 2 {
+            return None;
+        }
+        accounts
+            .iter()
+            .position(|a| &a.account.address == account)
+            .map(account_color)
+    })
 }
 
 fn sync_accounts(state: State) -> Vec<EmailAddress> {

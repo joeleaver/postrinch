@@ -228,7 +228,10 @@ fn views(cx: &Context) -> Result<()> {
         let started = std::time::Instant::now();
         let count = commands.view_counts(std::slice::from_ref(view))?;
         let counted = started.elapsed();
-        let count = count.first().map_or("-".to_owned(), |(_, n)| n.to_string());
+        let count = count
+            .first()
+            .and_then(|t| t.shown(view.count))
+            .map_or("-".to_owned(), |n| n.to_string());
         println!(
             "{:?}\t{}\t{}\t{} conversations, counts {count}\tlisted in {listed:?}, counted in {counted:?}",
             entry.place, view.name, view.query, page.total

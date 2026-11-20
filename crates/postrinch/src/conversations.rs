@@ -153,15 +153,6 @@ impl State {
         self.save_settings(|s| s.show_mail = choice);
     }
 
-    /// List newest, oldest or unread first, from the top again.
-    pub fn set_list_order(self, choice: postrinch_commands::ListOrder) {
-        batch(|| {
-            self.shown.set(PAGE);
-            self.list_order.set(choice);
-        });
-        self.save_settings(|s| s.list_order = choice);
-    }
-
     pub fn set_order(self, choice: Order) {
         self.order.set(choice);
         self.save_settings(|s| s.order = choice);

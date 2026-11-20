@@ -35,7 +35,7 @@ pub use attachments::{file_name, is_program, mime_for, size_text};
 pub use error::{CommandError, CommandResult};
 pub use filters::Filters;
 pub use folders::{AccountFolders, Folder, FolderEntry, Sidebar};
-pub use labels::{AppLabels, Chip, LabelNode, LabelRole, LabelTree, app_of, role};
+pub use labels::{AppLabels, Chip, LabelNode, LabelRole, LabelTree, app_of, label_term, role};
 pub use messages::{Grouping, MessageRef};
 pub use postrinch_render::Part;
 pub use postrinch_render::Rendered;
@@ -45,7 +45,7 @@ pub use rules_proposed::RuleProposal;
 pub use rules_run::{AgentAsk, Ran};
 pub use search::{Excerpt, Remote, SearchResults};
 pub use threads::{CATEGORIES, ListOrder, Thread, ThreadPage, ThreadRow};
-pub use views::{EVERYTHING_ELSE, Place, ViewEntry};
+pub use views::{EVERYTHING_ELSE, Place, ViewEntry, ViewTally};
 pub use writing::{Queued, Start};
 
 /// The commands, over one store. Cheap to clone.

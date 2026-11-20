@@ -97,7 +97,17 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     cursor: pointer;
 }
 .folder:hover { background: var(--hover); }
-.folder.indented { padding-left: 22px; }
+.view-line { display: flex; align-items: center; gap: 6px; height: 22px; margin: 4px 4px; }
+.view-rule { flex: 1; height: 1px; background: var(--line); }
+.view-add {
+    width: 20px; height: 20px; padding: 0;
+    border: 0; border-radius: 5px;
+    background: transparent; color: var(--muted);
+    font: inherit; font-size: 15px; line-height: 1;
+    cursor: pointer;
+}
+.view-add:hover { background: var(--hover); color: var(--ink); }
+.folder.hidden-view .name-text { color: var(--muted); font-style: italic; }
 .folder.chosen { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
 .folder-name {
     min-width: 0;
@@ -219,23 +229,6 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     line-height: 16px;
     color: var(--ink-2);
 }
-.tabs {
-    flex-shrink: 0;
-    display: flex;
-    padding: 0 13px;
-}
-.tab {
-    height: 32px;
-    padding: 0 7px;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    color: var(--muted);
-    font: inherit;
-    font-size: 13px;
-    cursor: pointer;
-}
-.tab.chosen { color: var(--accent-ink); border-bottom-color: var(--accent); font-weight: 600; }
 .snippet {
     flex: 1;
     min-width: 0;

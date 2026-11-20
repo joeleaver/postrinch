@@ -1,12 +1,12 @@
-//! The last few lists shown, so going back to an account, folder or tab
+//! The last few lists shown, so going back to a view
 //! shows its threads at once while the loader reads them again, and which
 //! list the window wants now, so the loader drops an answer for one the
 //! person has already left.
 
 use std::sync::Mutex;
 
-use postrinch_commands::{Folder, Grouping, ListOrder, ThreadPage};
-use postrinch_model::SystemLabel;
+use postrinch_commands::{Grouping, ThreadPage};
+use postrinch_model::SavedView;
 
 /// How many lists are kept.
 const KEPT: usize = 8;
@@ -15,10 +15,9 @@ const KEPT: usize = 8;
 /// of a list is still that list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListKey {
-    pub folder: Folder,
-    pub category: Option<SystemLabel>,
+    /// The view as shown, its order and any unsaved changes included.
+    pub view: SavedView,
     pub grouping: Grouping,
-    pub order: ListOrder,
 }
 
 struct Recent {
@@ -72,12 +71,11 @@ pub fn loaded(key: ListKey, page: &ThreadPage) -> bool {
 mod tests {
     use super::*;
 
-    fn key(system: SystemLabel) -> ListKey {
+    fn key(name: &str) -> ListKey {
+        let made = postrinch_model::Timestamp::from_millis(name.len() as i64);
         ListKey {
-            folder: Folder::Everywhere(system),
-            category: None,
+            view: SavedView::new(name, &format!("label:{name}"), made).unwrap(),
             grouping: Grouping::default(),
-            order: ListOrder::default(),
         }
     }
 
@@ -92,30 +90,19 @@ mod tests {
     // One test: they share the one cache.
     #[test]
     fn a_list_comes_back_at_once_and_a_left_one_is_not_shown() {
-        assert_eq!(want(key(SystemLabel::Inbox)), Some(None));
-        assert!(loaded(key(SystemLabel::Inbox), &page(1)));
+        assert_eq!(want(key("Inbox")), Some(None));
+        assert!(loaded(key("Inbox"), &page(1)));
         // The same list again (sync, or more shown): nothing to swap in.
-        assert_eq!(want(key(SystemLabel::Inbox)), None);
+        assert_eq!(want(key("Inbox")), None);
         // Another list, then back: the first comes back as it was.
-        assert_eq!(want(key(SystemLabel::Sent)), Some(None));
-        assert_eq!(want(key(SystemLabel::Inbox)), Some(Some(page(1))));
+        assert_eq!(want(key("Sent")), Some(None));
+        assert_eq!(want(key("Inbox")), Some(Some(page(1))));
         // Sent's answer arrives after the person went back to the inbox.
-        assert!(!loaded(key(SystemLabel::Sent), &page(2)));
+        assert!(!loaded(key("Sent"), &page(2)));
         // Only KEPT lists are kept, the oldest going first.
         for n in 0..KEPT {
-            loaded(
-                ListKey {
-                    category: Some(SystemLabel::CategorySocial),
-                    folder: Folder::Label {
-                        account: postrinch_model::EmailAddress::parse("a@b.c").unwrap(),
-                        label: n.to_string(),
-                    },
-                    grouping: Grouping::default(),
-                    order: ListOrder::default(),
-                },
-                &page(n),
-            );
+            loaded(key(&format!("other {n}")), &page(n));
         }
-        assert_eq!(want(key(SystemLabel::Sent)), Some(None));
+        assert_eq!(want(key("Sent")), Some(None));
     }
 }

@@ -3,12 +3,15 @@
 //! person's own come between them. A built-in view can be saved over and
 //! put back; the person's can be removed.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use postrinch_model::{EmailAddress, LabelKind, ListOrder, SavedView, Timestamp, ViewCount};
 use postrinch_store::ThreadEntry;
 use serde::{Deserialize, Serialize};
 
+use crate::labels::Chip;
+use crate::messages::message_row;
 use crate::query::{LabelName, Query, label_matches};
 use crate::query_or::Either;
 use crate::{CommandError, CommandResult, Commands, ThreadPage};
@@ -40,6 +43,26 @@ pub struct ViewEntry {
     /// A built-in view as it first was, to put back; `None` for the
     /// person's own, which can be removed instead.
     pub original: Option<SavedView>,
+}
+
+/// How many conversations a view has.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewTally {
+    pub key: String,
+    pub all: usize,
+    /// Those with unread mail.
+    pub unread: usize,
+}
+
+impl ViewTally {
+    /// What the sidebar shows beside the view, as it asks.
+    pub fn shown(&self, count: ViewCount) -> Option<usize> {
+        match count {
+            ViewCount::Unread => Some(self.unread),
+            ViewCount::All => Some(self.all),
+            ViewCount::None => None,
+        }
+    }
 }
 
 /// The built-in views: key, name, search, count, place.
@@ -193,11 +216,66 @@ impl Commands {
         self.thread_page(entries, order, offset, limit, None)
     }
 
-    /// What the sidebar counts beside each view, by key: its unread
-    /// conversations or all of them, as the view asks; views that count
-    /// nothing and show while empty are left out. A search several views
-    /// share (Everything else reads them all) is run once.
-    pub fn view_counts(&self, views: &[SavedView]) -> CommandResult<Vec<(String, usize)>> {
+    /// [`Commands::list_view`] one message at a time: the messages the
+    /// view's search finds, each a row of its own.
+    pub fn list_view_messages(
+        &self,
+        view: &SavedView,
+        order: ListOrder,
+        offset: usize,
+        limit: usize,
+    ) -> CommandResult<ThreadPage> {
+        let either = Either::parse(&view.query, now())?;
+        let (mut found, _) = self.found_in(&either, true, &view.accounts)?;
+        if view.key == EVERYTHING_ELSE {
+            let keep: HashSet<(String, String)> = self
+                .view_threads(view, &mut Found::new())?
+                .into_iter()
+                .map(|t| (t.account.key(), t.thread.0))
+                .collect();
+            let mut kept = Vec::new();
+            for f in found {
+                if let Some(thread) = self.store.found_thread(&f)?
+                    && keep.contains(&(f.account.key(), thread.0))
+                {
+                    kept.push(f);
+                }
+            }
+            found = kept;
+        }
+        found.sort_by(|a, b| {
+            let tie = a
+                .account
+                .key()
+                .cmp(&b.account.key())
+                .then_with(|| a.id.cmp(&b.id));
+            order.compare((a.unread, a.received), (b.unread, b.received), tie)
+        });
+        let total = found.len();
+        let mut rows = Vec::new();
+        let mut chips: HashMap<String, HashMap<String, Chip>> = HashMap::new();
+        for f in found.iter().skip(offset).take(limit) {
+            let Some(message) = self.store.message(&f.account, &f.id)? else {
+                continue;
+            };
+            let known = match chips.entry(f.account.key()) {
+                Entry::Occupied(known) => known.into_mut(),
+                Entry::Vacant(slot) => slot.insert(self.account_chips(&f.account)?),
+            };
+            rows.extend(message_row(&message, known, None, None));
+        }
+        Ok(ThreadPage {
+            total,
+            offset,
+            threads: rows,
+        })
+    }
+
+    /// What the sidebar needs to know of each view: how many
+    /// conversations are in it and how many have unread mail. Views that
+    /// count nothing and show while empty are left out. A search several
+    /// views share (Everything else reads them all) is run once.
+    pub fn view_counts(&self, views: &[SavedView]) -> CommandResult<Vec<ViewTally>> {
         let mut found = Found::new();
         let mut counts = Vec::new();
         for view in views {
@@ -205,11 +283,11 @@ impl Commands {
                 continue;
             }
             let threads = self.view_threads(view, &mut found)?;
-            let count = match view.count {
-                ViewCount::Unread => threads.iter().filter(|t| t.unread).count(),
-                ViewCount::All | ViewCount::None => threads.len(),
-            };
-            counts.push((view.key.clone(), count));
+            counts.push(ViewTally {
+                key: view.key.clone(),
+                all: threads.len(),
+                unread: threads.iter().filter(|t| t.unread).count(),
+            });
         }
         Ok(counts)
     }

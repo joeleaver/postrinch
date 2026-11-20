@@ -2,10 +2,13 @@
 
 use std::collections::HashSet;
 
+use std::collections::HashMap;
+
 use postrinch_commands::{
-    AccountInfo, Commands, Folder, LabelChoice, SearchResults, Sidebar, Thread, ThreadPage,
+    AccountInfo, Commands, LabelChoice, SearchResults, Sidebar, Thread, ThreadPage, ViewEntry,
+    ViewTally,
 };
-use postrinch_model::{EmailAddress, SystemLabel};
+use postrinch_model::EmailAddress;
 use rinch::prelude::*;
 use rinch::{Effect, batch};
 
@@ -39,6 +42,7 @@ pub enum View {
 pub enum SettingsSection {
     Accounts,
     Reading,
+    Labels,
     Rules,
     Agents,
     Appearance,
@@ -48,12 +52,19 @@ pub enum SettingsSection {
 /// The window's state. Every field is a signal, so this is `Copy`.
 #[derive(Clone, Copy)]
 pub struct State {
+    /// The accounts and their labels.
     pub sidebar: Signal<Option<Sidebar>>,
-    pub folder: Signal<Folder>,
-    /// Within an inbox, one of Gmail's categories, as its tabs show them
-    /// (Primary when an inbox opens), or `None` for all of it.
-    pub category: Signal<Option<SystemLabel>>,
-    /// How many of the folder's threads to show.
+    /// Every view, in the sidebar's order.
+    pub views: Signal<Vec<ViewEntry>>,
+    /// How many conversations each view has, by key.
+    pub view_counts: Signal<HashMap<String, ViewTally>>,
+    /// The open view's key.
+    pub open_view: Signal<String>,
+    /// What the person changed about the open view and not saved.
+    pub view_changes: Signal<crate::views::ViewChanges>,
+    /// The view being made or changed, in its dialog.
+    pub view_dialog: Signal<Option<crate::ui::view_dialog::ViewDialog>>,
+    /// How many of the view's threads to show.
     pub shown: Signal<usize>,
     pub page: Signal<Option<ThreadPage>>,
     /// What the search box holds.
@@ -70,6 +81,8 @@ pub struct State {
     pub filters_open: Signal<bool>,
     /// Whether the sidebar shows every label, hidden ones included.
     pub show_all: Signal<bool>,
+    /// Whether the sidebar lists the views hidden from it too.
+    pub show_hidden: Signal<bool>,
     /// Sidebar rows the person opened or closed (see `ui::labels`).
     pub toggled: Signal<HashSet<String>>,
     /// The open row: a conversation, or one message of it.
@@ -97,8 +110,6 @@ pub struct State {
     /// open in full, as saved.
     pub show_mail: Signal<ShowMail>,
     pub order: Signal<Order>,
-    /// The list's order, as saved.
-    pub list_order: Signal<postrinch_commands::ListOrder>,
     pub open_in_full: Signal<OpenInFull>,
     /// The open conversation's messages shown in full.
     pub opened: Signal<Opened>,
@@ -167,9 +178,11 @@ impl State {
         let settings = Settings::load();
         Self {
             sidebar: Signal::new(None),
-            folder: Signal::new(Folder::Everywhere(SystemLabel::Inbox)),
-            // The window opens on all inboxes, at their Primary tab.
-            category: Signal::new(Some(SystemLabel::CategoryPersonal)),
+            views: Signal::new(Vec::new()),
+            view_counts: Signal::new(HashMap::new()),
+            open_view: Signal::new(crate::views::FIRST.to_owned()),
+            view_changes: Signal::new(Default::default()),
+            view_dialog: Signal::new(None),
             shown: Signal::new(PAGE),
             page: Signal::new(None),
             search_draft: Signal::new(String::new()),
@@ -179,6 +192,7 @@ impl State {
             remote: Signal::new(None),
             filters_open: Signal::new(false),
             show_all: Signal::new(false),
+            show_hidden: Signal::new(false),
             toggled: Signal::new(HashSet::new()),
             selected: Signal::new(None),
             whole_conversation: Signal::new(false),
@@ -193,7 +207,6 @@ impl State {
             after_move: Signal::new(settings.after_move),
             show_mail: Signal::new(settings.show_mail),
             order: Signal::new(settings.order),
-            list_order: Signal::new(settings.list_order),
             open_in_full: Signal::new(settings.open_in_full),
             opened: Signal::new(Opened::default()),
             label_choices: Signal::new(Vec::new()),
@@ -248,32 +261,33 @@ impl State {
                 tracing::error!("the loader has stopped");
             }
         };
+        // The views at once, so the first list can load.
+        match commands.views() {
+            Ok(views) => self.views.set(views),
+            Err(e) => self.error.set(Some(e.to_string())),
+        }
+        // Only when what it shows changes, not whenever the views reload.
+        let shown_view = Memo::new(move || self.shown_view());
         let lists = ask.clone();
         Effect::new(move || {
             self.revision.get();
-            let (folder, category, grouping, order) = (
-                self.folder.get(),
-                self.category.get(),
-                self.grouping(),
-                self.list_order.get(),
-            );
+            let Some(view) = shown_view.get() else {
+                return;
+            };
+            let grouping = self.grouping();
             // Another list than before: show it as last loaded (or nothing,
             // rather than the list left) until the loader answers.
             let key = recent::ListKey {
-                folder: folder.clone(),
-                category,
+                view: view.clone(),
                 grouping,
-                order,
             };
             if let Some(page) = recent::want(key) {
                 self.page.set(page);
             }
             lists(Request::Lists {
-                folder,
-                category,
+                view,
                 shown: self.shown.get(),
                 grouping,
-                order,
             });
         });
         let accounts = ask.clone();
@@ -397,25 +411,5 @@ impl State {
         if let Err(e) = settings.save() {
             tracing::warn!("the pane widths were not saved: {e}");
         }
-    }
-
-    pub fn open_folder(self, folder: Folder) {
-        batch(|| {
-            self.search.set(None);
-            self.shown.set(PAGE);
-            self.selected.set(None);
-            // An inbox opens at its Primary tab; other folders have none.
-            let inbox = crate::ui::list::is_inbox(&folder, self.sidebar.get().as_ref());
-            self.category
-                .set(inbox.then_some(SystemLabel::CategoryPersonal));
-            self.folder.set(folder);
-        });
-    }
-
-    pub fn open_category(self, category: Option<SystemLabel>) {
-        batch(|| {
-            self.shown.set(PAGE);
-            self.category.set(category);
-        });
     }
 }

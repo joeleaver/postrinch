@@ -3,7 +3,7 @@
 //! do. The command layer builds and queues drafts; sync's sender delivers
 //! them (see `postrinch-commands`' writing.rs).
 
-use postrinch_commands::{Commands, Folder, Queued, Start, Thread};
+use postrinch_commands::{Commands, Queued, Start, Thread};
 use postrinch_model::{Draft, EmailAddress, Message, ProviderMessageId, ProviderThreadId};
 
 use crate::actions::{commands, sync};
@@ -188,7 +188,7 @@ impl State {
     /// The account new mail goes from: the one being looked at, else the
     /// first.
     fn writing_account(self) -> Option<postrinch_model::EmailAddress> {
-        if let Folder::Label { account, .. } = self.folder.get() {
+        if let Some(account) = self.shown_account() {
             return Some(account);
         }
         self.sidebar.with(|s| {

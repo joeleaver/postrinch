@@ -9,8 +9,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use postrinch_commands::{Commands, Folder, Grouping, ListOrder};
-use postrinch_model::{EmailAddress, ProviderThreadId, SystemLabel};
+use std::collections::HashMap;
+
+use postrinch_commands::{Commands, Grouping};
+use postrinch_model::{EmailAddress, ProviderThreadId, SavedView};
 
 use crate::changes;
 use crate::state::State;
@@ -25,14 +27,13 @@ const SLOW: Duration = Duration::from_millis(250);
 /// Something the window wants loaded.
 #[derive(Debug, Clone)]
 pub enum Request {
-    /// A page of the folder's threads, then the sidebar.
+    /// A page of the view's threads, then the sidebar and the views.
     Lists {
-        folder: Folder,
-        category: Option<SystemLabel>,
+        /// The view as shown, in its own order.
+        view: SavedView,
         shown: usize,
         /// Conversations, or one message at a time.
         grouping: Grouping,
-        order: ListOrder,
     },
     /// Settings' accounts.
     Accounts,
@@ -132,30 +133,21 @@ fn answer(commands: &Commands, state: State, request: Request) {
     let failed = |e: String| state.error.send(Some(e));
     match request {
         Request::Lists {
-            folder,
-            category,
+            view,
             shown,
             grouping,
-            order,
         } => {
             // Every action made by now shows in what is read next.
             let as_of = changes::made();
             // The list first, what the person waits on; the sidebar's
             // counts after.
             let page = match grouping {
-                Grouping::Conversations => {
-                    commands.list_threads_in(&folder, category, order, 0, shown)
-                }
-                Grouping::Messages => commands.list_messages_in(&folder, category, order, 0, shown),
+                Grouping::Conversations => commands.list_view(&view, view.order, 0, shown),
+                Grouping::Messages => commands.list_view_messages(&view, view.order, 0, shown),
             };
             match page {
                 Ok(page) => {
-                    let key = crate::recent::ListKey {
-                        folder,
-                        category,
-                        grouping,
-                        order,
-                    };
+                    let key = crate::recent::ListKey { view, grouping };
                     // Not a list the person has since left.
                     if crate::recent::loaded(key, &page) {
                         state.page.send(Some(page));
@@ -168,6 +160,22 @@ fn answer(commands: &Commands, state: State, request: Request) {
             }
             match commands.sidebar() {
                 Ok(sidebar) => state.sidebar.send(Some(sidebar)),
+                Err(e) => failed(e.to_string()),
+            }
+            match commands.views() {
+                Ok(views) => {
+                    let saved: Vec<SavedView> = views.iter().map(|e| e.view.clone()).collect();
+                    state.views.send(views);
+                    match commands.view_counts(&saved) {
+                        Ok(counts) => state.view_counts.send(
+                            counts
+                                .into_iter()
+                                .map(|t| (t.key.clone(), t))
+                                .collect::<HashMap<_, _>>(),
+                        ),
+                        Err(e) => failed(e.to_string()),
+                    }
+                }
                 Err(e) => failed(e.to_string()),
             }
             match commands.outgoing() {
