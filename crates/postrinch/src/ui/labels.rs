@@ -11,8 +11,9 @@ use rinch::prelude::*;
 
 use crate::state::State;
 use crate::sync::thousands;
-use crate::ui::LabelEdit;
 use crate::ui::label_edit::{EditMode, label_menu};
+use crate::ui::{LabelEdit, NewLabel};
+use postrinch_model::EmailAddress;
 
 /// One line of the labels section.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,7 +236,16 @@ pub fn labels_section(state: State) -> NodeHandle {
     });
     rsx! {
         div { class: "folder-group",
-            div { class: "section-title", "Labels" }
+            div { class: "labels-head",
+                div { class: "section-title", "Labels" }
+                button {
+                    class: "label-add",
+                    title: "New label",
+                    aria-label: "New label",
+                    onclick: move || new_label(state, None),
+                    "+"
+                }
+            }
             // Keyed without the count: rows are built once and their
             // counts follow the sidebar in place.
             for line in uncounted(&rows.get()) {
@@ -245,6 +255,34 @@ pub fn labels_section(state: State) -> NodeHandle {
             }
         }
     }
+}
+
+/// Open the new label dialog: under `under` (an account and Gmail's name
+/// of a label), or at the top in the account shown.
+pub fn new_label(state: State, under: Option<(EmailAddress, String)>) {
+    let (account, parent) = match under {
+        Some(under) => under,
+        None => {
+            let shown = match state.folder.get() {
+                Folder::Label { account, .. } => Some(account),
+                _ => None,
+            };
+            match shown.or_else(|| sidebar_accounts(state).into_iter().next()) {
+                Some(account) => (account, String::new()),
+                None => return,
+            }
+        }
+    };
+    state.making.set(Some(NewLabel::new(account, parent)));
+}
+
+/// The accounts the sidebar lists, in its order.
+pub fn sidebar_accounts(state: State) -> Vec<EmailAddress> {
+    state.sidebar.with(|s| {
+        s.iter()
+            .flat_map(|s| s.accounts.iter().map(|a| a.account.address.clone()))
+            .collect()
+    })
 }
 
 /// The rows as the loop keys them: everything but how much is unread.

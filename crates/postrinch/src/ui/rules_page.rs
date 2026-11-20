@@ -72,6 +72,7 @@ pub fn rules_page(state: State) -> NodeHandle {
                     }
                 }
             }
+            {crate::ui::rule_run_dialog::run_dialog(__scope, state)}
             if ui.page.get().is_some_and(|p| p.server == Some(false)) {
                 div { class: "rules-allow",
                     span {
@@ -149,6 +150,13 @@ fn rule_row(state: State, rule: Rule, index: usize) -> NodeHandle {
     let switch_label = format!("{} is {}", rule.name, if on { "on" } else { "off" });
     let grip_label = format!("Move {}", rule.name);
     let name = rule.name.clone();
+    let run_label = format!("Run {} now", rule.name);
+    let to_run = rule.clone();
+    let run_it = move || {
+        if let Some(account) = ui.account.get() {
+            ui.run.ask(account, to_run.clone());
+        }
+    };
     let edit = move || {
         if let Some(account) = ui.account.get() {
             ui.edit(account, Draft::of(&open));
@@ -181,6 +189,20 @@ fn rule_row(state: State, rule: Rule, index: usize) -> NodeHandle {
                 for why in refused.clone() {
                     span { key: why.clone(), class: "rule-refused", {why.clone()} }
                 }
+                for said in ui.run.said_of(ui.account.get().as_ref(), id) {
+                    span {
+                        key: format!("{said:?}"),
+                        class: if said.running { "rule-ran" } else { "rule-ran done" },
+                        {said.text.clone()}
+                    }
+                }
+            }
+            button {
+                class: "rule-run",
+                aria-label: {run_label.clone()},
+                disabled: {move || ui.account.get().is_some_and(|a| ui.run.running(&a, id))},
+                onclick: run_it,
+                "Run now\u{2026}"
             }
             button {
                 class: if on { "rule-switch on" } else { "rule-switch" },

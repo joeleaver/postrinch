@@ -37,6 +37,8 @@ pub struct RulesUi {
     pub over: Signal<Option<usize>>,
     /// Rules agents proposed, waiting for the person, in every account.
     pub proposals: Signal<Vec<RuleProposal>>,
+    /// Running a saved rule now.
+    pub run: crate::rule_run_now::RunNow,
 }
 
 impl RulesUi {
@@ -54,6 +56,7 @@ impl RulesUi {
             dragging: Signal::new(None),
             over: Signal::new(None),
             proposals: Signal::new(Vec::new()),
+            run: crate::rule_run_now::RunNow::new(),
         }
     }
 
@@ -281,7 +284,7 @@ impl Default for RulesUi {
 }
 
 /// Sync's sender, from another thread.
-fn sync_sender() -> Option<std::sync::Arc<tokio::sync::Notify>> {
+pub fn sync_sender() -> Option<std::sync::Arc<tokio::sync::Notify>> {
     SENDER.get().cloned()
 }
 

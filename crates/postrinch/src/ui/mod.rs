@@ -9,6 +9,7 @@ mod compose_files;
 mod icons;
 mod keys;
 mod label_edit;
+mod label_new;
 mod labels;
 pub(crate) mod list;
 mod list_head;
@@ -21,6 +22,7 @@ mod rule_editor;
 mod rule_editor_notes;
 mod rule_from_message;
 mod rule_pickers;
+mod rule_run_dialog;
 mod rules_page;
 mod search;
 mod settings;
@@ -44,6 +46,7 @@ use crate::{actions, agents, appearance, changes, update};
 const ACCOUNT_COLORS: [&str; 5] = ["#7a4fc2", "#c2621a", "#2f8a55", "#c2417a", "#5b6170"];
 
 pub use label_edit::LabelEdit;
+pub use label_new::NewLabel;
 
 pub fn account_color(index: usize) -> &'static str {
     ACCOUNT_COLORS[index % ACCOUNT_COLORS.len()]
@@ -114,9 +117,10 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {outgoing::CSS} }
                 style { {about::CSS} }
                 style { {thread_actions::CSS} }
-                style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} }
-                style { {list_head::CSS} {attachment_cards::CSS} {compose_files::CSS} }
+                style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
+                style { {list_head::CSS} {attachment_cards::CSS} {compose_files::CSS} {label_new::CSS} }
                 {label_edit::label_dialog(__scope, state)}
+                {label_new::new_label_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}
                 if state.view.get() == View::Mail {
                     div { class: "panes",

@@ -130,6 +130,7 @@ Decided and built 2026-11-04.
 
 - **Labels are a tree**, split on "/". Gmail's own labels have fixed places (the unified inboxes, Sent, Drafts, and the categories as inbox tabs); the sidebar's tree is the labels people and apps made.
 - **Other apps' labels are set apart**, under "From other apps", collapsed: bracketed namespaces (`[Superhuman]/…`, `[Zoom Mail]`, `[Imap]/…`), SaneBox's `@Sane…`, and the folders IMAP clients create (`Deleted Items`, `Notes`, `Sync Issues`…). Anyone who has tried a few mail apps has these; they should not crowd the person's own.
+- **Making a label** is the "+" by Labels, or "New label inside…" on a label's menu: a name, the label to put it under, and the account when there are several. It is made in Gmail at once (it needs sync), unlike Rename and Colour, which are only on this computer.
 - **What shows by default:** labels Gmail lists, with mail in them; show-if-unread labels while they hold unread mail. "Show all labels" brings back the rest.
 - **Folder or tag is read from use:** a label whose mail is nearly all out of the inbox and filed nowhere else works as a folder; any other works as a tag and shows as a chip on thread rows.
 - **The person's changes stay on this computer** (`LabelPrefs`: a name, shown or hidden, pinned, a colour). Sync never touches them and nothing is sent to Gmail.

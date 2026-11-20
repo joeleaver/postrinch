@@ -83,6 +83,8 @@ pub struct State {
     pub revision: Signal<u64>,
     /// The label being renamed or coloured.
     pub editing: Signal<Option<LabelEdit>>,
+    /// The label being made.
+    pub making: Signal<Option<crate::ui::NewLabel>>,
     /// Downloads the person asked for that have finished, to forget.
     pub downloaded: Signal<Vec<(String, String)>>,
     /// Light, dark or the system's choice, as saved.
@@ -184,6 +186,7 @@ impl State {
             sync: Signal::new(Vec::new()),
             revision: Signal::new(0),
             editing: Signal::new(None),
+            making: Signal::new(None),
             downloaded: Signal::new(Vec::new()),
             appearance: Signal::new(settings.appearance),
             mark_read: Signal::new(settings.mark_read),

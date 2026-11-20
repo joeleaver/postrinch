@@ -58,6 +58,19 @@ pub fn label_menu(state: State, edit: LabelEdit, shown: bool) -> NodeHandle {
             state.save_label_prefs(&edit.account, &edit.label, &prefs);
         }
     };
+    let inside = {
+        let (account, label) = (edit.account.clone(), edit.label.clone());
+        move || {
+            // Gmail's whole name for it: the row knows only its last part.
+            let whole = crate::actions::commands()
+                .and_then(|c| c.user_labels(&account).ok())
+                .and_then(|labels| labels.into_iter().find(|l| l.provider_id == label))
+                .map(|l| l.name);
+            if let Some(whole) = whole {
+                crate::ui::labels::new_label(state, Some((account.clone(), whole)));
+            }
+        }
+    };
     let pin = save(|p| p.pinned = !p.pinned);
     let visibility = if shown {
         save(|p| p.shown = Some(false))
@@ -77,6 +90,7 @@ pub fn label_menu(state: State, edit: LabelEdit, shown: bool) -> NodeHandle {
         ContextMenuDropdown {
             DropdownMenuItem { onclick: open(EditMode::Rename), "Rename…" }
             DropdownMenuItem { onclick: open(EditMode::Colour), "Colour…" }
+            DropdownMenuItem { onclick: inside, "New label inside…" }
             DropdownMenuItem { onclick: pin, {if pinned { "Unpin" } else { "Pin to the top" }} }
             DropdownMenuItem { onclick: visibility, {if shown { "Hide" } else { "Always show" }} }
             {reset}

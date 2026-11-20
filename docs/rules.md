@@ -262,6 +262,11 @@ carried a nonsense word, all removed afterwards (messages to the trash).
   cleanup), in the background past a minute. Conditions include
   `category` (also accepted as `label` CATEGORY_*); a waited rule may not
   use `gmail_search`, which only Gmail can run.
+- **Run now** on a rule's row in Settings › Rules does what `run_rule`
+  does: the last three months (with how many conversations match) or all
+  mail, off the window's thread; the row then says how many messages
+  changed. Like "also do this to these now", it changes mail only: it
+  forwards nothing and asks no agent.
 - **Tried live, 2026-11-18,** on joe@joeleaver.com from a test window on a
   copy of the store: Allow (signing in again with `gmail.settings.basic`),
   then a rule Gmail ran (a filter starred the test mail as it arrived) and
