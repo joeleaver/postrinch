@@ -257,7 +257,7 @@ impl Store {
     }
 
     /// The accounts, by the key their objects' keys start with.
-    fn accounts_by_key(&self) -> StoreResult<HashMap<String, EmailAddress>> {
+    pub(crate) fn accounts_by_key(&self) -> StoreResult<HashMap<String, EmailAddress>> {
         Ok(self
             .accounts()?
             .into_iter()

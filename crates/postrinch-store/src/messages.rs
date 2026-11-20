@@ -101,7 +101,8 @@ impl Store {
             .str("key", key.clone())
             .relation("message", id);
         self.upsert(CONTENT, "key", &key, create.build(), content.build())?;
-        Ok(())
+        // Once its content is in: working it out may read the thread.
+        self.thread_answered(thread_id, account, message)
     }
 
     /// Change a stored message's labels and flags, as when the provider
@@ -180,6 +181,7 @@ impl Store {
                 self.db_delete(THREAD, thread)?;
             } else {
                 self.thread_lost_one(thread)?;
+                self.thread_answered_again(thread)?;
             }
         }
         Ok(())

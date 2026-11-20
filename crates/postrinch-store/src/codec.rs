@@ -23,7 +23,7 @@ impl Fields {
         self.object.id
     }
 
-    fn value(&self, name: &str) -> &Value {
+    pub(crate) fn value(&self, name: &str) -> &Value {
         self.object.fields.get(name).unwrap_or(&Value::Null)
     }
 

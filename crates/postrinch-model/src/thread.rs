@@ -37,11 +37,21 @@ const DRAFT: &str = "DRAFT";
 const SENT: &str = "SENT";
 
 /// Whom the account answered, if its reply or reply-all is the latest of
-/// `sorted` (oldest first) that is not a draft. A forward passes mail on
-/// rather than answering it, and mail only to the account itself answers
-/// no one, so neither counts.
+/// `sorted` (oldest first) that is not a draft.
 fn replied_last(account: &EmailAddress, sorted: &[&Message]) -> Option<Vec<Mailbox>> {
-    let last = sorted.iter().rev().find(|m| !m.has_label(DRAFT))?;
+    let last = sorted.iter().rev().find(|m| !is_draft(m))?;
+    answered(account, last)
+}
+
+/// Whether a message is a draft, which has not been sent yet.
+pub fn is_draft(message: &Message) -> bool {
+    message.has_label(DRAFT)
+}
+
+/// Whom the account answered with `last`, if it is the account's reply or
+/// reply-all. A forward passes mail on rather than answering it, and mail
+/// only to the account itself answers no one, so neither counts.
+pub fn answered(account: &EmailAddress, last: &Message) -> Option<Vec<Mailbox>> {
     let mine = last.has_label(SENT)
         || last
             .headers

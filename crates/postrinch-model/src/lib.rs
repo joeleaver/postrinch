@@ -23,6 +23,6 @@ pub use draft::{
 };
 pub use label::{Label, LabelColor, LabelKind, LabelPrefs, LabelVisibility, SystemLabel};
 pub use message::{AttachmentInfo, Flags, Message, MessageHeaders, ProviderMessageId};
-pub use thread::{ProviderThreadId, ThreadSummary};
+pub use thread::{ProviderThreadId, ThreadSummary, answered, is_draft};
 pub use time::Timestamp;
 pub use view::{ListOrder, SavedView, ViewCount, ViewError};

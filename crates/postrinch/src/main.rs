@@ -113,8 +113,9 @@ fn main() -> ExitCode {
 }
 
 /// The store's upkeep after it opens, on a thread of its own: the latest
-/// activity of threads stored before threads kept it filled in (lists are
-/// right meanwhile, only slower), then the one full compaction its files need
+/// activity of threads stored before threads kept it filled in, and who
+/// answered each last (lists and searches are right meanwhile, only
+/// slower), then the one full compaction its files need
 /// after an engine upgrade (postrinch-store's upkeep.rs).
 fn upkeep(store: &Store) {
     let store = store.clone();
@@ -125,6 +126,15 @@ fn upkeep(store: &Store) {
                 Ok(0) => {}
                 Ok(n) => tracing::info!("kept the latest activity of {n} threads"),
                 Err(e) => tracing::warn!("keeping threads' latest activity: {e}"),
+            }
+            let started = std::time::Instant::now();
+            match store.fill_replied_last() {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(
+                    "kept who answered last for {n} threads in {:?}",
+                    started.elapsed()
+                ),
+                Err(e) => tracing::warn!("keeping who answered threads last: {e}"),
             }
             let started = std::time::Instant::now();
             match store.compact_once() {

@@ -46,6 +46,10 @@ type Thread {
     // reading every message (threads.rs). Null in a store written before
     // threads kept it, until the thread is next listed or added to.
     latest: DateTime
+    // When its latest message that is not a draft arrived, and whether that
+    // message is the account's answer (answered.rs). Null until worked out.
+    last_message: DateTime
+    replied_last: Bool
     messages: [Message] @inverse(Message.thread)
 }
 
