@@ -69,3 +69,11 @@ pub const DARK: &str = r#"
     --rinch-titlebar-active: rgba(231, 233, 238, 0.14);
 }
 "#;
+
+/// Mail with no design of its own, redrawn for the dark window
+/// (postrinch_render::for_dark): its text in `--ink`, its links in
+/// `--accent`. Kept with [`DARK`], whose colours these are.
+pub const DARK_MAIL: postrinch_render::DarkColours = postrinch_render::DarkColours {
+    ink: postrinch_render::Rgba::rgb(0xe7, 0xe9, 0xee),
+    link: postrinch_render::Rgba::rgb(0x6f, 0x9c, 0xf0),
+};
