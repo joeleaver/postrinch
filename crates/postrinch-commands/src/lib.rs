@@ -10,12 +10,14 @@
 mod accounts;
 mod actions;
 mod attachments;
+mod bulk;
 mod error;
 mod filters;
 mod folders;
 mod labels;
 mod messages;
 mod query;
+mod query_or;
 mod rules;
 mod rules_proposed;
 mod rules_run;

@@ -14,6 +14,7 @@ use std::thread;
 use postrinch_commands::Commands;
 use serde::Serialize;
 
+use crate::gmail::Gmail;
 use crate::registry::{Agent, Agents, Reach};
 use crate::views;
 use crate::wire::{Changed, Greeting, Hello, MAX_LINE, Outcome, Request, Response};
@@ -22,16 +23,24 @@ use crate::wire::{Changed, Greeting, Hello, MAX_LINE, Outcome, Request, Response
 /// sync sends it.
 pub type OnChange = Arc<dyn Fn(&Changed) + Send + Sync>;
 
+/// What the app gives the server: told of changes, and Gmail's own calls
+/// when sync runs.
+#[derive(Clone)]
+pub struct Hooks {
+    pub on_change: OnChange,
+    pub gmail: Option<Arc<dyn Gmail>>,
+}
+
 /// Listen at `addr` (see [`crate::wire::addr`]) in the background.
 pub fn start(
     addr: &str,
     commands: Commands,
     agents_path: PathBuf,
-    on_change: OnChange,
+    hooks: Hooks,
 ) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr)?;
     tracing::info!("agents can connect at {addr}");
-    start_on(listener, commands, agents_path, on_change)
+    start_on(listener, commands, agents_path, hooks)
 }
 
 /// Answer agents on a listener already bound.
@@ -39,7 +48,7 @@ pub fn start_on(
     listener: TcpListener,
     commands: Commands,
     agents_path: PathBuf,
-    on_change: OnChange,
+    hooks: Hooks,
 ) -> std::io::Result<()> {
     thread::Builder::new()
         .name("agents".into())
@@ -55,7 +64,7 @@ pub fn start_on(
                 let link = Link {
                     commands: commands.clone(),
                     agents_path: agents_path.clone(),
-                    on_change: on_change.clone(),
+                    hooks: hooks.clone(),
                 };
                 let spawned = thread::Builder::new()
                     .name("agent".into())
@@ -71,7 +80,7 @@ pub fn start_on(
 struct Link {
     commands: Commands,
     agents_path: PathBuf,
-    on_change: OnChange,
+    hooks: Hooks,
 }
 
 impl Link {
@@ -157,10 +166,16 @@ impl Link {
             Reach::Only(accounts) => self.commands.limited_to(accounts),
         };
         let changes = call.changes();
-        match views::run(&commands, call, &agent.name, agents) {
+        let asker = views::Asker {
+            agent: &agent.name,
+            agents,
+            gmail: self.hooks.gmail.as_deref(),
+            on_change: &self.hooks.on_change,
+        };
+        match views::run(&commands, call, &asker) {
             Ok(value) => {
                 if let Some(changed) = changes {
-                    (self.on_change)(&changed);
+                    (self.hooks.on_change)(&changed);
                 }
                 Outcome::Ok(value)
             }

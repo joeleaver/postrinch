@@ -7,6 +7,7 @@ use postrinch_model::EmailAddress;
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 
+mod labels;
 mod outgoing;
 mod settings;
 mod snippet;

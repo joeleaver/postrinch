@@ -96,9 +96,14 @@ pub enum Call {
     LabelChoices {
         account: EmailAddress,
     },
+    /// Do `actions`, in order, to `threads`, or to every thread `search`
+    /// (the search language) matches.
     Act {
+        #[serde(default)]
         threads: Vec<ThreadRef>,
-        action: ThreadAction,
+        #[serde(default)]
+        search: Option<String>,
+        actions: Vec<ThreadAction>,
     },
     /// A message for the person to check and send: a reply to `thread`'s
     /// latest message (to everyone on it, unless `to` says otherwise), or
@@ -154,6 +159,29 @@ pub enum Call {
         rule_id: u32,
         to: usize,
     },
+    /// Run a saved rule now over the mail already here: the last three
+    /// months', or with `all` every message.
+    RunRule {
+        account: EmailAddress,
+        rule_id: u32,
+        #[serde(default)]
+        all: bool,
+    },
+    /// Make a label in Gmail at once (one already named so is answered).
+    CreateLabel {
+        account: EmailAddress,
+        name: String,
+    },
+    /// Rename one of the person's labels, named by id or name.
+    RenameLabel {
+        account: EmailAddress,
+        label: String,
+        name: String,
+    },
+    DeleteLabel {
+        account: EmailAddress,
+        label: String,
+    },
 }
 
 /// A file an agent attaches to a proposal.
@@ -188,7 +216,12 @@ impl Call {
     /// What the call changes, if anything.
     pub fn changes(&self) -> Option<Changed> {
         match self {
-            Call::Act { .. } | Call::Propose { .. } => Some(Changed::Mail),
+            Call::Act { .. }
+            | Call::Propose { .. }
+            | Call::CreateLabel { .. }
+            | Call::RenameLabel { .. }
+            | Call::DeleteLabel { .. }
+            | Call::RunRule { .. } => Some(Changed::Mail),
             Call::SaveRule { account, .. }
             | Call::DeleteRule { account, .. }
             | Call::SetRuleOn { account, .. }

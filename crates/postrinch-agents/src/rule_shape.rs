@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 pub const TESTS: &str = "from (an address), from_domain, from_words, sent_to (To, Cc or Bcc), \
 to, cc, subject_words, subject_phrase, words (subject, body, people, attachment names), \
 phrase, has_attachment, attachment_type (pdf), attachment_name, larger_than_mb, \
-smaller_than_mb, unread, starred, label, in_inbox, older_than_days (only with when \
-`waited`), gmail_search";
+smaller_than_mb, unread, starred, label, category (primary, social, promotions, updates, \
+forums), in_inbox, older_than_days (only with when `waited`), gmail_search";
 
 /// The words for each action.
 pub const ACTIONS: &str = "add_label, skip_inbox (archive), mark_read, star, mark_important, \
@@ -42,7 +42,8 @@ pub struct ConditionShape {
     /// What it looks at: from, from_domain, from_words, sent_to, to, cc,
     /// subject_words, subject_phrase, words, phrase, has_attachment,
     /// attachment_type, attachment_name, larger_than_mb, smaller_than_mb,
-    /// unread, starred, label, in_inbox, older_than_days, gmail_search.
+    /// unread, starred, label, category, in_inbox, older_than_days,
+    /// gmail_search.
     pub test: String,
     /// The address, words, label, number or search it looks for; none for
     /// has_attachment, unread, starred and in_inbox.
@@ -170,7 +171,11 @@ impl ConditionShape {
             "smaller_than_mb" => Test::SmallerThan((number("MB")? * MB) as u64),
             "unread" => Test::Unread,
             "starred" => Test::Starred,
+            // Gmail's categories are labels there (CATEGORY_UPDATES); here
+            // they have a test of their own.
+            "label" if is_category_label(&value()?) => Test::InCategory(category(&value()?)?),
             "label" => Test::HasLabel(names.label_id(&value()?)?),
+            "category" => Test::InCategory(category(&value()?)?),
             "in_inbox" => Test::InInbox,
             "older_than_days" => Test::OlderThanDays(number("days")?.ceil() as u32),
             "gmail_search" => Test::GmailSearch(value()?),
@@ -202,6 +207,7 @@ impl ConditionShape {
             Test::Unread => ("unread", None),
             Test::Starred => ("starred", None),
             Test::HasLabel(id) => ("label", Some(names.label_name(id))),
+            Test::InCategory(c) => ("category", Some(c.name().to_ascii_lowercase())),
             Test::InInbox => ("in_inbox", None),
             Test::OlderThanDays(n) => ("older_than_days", Some(n.to_string())),
             Test::GmailSearch(v) => ("gmail_search", Some(v.clone())),
@@ -232,17 +238,7 @@ impl ActionShape {
             "star" => Action::Star,
             "mark_important" => Action::MarkImportant,
             "never_important" => Action::NeverImportant,
-            "category" => {
-                let v = value()?;
-                let found = Category::ALL
-                    .into_iter()
-                    .find(|c| c.name().eq_ignore_ascii_case(&v));
-                Action::Category(found.ok_or_else(|| {
-                    format!(
-                        "There is no category {v:?}: use primary, social, promotions, updates or forums."
-                    )
-                })?)
-            }
+            "category" => Action::Category(category(&value()?)?),
             "never_spam" => Action::NeverSpam,
             "trash" => Action::Trash,
             "forward" => Action::Forward(value()?),
@@ -290,6 +286,33 @@ const MB: f64 = 1_048_576.0;
 fn mb_text(bytes: u64) -> String {
     let text = format!("{:.2}", bytes as f64 / MB);
     text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+fn is_category_label(value: &str) -> bool {
+    let v = value.trim().to_ascii_lowercase();
+    v.starts_with("category_") || v.starts_with("category:")
+}
+
+/// An inbox category by its name (`updates`), or as Gmail's label for it
+/// reads (`CATEGORY_UPDATES`, `category:updates`).
+fn category(name: &str) -> Result<Category, String> {
+    let name = name.trim();
+    let bare = name
+        .strip_prefix("category:")
+        .or_else(|| name.strip_prefix("CATEGORY_"))
+        .unwrap_or(name);
+    Category::ALL
+        .into_iter()
+        .find(|c| {
+            c.name().eq_ignore_ascii_case(bare)
+                || c.label_id().eq_ignore_ascii_case(name)
+                || (*c == Category::Primary && bare.eq_ignore_ascii_case("personal"))
+        })
+        .ok_or_else(|| {
+            format!(
+                "There is no category {name:?}: use primary, social, promotions, updates or forums."
+            )
+        })
 }
 
 #[cfg(test)]

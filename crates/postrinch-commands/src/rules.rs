@@ -2,7 +2,7 @@
 //! rules in order, the filters made in Gmail itself, and what a rule would
 //! match among the mail already here.
 
-use postrinch_model::{EmailAddress, Message, ProviderThreadId, Timestamp};
+use postrinch_model::{EmailAddress, ProviderMessageId, ProviderThreadId, Timestamp};
 use postrinch_rules::matching::{Verdict, matches};
 use postrinch_rules::{Elsewhere, Rule, Test};
 use postrinch_store::Find;
@@ -149,9 +149,12 @@ impl Commands {
         rule: &Rule,
         now: Timestamp,
     ) -> CommandResult<AlreadyHere> {
-        let found = self.rule_candidates(account, rule, now)?;
+        let found = self.rule_candidates(account, rule, now, false)?;
         let mut here = AlreadyHere::default();
-        for message in found {
+        for id in found {
+            let Some(message) = self.store.message(account, &id)? else {
+                continue;
+            };
             if matches(rule, &message, now) != Verdict::Yes {
                 continue;
             }
@@ -183,10 +186,34 @@ impl Commands {
         rule: &Rule,
         now: Timestamp,
     ) -> CommandResult<usize> {
+        self.apply_rule(account, rule, now, false)
+    }
+
+    /// [`Commands::apply_to_existing`] over every message here, however
+    /// old: for mail the person cleans up once.
+    pub fn apply_to_all_existing(
+        &self,
+        account: &EmailAddress,
+        rule: &Rule,
+        now: Timestamp,
+    ) -> CommandResult<usize> {
+        self.apply_rule(account, rule, now, true)
+    }
+
+    fn apply_rule(
+        &self,
+        account: &EmailAddress,
+        rule: &Rule,
+        now: Timestamp,
+        all: bool,
+    ) -> CommandResult<usize> {
         let labels = self.store.labels(account)?;
         let mut changed = 0;
         let mut changes = crate::rules_run::Changes::default();
-        for message in self.rule_candidates(account, rule, now)? {
+        for id in self.rule_candidates(account, rule, now, all)? {
+            let Some(message) = self.store.message(account, &id)? else {
+                continue;
+            };
             if matches(rule, &message, now) == Verdict::Yes {
                 let change = crate::rules_run::change_for(&rule.actions, &message, &labels);
                 if !change.is_empty() {
@@ -199,47 +226,54 @@ impl Commands {
         Ok(changed)
     }
 
-    /// The last three months' messages that might match `rule`, newest
-    /// first: narrowed by the store's indexes where the rule says who or
-    /// what, then read in full for the matcher.
+    /// The last three months' messages that might match `rule` (with
+    /// `all`, every message), newest first: narrowed by the store's indexes
+    /// where the rule says who or what, then read in full for the matcher.
     fn rule_candidates(
         &self,
         account: &EmailAddress,
         rule: &Rule,
         now: Timestamp,
-    ) -> CommandResult<Vec<Message>> {
+        all: bool,
+    ) -> CommandResult<Vec<ProviderMessageId>> {
         self.check(account)?;
         let mut find = Find {
             accounts: vec![account.clone()],
-            after: Some(Timestamp::from_millis(
-                now.as_millis() - ALREADY_HERE_DAYS * DAY_MILLIS,
-            )),
+            after: (!all)
+                .then(|| Timestamp::from_millis(now.as_millis() - ALREADY_HERE_DAYS * DAY_MILLIS)),
             ..Find::default()
         };
         if rule.matching == postrinch_rules::Match::All {
-            narrow(&mut find, rule);
+            narrow(&mut find, rule, account);
         }
-        let mut messages = Vec::new();
-        for found in self
+        Ok(self
             .store
             .find_messages(&find)?
-            .iter()
-            .take(ALREADY_HERE_READ)
-        {
-            if let Some(message) = self.store.message(account, &found.id)? {
-                messages.push(message);
-            }
-        }
-        Ok(messages)
+            .into_iter()
+            .take(if all { usize::MAX } else { ALREADY_HERE_READ })
+            .map(|found| found.id)
+            .collect())
     }
 }
 
 /// Narrow a search to what an "all of" rule's positive conditions name.
 /// The store's matches are broader (parts of names, any case); the matcher
 /// decides.
-fn narrow(find: &mut Find, rule: &Rule) {
+fn narrow(find: &mut Find, rule: &Rule, account: &EmailAddress) {
+    let label = |id: &str| vec![(account.clone(), id.to_owned())];
+    for c in rule.conditions.iter().filter(|c| c.negate) {
+        match &c.test {
+            Test::HasLabel(l) => find.without.push(label(l)),
+            Test::InCategory(cat) => find.without.push(label(cat.label_id())),
+            Test::InInbox => find.without.push(label("INBOX")),
+            _ => {}
+        }
+    }
     for c in rule.conditions.iter().filter(|c| !c.negate) {
         match &c.test {
+            Test::HasLabel(l) => find.labels.push(label(l)),
+            Test::InCategory(cat) => find.labels.push(label(cat.label_id())),
+            Test::InInbox => find.labels.push(label("INBOX")),
             Test::FromAddress(a) | Test::FromDomain(a) => {
                 find.from
                     .push(a.trim().trim_start_matches('@').to_lowercase());

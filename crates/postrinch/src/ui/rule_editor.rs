@@ -2,7 +2,7 @@
 //! to do, and beside them what the rule matches among the mail already
 //! here. Saving a rule that forwards asks once.
 
-use postrinch_rules::{Category, Match, When};
+use postrinch_rules::{Match, When};
 use rinch::prelude::*;
 
 use crate::dates;
@@ -12,6 +12,7 @@ use crate::rule_draft::{
 use crate::rules_ui::RulesUi;
 use crate::state::State;
 use crate::ui::rule_editor_notes as notes;
+use crate::ui::rule_pickers::{category_select, label_select};
 
 fn options(names: &[&str]) -> Vec<SelectOption> {
     names.iter().map(|n| SelectOption::new(*n, *n)).collect()
@@ -217,8 +218,10 @@ fn looks_row(state: State, id: u32, field: &'static str, how: &'static str) -> N
     };
     let field_names: Vec<&str> = FIELDS.iter().map(|(f, _)| *f).collect();
     let field = row.field;
-    let input: NodeHandle = if row.how == "labelled" {
+    let input: NodeHandle = if matches!(row.how, "labelled" | "not labelled") {
         label_select(__scope, ui, value, set)
+    } else if row.how.ends_with("in the category") {
+        category_select(__scope, value, set)
     } else if needs_value(row.how) {
         let hint = placeholder(row.field, row.how);
         rsx! { TextInput { placeholder: hint, value_fn: move || value.get(), oninput: set } }
@@ -275,23 +278,6 @@ fn placeholder(field: &str, how: &str) -> &'static str {
     }
 }
 
-fn label_select(
-    __scope: &mut RenderScope,
-    ui: RulesUi,
-    value: Signal<String>,
-    set: impl Fn(String) + 'static,
-) -> NodeHandle {
-    let labels: Vec<SelectOption> = ui
-        .labels
-        .get()
-        .into_iter()
-        .map(|l| SelectOption::new(l.label, l.name))
-        .collect();
-    rsx! {
-        Select { data: labels, placeholder: "Pick a label", value_fn: move || value.get(), onchange: move |v: String| set(v) }
-    }
-}
-
 #[component]
 fn does_row(state: State, id: u32, what: &'static str) -> NodeHandle {
     let ui = state.rules;
@@ -314,13 +300,7 @@ fn does_row(state: State, id: u32, what: &'static str) -> NodeHandle {
     };
     let extra: NodeHandle = match row.what {
         "Add the label" => label_select(__scope, ui, value, set),
-        "Put in the category" => {
-            let items: Vec<SelectOption> = Category::ALL
-                .iter()
-                .map(|c| SelectOption::new(c.name(), c.name()))
-                .collect();
-            rsx! { Select { data: items, placeholder: "Pick a category", value_fn: move || value.get(), onchange: move |v: String| set(v) } }
-        }
+        "Put in the category" => category_select(__scope, value, set),
         "Forward to" => forward_pick(__scope, ui, value, set),
         "Ask an agent" => {
             let agents: Vec<SelectOption> = ui

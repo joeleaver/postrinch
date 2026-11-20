@@ -61,6 +61,9 @@ pub struct Find {
     pub before: Option<Timestamp>,
     /// Look in the trash and spam too (every other mailbox leaves them out).
     pub set_aside_too: bool,
+    /// Every message the words match, not only the most relevant
+    /// [`TEXT_LIMIT`]: for changing all of them, not for showing them.
+    pub every: bool,
 }
 
 /// A message that matched.
@@ -106,9 +109,14 @@ impl Store {
         let mut scores: HashMap<u64, f32> = HashMap::new();
         let candidates: Option<HashSet<u64>> = match &find.text {
             Some(text) => {
-                let mut hits = self.text_hits(text, TEXT_LIMIT, None)?;
+                let limit = if find.every {
+                    (self.db.count_type(CONTENT)? as usize).max(1)
+                } else {
+                    TEXT_LIMIT
+                };
+                let mut hits = self.text_hits(text, limit, None)?;
                 if let Some(messages) = &narrowed
-                    && hits.len() >= TEXT_LIMIT
+                    && hits.len() >= limit
                 {
                     let contents = self.contents_of(messages)?;
                     hits = self.text_hits(text, contents.len().max(1), Some(&contents))?;

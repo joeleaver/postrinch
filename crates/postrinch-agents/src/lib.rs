@@ -9,7 +9,10 @@
 //! agent's accounts ([`serve`]). The agents file is read again on every
 //! call, so removing an agent or narrowing it takes effect at once.
 
+mod change;
 pub mod client;
+mod gmail;
+mod later;
 pub mod registry;
 pub mod rule_shape;
 pub mod serve;
@@ -18,6 +21,7 @@ mod views;
 mod views_rules;
 pub mod wire;
 
+pub use gmail::Gmail;
 pub use registry::{Agent, Agents, Reach, Setup};
 pub use setup::App;
 pub use wire::{Call, Changed, KEY_ENV, ProposedFile};

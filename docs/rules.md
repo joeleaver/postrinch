@@ -257,7 +257,11 @@ carried a nonsense word, all removed afterwards (messages to the trash).
   proposed: it waits on this computer (`Local.proposed`), shows in the
   sidebar beside proposed messages, and opens in the editor with the
   agent's reason, for the person to save or discard. As in the editor,
-  forwarding goes only to an address Gmail has verified.
+  forwarding goes only to an address Gmail has verified. `run_rule` runs a
+  saved rule now over the last three months, or over every message (for a
+  cleanup), in the background past a minute. Conditions include
+  `category` (also accepted as `label` CATEGORY_*); a waited rule may not
+  use `gmail_search`, which only Gmail can run.
 - **Tried live, 2026-11-18,** on joe@joeleaver.com from a test window on a
   copy of the store: Allow (signing in again with `gmail.settings.basic`),
   then a rule Gmail ran (a filter starred the test mail as it arrived) and

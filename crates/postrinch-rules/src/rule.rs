@@ -133,6 +133,8 @@ pub enum Test {
     Starred,
     /// Carries this label (provider id).
     HasLabel(String),
+    /// In this inbox category, as Gmail sorted it.
+    InCategory(Category),
     InInbox,
     /// Arrived more than this many days ago.
     OlderThanDays(u32),
@@ -150,6 +152,7 @@ impl Test {
             Test::Unread
                 | Test::Starred
                 | Test::HasLabel(_)
+                | Test::InCategory(_)
                 | Test::InInbox
                 | Test::OlderThanDays(_)
         )
@@ -389,7 +392,11 @@ fn check_test(test: &Test, when: When) -> Result<(), RuleError> {
                 return bad("A Gmail search can't be empty.");
             }
         }
-        Test::HasAttachment | Test::Unread | Test::Starred | Test::InInbox => {}
+        Test::HasAttachment
+        | Test::Unread
+        | Test::Starred
+        | Test::InInbox
+        | Test::InCategory(_) => {}
     }
     Ok(())
 }

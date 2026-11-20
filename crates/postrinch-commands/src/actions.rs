@@ -7,7 +7,7 @@
 //! undone, and none leaves the account.
 
 use postrinch_model::{
-    EmailAddress, LabelKind, Message, MessageChange, ProviderMessageId, ProviderThreadId,
+    EmailAddress, Label, LabelKind, Message, MessageChange, ProviderMessageId, ProviderThreadId,
     SystemLabel,
 };
 use serde::{Deserialize, Serialize};
@@ -91,6 +91,15 @@ impl Commands {
             .collect();
         choices.sort_by_key(|c| c.name.to_lowercase());
         Ok(choices)
+    }
+
+    /// Every label the person (or an app of theirs) made in an account,
+    /// as Gmail names it.
+    pub fn user_labels(&self, account: &EmailAddress) -> CommandResult<Vec<Label>> {
+        self.check(account)?;
+        let mut labels = self.store.labels(account)?;
+        labels.retain(|l| l.kind == LabelKind::User);
+        Ok(labels)
     }
 
     /// The changes `action` makes to a thread's messages (oldest first).

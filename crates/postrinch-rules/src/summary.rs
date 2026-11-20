@@ -100,6 +100,7 @@ fn condition(c: &Condition, label: &dyn Fn(&str) -> String) -> String {
             format!("labelled {}", label(l)),
             format!("not labelled {}", label(l)),
         ),
+        Test::InCategory(c) => (format!("in {}", c.name()), format!("not in {}", c.name())),
         Test::InInbox => ("in the inbox".into(), "not in the inbox".into()),
         Test::OlderThanDays(d) => {
             let days = if *d == 1 {

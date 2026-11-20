@@ -9,35 +9,45 @@ use std::collections::HashMap;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use postrinch_commands::{
-    Commands, Folder, FolderEntry, Start, ThreadAction, ThreadRef, ThreadRow,
-};
+use postrinch_commands::{Commands, Folder, FolderEntry, Start, ThreadRow};
 use postrinch_model::{
     AttachmentOrigin, DraftAttachment, EmailAddress, Mailbox, Message, Proposal, Timestamp,
 };
 use serde_json::{Value, json};
 
+use crate::change;
+use crate::gmail::{self, Gmail};
 use crate::registry::Agents;
+use crate::serve::OnChange;
 use crate::views_rules;
 use crate::wire::{Call, ProposedFile};
 
 /// The most body text one message carries, in chars.
 const BODY_CHARS: usize = 100_000;
 
+/// Who asks, and what the app gave the server to answer them with.
+pub(crate) struct Asker<'a> {
+    pub agent: &'a str,
+    pub agents: &'a Agents,
+    pub gmail: Option<&'a dyn Gmail>,
+    /// To tell the window about changes that finish after the answer.
+    pub on_change: &'a OnChange,
+}
+
 /// Run a call and shape its answer.
-pub(crate) fn run(
-    commands: &Commands,
-    call: Call,
-    agent: &str,
-    agents: &Agents,
-) -> Result<Value, String> {
+pub(crate) fn run(commands: &Commands, call: Call, asker: &Asker) -> Result<Value, String> {
+    let agent = asker.agent;
     let mut labels = LabelNames::default();
     match call {
         Call::Rules { .. }
         | Call::SaveRule { .. }
         | Call::DeleteRule { .. }
         | Call::SetRuleOn { .. }
-        | Call::MoveRule { .. } => views_rules::run(commands, call, agent, agents),
+        | Call::MoveRule { .. }
+        | Call::RunRule { .. } => views_rules::run(commands, call, asker),
+        Call::CreateLabel { .. } | Call::RenameLabel { .. } | Call::DeleteLabel { .. } => {
+            gmail::run(commands, call, asker.gmail)
+        }
         Call::Accounts => {
             let accounts = commands.accounts().map_err(say)?;
             Ok(Value::Array(
@@ -221,19 +231,11 @@ pub(crate) fn run(
                 },
             }))
         }
-        Call::Act { threads, action } => {
-            let action = match action {
-                ThreadAction::AddLabel(l) => {
-                    ThreadAction::AddLabel(label_id(commands, &threads, l)?)
-                }
-                ThreadAction::RemoveLabel(l) => {
-                    ThreadAction::RemoveLabel(label_id(commands, &threads, l)?)
-                }
-                other => other,
-            };
-            commands.act(&threads, &action).map_err(say)?;
-            Ok(json!({ "done": threads.len() }))
-        }
+        Call::Act {
+            threads,
+            search,
+            actions,
+        } => change::act(commands, threads, search, actions, asker.on_change),
     }
 }
 
@@ -261,27 +263,6 @@ fn proposed_file(commands: &Commands, file: ProposedFile) -> Result<DraftAttachm
                     message.0
                 )
             }),
-    }
-}
-
-/// A label named by its id or by the name agents are shown. The threads
-/// must all be in one account, as a label belongs to one.
-fn label_id(commands: &Commands, threads: &[ThreadRef], label: String) -> Result<String, String> {
-    let Some((account, _)) = threads.first() else {
-        return Ok(label);
-    };
-    if threads.iter().any(|(a, _)| a != account) {
-        return Err("A label belongs to one account: label each account's threads apart.".into());
-    }
-    let choices = commands.label_choices(account).map_err(say)?;
-    if choices.iter().any(|c| c.label == label) {
-        return Ok(label);
-    }
-    match choices.iter().find(|c| c.name.eq_ignore_ascii_case(&label)) {
-        Some(c) => Ok(c.label.clone()),
-        None => Err(format!(
-            "{account} has no label {label:?}. list_labels shows the ones it has."
-        )),
     }
 }
 

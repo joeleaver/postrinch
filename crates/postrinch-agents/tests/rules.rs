@@ -7,7 +7,10 @@ use postrinch_agents::client::Client;
 use postrinch_agents::rule_shape::RuleShape;
 use postrinch_agents::{Agents, Call, Changed, Reach};
 use postrinch_commands::Commands;
-use postrinch_model::{Account, EmailAddress, Label, LabelKind, Provider, SystemLabel};
+use postrinch_model::{
+    Account, EmailAddress, Flags, Label, LabelKind, Mailbox, Message, MessageHeaders, Provider,
+    ProviderMessageId, ProviderThreadId, SystemLabel, Timestamp,
+};
 use postrinch_store::Store;
 
 fn address(s: &str) -> EmailAddress {
@@ -32,6 +35,29 @@ fn add_account(store: &Store, account: &EmailAddress) {
             local.forwarding = vec!["books@example.org".into()];
         })
         .unwrap();
+}
+
+/// Gmail's label calls, answered by putting the label in the store.
+struct FakeGmail(Store);
+
+impl postrinch_agents::Gmail for FakeGmail {
+    fn create_label(&self, account: &EmailAddress, name: &str) -> Result<String, String> {
+        let id = format!("Label_{}", name.len());
+        self.0
+            .put_label(account, &Label::new(id.clone(), name, LabelKind::User))
+            .map_err(|e| e.to_string())?;
+        Ok(id)
+    }
+
+    fn rename_label(&self, account: &EmailAddress, id: &str, name: &str) -> Result<(), String> {
+        self.0
+            .put_label(account, &Label::new(id, name, LabelKind::User))
+            .map_err(|e| e.to_string())
+    }
+
+    fn delete_label(&self, account: &EmailAddress, id: &str) -> Result<(), String> {
+        self.0.remove_label(account, id).map_err(|e| e.to_string())
+    }
 }
 
 fn shape(json: &str) -> RuleShape {
@@ -62,7 +88,10 @@ fn an_agent_makes_rules_and_proposes_the_ones_that_send() {
         listener,
         commands.clone(),
         agents_path,
-        Arc::new(move |c: &Changed| seen.lock().unwrap().push(c.clone())),
+        postrinch_agents::serve::Hooks {
+            on_change: Arc::new(move |c: &Changed| seen.lock().unwrap().push(c.clone())),
+            gmail: Some(Arc::new(FakeGmail(store.clone()))),
+        },
     )
     .unwrap();
     let client = Client::new(addr, Some(key));
@@ -180,4 +209,153 @@ fn an_agent_makes_rules_and_proposes_the_ones_that_send() {
         reason: None,
     });
     assert!(no_label.unwrap_err().contains("no label \"Taxes\""));
+}
+
+#[test]
+fn an_agent_makes_labels_and_runs_rules_over_old_mail() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().join("store")).unwrap();
+    let work = address("work@example.org");
+    add_account(&store, &work);
+    store
+        .put_label(
+            &work,
+            &Label::new(
+                "CATEGORY_UPDATES",
+                "CATEGORY_UPDATES",
+                LabelKind::System(SystemLabel::CategoryUpdates),
+            ),
+        )
+        .unwrap();
+    // An update from long ago, in the inbox.
+    let old = Message {
+        account: work.clone(),
+        id: ProviderMessageId("m1".into()),
+        thread: ProviderThreadId("t1".into()),
+        headers: MessageHeaders {
+            subject: Some("Your statement".into()),
+            from: vec![Mailbox::new(None, address("bank@example.com"))],
+            ..Default::default()
+        },
+        received: Timestamp::from_millis(1_500_000_000_000),
+        labels: vec!["INBOX".into(), "CATEGORY_UPDATES".into()],
+        flags: Flags {
+            unread: true,
+            starred: false,
+        },
+        snippet: String::new(),
+        body_text: String::new(),
+        downloaded: true,
+        attachments: Vec::new(),
+        size: 0,
+    };
+    store.put_message(&old, None).unwrap();
+
+    let agents_path = dir.path().join("agents.json");
+    let mut agents = Agents::load(&agents_path).unwrap();
+    let (_, key) = agents.create("Test agent", Reach::Every).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    postrinch_agents::serve::start_on(
+        listener,
+        Commands::new(store.clone()),
+        agents_path,
+        postrinch_agents::serve::Hooks {
+            on_change: Arc::new(|_: &Changed| {}),
+            gmail: Some(Arc::new(FakeGmail(store.clone()))),
+        },
+    )
+    .unwrap();
+    let client = Client::new(addr, Some(key));
+
+    // A label made, then made again: one label.
+    let made = client
+        .call(&Call::CreateLabel {
+            account: work.clone(),
+            name: " Banking ".into(),
+        })
+        .unwrap();
+    assert_eq!(made["made"], true);
+    let again = client
+        .call(&Call::CreateLabel {
+            account: work.clone(),
+            name: "banking".into(),
+        })
+        .unwrap();
+    assert_eq!(again["made"], false);
+    assert_eq!(again["label"], made["label"]);
+
+    // A rule on a category, run over every message however old.
+    let saved = client
+        .call(&Call::SaveRule {
+            account: work.clone(),
+            rule_id: None,
+            rule: shape(
+                r#"{"name":"Updates","conditions":[{"test":"category","value":"updates"},{"test":"label","value":"CATEGORY_PERSONAL","not":true}],
+                    "actions":[{"action":"add_label","value":"Banking"},{"action":"skip_inbox"}]}"#,
+            ),
+            apply_to_existing: false,
+            reason: None,
+        })
+        .unwrap();
+    let id = saved["saved"].as_u64().unwrap() as u32;
+    let recent = client
+        .call(&Call::RunRule {
+            account: work.clone(),
+            rule_id: id,
+            all: false,
+        })
+        .unwrap();
+    assert_eq!(recent["changed"], 0, "too old for three months");
+    let all = client
+        .call(&Call::RunRule {
+            account: work.clone(),
+            rule_id: id,
+            all: true,
+        })
+        .unwrap();
+    assert_eq!(all["changed"], 1, "{all}");
+    let m = &store.thread_messages(&work, &old.thread).unwrap()[0];
+    assert!(!m.labels.contains(&"INBOX".to_string()));
+    let listed = client
+        .call(&Call::Rules {
+            account: work.clone(),
+        })
+        .unwrap();
+    let conditions = &listed["rules"][0]["rule"]["conditions"];
+    assert_eq!(conditions[0]["test"], "category");
+    assert_eq!(conditions[1]["value"], "primary");
+
+    // A label a rule uses stays; renamed, the rule follows it.
+    let used = client.call(&Call::DeleteLabel {
+        account: work.clone(),
+        label: "Banking".into(),
+    });
+    assert!(used.unwrap_err().contains("change or delete the rule"));
+    client
+        .call(&Call::RenameLabel {
+            account: work.clone(),
+            label: "Banking".into(),
+            name: "Money".into(),
+        })
+        .unwrap();
+    let listed = client
+        .call(&Call::Rules {
+            account: work.clone(),
+        })
+        .unwrap();
+    assert_eq!(listed["rules"][0]["rule"]["actions"][0]["value"], "Money");
+
+    // A waited rule can't lean on Gmail's search.
+    let waited = client.call(&Call::SaveRule {
+        account: work.clone(),
+        rule_id: None,
+        rule: shape(
+            r#"{"name":"Old","when":"waited","conditions":[{"test":"gmail_search","value":"-category:primary"},{"test":"older_than_days","value":"7"}],
+                "actions":[{"action":"skip_inbox"}]}"#,
+        ),
+        apply_to_existing: false,
+        reason: None,
+    });
+    assert!(waited.unwrap_err().contains("can't run gmail_search"));
 }

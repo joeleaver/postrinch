@@ -161,6 +161,7 @@ fn test(test: &Test, message: &Message, now: Timestamp) -> bool {
         Test::Unread => message.flags.unread,
         Test::Starred => message.flags.starred,
         Test::HasLabel(l) => message.has_label(l),
+        Test::InCategory(c) => message.has_label(c.label_id()),
         Test::InInbox => message.has_label(INBOX),
         Test::GmailSearch(_) => false,
         Test::OlderThanDays(d) => {

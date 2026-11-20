@@ -8,11 +8,12 @@ use std::collections::{HashMap, HashSet};
 use postrinch_model::{
     EmailAddress, LabelKind, Message, ProviderMessageId, ProviderThreadId, ThreadSummary, Timestamp,
 };
-use postrinch_store::Find;
+use postrinch_store::{Find, Found};
 use serde::{Deserialize, Serialize};
 
 use crate::messages::message_row;
 use crate::query::{LabelName, Query, label_matches};
+use crate::query_or::Either;
 use crate::{CommandError, CommandResult, Commands, Grouping, ThreadRow};
 
 /// How much text an excerpt keeps before what matched, in chars: little,
@@ -82,13 +83,12 @@ impl Commands {
             return Ok(results);
         }
         let now = Timestamp::from_millis(jiff::Timestamp::now().as_millisecond());
-        let query = Query::parse(text, now)?;
-        let accounts = self.search_accounts(&query)?;
-        let find = self.to_find(&query, &accounts)?;
+        let query = Either::parse(text, now)?;
+        let (found, accounts) = self.found(&query, false)?;
 
         let mut threads: Vec<(EmailAddress, ProviderThreadId, ProviderMessageId)> = Vec::new();
         let mut seen: HashSet<(String, String)> = HashSet::new();
-        for found in self.store.find_messages(&find)? {
+        for found in found {
             let Some(thread) = self.store.found_thread(&found)? else {
                 continue;
             };
@@ -129,7 +129,7 @@ impl Commands {
                 .collect();
             if !ask.is_empty() {
                 results.remote = Some(Remote {
-                    query: query.gmail.clone(),
+                    query: query.gmail(),
                     accounts: ask,
                 });
             }
@@ -152,8 +152,8 @@ impl Commands {
     ) -> CommandResult<Vec<ThreadRow>> {
         self.check(account)?;
         let now = Timestamp::from_millis(jiff::Timestamp::now().as_millisecond());
-        let query = Query::parse(query, now)?;
-        let set_aside = if query.set_aside_too {
+        let query = Either::parse(query, now)?;
+        let set_aside = if query.set_aside_too() {
             HashSet::new()
         } else {
             self.set_aside_ids(account)?
@@ -253,9 +253,41 @@ impl Commands {
         Ok(message_row(&message, known, None, Some(terms)))
     }
 
+    /// Every message a query's alternatives match, newest first, each
+    /// once, and the accounts it looked in. `every`: not only the most
+    /// relevant word matches ([`Find::every`]).
+    pub(crate) fn found(
+        &self,
+        query: &Either,
+        every: bool,
+    ) -> CommandResult<(Vec<Found>, Vec<EmailAddress>)> {
+        let mut accounts: Vec<EmailAddress> = Vec::new();
+        let mut found: Vec<Found> = Vec::new();
+        let mut seen: HashSet<(String, String)> = HashSet::new();
+        for one in &query.queries {
+            let these = self.search_accounts(one)?;
+            let mut find = self.to_find(one, &these)?;
+            find.every = every;
+            for f in self.store.find_messages(&find)? {
+                if seen.insert((f.account.key(), f.id.0.clone())) {
+                    found.push(f);
+                }
+            }
+            for a in these {
+                if !accounts.contains(&a) {
+                    accounts.push(a);
+                }
+            }
+        }
+        if query.queries.len() > 1 {
+            found.sort_by(|a, b| b.received.cmp(&a.received).then_with(|| a.id.cmp(&b.id)));
+        }
+        Ok((found, accounts))
+    }
+
     /// The accounts a query looks in: those this caller sees, narrowed by
     /// `account:`.
-    fn search_accounts(&self, query: &Query) -> CommandResult<Vec<EmailAddress>> {
+    pub(crate) fn search_accounts(&self, query: &Query) -> CommandResult<Vec<EmailAddress>> {
         let mut accounts: Vec<EmailAddress> = self
             .visible_accounts()?
             .into_iter()
@@ -314,6 +346,7 @@ impl Commands {
             after: query.after,
             before: query.before,
             set_aside_too: query.set_aside_too,
+            every: false,
         })
     }
 

@@ -14,6 +14,7 @@ mod cursor;
 mod full;
 mod incremental;
 mod keep;
+mod labels;
 mod messages;
 mod outbox;
 mod outgoing;

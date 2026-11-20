@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use postrinch_agents::client::Client;
 use postrinch_agents::{Call, ProposedFile};
-use postrinch_commands::{Folder, ThreadAction};
+use postrinch_commands::Folder;
 use postrinch_model::{
     EmailAddress, Mailbox, ProviderMessageId, ProviderThreadId, SystemLabel, parse_mailboxes,
 };
@@ -29,7 +29,10 @@ counts, flags, labels) sit outside it.
 
 Threads are named by `account` and `thread` id, as list_threads and search return them. \
 change_threads makes changes that can be undone and stay in the account (read, star, \
-archive, trash, labels); they show in the window at once and reach Gmail in the background.
+archive, trash, labels); they show in the window at once and reach Gmail in the background. \
+It changes named threads, or every thread a search matches however many there are, with \
+several actions at once: use a search rather than paging through ids. create_label, \
+rename_label and delete_label change the person's labels in Gmail at once.
 
 Attachments are numbered in read_thread's answer. read_attachment returns a file's text \
 (text files, PDFs) or a picture; save_attachment writes it to a path, for files it cannot \
@@ -42,8 +45,9 @@ or from mail; the person sees where each came from.
 
 Mail rules act on mail as it arrives, from then on. list_rules shows an account's rules; \
 save_rule makes or changes one, and set_rule_on, move_rule and delete_rule do what the \
-person can do in Settings › Rules. A rule that labels, files or flags mail is saved at \
-once. One that forwards mail or asks an agent is proposed: the person saves it or not.";
+person can do in Settings › Rules; run_rule runs a saved rule now over the mail already \
+here, all of it if asked. A rule that labels, files or flags mail is saved at once. One \
+that forwards mail or asks an agent is proposed: the person saves it or not.";
 
 /// The most threads a listing or search returns.
 const MAX_LIMIT: usize = 200;
@@ -104,19 +108,6 @@ pub struct SearchArgs {
 pub struct AccountArgs {
     /// The account's address.
     pub account: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct ChangeArgs {
-    /// The threads to change.
-    pub threads: Vec<ThreadArgs>,
-    /// `mark_read`, `mark_unread`, `star`, `unstar`, `archive`,
-    /// `move_to_inbox`, `trash`, `untrash`, `add_label` or `remove_label`.
-    pub action: String,
-    /// For `add_label` and `remove_label`: the label's name or id, as
-    /// list_labels gives it. Its threads must all be in one account.
-    #[serde(default)]
-    pub label: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -193,7 +184,7 @@ impl Postrinch {
     pub fn new(client: Arc<Client>) -> Self {
         Self {
             client,
-            tool_router: Self::tool_router() + Self::rules_router(),
+            tool_router: Self::tool_router() + Self::change_router() + Self::rules_router(),
         }
     }
 
@@ -336,19 +327,6 @@ impl Postrinch {
         .await
     }
 
-    /// The labels the person made in an account, with their ids: what
-    /// change_threads can add and remove.
-    #[tool(name = "list_labels")]
-    async fn list_labels(
-        &self,
-        Parameters(args): Parameters<AccountArgs>,
-    ) -> Result<String, String> {
-        self.call(Call::LabelChoices {
-            account: address(&args.account)?,
-        })
-        .await
-    }
-
     /// Write a message for the person to send: new mail, or a reply to a
     /// conversation. It opens in Postrinch with your reason beside it, and
     /// is sent only if the person presses Send (they may change it, keep it
@@ -401,45 +379,6 @@ impl Postrinch {
             attachments,
         })
         .await
-    }
-
-    /// Change threads: read, unread, star, unstar, archive, back to the
-    /// inbox, trash, out of the trash, add or remove a label. Each can be
-    /// undone with its opposite. Unread and star apply to a thread's latest
-    /// message, as in Gmail.
-    #[tool(name = "change_threads")]
-    async fn change_threads(
-        &self,
-        Parameters(args): Parameters<ChangeArgs>,
-    ) -> Result<String, String> {
-        if args.threads.is_empty() {
-            return Err("Name at least one thread.".into());
-        }
-        let label = || {
-            args.label
-                .clone()
-                .filter(|l| !l.trim().is_empty())
-                .ok_or_else(|| format!("{} needs a label.", args.action))
-        };
-        let action = match args.action.as_str() {
-            "mark_read" => ThreadAction::MarkRead,
-            "mark_unread" => ThreadAction::MarkUnread,
-            "star" => ThreadAction::Star,
-            "unstar" => ThreadAction::Unstar,
-            "archive" => ThreadAction::Archive,
-            "move_to_inbox" => ThreadAction::MoveToInbox,
-            "trash" => ThreadAction::Trash,
-            "untrash" => ThreadAction::Untrash,
-            "add_label" => ThreadAction::AddLabel(label()?),
-            "remove_label" => ThreadAction::RemoveLabel(label()?),
-            other => return Err(format!("There is no action {other:?}.")),
-        };
-        let threads = args
-            .threads
-            .iter()
-            .map(|t| Ok((address(&t.account)?, ProviderThreadId(t.thread.clone()))))
-            .collect::<Result<Vec<_>, String>>()?;
-        self.call(Call::Act { threads, action }).await
     }
 }
 

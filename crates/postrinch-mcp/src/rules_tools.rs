@@ -22,7 +22,8 @@ pub struct SaveRuleArgs {
     /// The rule. Conditions (`test`, `value`, `not`): from, from_domain,
     /// from_words, sent_to, to, cc, subject_words, subject_phrase, words,
     /// phrase, has_attachment, attachment_type, attachment_name,
-    /// larger_than_mb, smaller_than_mb, unread, starred, label, in_inbox,
+    /// larger_than_mb, smaller_than_mb, unread, starred, label, category
+    /// (primary, social, promotions, updates, forums), in_inbox,
     /// older_than_days (only with when `waited`), gmail_search. Actions
     /// (`action`, `value`, `prompt`): add_label, skip_inbox, mark_read,
     /// star, mark_important, never_important, category, never_spam, trash,
@@ -56,6 +57,18 @@ pub struct RuleOnArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct RunRuleArgs {
+    /// The account's address.
+    pub account: String,
+    /// The rule's id, as list_rules gives it.
+    pub id: u32,
+    /// Every message here, however old, rather than the last three
+    /// months'. Default false.
+    #[serde(default)]
+    pub all: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct MoveRuleArgs {
     /// The account's address.
     pub account: String,
@@ -84,8 +97,10 @@ impl Postrinch {
         .await
     }
 
-    /// Make a mail rule, or change one: it runs on mail as it arrives (or,
-    /// with when `waited`, on mail as it ages), from now on, in this account.
+    /// Make a mail rule, or change one: it runs on mail as it arrives, from
+    /// now on, in this account. With when `waited` it runs every hour over
+    /// the whole inbox, on mail that has aged (older_than_days); Postrinch
+    /// runs those while it is open, so gmail_search can't be used in them.
     /// A rule that labels, files or flags mail is saved at once; the person
     /// can change it, switch it off or delete it in Settings › Rules. A rule
     /// that forwards mail out of the account or asks an agent is the
@@ -102,6 +117,20 @@ impl Postrinch {
             rule: args.rule,
             apply_to_existing: args.apply_to_existing,
             reason: args.reason,
+        })
+        .await
+    }
+
+    /// Run a saved rule now over the mail already here, as if it had just
+    /// arrived: the last three months', or with `all` every message (for a
+    /// cleanup). What it asks of agents and where it forwards are left out.
+    /// Answers with how many messages it changed.
+    #[tool(name = "run_rule")]
+    async fn run_rule(&self, Parameters(args): Parameters<RunRuleArgs>) -> Result<String, String> {
+        self.call(Call::RunRule {
+            account: address(&args.account)?,
+            rule_id: args.id,
+            all: args.all,
         })
         .await
     }

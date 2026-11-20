@@ -77,9 +77,12 @@ fn an_agent_reads_and_changes_only_what_it_was_given() {
         listener,
         Commands::new(store.clone()),
         agents_path.clone(),
-        Arc::new(move |_: &postrinch_agents::Changed| {
-            counter.fetch_add(1, Ordering::SeqCst);
-        }),
+        postrinch_agents::serve::Hooks {
+            on_change: Arc::new(move |_: &postrinch_agents::Changed| {
+                counter.fetch_add(1, Ordering::SeqCst);
+            }),
+            gmail: None,
+        },
     )
     .unwrap();
 
@@ -124,19 +127,24 @@ fn an_agent_reads_and_changes_only_what_it_was_given() {
     client
         .call(&Call::Act {
             threads: t1.clone(),
-            action: ThreadAction::AddLabel("receipts".into()),
+            search: None,
+            actions: vec![ThreadAction::AddLabel("receipts".into())],
         })
         .unwrap();
-    client
+    // Several actions, to every thread a search matches.
+    let by_search = client
         .call(&Call::Act {
-            threads: t1.clone(),
-            action: ThreadAction::MarkRead,
+            threads: Vec::new(),
+            search: Some("from:ada OR from:nobody".into()),
+            actions: vec![ThreadAction::MarkRead, ThreadAction::Archive],
         })
         .unwrap();
+    assert_eq!(by_search["changed"], 1, "{by_search}");
     assert_eq!(changed.load(Ordering::SeqCst), 2, "the window is told");
     let m = &store.thread_messages(&work, &t1[0].1).unwrap()[0];
     assert!(!m.flags.unread);
     assert!(m.labels.contains(&"Label_1".to_string()));
+    assert!(!m.labels.contains(&"INBOX".to_string()), "archived");
     assert!(
         store.thread_messages(&home, &t1[0].1).unwrap()[0]
             .flags

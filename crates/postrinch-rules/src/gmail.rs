@@ -292,6 +292,7 @@ fn term(condition: &Condition) -> Option<String> {
         | Test::Unread
         | Test::Starred
         | Test::HasLabel(_)
+        | Test::InCategory(_)
         | Test::InInbox
         | Test::OlderThanDays(_) => return None,
     };

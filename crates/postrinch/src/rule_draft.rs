@@ -26,6 +26,9 @@ pub const FIELDS: &[(&str, &[&str])] = &[
             "starred",
             "in the inbox",
             "labelled",
+            "not labelled",
+            "in the category",
+            "not in the category",
             "older than (days)",
         ],
     ),
@@ -275,9 +278,16 @@ fn condition(l: &Looks) -> Option<Condition> {
         ("Mail is", "starred") => Condition::is(Test::Starred),
         ("Mail is", "in the inbox") => Condition::is(Test::InInbox),
         ("Mail is", "labelled") => Condition::is(Test::HasLabel(v)),
+        ("Mail is", "not labelled") => Condition::not(Test::HasLabel(v)),
+        ("Mail is", "in the category") => Condition::is(Test::InCategory(category_named(&v)?)),
+        ("Mail is", "not in the category") => Condition::not(Test::InCategory(category_named(&v)?)),
         ("Mail is", _) => Condition::is(Test::OlderThanDays(v.parse().ok()?)),
         _ => Condition::is(Test::GmailSearch(v)),
     })
+}
+
+fn category_named(name: &str) -> Option<Category> {
+    Category::ALL.into_iter().find(|c| c.name() == name)
 }
 
 fn mb_text(bytes: u64) -> String {
@@ -312,7 +322,10 @@ fn looks_of(c: &Condition) -> (&'static str, &'static str, String) {
         Test::Unread => ("Mail is", "unread", String::new()),
         Test::Starred => ("Mail is", "starred", String::new()),
         Test::InInbox => ("Mail is", "in the inbox", String::new()),
+        Test::HasLabel(l) if n => ("Mail is", "not labelled", l.clone()),
         Test::HasLabel(l) => ("Mail is", "labelled", l.clone()),
+        Test::InCategory(c) if n => ("Mail is", "not in the category", c.name().to_owned()),
+        Test::InCategory(c) => ("Mail is", "in the category", c.name().to_owned()),
         Test::OlderThanDays(d) => ("Mail is", "older than (days)", d.to_string()),
         Test::GmailSearch(q) => ("Gmail search", "matches", q.clone()),
     }
@@ -327,7 +340,7 @@ fn action(d: &Does) -> Option<Action> {
         "Star" => Action::Star,
         "Mark important" => Action::MarkImportant,
         "Never mark important" => Action::NeverImportant,
-        "Put in the category" => Action::Category(*Category::ALL.iter().find(|c| c.name() == v)?),
+        "Put in the category" => Action::Category(category_named(&v)?),
         "Never send to spam" => Action::NeverSpam,
         "Move to trash" => Action::Trash,
         "Forward to" if !v.is_empty() => Action::Forward(v),
@@ -377,6 +390,9 @@ mod tests {
                 Condition::not(Test::SubjectWords("lunch menu".into())),
                 Condition::is(Test::LargerThan(5 * 1_048_576)),
                 Condition::not(Test::HasAttachment),
+                Condition::not(Test::HasLabel("Label_2".into())),
+                Condition::is(Test::InCategory(Category::Promotions)),
+                Condition::not(Test::InCategory(Category::Primary)),
             ],
             actions: vec![
                 Action::AddLabel("Label_1".into()),

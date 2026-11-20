@@ -5,21 +5,20 @@
 
 use postrinch_commands::{Commands, LabelChoice};
 use postrinch_model::{EmailAddress, Timestamp};
-use postrinch_rules::{Action, Rule};
+use postrinch_rules::{Action, Rule, Test, When};
 use serde_json::{Value, json};
+use std::sync::atomic::AtomicUsize;
 
+use crate::later::{self, Finished};
 use crate::registry::Agents;
 use crate::rule_shape::{Names, RuleShape};
 use crate::setup::App;
-use crate::views::say;
+use crate::views::{Asker, say};
 use crate::wire::Call;
+use crate::wire::Changed;
 
-pub(crate) fn run(
-    commands: &Commands,
-    call: Call,
-    agent: &str,
-    agents: &Agents,
-) -> Result<Value, String> {
+pub(crate) fn run(commands: &Commands, call: Call, asker: &Asker) -> Result<Value, String> {
+    let (agent, agents) = (asker.agent, asker.agents);
     match call {
         Call::Rules { account } => list(commands, &account, agents),
         Call::SaveRule {
@@ -65,6 +64,32 @@ pub(crate) fn run(
             known(commands, &account, id)?;
             commands.move_rule(&account, id, to).map_err(say)?;
             list(commands, &account, agents)
+        }
+        Call::RunRule {
+            account,
+            rule_id: id,
+            all,
+        } => {
+            let rule = known(commands, &account, id)?;
+            let work = {
+                let commands = commands.clone();
+                move |_: &AtomicUsize| {
+                    let run = if all {
+                        commands.apply_to_all_existing(&account, &rule, now())
+                    } else {
+                        commands.apply_to_existing(&account, &rule, now())
+                    };
+                    run.map_err(say)
+                }
+            };
+            Ok(match later::within(asker.on_change, Changed::Mail, work)? {
+                Finished::Done(n) => json!({ "rule": id, "changed": n }),
+                Finished::Going(_) => json!({
+                    "rule": id,
+                    "running": true,
+                    "note": "Postrinch is still running the rule over the mail and will finish by itself; the window shows the changes when done.",
+                }),
+            })
         }
         _ => unreachable!("only rules calls come here"),
     }
@@ -155,6 +180,14 @@ fn save(
                 )
             });
         }
+    }
+    if rule.when == When::Waited
+        && rule
+            .conditions
+            .iter()
+            .any(|c| matches!(c.test, Test::GmailSearch(_)))
+    {
+        return Err("A rule that waits is run by Postrinch, which can't run gmail_search: use the other conditions (category, label, in_inbox, from...).".into());
     }
     if needs_person(&rule, before.as_ref()) {
         commands

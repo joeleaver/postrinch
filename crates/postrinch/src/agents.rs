@@ -8,13 +8,13 @@ use std::sync::Arc;
 use postrinch_agents::setup::{
     bridge_path, command_snippet, entry_name, json_snippet, toml_snippet,
 };
-use postrinch_agents::{Agent, Agents, App, Changed, Reach, Setup, serve, wire};
+use postrinch_agents::{Agent, Agents, App, Changed, Gmail, Reach, Setup, serve, wire};
 use postrinch_commands::Commands;
 use postrinch_model::EmailAddress;
-use tokio::sync::Notify;
 
 use crate::actions::Notice;
 use crate::state::State;
+use crate::sync::SyncHandle;
 
 /// The dialog Settings › Agents has open.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,16 +44,20 @@ pub struct Ready {
 /// Listen for agents. A change an agent makes reloads what the window shows
 /// and wakes sync's sender, as the window's own changes do; a change to
 /// rules also wakes sync, to give Gmail the rules, and the rules runner.
-/// `sync` is its sender and its wake.
-pub fn start(commands: Commands, state: State, sync: Option<(Arc<Notify>, Arc<Notify>)>) {
+/// With `sync`, agents can also make, rename and delete labels in Gmail.
+pub fn start(commands: Commands, state: State, sync: Option<SyncHandle>) {
     let Some(path) = Agents::default_path() else {
         state.agents_off.set(Some(
             "Agents cannot connect: this system has no settings folder.".into(),
         ));
         return;
     };
+    let gmail = sync
+        .clone()
+        .map(|sync| Arc::new(GmailLabels(sync)) as Arc<dyn Gmail>);
+    let wakes = sync.map(|s| (s.send, s.wake));
     let on_change: serve::OnChange = Arc::new(move |changed: &Changed| {
-        if let Some((send, wake)) = &sync {
+        if let Some((send, wake)) = &wakes {
             send.notify_one();
             if matches!(changed, Changed::Rules(_)) {
                 wake.notify_one();
@@ -65,13 +69,55 @@ pub fn start(commands: Commands, state: State, sync: Option<(Arc<Notify>, Arc<No
         state.revision.update_send(|n| *n += 1);
     });
     let addr = wire::addr();
-    if let Err(e) = serve::start(&addr, commands, path, on_change) {
+    let hooks = serve::Hooks { on_change, gmail };
+    if let Err(e) = serve::start(&addr, commands, path, hooks) {
         // Another Postrinch is answering there, or something else holds it.
         tracing::warn!("agents cannot connect: listening at {addr} failed: {e}");
         let port = addr.rsplit(':').next().unwrap_or(&addr).to_owned();
         state.agents_off.set(Some(format!(
             "Agents cannot connect: another program is using Postrinch\u{2019}s port ({port}). Close it, or the other Postrinch, and reopen."
         )));
+    }
+}
+
+/// Gmail's label calls for agents, run on sync's runtime from the agent's
+/// connection thread, which waits for them.
+struct GmailLabels(SyncHandle);
+
+impl GmailLabels {
+    fn run<T>(
+        &self,
+        work: impl std::future::Future<Output = postrinch_sync::SyncResult<T>>,
+    ) -> Result<T, String> {
+        self.0.runtime.block_on(work).map_err(|e| {
+            tracing::warn!("an agent's label change failed: {e}");
+            match e {
+                postrinch_sync::SyncError::NeedsSignIn(_) => {
+                    "That account must sign in again in Postrinch first.".to_owned()
+                }
+                postrinch_sync::SyncError::Http(_) => {
+                    "Gmail could not be reached; try again when online.".to_owned()
+                }
+                other => format!("Gmail refused: {other}."),
+            }
+        })
+    }
+}
+
+impl Gmail for GmailLabels {
+    fn create_label(&self, account: &EmailAddress, name: &str) -> Result<String, String> {
+        let sync = self.0.sync_engine();
+        Ok(self.run(sync.create_label(account, name))?.provider_id)
+    }
+
+    fn rename_label(&self, account: &EmailAddress, id: &str, name: &str) -> Result<(), String> {
+        let sync = self.0.sync_engine();
+        self.run(sync.rename_label(account, id, name)).map(|_| ())
+    }
+
+    fn delete_label(&self, account: &EmailAddress, id: &str) -> Result<(), String> {
+        let sync = self.0.sync_engine();
+        self.run(sync.delete_label(account, id))
     }
 }
 
