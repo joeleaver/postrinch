@@ -221,6 +221,7 @@ fn row(state: State, id: RowId) -> NodeHandle {
             class: {move || {
                 let mut class = String::from("row");
                 if summary().unread_count > 0 { class.push_str(" unread"); }
+                if summary().replied_last.is_some() { class.push_str(" mine"); }
                 if state.selected.get().as_ref() == Some(&chosen) { class.push_str(" chosen"); }
                 class
             }},
@@ -316,6 +317,10 @@ fn shown(show: bool) -> &'static str {
 /// Who a thread is between, by first name where there is one, leaving out
 /// the account's own address unless it is all there is.
 fn people(summary: &ThreadSummary) -> String {
+    if let Some(answered) = &summary.replied_last {
+        let names: Vec<String> = answered.iter().map(|m| m.display_name()).collect();
+        return format!("↩ You, to {}", listed(&names));
+    }
     let me = summary.account.key();
     let others: Vec<String> = summary
         .participants
@@ -323,10 +328,17 @@ fn people(summary: &ThreadSummary) -> String {
         .filter(|m| m.address.key() != me)
         .map(|m| m.display_name())
         .collect();
-    match others.len() {
-        0 => "me".to_owned(),
-        1..=3 => others.join(", "),
-        n => format!("{}, {} and {} more", others[0], others[1], n - 2),
+    if others.is_empty() {
+        return "me".to_owned();
+    }
+    listed(&others)
+}
+
+/// Names joined, the first two and how many more past three.
+fn listed(names: &[String]) -> String {
+    match names.len() {
+        0..=3 => names.join(", "),
+        n => format!("{}, {} and {} more", names[0], names[1], n - 2),
     }
 }
 

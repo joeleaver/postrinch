@@ -12,7 +12,7 @@ use postrinch_store::{Find, Found};
 use serde::{Deserialize, Serialize};
 
 use crate::messages::message_row;
-use crate::query::{LabelName, Query, label_matches};
+use crate::query::{LabelName, Last, Query, label_matches};
 use crate::query_or::Either;
 use crate::{CommandError, CommandResult, Commands, Grouping, ThreadRow};
 
@@ -282,7 +282,37 @@ impl Commands {
         if query.queries.len() > 1 {
             found.sort_by(|a, b| b.received.cmp(&a.received).then_with(|| a.id.cmp(&b.id)));
         }
+        if let Some(last) = query.last()? {
+            found = self.whose_last(found, last)?;
+        }
         Ok((found, accounts))
+    }
+
+    /// The messages whose conversation's latest message is `last`'s, each
+    /// conversation read once.
+    fn whose_last(&self, found: Vec<Found>, last: Last) -> CommandResult<Vec<Found>> {
+        let mut holds: HashMap<(String, ProviderThreadId), bool> = HashMap::new();
+        let mut kept = Vec::new();
+        for f in found {
+            let Some(thread) = self.store.found_thread(&f)? else {
+                continue;
+            };
+            let key = (f.account.key(), thread);
+            let keep = match holds.get(&key) {
+                Some(&keep) => keep,
+                None => {
+                    let messages = self.store.thread_messages(&f.account, &key.1)?;
+                    let keep =
+                        ThreadSummary::from_messages(&messages).is_some_and(|s| last.holds(&s));
+                    holds.insert(key, keep);
+                    keep
+                }
+            };
+            if keep {
+                kept.push(f);
+            }
+        }
+        Ok(kept)
     }
 
     /// The accounts a query looks in: those this caller sees, narrowed by

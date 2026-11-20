@@ -41,6 +41,20 @@ impl Either {
         self.queries.iter().any(Query::has_words)
     }
 
+    /// What `last:` asks of every conversation found. Alternatives that
+    /// ask different things are refused: what is found is joined before it
+    /// is grouped into conversations, so it could not tell them apart.
+    pub fn last(&self) -> CommandResult<Option<crate::query::Last>> {
+        let mut asked = self.queries.iter().map(|q| q.last);
+        let first = asked.next().flatten();
+        if asked.any(|l| l != first) {
+            return Err(CommandError::Invalid(
+                "last: must be the same on both sides of OR.".into(),
+            ));
+        }
+        Ok(first)
+    }
+
     pub fn set_aside_too(&self) -> bool {
         self.queries.iter().any(|q| q.set_aside_too)
     }

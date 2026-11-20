@@ -9,6 +9,7 @@ pub const LIGHT: &str = r#"
     --ink: #16181d;
     --ink-2: #3a3f4a;
     --muted: #5b6170;
+    --faint: #8a909c;
     --line: #dfe2e7;
     --line-soft: #eceef1;
     --field: #d4d8de;
@@ -46,6 +47,7 @@ pub const DARK: &str = r#"
     --ink: #e7e9ee;
     --ink-2: #c4c8d0;
     --muted: #949aa6;
+    --faint: #6b717d;
     --line: #2d3139;
     --line-soft: #262a31;
     --field: #3a3f49;

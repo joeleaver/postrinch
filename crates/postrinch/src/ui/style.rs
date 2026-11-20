@@ -202,6 +202,9 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .row-top { display: flex; align-items: center; gap: 8px; }
 .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row.unread .who, .row.unread .subject { font-weight: 600; }
+/* You answered last: done with it for now, so it steps back. */
+.row.mine .who, .row.mine .subject { color: var(--muted); font-weight: 400; }
+.row.mine .snippet { color: var(--faint); }
 .thread-count { font-size: 12px; color: var(--muted); }
 .attachment { font-size: 12px; }
 .when { flex-shrink: 0; font-size: 12px; color: var(--muted); }

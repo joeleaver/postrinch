@@ -24,6 +24,48 @@ pub struct ThreadSummary {
     pub has_attachments: bool,
     /// Every label any message in the thread carries, each once.
     pub labels: Vec<String>,
+    /// Whom the account answered, when its answer is the thread's latest
+    /// message: the person is done with it for now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replied_last: Option<Vec<Mailbox>>,
+}
+
+/// The label a provider puts on drafts (Gmail's; the only provider yet).
+const DRAFT: &str = "DRAFT";
+/// The label a provider puts on what the account sent, from any of its
+/// addresses.
+const SENT: &str = "SENT";
+
+/// Whom the account answered, if its reply or reply-all is the latest of
+/// `sorted` (oldest first) that is not a draft. A forward passes mail on
+/// rather than answering it, and mail only to the account itself answers
+/// no one, so neither counts.
+fn replied_last(account: &EmailAddress, sorted: &[&Message]) -> Option<Vec<Mailbox>> {
+    let last = sorted.iter().rev().find(|m| !m.has_label(DRAFT))?;
+    let mine = last.has_label(SENT)
+        || last
+            .headers
+            .from
+            .iter()
+            .any(|f| f.address.key() == account.key());
+    let reply = last.headers.in_reply_to.is_some() || !last.headers.references.is_empty();
+    let subject = last.subject().trim_start().to_lowercase();
+    let forward = subject.starts_with("fwd:") || subject.starts_with("fw:");
+    if !mine || !reply || forward {
+        return None;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let others: Vec<Mailbox> = last
+        .headers
+        .to
+        .iter()
+        .chain(&last.headers.cc)
+        .chain(&last.headers.bcc)
+        .filter(|m| m.address.key() != account.key())
+        .filter(|m| seen.insert(m.address.key()))
+        .cloned()
+        .collect();
+    (!others.is_empty()).then_some(others)
 }
 
 impl ThreadSummary {
@@ -65,6 +107,7 @@ impl ThreadSummary {
             unread_count: sorted.iter().filter(|m| m.flags.unread).count(),
             starred: sorted.iter().any(|m| m.flags.starred),
             has_attachments: sorted.iter().any(|m| m.has_attachments()),
+            replied_last: replied_last(&first.account, &sorted),
             labels,
         })
     }
@@ -117,6 +160,65 @@ mod tests {
             .map(|m| m.address.key())
             .collect();
         assert_eq!(who, ["ada@example.org", "bob@example.org"]);
+    }
+
+    fn answer(id: &str, received: i64, from: &str, to: &[&str], labels: &[&str]) -> Message {
+        let mut m = message(id, received, from, false, labels);
+        m.headers.in_reply_to = Some("first@example.org".into());
+        m.headers.to = to
+            .iter()
+            .map(|a| Mailbox::new(None, EmailAddress::parse(a).unwrap()))
+            .collect();
+        m
+    }
+
+    fn whom(messages: &[&Message]) -> Option<Vec<String>> {
+        let summary = ThreadSummary::from_messages(messages.iter().copied()).unwrap();
+        summary
+            .replied_last
+            .map(|r| r.iter().map(|m| m.address.key()).collect())
+    }
+
+    #[test]
+    fn replied_last_when_my_answer_is_latest() {
+        let first = message("m1", 100, "bob@example.org", false, &["INBOX"]);
+        let to = ["bob@example.org", "me@example.org"];
+        let mine = answer("m2", 200, "me@example.org", &to, &[]);
+        assert_eq!(whom(&[&first, &mine]), Some(vec!["bob@example.org".into()]));
+        // From another of my addresses: Gmail marks it sent.
+        let alias = answer("m2", 200, "me.too@example.org", &to, &["SENT"]);
+        assert_eq!(
+            whom(&[&first, &alias]),
+            Some(vec!["bob@example.org".into()])
+        );
+        // Bob answered after me.
+        let again = answer(
+            "m3",
+            300,
+            "bob@example.org",
+            &["me@example.org"],
+            &["INBOX"],
+        );
+        assert_eq!(whom(&[&first, &mine, &again]), None);
+        // A draft after my answer changes nothing.
+        let draft = answer("m3", 300, "me@example.org", &to, &["DRAFT"]);
+        assert_eq!(
+            whom(&[&first, &mine, &draft]),
+            Some(vec!["bob@example.org".into()])
+        );
+    }
+
+    #[test]
+    fn forwards_notes_to_self_and_new_mail_are_not_answers() {
+        let first = message("m1", 100, "bob@example.org", false, &["INBOX"]);
+        let mut forward = answer("m2", 200, "me@example.org", &["cat@example.org"], &["SENT"]);
+        forward.headers.subject = Some("Fwd: the plan".into());
+        assert_eq!(whom(&[&first, &forward]), None);
+        let to_self = answer("m2", 200, "me@example.org", &["me@example.org"], &["SENT"]);
+        assert_eq!(whom(&[&first, &to_self]), None);
+        let mut started = answer("m1", 100, "me@example.org", &["bob@example.org"], &["SENT"]);
+        started.headers.in_reply_to = None;
+        assert_eq!(whom(&[&started]), None);
     }
 
     #[test]

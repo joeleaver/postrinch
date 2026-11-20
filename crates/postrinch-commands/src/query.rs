@@ -3,8 +3,9 @@
 //! text can be handed to Gmail for mail not downloaded yet.
 //!
 //! `from:` `to:` `cc:` `bcc:` `subject:` `label:` `in:` `category:` `is:`
-//! `has:` `after:` `before:` `newer_than:` `older_than:`, and `account:`,
-//! which is Postrinch's own. A value with spaces is quoted
+//! `has:` `after:` `before:` `newer_than:` `older_than:`, and Postrinch's
+//! own `account:` and `last:` (`last:me`, the account answered last;
+//! `last:them`, someone else wrote last). A value with spaces is quoted
 //! (`from:"Ada Lovelace"`); `-label:` and `-in:` leave a label out.
 
 use jiff::civil::Date;
@@ -32,11 +33,30 @@ pub struct Query {
     pub attachments: Option<bool>,
     pub after: Option<Timestamp>,
     pub before: Option<Timestamp>,
+    /// `last:me` or `last:them`: whose the conversation's latest message
+    /// is.
+    pub last: Option<Last>,
     /// `in:trash`, `in:spam` or `in:anywhere`: look where mailboxes don't.
     pub set_aside_too: bool,
     /// The query to give Gmail: what was typed, less Postrinch's own
     /// operators.
     pub gmail: String,
+}
+
+/// Who wrote a conversation's latest message, as `last:` asks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Last {
+    /// The account answered last: the person is done with it for now.
+    Me,
+    /// Someone else did: it is the person's turn.
+    Them,
+}
+
+impl Last {
+    /// Whether a conversation is one this asks for.
+    pub fn holds(self, summary: &postrinch_model::ThreadSummary) -> bool {
+        summary.replied_last.is_some() == (self == Last::Me)
+    }
 }
 
 /// A label a query names.
@@ -58,7 +78,7 @@ impl Query {
                 gmail.push(token);
                 continue;
             };
-            if operator != "account" {
+            if !matches!(operator, "account" | "last") {
                 gmail.push(token.clone());
             }
             let value = unquote(value);
@@ -94,6 +114,15 @@ impl Query {
                 "has" => match value.to_lowercase().as_str() {
                     "attachment" | "attachments" => query.attachments = Some(true),
                     other => return Err(invalid(format!("has:{other} is not known."))),
+                },
+                "last" => match value.to_lowercase().as_str() {
+                    "me" => query.last = Some(Last::Me),
+                    "them" => query.last = Some(Last::Them),
+                    other => {
+                        return Err(invalid(format!(
+                            "last:{other} is not known; last:me and last:them are."
+                        )));
+                    }
                 },
                 "after" => query.after = Some(date(&value)?),
                 "before" => query.before = Some(date(&value)?),
@@ -237,6 +266,7 @@ pub(crate) fn operator(token: &str) -> Option<(bool, &str, &str)> {
         "newer_than",
         "older_than",
         "account",
+        "last",
     ];
     let name = known.iter().find(|k| k.eq_ignore_ascii_case(name))?;
     Some((negated, name, value))
@@ -357,6 +387,17 @@ mod tests {
         }
         // An unknown word with a colon is just a word.
         assert_eq!(parse("re:invoice").words, ["re:invoice"]);
+    }
+
+    #[test]
+    fn last_is_postrinch_own() {
+        let q = parse("last:me in:inbox");
+        assert_eq!(q.last, Some(Last::Me));
+        assert_eq!(q.gmail, "in:inbox");
+        assert_eq!(parse("last:Them").last, Some(Last::Them));
+        let now = Timestamp::from_millis(0);
+        assert!(Query::parse("last:you", now).is_err());
+        assert!(Query::parse("-last:me", now).is_err());
     }
 
     #[test]
