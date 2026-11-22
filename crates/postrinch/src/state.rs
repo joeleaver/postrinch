@@ -272,13 +272,17 @@ impl State {
         }
         // Only when what it shows changes, not whenever the views reload.
         let shown_view = Memo::new(move || self.shown_view());
+        // Likewise: the grouping reads the views, which every list's
+        // answer reloads; a list asked again for that alone would ask
+        // again for ever.
+        let grouping = Memo::new(move || self.grouping());
         let lists = ask.clone();
         Effect::new(move || {
             self.revision.get();
             let Some(view) = shown_view.get() else {
                 return;
             };
-            let grouping = self.grouping();
+            let grouping = grouping.get();
             // Another list than before: show it as last loaded (or nothing,
             // rather than the list left) until the loader answers.
             let key = recent::ListKey {
@@ -329,7 +333,7 @@ impl State {
             search(Request::Search {
                 query: self.search.get(),
                 accounts: self.search_accounts.get(),
-                grouping: self.grouping(),
+                grouping: grouping.get(),
             });
         });
         let people = ask.clone();
