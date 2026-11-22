@@ -1,5 +1,6 @@
 //! The search filters a window offers (who it is from and to, or not, when, unread,
-//! starred, with attachments, who wrote last, which accounts, which labels),
+//! starred, with attachments, who wrote last, which accounts, which labels,
+//! which of Gmail's categories),
 //! read from and written into the query text, so the text stays the one
 //! place a search lives: what the person types, what an agent sends and
 //! what a saved view keeps.
@@ -7,8 +8,21 @@
 use crate::query::{Last, label_matches, operator, tokens};
 
 /// The operators the panel writes as a group of "any of these"
-/// (`{label:a label:b}`, `{from:a from:b}`, `{to:a to:b}`).
-const GROUPED: [&str; 3] = ["label", "from", "to"];
+/// (`{label:a label:b}`, `{from:a from:b}`, `{to:a to:b}`,
+/// `{category:a category:b}`).
+const GROUPED: [&str; 4] = ["label", "from", "to", "category"];
+
+/// Gmail's categories (its inbox tabs), as `category:` names them.
+pub const CATEGORY_NAMES: [&str; 5] = ["primary", "updates", "promotions", "social", "forums"];
+
+/// A `category:` value as [`CATEGORY_NAMES`] has it (`personal` is
+/// Gmail's other word for Primary).
+fn category_name(value: &str) -> String {
+    match value.to_lowercase().as_str() {
+        "personal" => "primary".to_owned(),
+        other => other.to_owned(),
+    }
+}
 
 /// The groups the panel wrote, found in a query, by operator.
 #[derive(Debug, Default)]
@@ -16,6 +30,7 @@ struct Groups {
     label: Vec<String>,
     from: Vec<String>,
     to: Vec<String>,
+    category: Vec<String>,
 }
 
 impl Groups {
@@ -23,6 +38,7 @@ impl Groups {
         match name {
             "label" => &mut self.label,
             "from" => &mut self.from,
+            "category" => &mut self.category,
             _ => &mut self.to,
         }
     }
@@ -34,6 +50,7 @@ impl Groups {
             "label" => !self.label.is_empty(),
             "from" => !self.from.is_empty(),
             "to" => !self.to.is_empty(),
+            "category" => !self.category.is_empty(),
             _ => false,
         }
     }
@@ -77,6 +94,11 @@ pub struct Filters {
     pub all_labels: bool,
     /// Labels it has none of (`-label:a`).
     pub without: Vec<String>,
+    /// Gmail categories a conversation is in: any of them, as
+    /// [`CATEGORY_NAMES`] names them.
+    pub categories: Vec<String>,
+    /// Categories it is in none of (`-category:a`).
+    pub not_categories: Vec<String>,
     pub unread: bool,
     pub starred: bool,
     pub attachments: bool,
@@ -110,6 +132,7 @@ impl Filters {
                 match name {
                     "label" => filters.without.push(value),
                     "from" => filters.not_from.push(value),
+                    "category" => filters.not_categories.push(category_name(&value)),
                     _ => filters.not_to.push(value),
                 }
                 continue;
@@ -121,6 +144,7 @@ impl Filters {
                 ("from", _) => filters.from.push(value),
                 ("to", _) => filters.to.push(value),
                 ("label", _) => filters.labels.push(value),
+                ("category", _) => filters.categories.push(category_name(&value)),
                 ("is", "unread") => filters.unread = true,
                 ("is", "starred") => filters.starred = true,
                 ("has", "attachment" | "attachments") => filters.attachments = true,
@@ -131,7 +155,14 @@ impl Filters {
         }
         // Labels side by side, outside a group, are all of them.
         filters.all_labels = !grouped_labels && filters.labels.len() > 1;
-        let Groups { label, from, to } = groups;
+        let Groups {
+            label,
+            from,
+            to,
+            category,
+        } = groups;
+        let category = category.iter().map(|c| category_name(c));
+        filters.categories.splice(0..0, category);
         filters.labels.splice(0..0, label);
         filters.from.splice(0..0, from);
         filters.to.splice(0..0, to);
@@ -147,6 +178,28 @@ impl Filters {
             Some(LabelPick::Not)
         } else {
             None
+        }
+    }
+
+    /// What the filter asks of a category, by [`CATEGORY_NAMES`]' name.
+    pub fn category(&self, name: &str) -> Option<LabelPick> {
+        if self.categories.iter().any(|c| c == name) {
+            Some(LabelPick::Has)
+        } else if self.not_categories.iter().any(|c| c == name) {
+            Some(LabelPick::Not)
+        } else {
+            None
+        }
+    }
+
+    /// Ask `pick` of a category, or nothing.
+    pub fn pick_category(&mut self, name: &str, pick: Option<LabelPick>) {
+        self.categories.retain(|c| c != name);
+        self.not_categories.retain(|c| c != name);
+        match pick {
+            Some(LabelPick::Has) => self.categories.push(name.to_owned()),
+            Some(LabelPick::Not) => self.not_categories.push(name.to_owned()),
+            None => {}
         }
     }
 
@@ -186,6 +239,8 @@ impl Filters {
             Archived::LeaveOut => kept.push("in:inbox".to_owned()),
             Archived::Only => kept.push("-in:inbox".to_owned()),
         }
+        any_of(&mut kept, "category", &self.categories, false);
+        not(&mut kept, "category", &self.not_categories);
         any_of(&mut kept, "label", &self.labels, self.all_labels);
         not(&mut kept, "label", &self.without);
         let last = match self.last {
@@ -242,7 +297,7 @@ fn manages(token: &str, groups: &Groups) -> bool {
         return GROUPED.contains(&name);
     }
     match name {
-        "label" | "from" | "to" => !groups.has(name),
+        "label" | "from" | "to" | "category" => !groups.has(name),
         "account" | "newer_than" => true,
         "is" => matches!(value.as_str(), "unread" | "starred"),
         "has" => matches!(value.as_str(), "attachment" | "attachments"),
@@ -336,116 +391,5 @@ fn quote(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn archived_mail_is_in_inbox_or_not() {
-        let read = |q: &str| Filters::read(q).archived;
-        assert_eq!(read("label:clients"), Archived::Include);
-        assert_eq!(read("in:inbox category:primary"), Archived::LeaveOut);
-        assert_eq!(read("label:clients -in:inbox"), Archived::Only);
-        let mut f = Filters::read("in:inbox category:primary");
-        f.archived = Archived::Only;
-        assert_eq!(
-            f.apply("in:inbox category:primary"),
-            "category:primary -in:inbox"
-        );
-        f.archived = Archived::Include;
-        assert_eq!(f.apply("in:inbox category:primary"), "category:primary");
-        // Other folders stay the person's own.
-        assert_eq!(Filters::read("in:sent").archived, Archived::Include);
-        assert_eq!(Filters::default().apply("in:sent"), "in:sent");
-    }
-
-    #[test]
-    fn filters_round_trip_through_the_text() {
-        let query = r#"cover shift from:"Ada Lovelace" is:unread in:inbox"#;
-        let mut filters = Filters::read(query);
-        assert_eq!(filters.from, ["Ada Lovelace"]);
-        assert!(filters.unread);
-        filters.unread = false;
-        filters.within = Some("1m".into());
-        filters.labels = vec!["Work/Clients".into()];
-        assert_eq!(
-            filters.apply(query),
-            r#"cover shift newer_than:1m from:"Ada Lovelace" in:inbox label:Work/Clients"#
-        );
-        assert_eq!(Filters::default().apply(query), "cover shift");
-    }
-
-    #[test]
-    fn labels_are_any_of_and_last_is_kept() {
-        let mut filters = Filters::default();
-        filters.pick_label("Clients/Acme", Some(LabelPick::Has));
-        filters.pick_label("Receipts 2024", Some(LabelPick::Has));
-        filters.last = Some(Last::Me);
-        filters.attachments = true;
-        let query = filters.apply("has:attachment");
-        assert_eq!(
-            query,
-            r#"{label:Clients/Acme label:"Receipts 2024"} has:attachment last:me"#
-        );
-        let read = Filters::read(&query);
-        assert_eq!(read.labels, ["Clients/Acme", "Receipts 2024"]);
-        assert!(read.attachments && read.label("clients-acme") == Some(LabelPick::Has));
-        assert!(!read.all_labels);
-        assert_eq!(read.last, Some(Last::Me));
-        filters.pick_label("clients/acme", None);
-        assert_eq!(filters.labels, ["Receipts 2024"]);
-        // A group of the person's own stays.
-        let theirs = "{from:ann label:y} label:x";
-        assert_eq!(Filters::default().apply(theirs), "{from:ann label:y}");
-    }
-
-    #[test]
-    fn senders_and_recipients_any_of_or_not() {
-        let query = "invoice {from:ann from:\"Bob Smith\"} -from:noreply to:me@x.org";
-        let mut f = Filters::read(query);
-        assert_eq!(f.from, ["ann", "Bob Smith"]);
-        assert_eq!(
-            (f.not_from.as_slice(), f.to.as_slice()),
-            (&["noreply".to_owned()][..], &["me@x.org".to_owned()][..])
-        );
-        assert_eq!(f.apply(query), query);
-        f.from.retain(|p| p != "ann");
-        f.not_to.push("list@x.org".into());
-        assert_eq!(
-            f.apply(query),
-            "invoice from:\"Bob Smith\" -from:noreply to:me@x.org -to:list@x.org"
-        );
-        // Groups of each kind are read side by side.
-        let both = Filters::read("{label:a label:b} {to:c to:d}");
-        assert_eq!((both.labels.len(), both.to.len()), (2, 2));
-        assert_eq!(
-            Filters::default().apply("{label:a label:b} {to:c to:d} word"),
-            "word"
-        );
-    }
-
-    #[test]
-    fn labels_all_of_and_left_out() {
-        let query = "invoice label:Clients label:Receipts -label:Newsletters";
-        let mut filters = Filters::read(query);
-        assert_eq!(filters.labels, ["Clients", "Receipts"]);
-        assert!(filters.all_labels);
-        assert_eq!(filters.label("newsletters"), Some(LabelPick::Not));
-        assert_eq!(filters.apply(query), query);
-        filters.all_labels = false;
-        filters.pick_label("Receipts", Some(LabelPick::Not));
-        assert_eq!(
-            filters.apply(query),
-            "invoice label:Clients -label:Newsletters -label:Receipts"
-        );
-        filters.pick_label("Old", Some(LabelPick::Has));
-        assert_eq!(
-            filters.apply(query),
-            "invoice {label:Clients label:Old} -label:Newsletters -label:Receipts"
-        );
-        // A label beside a group is the person's own, and stays.
-        let theirs = "{label:a label:b} label:c -label:d";
-        let read = Filters::read(theirs);
-        assert_eq!((read.labels.len(), read.without.len()), (2, 1));
-        assert_eq!(Filters::default().apply(theirs), "label:c");
-    }
-}
+#[path = "filters_tests.rs"]
+mod tests;

@@ -10,7 +10,7 @@ use rinch::batch;
 use crate::state::{PAGE, State, View};
 
 /// The view the window opens on.
-pub const FIRST: &str = "primary";
+pub const FIRST: &str = "inbox";
 
 impl State {
     /// The open view as saved, once the views are loaded.

@@ -30,7 +30,7 @@ fn message(account: &EmailAddress, id: &str, at: i64) -> Message {
             ..Default::default()
         },
         received: Timestamp::from_millis(at),
-        labels: vec!["INBOX".into()],
+        labels: vec!["INBOX".into(), "CATEGORY_PERSONAL".into()],
         flags: Flags {
             unread: true,
             starred: false,
@@ -51,6 +51,13 @@ fn add_account(store: &Store, account: &EmailAddress) {
         .put_label(
             account,
             &Label::new("INBOX", "INBOX", LabelKind::System(SystemLabel::Inbox)),
+        )
+        .unwrap();
+    let primary = LabelKind::System(SystemLabel::CategoryPersonal);
+    store
+        .put_label(
+            account,
+            &Label::new("CATEGORY_PERSONAL", "CATEGORY_PERSONAL", primary),
         )
         .unwrap();
     for (id, at) in [("m1", 1_762_200_000_000), ("m2", 1_762_200_100_000)] {

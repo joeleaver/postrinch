@@ -5,6 +5,7 @@
 //! shows is in view_panel_mail.rs; here are the list's order, how the
 //! sidebar lists it, and Save.
 
+use postrinch_commands::is_account_inbox;
 use postrinch_model::{ListOrder, SavedView, ViewCount, ViewRows};
 use rinch::prelude::*;
 
@@ -143,6 +144,8 @@ fn body(state: State) -> NodeHandle {
         listed,
         set_listed,
     );
+    // An account's inbox shows Inbox's mail: that is changed on Inbox.
+    let follows = read(state, |e| Some(is_account_inbox(&e.draft.key))).unwrap_or(false);
     let name_hint = match kind {
         Editing::Search => "Name it to keep it as a view",
         _ => "Name",
@@ -163,7 +166,13 @@ fn body(state: State) -> NodeHandle {
         }
         div { class: "panel-body",
             p { class: "panel-group", "WHICH MAIL" }
-            {crate::ui::view_panel_mail::which_mail(__scope, state)}
+            div { class: "panel-follows", style: {if follows { "" } else { "display: none" }},
+                p { "Inbox\u{2019}s mail, in this account alone. What the inbox shows is set on Inbox, for every account." }
+                button { class: "panel-link", onclick: move || state.edit_view("inbox"), "Change Inbox" }
+            }
+            div { style: {if follows { "display: none" } else { "" }},
+                {crate::ui::view_panel_mail::which_mail(__scope, state)}
+            }
             p { class: "panel-group", "HOW IT SHOWS" }
             {rows}
             {orders}
@@ -258,6 +267,10 @@ pub const CSS: &str = r#"
 .panel-parts { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .panel-mail { display: flex; flex-direction: column; gap: 8px; }
 .panel-head { padding: 12px 24px 14px; border-bottom: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 6px; }
+.panel-follows { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 13px; color: var(--muted); }
+.panel-follows p { margin: 0; }
+.panel-link { border: 0; padding: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.panel-link:hover { text-decoration: underline; }
 .panel-kind { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); }
 .panel-title .rinch-text-input__input { height: 38px; font-size: 17px; font-weight: 600; }
 .view-panel .rinch-text-input__input { min-height: 32px; }

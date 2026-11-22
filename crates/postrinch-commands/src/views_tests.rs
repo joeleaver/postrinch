@@ -95,15 +95,17 @@ fn built_in_views_come_first_and_last() {
         .into_iter()
         .map(|e| e.view.key)
         .collect();
-    assert_eq!(keys[..2], ["inbox", "primary"]);
+    assert_eq!(keys[..2], ["inbox", "updates"], "Primary is the inbox");
     assert_eq!(keys.last().unwrap(), "drafts");
     let clients = commands.new_view("Clients", "label:clients").unwrap();
     commands.save_view(&clients).unwrap();
     let entries = commands.views().unwrap();
     let mine = entries.iter().find(|e| e.view.key == clients.key).unwrap();
     assert_eq!((mine.place, mine.original.is_none()), (Place::Yours, true));
-    let six = &entries[6];
-    assert_eq!(six.view.name, "Clients", "after the six inbox views");
+    assert_eq!(
+        entries[5].view.name, "Clients",
+        "after the five inbox views"
+    );
 }
 
 #[test]
@@ -136,10 +138,24 @@ fn each_account_has_an_inbox_under_inbox_when_there_are_several() {
         .into_iter()
         .find(|e| e.view.name == me.to_string())
         .unwrap();
+    assert_eq!(listed_view(&commands, &mine.view), ["dinner", "acme"]);
+
+    // They follow Inbox: changed there, changed in each.
+    let mut inbox = commands.views().unwrap()[0].view.clone();
+    inbox.query = "in:inbox".into();
+    commands.save_view(&inbox).unwrap();
+    let mine = commands
+        .views()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.view.key == mine.view.key)
+        .unwrap();
+    assert_eq!(mine.view.query, "in:inbox");
     assert_eq!(
         listed_view(&commands, &mine.view),
         ["dinner", "invoice", "acme"]
     );
+    commands.remove_view("inbox").unwrap();
 
     // Hidden, it stays an account inbox, not a view of the person's own.
     let mut hidden = mine.view.clone();
@@ -213,7 +229,6 @@ fn counts_and_everything_else() {
             .and_then(|t| t.shown(view.count))
     };
     assert_eq!(count("inbox"), Some(1));
-    assert_eq!(count("primary"), Some(1));
     assert_eq!(count(&clients.key), Some(1));
     assert_eq!(count("promotions"), None, "counts nothing");
     // Every inbox conversation is in a tab, so nothing else is left.
@@ -252,16 +267,29 @@ fn saving_checks_and_removing_puts_built_ins_back() {
     bad.accounts = vec![address("stranger@example.org")];
     assert!(commands.save_view(&bad).is_err());
 
-    let mut primary = commands.views().unwrap()[1].view.clone();
-    primary.query = "in:inbox category:primary is:unread".into();
-    commands.save_view(&primary).unwrap();
+    let mut updates = commands.views().unwrap()[1].view.clone();
+    updates.query = "in:inbox category:updates is:unread".into();
+    commands.save_view(&updates).unwrap();
     let entry = commands.views().unwrap()[1].clone();
-    assert_eq!(entry.view.query, primary.query);
-    assert_eq!(entry.original.unwrap().query, "in:inbox category:primary");
-    commands.remove_view("primary").unwrap();
+    assert_eq!(entry.view.query, updates.query);
+    assert_eq!(entry.original.unwrap().query, "in:inbox category:updates");
+    commands.remove_view("updates").unwrap();
     assert_eq!(
         commands.views().unwrap()[1].view.query,
-        "in:inbox category:primary"
+        "in:inbox category:updates"
+    );
+
+    // A Primary saved before it was the inbox is passed over, not made
+    // one of the person's own.
+    let mut old = updates;
+    old.key = "primary".into();
+    commands.store.put_view(&old).unwrap();
+    assert!(
+        commands
+            .views()
+            .unwrap()
+            .iter()
+            .all(|e| e.view.key != "primary")
     );
 }
 

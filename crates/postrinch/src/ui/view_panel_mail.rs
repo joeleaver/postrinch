@@ -1,5 +1,6 @@
 //! The view panel's "which mail": where (accounts, archived mail, when),
-//! who (from, to), what (labels, unread and the rest), and the search text
+//! who (from, to), what (labels, Gmail's categories, unread and the rest),
+//! and the search text
 //! all of these write into (`Filters`), so the text stays the one place a
 //! view's search lives and each field follows the others.
 
@@ -9,6 +10,7 @@ use rinch::prelude::*;
 
 use crate::state::State;
 use crate::ui::account_color;
+use crate::ui::category_picker::category_picker;
 use crate::ui::label_picker::label_picker;
 use crate::ui::people_picker::{Side, people_picker};
 use crate::ui::view_panel::{choice, read};
@@ -124,6 +126,7 @@ pub fn which_mail(state: State) -> NodeHandle {
         {people_picker(__scope, state, Side::From)}
         {people_picker(__scope, state, Side::To)}
         {label_picker(__scope, state)}
+        {category_picker(__scope, state)}
         div { class: "panel-field",
             span { class: "panel-name", "Only" }
             div { class: "view-chips", {flags} {lasts} }

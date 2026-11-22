@@ -4,6 +4,7 @@ mod about;
 mod agent_dialogs;
 mod agents_settings;
 mod attachment_cards;
+mod category_picker;
 mod chooser;
 mod compose;
 mod compose_files;
@@ -126,7 +127,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {compose_files::CSS} {label_new::CSS} }
-                style { {view_head::CSS} {view_panel::CSS} {chooser::CSS} }
+                style { {view_head::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}

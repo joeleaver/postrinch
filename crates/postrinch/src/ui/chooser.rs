@@ -133,7 +133,7 @@ fn chip(
 }
 
 /// One match, with its Has and Not.
-fn row(
+pub(crate) fn row(
     __scope: &mut RenderScope,
     asked: impl Fn(&str) -> Option<LabelPick> + Copy + 'static,
     set: impl Fn(String, Option<LabelPick>) + Copy + 'static,

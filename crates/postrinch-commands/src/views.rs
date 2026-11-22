@@ -19,6 +19,10 @@ use crate::{CommandError, CommandResult, Commands, ThreadPage};
 /// The built-in view of mail in the inbox and in no other view.
 pub const EVERYTHING_ELSE: &str = "everything-else";
 
+/// Built-in views there are no more, whose saved settings are passed
+/// over: Primary is the inbox now.
+const RETIRED: [&str; 1] = ["primary"];
+
 /// What an account's own inbox view's key starts with; the account's
 /// address (lowercased) follows.
 const ACCOUNT_INBOX: &str = "inbox:";
@@ -78,11 +82,12 @@ impl ViewTally {
 }
 
 /// The built-in views: key, name, search, count, place.
-const BUILT_IN: [(&str, &str, &str, ViewCount, Place); 10] = [
-    ("inbox", "Inbox", "in:inbox", ViewCount::Unread, Place::Top),
+const BUILT_IN: [(&str, &str, &str, ViewCount, Place); 9] = [
+    // Gmail's inbox as Gmail shows it with its tabs: Primary. The other
+    // tabs follow it.
     (
-        "primary",
-        "Primary",
+        "inbox",
+        "Inbox",
         "in:inbox category:primary",
         ViewCount::Unread,
         Place::Top,
@@ -161,12 +166,12 @@ fn limited() -> CommandError {
     )
 }
 
-/// One account's inbox, as it first was.
-fn account_inbox(account: &EmailAddress) -> SavedView {
+/// One account's inbox, as it first was: Inbox's search, in that account.
+fn account_inbox(account: &EmailAddress, inbox: &str) -> SavedView {
     SavedView {
         key: format!("{ACCOUNT_INBOX}{}", account.key()),
         name: account.to_string(),
-        query: "in:inbox".to_owned(),
+        query: inbox.to_owned(),
         accounts: vec![account.clone()],
         count: ViewCount::Unread,
         hide_when_empty: false,
@@ -198,13 +203,18 @@ impl Commands {
         let accounts = self.visible_accounts()?;
         let mut entries = Vec::new();
         for entry in built(Place::Top) {
-            let inbox = entry.view.key == "inbox";
+            let inbox = (entry.view.key == "inbox").then(|| entry.view.query.clone());
             entries.push(entry);
-            if inbox && accounts.len() > 1 {
+            if let Some(inbox) = inbox.filter(|_| accounts.len() > 1) {
+                // Each shows Inbox's mail, whatever its own settings: Inbox
+                // is the one place that says what the inbox is.
                 entries.extend(accounts.iter().map(|a| {
-                    let original = account_inbox(&a.address);
+                    let original = account_inbox(&a.address, &inbox);
+                    let mut view = saved(&original.key).unwrap_or_else(|| original.clone());
+                    view.query = inbox.clone();
+                    view.accounts = original.accounts.clone();
                     ViewEntry {
-                        view: saved(&original.key).unwrap_or_else(|| original.clone()),
+                        view,
                         place: Place::Top,
                         original: Some(original),
                         nested: true,
@@ -215,7 +225,11 @@ impl Commands {
         entries.extend(
             stored
                 .iter()
-                .filter(|v| built_in(&v.key).is_none() && !is_account_inbox(&v.key))
+                .filter(|v| {
+                    built_in(&v.key).is_none()
+                        && !is_account_inbox(&v.key)
+                        && !RETIRED.contains(&v.key.as_str())
+                })
                 .map(|v| ViewEntry {
                     view: v.clone(),
                     place: Place::Yours,
@@ -369,7 +383,9 @@ impl Commands {
         if view.key == EVERYTHING_ELSE {
             let mut elsewhere: HashSet<(String, String)> = HashSet::new();
             for other in self.views()? {
-                let skip = matches!(other.view.key.as_str(), "inbox" | EVERYTHING_ELSE)
+                // Inbox counts (it is Primary unless changed); each
+                // account's is part of it.
+                let skip = other.view.key == EVERYTHING_ELSE
                     || is_account_inbox(&other.view.key)
                     || other.place == Place::Bottom
                     || other.view.hidden;
