@@ -88,6 +88,34 @@ fn detail(state: State, h: Happening, answering: Option<Answer>) -> NodeHandle {
     let may_change = may_delete && organizes(&h);
     let edit_h = h.clone();
     let chosen = answering.or(e.answer);
+    let proposal = state.proposal_for(&h.account, &e.id);
+    let suggested = proposal.as_ref().and_then(|p| match p.change {
+        postrinch_model::EventChange::Answer { answer, .. } => Some(answer),
+        _ => None,
+    });
+    let suggestion = proposal.map(|p| {
+        let what = match &p.change {
+            postrinch_model::EventChange::Answer { answer, .. } => format!(
+                "{} suggests answering \u{201c}{}\u{201d}.",
+                p.agent,
+                match answer { Answer::Yes => "Yes", Answer::Maybe => "Maybe", Answer::No => "No" }
+            ),
+            _ => format!("{} suggests deleting this, which tells its guests.", p.agent),
+        };
+        let reason = p.reason.clone();
+        let (account, id) = (h.account.clone(), p.id);
+        rsx! {
+            div { class: "invite-suggest",
+                div { class: "invite-suggest-line",
+                    span { class: "invite-suggest-who", {what} }
+                    button { class: "link-button", onclick: move || state.dismiss_event_proposal(&account, id), "Dismiss" }
+                }
+                for reason in reason.clone() {
+                    div { key: reason.clone(), class: "invite-suggest-reason", {reason.clone()} }
+                }
+            }
+        }
+    });
     let answer_buttons: Vec<NodeHandle> = if e.guest {
         Answer::ALL
             .into_iter()
@@ -97,10 +125,10 @@ fn detail(state: State, h: Happening, answering: Option<Answer>) -> NodeHandle {
                     Answer::Maybe => "Maybe",
                     Answer::No => "No",
                 };
-                let class = if chosen == Some(a) {
-                    "invite-answer chosen"
-                } else {
-                    "invite-answer"
+                let class = match (chosen == Some(a), suggested == Some(a)) {
+                    (true, _) => "invite-answer chosen",
+                    (false, true) => "invite-answer suggested",
+                    (false, false) => "invite-answer",
                 };
                 rsx! { button { class: {class}, onclick: move || state.answer_event(a), {label} } }
             })
@@ -184,6 +212,7 @@ fn detail(state: State, h: Happening, answering: Option<Answer>) -> NodeHandle {
             for line in clash_lines.clone() {
                 div { key: line.clone(), class: "event-line clash", {line.clone()} }
             }
+            {suggestion}
             {going}
             for head in guest_head.clone() {
                 div { key: head.clone(), class: "event-guests",

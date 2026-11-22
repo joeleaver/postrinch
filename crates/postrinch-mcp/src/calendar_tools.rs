@@ -57,6 +57,69 @@ pub struct AnswerArgs {
     pub reason: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SaveEventArgs {
+    /// The account whose calendar it is in.
+    pub account: String,
+    /// The calendar, by the id list_calendars gives; the account's own by
+    /// default.
+    #[serde(default)]
+    pub calendar: Option<String>,
+    /// To change an event: its id, as list_events gives it (one time of a
+    /// repeating event is named so too). Leave it out to make one.
+    #[serde(default)]
+    pub event: Option<String>,
+    /// What it is called. Needed to make one.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// An event at a time: when it starts and ends, RFC 3339 or a time in
+    /// the person's zone (`2026-11-24T10:00`).
+    #[serde(default)]
+    pub starts: Option<String>,
+    #[serde(default)]
+    pub ends: Option<String>,
+    /// Or whole days: the first and last (`2026-12-24`).
+    #[serde(default)]
+    pub first_day: Option<String>,
+    #[serde(default)]
+    pub last_day: Option<String>,
+    #[serde(default)]
+    pub location: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Who is invited, as To: takes them (`Ada <ada@example.org>, bob@…`):
+    /// the whole list, replacing any. Inviting anyone waits for the person.
+    #[serde(default)]
+    pub guests: Option<String>,
+    /// Why, in a sentence the person reads when it waits for them.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EventArgs {
+    pub account: String,
+    /// The calendar's id, as list_events gives it.
+    pub calendar: String,
+    /// The event's id, as list_events gives it.
+    pub event: String,
+    /// Why, in a sentence the person reads when it waits for them.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AnswerEventArgs {
+    #[serde(flatten)]
+    pub event: EventArgs,
+    /// `yes`, `maybe` or `no`.
+    pub answer: String,
+}
+
+fn address(text: &str) -> Result<EmailAddress, String> {
+    EmailAddress::parse(text.trim()).map_err(|_| format!("{text:?} is not an address."))
+}
+
 fn addresses(list: &[String]) -> Result<Vec<EmailAddress>, String> {
     list.iter()
         .map(|a| EmailAddress::parse(a.trim()).map_err(|_| format!("{a:?} is not an address.")))
@@ -111,6 +174,74 @@ impl Postrinch {
             day_starts: args.day_starts,
             day_ends: args.day_ends,
             calendars: args.calendars,
+        })
+        .await
+    }
+
+    /// Make an event, or change one (only what you give changes). An event
+    /// with no guests is saved at once, in the person's calendar; one that
+    /// would invite, update or tell guests is not: Postrinch shows it to
+    /// the person with your reason, and they save it or not. Only events
+    /// the account organizes can be changed. Answers with what was saved,
+    /// or that it waits.
+    #[tool(name = "save_event")]
+    async fn save_event(
+        &self,
+        Parameters(args): Parameters<SaveEventArgs>,
+    ) -> Result<String, String> {
+        let guests = match &args.guests {
+            Some(g) => Some(postrinch_model::parse_mailboxes(g).map_err(|e| e.to_string())?),
+            None => None,
+        };
+        self.call(Call::SaveEvent {
+            account: address(&args.account)?,
+            calendar: args.calendar,
+            event: args.event,
+            summary: args.summary,
+            starts: args.starts,
+            ends: args.ends,
+            first_day: args.first_day,
+            last_day: args.last_day,
+            location: args.location,
+            description: args.description,
+            guests,
+            reason: args.reason,
+        })
+        .await
+    }
+
+    /// Delete an event (one time of a repeating one, when its id names
+    /// that). An event with guests the account organizes would tell them
+    /// it is off, so that waits for the person; one it is a guest of is
+    /// taken off its calendar alone, telling nobody.
+    #[tool(name = "delete_event")]
+    async fn delete_event(
+        &self,
+        Parameters(args): Parameters<EventArgs>,
+    ) -> Result<String, String> {
+        self.call(Call::DeleteEvent {
+            account: address(&args.account)?,
+            calendar: args.calendar,
+            event: args.event,
+            reason: args.reason,
+        })
+        .await
+    }
+
+    /// Answer an event the account is invited to (list_events says
+    /// `invited`): yes, maybe or no. It tells the organizer, so it waits
+    /// for the person, shown with your reason.
+    #[tool(name = "answer_event")]
+    async fn answer_event(
+        &self,
+        Parameters(args): Parameters<AnswerEventArgs>,
+    ) -> Result<String, String> {
+        self.call(Call::AnswerEvent {
+            account: address(&args.event.account)?,
+            calendar: args.event.calendar,
+            event: args.event.event,
+            answer: args.answer,
+            reason: args.event.reason,
         })
         .await
     }

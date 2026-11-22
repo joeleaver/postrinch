@@ -46,6 +46,11 @@ pub struct CalendarUi {
     pub answering: Signal<Option<Answer>>,
     /// The event being made or changed, in the pane.
     pub editing: Signal<Option<crate::calendar_edit::Form>>,
+    /// Agents' changes waiting for the person, in every account.
+    pub proposals: Signal<Vec<(EmailAddress, postrinch_model::EventProposal)>>,
+    /// An event to open once the stretch holding it is loaded: its account
+    /// and id.
+    pub pending: Signal<Option<(EmailAddress, String)>>,
 }
 
 /// A calendar as the hidden set names it.
@@ -68,6 +73,8 @@ impl CalendarUi {
             open: Signal::new(None),
             answering: Signal::new(None),
             editing: Signal::new(None),
+            proposals: Signal::new(Vec::new()),
+            pending: Signal::new(None),
         }
     }
 }
@@ -126,6 +133,24 @@ impl State {
                 from: midnight(first),
                 to: midnight(after),
             });
+        });
+        // An event asked for opens once its stretch is loaded.
+        Effect::new(move || {
+            let loaded = self.calendar.happenings.get();
+            let Some((account, id)) = untracked(|| self.calendar.pending.get()) else {
+                return;
+            };
+            if let Some(found) = loaded
+                .iter()
+                .find(|h| h.account == account && h.event.id == id)
+            {
+                let found = found.clone();
+                batch(|| {
+                    self.calendar.pending.set(None);
+                    self.calendar.editing.set(None);
+                    self.calendar.open.set(Some(found));
+                });
+            }
         });
         // The open event follows what is loaded: changed, or gone.
         Effect::new(move || {
@@ -218,6 +243,7 @@ impl State {
         self.calendar.answering.set(Some(answer));
         let (answering, error, revision) = (self.calendar.answering, self.error, self.revision);
         let (happenings, opened) = (self.calendar.happenings, self.calendar.open);
+        let here = crate::actions::commands().map(|c| (*c).clone());
         std::thread::spawn(move || {
             let sync = handle.sync_engine();
             let done = handle.runtime.block_on(sync.answer_event(
@@ -228,6 +254,9 @@ impl State {
             ));
             let trouble = match done {
                 Ok(Answered::Done(_)) => {
+                    if let Some(here) = &here {
+                        crate::calendar_proposals::settle_for(here, &open.account, &open.event.id);
+                    }
                     // Shown at once, before the stretch loads again.
                     let (who, id) = (open.account.clone(), open.event.id.clone());
                     happenings.update_send(move |all| {

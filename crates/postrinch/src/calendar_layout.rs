@@ -130,6 +130,16 @@ fn date(d: postrinch_model::Day) -> Option<Date> {
     Date::new(d.year, d.month, d.day).ok()
 }
 
+/// The day an event starts on, in `tz`.
+pub fn span_day(when: &EventWhen, tz: &TimeZone) -> Option<Date> {
+    match *when {
+        EventWhen::Days { first, .. } => date(first),
+        EventWhen::Times { start, .. } => jiff::Timestamp::from_millisecond(start.as_millis())
+            .ok()
+            .map(|t| t.to_zoned(tz.clone()).date()),
+    }
+}
+
 /// Where now is in a day's column, in px from its top.
 pub fn now_top(tz: &TimeZone) -> f64 {
     let now = jiff::Zoned::now().with_time_zone(tz.clone());

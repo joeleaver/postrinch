@@ -269,4 +269,89 @@ fn an_agent_reads_calendars_and_proposes_answers() {
     assert_eq!(waiting[0].1.summary.as_deref(), Some("Plans"));
     assert_eq!(waiting[0].1.agent, "Test agent");
     assert_eq!(changes.lock().unwrap().as_slice(), [Changed::Answers]);
+
+    // Calendar changes: what would tell other people waits.
+    let guest = postrinch_model::Mailbox::new(None, address("bob@example.org"));
+    let proposed = client
+        .call(&Call::SaveEvent {
+            account: me.clone(),
+            calendar: None,
+            event: None,
+            summary: Some("Walkthrough".into()),
+            starts: Some("2036-11-25T14:00:00Z".into()),
+            ends: Some("2036-11-25T15:00:00Z".into()),
+            first_day: None,
+            last_day: None,
+            location: None,
+            description: None,
+            guests: Some(vec![guest.clone()]),
+            reason: Some("Bob asked".into()),
+        })
+        .unwrap();
+    assert!(proposed["proposed"].is_u64(), "{proposed}");
+    // With nobody to tell it is made at once, which needs Google.
+    let refused = client
+        .call(&Call::SaveEvent {
+            account: me.clone(),
+            calendar: None,
+            event: None,
+            summary: Some("Focus".into()),
+            starts: Some("2036-11-25T16:00:00Z".into()),
+            ends: Some("2036-11-25T17:00:00Z".into()),
+            first_day: None,
+            last_day: None,
+            location: None,
+            description: None,
+            guests: None,
+            reason: None,
+        })
+        .unwrap_err();
+    assert!(refused.contains("sync is off"), "{refused}");
+
+    // An event with a guest the account organizes: deleting it waits.
+    let mut meeting = event(
+        "meeting",
+        "2036-11-26T10:00:00Z",
+        "2036-11-26T11:00:00Z",
+        true,
+    );
+    meeting.event.attendees = vec![postrinch_model::Attendee {
+        mailbox: guest,
+        answer: None,
+    }];
+    store.put_event(&me, "me@example.org", &meeting).unwrap();
+    let proposed = client
+        .call(&Call::DeleteEvent {
+            account: me.clone(),
+            calendar: "me@example.org".into(),
+            event: "meeting".into(),
+            reason: None,
+        })
+        .unwrap();
+    assert!(proposed["proposed"].is_u64(), "{proposed}");
+
+    // One time of a repeating event it is invited to, named as list_events
+    // names it: answering waits.
+    let mut weekly = event(
+        "weekly",
+        "2036-11-03T09:00:00Z",
+        "2036-11-03T09:30:00Z",
+        true,
+    );
+    weekly.recurrence = vec!["RRULE:FREQ=WEEKLY".into()];
+    weekly.event.guest = true;
+    store.put_event(&me, "me@example.org", &weekly).unwrap();
+    let proposed = client
+        .call(&Call::AnswerEvent {
+            account: me.clone(),
+            calendar: "me@example.org".into(),
+            event: "weekly_20361124T090000Z".into(),
+            answer: "no".into(),
+            reason: None,
+        })
+        .unwrap();
+    assert!(proposed["proposed"].is_u64(), "{proposed}");
+    let waiting = commands.event_proposals().unwrap();
+    assert_eq!(waiting.len(), 3);
+    assert_eq!(waiting[0].1.reason.as_deref(), Some("Bob asked"));
 }

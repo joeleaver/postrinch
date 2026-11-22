@@ -1,5 +1,5 @@
-//! Making, renaming and deleting labels in Gmail itself, for agents and
-//! the window alike. Each call runs on sync's runtime and waits for it, so
+//! Making, renaming and deleting labels in Gmail itself, and changing
+//! events in Google Calendar, for agents and the window alike. Each call runs on sync's runtime and waits for it, so
 //! it is made from a thread of its own, never the window's.
 
 use postrinch_agents::Gmail;
@@ -43,5 +43,31 @@ impl Gmail for GmailLabels {
     fn delete_label(&self, account: &EmailAddress, id: &str) -> Result<(), String> {
         let sync = self.0.sync_engine();
         self.run(sync.delete_label(account, id))
+    }
+
+    fn save_event(
+        &self,
+        account: &EmailAddress,
+        event: Option<&str>,
+        draft: &postrinch_model::EventDraft,
+    ) -> Result<String, String> {
+        let sync = self.0.sync_engine();
+        match event {
+            Some(id) => self
+                .run(sync.change_event(account, id, draft))
+                .map(|()| id.to_owned()),
+            None => self.run(sync.create_event(account, draft)),
+        }
+    }
+
+    fn delete_event(
+        &self,
+        account: &EmailAddress,
+        calendar: &str,
+        event: &str,
+        tell: bool,
+    ) -> Result<(), String> {
+        let sync = self.0.sync_engine();
+        self.run(sync.delete_event(account, calendar, event, tell))
     }
 }

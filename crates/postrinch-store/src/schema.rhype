@@ -197,3 +197,13 @@ type ProposedAnswer {
     account: String
     proposal: Json
 }
+
+// An agent's change to the person's calendars that would tell other
+// people, waiting for the person (answers.rs): `proposal` is the
+// EventProposal.
+type ProposedEvent {
+    // "<account address key>\u001f<id, 20 digits>".
+    key: String @unique
+    account: String
+    proposal: Json
+}

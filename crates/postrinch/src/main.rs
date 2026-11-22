@@ -6,6 +6,7 @@ mod appearance;
 mod attachments;
 mod calendar_edit;
 mod calendar_layout;
+mod calendar_proposals;
 mod calendar_ui;
 mod changes;
 mod conversations;

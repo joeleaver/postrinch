@@ -16,6 +16,22 @@ pub trait Gmail: Send + Sync {
     fn create_label(&self, account: &EmailAddress, name: &str) -> Result<String, String>;
     fn rename_label(&self, account: &EmailAddress, id: &str, name: &str) -> Result<(), String>;
     fn delete_label(&self, account: &EmailAddress, id: &str) -> Result<(), String>;
+    /// Make an event (`event` none) or change one; returns its id. Its
+    /// guests are told: only called for changes that tell nobody, or that
+    /// the person made.
+    fn save_event(
+        &self,
+        account: &EmailAddress,
+        event: Option<&str>,
+        draft: &postrinch_model::EventDraft,
+    ) -> Result<String, String>;
+    fn delete_event(
+        &self,
+        account: &EmailAddress,
+        calendar: &str,
+        event: &str,
+        tell: bool,
+    ) -> Result<(), String>;
 }
 
 const NO_GMAIL: &str = "Postrinch can't reach Gmail now (sync is off), so it can't change labels.";

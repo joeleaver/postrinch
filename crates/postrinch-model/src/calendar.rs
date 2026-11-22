@@ -222,3 +222,67 @@ impl EventDraft {
         }
     }
 }
+
+/// A change to the person's calendars an agent asks for that would tell
+/// other people (invite, update or cancel guests, or answer an organizer),
+/// waiting for the person to make it or not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventProposal {
+    /// Its id among the account's proposals.
+    pub id: u64,
+    pub change: EventChange,
+    /// The agent's name.
+    pub agent: String,
+    pub reason: Option<String>,
+    pub made: Timestamp,
+}
+
+/// What an agent asks to change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EventChange {
+    /// Make an event (`event` none) or change one.
+    Save {
+        event: Option<String>,
+        draft: EventDraft,
+    },
+    Delete {
+        calendar: String,
+        event: String,
+        summary: Option<String>,
+        when: EventWhen,
+    },
+    Answer {
+        calendar: String,
+        event: String,
+        summary: Option<String>,
+        when: EventWhen,
+        answer: Answer,
+    },
+}
+
+impl EventChange {
+    /// When the event is, to show it.
+    pub fn when(&self) -> EventWhen {
+        match self {
+            EventChange::Save { draft, .. } => draft.when,
+            EventChange::Delete { when, .. } | EventChange::Answer { when, .. } => *when,
+        }
+    }
+
+    /// The event's id, when it names one that exists.
+    pub fn event(&self) -> Option<&str> {
+        match self {
+            EventChange::Save { event, .. } => event.as_deref(),
+            EventChange::Delete { event, .. } | EventChange::Answer { event, .. } => Some(event),
+        }
+    }
+
+    pub fn summary(&self) -> Option<&str> {
+        match self {
+            EventChange::Save { draft, .. } => Some(draft.summary.as_str()),
+            EventChange::Delete { summary, .. } | EventChange::Answer { summary, .. } => {
+                summary.as_deref()
+            }
+        }
+    }
+}

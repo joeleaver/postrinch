@@ -232,6 +232,48 @@ pub enum Call {
         #[serde(default)]
         calendars: Vec<String>,
     },
+    /// Make an event, or change the one `event` names (only what is given).
+    /// One that would invite or tell guests waits for the person.
+    SaveEvent {
+        account: EmailAddress,
+        #[serde(default)]
+        calendar: Option<String>,
+        #[serde(default)]
+        event: Option<String>,
+        #[serde(default)]
+        summary: Option<String>,
+        #[serde(default)]
+        starts: Option<String>,
+        #[serde(default)]
+        ends: Option<String>,
+        #[serde(default)]
+        first_day: Option<String>,
+        #[serde(default)]
+        last_day: Option<String>,
+        #[serde(default)]
+        location: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        guests: Option<Vec<Mailbox>>,
+        reason: Option<String>,
+    },
+    /// Delete an event (one time of a repeating one, when it names that).
+    /// One whose guests would be told waits for the person.
+    DeleteEvent {
+        account: EmailAddress,
+        calendar: String,
+        event: String,
+        reason: Option<String>,
+    },
+    /// Answer an event the account is invited to: kept for the person.
+    AnswerEvent {
+        account: EmailAddress,
+        calendar: String,
+        event: String,
+        answer: String,
+        reason: Option<String>,
+    },
     /// Answer the invitation in a message: kept for the person to give.
     AnswerInvitation {
         account: EmailAddress,
@@ -271,6 +313,8 @@ pub enum Changed {
     Views,
     /// An answer to an invitation waits for the person.
     Answers,
+    /// A calendar changed, or a change to one waits for the person.
+    Calendar,
 }
 
 impl Call {
@@ -289,6 +333,9 @@ impl Call {
             | Call::MoveRule { account, .. } => Some(Changed::Rules(account.clone())),
             Call::SaveView { .. } | Call::DeleteView { .. } => Some(Changed::Views),
             Call::AnswerInvitation { .. } => Some(Changed::Answers),
+            Call::SaveEvent { .. } | Call::DeleteEvent { .. } | Call::AnswerEvent { .. } => {
+                Some(Changed::Calendar)
+            }
             _ => None,
         }
     }

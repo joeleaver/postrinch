@@ -55,9 +55,36 @@ pub fn editor(state: State) -> NodeHandle {
         .calendar
         .editing
         .with(|e| e.as_ref().is_some_and(|f| f.event.is_none()));
+    let from_agent = state.calendar.editing.with(|e| {
+        e.as_ref()
+            .and_then(|f| f.proposal.clone().map(|p| (f.account.clone(), p)))
+    });
+    let banner = from_agent.map(|(account, p)| {
+        let line = format!(
+            "{} proposes this. Check it, then save it, or dismiss it.",
+            p.agent
+        );
+        let reason = p.reason.clone();
+        let id = p.id;
+        rsx! {
+            div { class: "invite-suggest",
+                div { class: "invite-suggest-line",
+                    span { class: "invite-suggest-who", {line} }
+                    button { class: "link-button", onclick: move || {
+                        state.dismiss_event_proposal(&account, id);
+                        state.cancel_edit();
+                    }, "Dismiss" }
+                }
+                for reason in reason.clone() {
+                    div { key: reason.clone(), class: "invite-suggest-reason", {reason.clone()} }
+                }
+            }
+        }
+    });
     rsx! {
         div { class: "event-editor",
             span { class: "editor-head", {if new { "New event" } else { "Change the event" }} }
+            {banner}
             label { class: "editor-field",
                 span { class: "editor-label", "What" }
                 TextInput {

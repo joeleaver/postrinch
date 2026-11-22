@@ -210,6 +210,10 @@ fn answer(commands: &Commands, state: State, request: Request) {
                 Ok(proposals) => state.invitations.proposals.send(proposals),
                 Err(e) => failed(e.to_string()),
             }
+            match commands.event_proposals() {
+                Ok(proposals) => state.calendar.proposals.send(proposals),
+                Err(e) => failed(e.to_string()),
+            }
         }
         Request::Accounts => match commands.accounts() {
             Ok(accounts) => state.accounts.send(accounts),

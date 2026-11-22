@@ -14,6 +14,7 @@ mod bulk;
 mod calendar;
 mod calendar_times;
 mod error;
+mod event_proposals;
 mod filters;
 mod folders;
 mod invitations;

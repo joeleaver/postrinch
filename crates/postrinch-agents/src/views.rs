@@ -52,6 +52,9 @@ pub(crate) fn run(commands: &Commands, call: Call, asker: &Asker) -> Result<Valu
         | Call::Events { .. }
         | Call::FreeTime { .. }
         | Call::AnswerInvitation { .. } => crate::calendar::run(commands, call, agent),
+        Call::SaveEvent { .. } | Call::DeleteEvent { .. } | Call::AnswerEvent { .. } => {
+            crate::calendar_write::run(commands, call, agent, asker.gmail)
+        }
         Call::CreateLabel { .. } | Call::RenameLabel { .. } | Call::DeleteLabel { .. } => {
             gmail::run(commands, call, asker.gmail)
         }

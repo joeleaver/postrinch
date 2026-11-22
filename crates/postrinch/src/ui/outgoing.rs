@@ -12,7 +12,7 @@ use crate::state::State;
 pub fn outgoing_lines(state: State) -> NodeHandle {
     rsx! {
         div { class: "outgoing",
-            style: {move || if state.outgoing.with(|all| all.is_empty()) && state.rules.proposals.with(|all| all.is_empty()) && state.invitations.proposals.with(|all| all.is_empty()) { "display: none".to_owned() } else { String::new() }},
+            style: {move || if state.outgoing.with(|all| all.is_empty()) && state.rules.proposals.with(|all| all.is_empty()) && state.invitations.proposals.with(|all| all.is_empty()) && state.calendar.proposals.with(|all| all.is_empty()) { "display: none".to_owned() } else { String::new() }},
             // Keyed by what each is, so a line is built once.
             for queued in state.outgoing.get().into_iter().filter(|q| q.kind == OutgoingKind::Proposed || q.refused) {
                 div { key: format!("{}|{}", queued.id, queued.refused),
@@ -22,6 +22,11 @@ pub fn outgoing_lines(state: State) -> NodeHandle {
             for (account, proposal) in state.invitations.proposals.get() {
                 div { key: format!("{}|{}|{:?}", account.key(), proposal.message.0, proposal.answer),
                     {answer_proposed(__scope, state, account.clone(), proposal.clone())}
+                }
+            }
+            for (account, proposal) in state.calendar.proposals.get() {
+                div { key: format!("{}|{}", account.key(), proposal.id),
+                    {event_proposed(__scope, state, account.clone(), proposal.clone())}
                 }
             }
             for proposal in state.rules.proposals.get() {
@@ -126,6 +131,31 @@ fn answer_proposed(
     rsx! {
         div { class: "needs-you", role: "button",
             onclick: move || state.open_answer(&account, &proposal),
+            span { class: "needs-you-title", {title} }
+            span { class: "needs-you-detail", {detail} }
+        }
+    }
+}
+
+/// An agent's calendar change: opens it where it can be made.
+#[component]
+fn event_proposed(
+    state: State,
+    account: postrinch_model::EmailAddress,
+    proposal: postrinch_model::EventProposal,
+) -> NodeHandle {
+    use postrinch_model::EventChange;
+    let what = match &proposal.change {
+        EventChange::Save { event: None, .. } => "proposes an event",
+        EventChange::Save { .. } => "wants to change an event",
+        EventChange::Delete { .. } => "wants to delete an event",
+        EventChange::Answer { .. } => "suggests an answer to an event",
+    };
+    let title = format!("{} {what}", proposal.agent);
+    let detail = proposal.change.summary().unwrap_or("(no title)").to_owned();
+    rsx! {
+        div { class: "needs-you", role: "button",
+            onclick: move || state.open_event_proposal(&account, &proposal),
             span { class: "needs-you-title", {title} }
             span { class: "needs-you-detail", {detail} }
         }

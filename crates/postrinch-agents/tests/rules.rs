@@ -58,6 +58,20 @@ impl postrinch_agents::Gmail for FakeGmail {
     fn delete_label(&self, account: &EmailAddress, id: &str) -> Result<(), String> {
         self.0.remove_label(account, id).map_err(|e| e.to_string())
     }
+
+    // Rules never change calendars.
+    fn save_event(
+        &self,
+        _: &EmailAddress,
+        _: Option<&str>,
+        _: &postrinch_model::EventDraft,
+    ) -> Result<String, String> {
+        Err("no calendars here".into())
+    }
+
+    fn delete_event(&self, _: &EmailAddress, _: &str, _: &str, _: bool) -> Result<(), String> {
+        Err("no calendars here".into())
+    }
 }
 
 fn shape(json: &str) -> RuleShape {

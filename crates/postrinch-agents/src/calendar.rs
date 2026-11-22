@@ -152,7 +152,7 @@ fn mailbox(m: &Mailbox) -> Value {
 /// A moment as the agent writes it: RFC 3339 (`2026-11-24T10:00:00-05:00`),
 /// a wall time in the person's zone (`2026-11-24T10:00`), or a date for its
 /// midnight there.
-fn moment(text: &str) -> Result<Timestamp, String> {
+pub(crate) fn moment(text: &str) -> Result<Timestamp, String> {
     let text = text.trim();
     let tz = TimeZone::system();
     let at = if let Ok(t) = text.parse::<jiff::Timestamp>() {

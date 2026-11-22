@@ -37,6 +37,8 @@ pub struct Form {
     /// Why it can't be saved, or what went wrong saving it.
     pub error: Option<String>,
     pub busy: bool,
+    /// The agent's proposal it came from, settled when it is saved.
+    pub proposal: Option<postrinch_model::EventProposal>,
 }
 
 impl Form {
@@ -63,14 +65,25 @@ impl Form {
             notes: String::new(),
             error: None,
             busy: false,
+            proposal: None,
         }
     }
 
     /// An event as it is, to change.
     pub fn of(h: &Happening, tz: &TimeZone) -> Self {
         let d = EventDraft::of(&h.event, &h.account);
-        let mut form = Self::new(h.account.clone(), d.calendar.clone(), today());
-        form.event = Some(h.event.id.clone());
+        Self::of_draft(h.account.clone(), Some(h.event.id.clone()), d, tz)
+    }
+
+    /// An event as a draft says it: an agent's, to check.
+    pub fn of_draft(
+        account: EmailAddress,
+        event: Option<String>,
+        d: EventDraft,
+        tz: &TimeZone,
+    ) -> Self {
+        let mut form = Self::new(account, d.calendar.clone(), today());
+        form.event = event;
         form.summary = d.summary;
         form.location = d.location;
         form.notes = d.description;
@@ -249,6 +262,7 @@ impl State {
         };
         self.edit_form(|f| f.busy = true);
         let (editing, revision) = (self.calendar.editing, self.revision);
+        let here = crate::actions::commands().map(|c| (*c).clone());
         std::thread::spawn(move || {
             let sync = handle.sync_engine();
             let done = match &form.event {
@@ -262,6 +276,11 @@ impl State {
             };
             match done {
                 Ok(()) => {
+                    if let (Some(p), Some(here)) = (&form.proposal, &here)
+                        && let Err(e) = here.settle_event_proposal(&form.account, p.id)
+                    {
+                        tracing::warn!("settling an agent's event: {e}");
+                    }
                     editing.send(None);
                     revision.update_send(|n| *n += 1);
                 }
@@ -289,6 +308,7 @@ impl State {
             return;
         };
         let (error, revision, opened) = (self.error, self.revision, self.calendar.open);
+        let here = crate::actions::commands().map(|c| (*c).clone());
         // A guest taking it off its own calendar tells nobody.
         let organizes = open.event.organizer.as_ref().is_none_or(|o| {
             o.address.key() == open.account.key() || o.address.to_string() == open.event.calendar
@@ -304,6 +324,9 @@ impl State {
             ));
             match done {
                 Ok(()) => {
+                    if let Some(here) = &here {
+                        crate::calendar_proposals::settle_for(here, &open.account, &open.event.id);
+                    }
                     opened.send(None);
                     revision.update_send(|n| *n += 1);
                 }
