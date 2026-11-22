@@ -18,6 +18,13 @@ pub struct Happening {
     pub event: CalendarEvent,
 }
 
+/// When the person is free, and the calendars that said so.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreeTime {
+    pub free: Vec<(Timestamp, Timestamp)>,
+    pub counted: Vec<(EmailAddress, CalendarInfo)>,
+}
+
 /// The working day free time is looked for in, in the person's zone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Hours {
@@ -69,23 +76,47 @@ impl Commands {
         Ok(out)
     }
 
-    /// The stretches of at least `minutes` in `from`..`to` that no event of
-    /// `accounts`' own calendars makes busy (as Google's free/busy counts:
-    /// the account's main calendar, events that make it busy, not those it
-    /// declined, not whole days), within `hours` of each day when given.
+    /// The stretches of at least `minutes` in `from`..`to` that no event
+    /// makes busy, within `hours` of each day when given. Events count from
+    /// `calendars` (ids), or else from each account's own calendar and the
+    /// others it may change and shows; those that make the person busy, not
+    /// cancelled, not declined, not whole days.
     pub fn free_time(
         &self,
         accounts: &[EmailAddress],
-        from: Timestamp,
-        to: Timestamp,
+        (from, to): (Timestamp, Timestamp),
         minutes: i64,
         hours: Option<Hours>,
-    ) -> CommandResult<Vec<(Timestamp, Timestamp)>> {
+        calendars: &[String],
+    ) -> CommandResult<FreeTime> {
         let tz = TimeZone::system();
+        let asked = self.asked(accounts)?;
+        let mut counted = Vec::new();
+        for account in &asked {
+            for info in self.store.calendars(account)? {
+                let wanted = if calendars.is_empty() {
+                    info.primary || (info.writable && info.shown)
+                } else {
+                    calendars.contains(&info.id)
+                };
+                if wanted {
+                    counted.push((account.clone(), info));
+                }
+            }
+        }
+        for id in calendars {
+            if !counted.iter().any(|(_, c)| &c.id == id) {
+                return Err(CommandError::Invalid(format!(
+                    "There is no calendar {id:?}: list_calendars names them."
+                )));
+            }
+        }
         let mut busy: Vec<(i64, i64)> = Vec::new();
-        for happening in self.events_between(accounts, from, to)? {
+        for happening in self.events_between(&asked, from, to)? {
             let e = &happening.event;
-            let own = e.calendar == happening.account.to_string();
+            let own = counted
+                .iter()
+                .any(|(a, c)| a == &happening.account && c.id == e.calendar);
             let counts = own
                 && e.busy
                 && !e.cancelled
@@ -100,10 +131,11 @@ impl Commands {
             Some(hours) => working_windows(from, to, hours, &tz),
             None => vec![(from.as_millis(), to.as_millis())],
         };
-        Ok(free_in(windows, busy, minutes.max(1) * 60_000)
+        let free = free_in(windows, busy, minutes.max(1) * 60_000)
             .into_iter()
             .map(|(s, e)| (Timestamp::from_millis(s), Timestamp::from_millis(e)))
-            .collect())
+            .collect();
+        Ok(FreeTime { free, counted })
     }
 
     /// The accounts asked about: those given, each seen, or every one.

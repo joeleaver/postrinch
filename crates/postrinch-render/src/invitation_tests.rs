@@ -151,3 +151,19 @@ fn durations() {
     assert!(duration("1H").is_none());
     assert!(duration("PT5").is_none());
 }
+
+#[test]
+fn outlook_s_zone_is_read_by_its_own_definition() {
+    let text = "BEGIN:VCALENDAR\nMETHOD:REQUEST\nBEGIN:VTIMEZONE\nTZID:Eastern Standard Time\n\
+        BEGIN:STANDARD\nDTSTART:16010101T020000\nTZOFFSETFROM:-0400\nTZOFFSETTO:-0500\n\
+        RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=1SU;BYMONTH=11\nEND:STANDARD\n\
+        BEGIN:DAYLIGHT\nDTSTART:16010101T020000\nTZOFFSETFROM:-0500\nTZOFFSETTO:-0400\n\
+        RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=2SU;BYMONTH=3\nEND:DAYLIGHT\nEND:VTIMEZONE\n\
+        BEGIN:VEVENT\nUID:u\nDTSTART;TZID=Eastern Standard Time:20261124T100000\n\
+        DTEND;TZID=Eastern Standard Time:20260701T110000\nEND:VEVENT\nEND:VCALENDAR\n";
+    let inv = from_text(text, &TimeZone::UTC).unwrap();
+    let Some(EventWhen::Times { start, .. }) = inv.when else {
+        panic!("{:?}", inv.when)
+    };
+    assert_eq!(start, utc("2026-11-24T15:00:00Z"));
+}

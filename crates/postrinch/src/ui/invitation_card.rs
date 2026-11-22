@@ -16,9 +16,14 @@ use rinch::prelude::*;
 use crate::invitations::Lookup;
 use crate::state::State;
 
-/// What the card shows: the invitation, its calendar's answer, and an
-/// agent's answer waiting.
-type Shown = (Invitation, Option<Lookup>, Option<ProposedAnswer>);
+/// What the card shows: the invitation, its calendar's answer, an agent's
+/// answer waiting, and what clashes with it.
+type Shown = (
+    Invitation,
+    Option<Lookup>,
+    Option<ProposedAnswer>,
+    Vec<CalendarEvent>,
+);
 
 #[component]
 pub fn invitation_card(state: State, message: Message) -> NodeHandle {
@@ -41,18 +46,31 @@ pub fn invitation_card(state: State, message: Message) -> NodeHandle {
 fn shown(state: State, account: &EmailAddress, id: &str) -> Option<Shown> {
     let invitation = state.invitations.found.get().get(id).cloned()?;
     let lookup = state.invitations.events.get().get(id).cloned();
-    Some((invitation, lookup, state.proposed_answer(account, id)))
+    let clashes = state
+        .invitations
+        .clashes
+        .get()
+        .get(id)
+        .cloned()
+        .unwrap_or_default();
+    Some((
+        invitation,
+        lookup,
+        state.proposed_answer(account, id),
+        clashes,
+    ))
 }
 
 /// Changes whenever what the card shows does.
 fn key(shown: &Shown) -> String {
     let proposed = shown.2.as_ref().map(|p| (p.answer, p.made));
-    format!("{:?}|{:?}|{proposed:?}", shown.0.kind, shown.1)
+    let clashes: Vec<&str> = shown.3.iter().map(|e| e.id.as_str()).collect();
+    format!("{:?}|{:?}|{proposed:?}|{clashes:?}", shown.0.kind, shown.1)
 }
 
 #[component]
 fn card(state: State, account: EmailAddress, id: String, shown: Shown) -> NodeHandle {
-    let (invitation, lookup, proposed) = shown;
+    let (invitation, lookup, proposed, clashes) = shown;
     let proposed = proposed.filter(|_| invitation.kind == InvitationKind::Request);
     let event = match &lookup {
         Some(Lookup::Found(e) | Lookup::Answering(e, _)) => Some(e.clone()),
@@ -83,6 +101,16 @@ fn card(state: State, account: EmailAddress, id: String, shown: Shown) -> NodeHa
         .unwrap_or_else(|| invitation.attendees.clone());
     let who = who(organizer.as_ref(), &guests, &account);
     let repeats = invitation.repeats || event.as_ref().is_some_and(|e| e.repeating);
+    let clash_lines: Vec<String> = clashes
+        .iter()
+        .map(|e| {
+            let what = e.summary.clone().unwrap_or_else(|| "an event".to_owned());
+            format!(
+                "Clashes with {what}, {}",
+                crate::dates::event_hours(&e.when, &tz)
+            )
+        })
+        .collect();
     let suggested = proposed.as_ref().map(|p| p.answer);
     let foot = foot(
         __scope,
@@ -122,6 +150,9 @@ fn card(state: State, account: EmailAddress, id: String, shown: Shown) -> NodeHa
                 }
                 for line in who.clone() {
                     div { key: line.clone(), class: "invite-line muted", {line.clone()} }
+                }
+                for line in clash_lines.clone() {
+                    div { key: line.clone(), class: "invite-line clash", {line.clone()} }
                 }
                 {suggestion}
                 {foot}
@@ -380,6 +411,7 @@ pub const CSS: &str = r#"
 }
 .invite-line { font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
 .invite-line.muted { color: var(--muted); }
+.invite-line.clash { color: var(--trouble); }
 .invite-note { margin-top: 6px; font-size: 13px; color: var(--ink-2); }
 .invite-answers { margin-top: 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .invite-going { font-size: 13px; color: var(--ink-2); margin-right: 4px; }

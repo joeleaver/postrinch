@@ -28,6 +28,8 @@ pub struct Invitations {
     pub found: Signal<HashMap<String, Invitation>>,
     /// What each one's account's calendar says of it, by message id.
     pub events: Signal<HashMap<String, Lookup>>,
+    /// What clashes with each invitation's time, by message id.
+    pub clashes: Signal<HashMap<String, Vec<CalendarEvent>>>,
     /// Agents' answers waiting for the person, in every account.
     pub proposals: Signal<Vec<(EmailAddress, ProposedAnswer)>>,
 }
@@ -52,22 +54,39 @@ impl Invitations {
             found: Signal::new(HashMap::new()),
             events: Signal::new(HashMap::new()),
             proposals: Signal::new(Vec::new()),
+            clashes: Signal::new(HashMap::new()),
         }
     }
 }
 
-/// The thread's invitations, by message id. Run on the loader thread.
-pub fn read(commands: &Commands, thread: &Thread) -> HashMap<String, Invitation> {
+/// The thread's invitations, and what clashes with each, by message id.
+/// Run on the loader thread.
+pub fn read(
+    commands: &Commands,
+    thread: &Thread,
+) -> (
+    HashMap<String, Invitation>,
+    HashMap<String, Vec<CalendarEvent>>,
+) {
     let account = &thread.summary.account;
-    thread
-        .messages
-        .iter()
-        .filter(|m| may_invite(m))
-        .filter_map(|m| {
-            let invitation = commands.invitation(account, &m.id).ok().flatten()?;
-            Some((m.id.0.clone(), invitation))
-        })
-        .collect()
+    let mut found = HashMap::new();
+    let mut clashes = HashMap::new();
+    for m in thread.messages.iter().filter(|m| may_invite(m)) {
+        let Some(invitation) = commands.invitation(account, &m.id).ok().flatten() else {
+            continue;
+        };
+        if invitation.kind == InvitationKind::Request {
+            let clash: Vec<CalendarEvent> = commands
+                .clashes(&invitation)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|h| h.event)
+                .collect();
+            clashes.insert(m.id.0.clone(), clash);
+        }
+        found.insert(m.id.0.clone(), invitation);
+    }
+    (found, clashes)
 }
 
 impl State {

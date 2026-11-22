@@ -36,7 +36,7 @@ use postrinch_store::Store;
 pub use accounts::AccountInfo;
 pub use actions::{LabelChoice, ThreadAction, ThreadRef};
 pub use attachments::{file_name, is_program, mime_for, size_text};
-pub use calendar::{Happening, Hours};
+pub use calendar::{FreeTime, Happening, Hours};
 pub use error::{CommandError, CommandResult};
 pub use filters::{Archived, CATEGORY_NAMES, Filters, LabelPick};
 pub use folders::{AccountFolders, Folder, FolderEntry, Sidebar};

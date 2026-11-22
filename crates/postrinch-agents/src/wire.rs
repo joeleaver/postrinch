@@ -227,6 +227,10 @@ pub enum Call {
         day_starts: Option<String>,
         #[serde(default)]
         day_ends: Option<String>,
+        /// The calendars whose events count, by id; when empty, each
+        /// account's own and the others it may change and shows.
+        #[serde(default)]
+        calendars: Vec<String>,
     },
     /// Answer the invitation in a message: kept for the person to give.
     AnswerInvitation {

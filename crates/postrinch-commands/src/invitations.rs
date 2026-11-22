@@ -77,12 +77,28 @@ impl Commands {
         Ok(proposal)
     }
 
-    /// Every answer agents proposed, account by account, oldest first.
+    /// Every answer agents proposed, account by account, oldest first. An
+    /// answer whose message is gone, or whose event is over, is dropped.
     pub fn answer_proposals(&self) -> CommandResult<Vec<(EmailAddress, ProposedAnswer)>> {
+        let now = crate::views::now();
+        let tz = jiff::tz::TimeZone::system();
         let mut all = Vec::new();
         for account in self.visible_accounts()? {
-            for p in self.store.proposed_answers(&account.address)? {
-                all.push((account.address.clone(), p));
+            let account = account.address;
+            for p in self.store.proposed_answers(&account)? {
+                let invitation = match self.store.message(&account, &p.message)? {
+                    Some(_) => self.invitation(&account, &p.message)?,
+                    None => None,
+                };
+                let over = match invitation.as_ref().and_then(|i| i.when) {
+                    Some(when) => crate::calendar_times::span(&when, &tz).1 <= now,
+                    None => invitation.is_none(),
+                };
+                if over {
+                    self.store.remove_proposed_answer(&account, &p.message)?;
+                } else {
+                    all.push((account.clone(), p));
+                }
             }
         }
         Ok(all)
@@ -153,5 +169,36 @@ impl Commands {
             postrinch_model::AttachmentOrigin::Person,
         )?];
         self.send_draft(&draft, None)
+    }
+}
+
+impl Commands {
+    /// What in the person's calendars clashes with the invitation's time:
+    /// events of every account seen that make them busy, not cancelled, not
+    /// declined, not whole days, and not the invited event itself.
+    pub fn clashes(&self, invitation: &Invitation) -> CommandResult<Vec<crate::Happening>> {
+        let Some(when @ postrinch_model::EventWhen::Times { start, end }) = invitation.when else {
+            return Ok(Vec::new());
+        };
+        if end <= start {
+            return Ok(Vec::new());
+        }
+        let own_id = invitation
+            .uid
+            .strip_suffix("@google.com")
+            .unwrap_or(&invitation.uid);
+        let mut found = self.events_between(&[], start, end)?;
+        found.retain(|h| {
+            let e = &h.event;
+            let itself = e.id == own_id
+                || e.id.starts_with(&format!("{own_id}_"))
+                || (e.summary == invitation.summary && e.when == when);
+            !itself
+                && e.busy
+                && !e.cancelled
+                && e.answer != Some(Answer::No)
+                && matches!(e.when, postrinch_model::EventWhen::Times { .. })
+        });
+        Ok(found)
     }
 }

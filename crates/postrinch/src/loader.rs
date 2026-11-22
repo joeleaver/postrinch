@@ -248,10 +248,9 @@ fn answer(commands: &Commands, state: State, request: Request) {
                     state
                         .thumbnails
                         .send(crate::attachments::thumbnails(commands, thread));
-                    state
-                        .invitations
-                        .found
-                        .send(crate::invitations::read(commands, thread));
+                    let (found, clashes) = crate::invitations::read(commands, thread);
+                    state.invitations.clashes.send(clashes);
+                    state.invitations.found.send(found);
                 }
                 state.thread.send(thread);
             }

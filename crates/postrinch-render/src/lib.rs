@@ -19,6 +19,7 @@ mod parts;
 mod plain;
 mod quotes;
 mod sanitize;
+mod vtimezone;
 
 use mail_parser::{MessageParser, PartKind};
 

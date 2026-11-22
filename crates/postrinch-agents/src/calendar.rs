@@ -47,6 +47,7 @@ pub(crate) fn run(commands: &Commands, call: Call, agent: &str) -> Result<Value,
             minutes,
             day_starts,
             day_ends,
+            calendars,
         } => {
             let (from, to) = (moment(&from)?, moment(&to)?);
             let hours = match (day_starts, day_ends) {
@@ -63,14 +64,19 @@ pub(crate) fn run(commands: &Commands, call: Call, agent: &str) -> Result<Value,
                 (None, None) => None,
                 _ => return Err("Give both day_starts and day_ends, or neither.".into()),
             };
-            let free = commands
-                .free_time(&accounts, from, to, minutes, hours)
+            let found = commands
+                .free_time(&accounts, (from, to), minutes, hours, &calendars)
                 .map_err(say)?;
             Ok(json!({
                 "time_zone": zone_name(),
-                "counts": "events that make the person busy in each account's own calendar, \
-                           less those declined; whole-day events do not",
-                "free": free.iter().map(|(s, e)| json!({
+                "counts": "events that make the person busy in these calendars, less those \
+                           declined or cancelled; whole-day events do not",
+                "calendars": found.counted.iter().map(|(a, c)| json!({
+                    "account": a,
+                    "calendar": c.id,
+                    "untrusted": { "name": c.name },
+                })).collect::<Vec<_>>(),
+                "free": found.free.iter().map(|(s, e)| json!({
                     "starts": local(*s),
                     "ends": local(*e),
                 })).collect::<Vec<_>>(),

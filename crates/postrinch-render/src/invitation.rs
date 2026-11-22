@@ -3,7 +3,8 @@
 //!
 //! Times written in a named time zone are read in that zone when it is one
 //! the system knows (IANA names, as Google and Apple write); others (the
-//! Windows names Outlook writes) are read as the person's own time. The
+//! Windows names Outlook writes) by the invitation's own definition of the
+//! zone (vtimezone.rs), or as the person's own time when it has none. The
 //! person's calendar's copy of the event, when there is one, is shown
 //! instead (DESIGN.md "Calendar").
 
@@ -93,7 +94,7 @@ pub(crate) fn from_text(text: &str, local: &TimeZone) -> Option<Invitation> {
             .map(|r| r.value.trim().to_owned()),
         summary: text_of(event, "SUMMARY"),
         location: text_of(event, "LOCATION"),
-        when: when(event, local),
+        when: when(event, local, &calendar),
         repeats: event.get("RRULE").is_some() || event.get("RDATE").is_some(),
         organizer: event.get("ORGANIZER").and_then(mailbox),
         attendees: event
@@ -135,9 +136,9 @@ fn answer(partstat: &str) -> Option<Answer> {
 }
 
 /// When the event is: `DTSTART` until `DTEND`, or for its `DURATION`.
-fn when(event: &Component, local: &TimeZone) -> Option<EventWhen> {
-    let start = moment(event.get("DTSTART")?, local)?;
-    let end = event.get("DTEND").and_then(|e| moment(e, local));
+fn when(event: &Component, local: &TimeZone, calendar: &Component) -> Option<EventWhen> {
+    let start = moment(event.get("DTSTART")?, local, calendar)?;
+    let end = event.get("DTEND").and_then(|e| moment(e, local, calendar));
     let length = event.get("DURATION").and_then(|d| duration(&d.value));
     match start {
         Moment::Day(first) => {
@@ -174,7 +175,7 @@ enum Moment {
     At(jiff::Timestamp),
 }
 
-fn moment(p: &Property, local: &TimeZone) -> Option<Moment> {
+fn moment(p: &Property, local: &TimeZone, calendar: &Component) -> Option<Moment> {
     let value = p.value.trim();
     let is_date = p
         .param("VALUE")
@@ -188,10 +189,21 @@ fn moment(p: &Property, local: &TimeZone) -> Option<Moment> {
         return Some(Moment::At(at.to_zoned(TimeZone::UTC).ok()?.timestamp()));
     }
     let at = DateTime::strptime("%Y%m%dT%H%M%S", value).ok()?;
-    let zone = p
-        .param("TZID")
-        .and_then(|id| TimeZone::get(id.trim_start_matches('/')).ok())
-        .unwrap_or_else(|| local.clone());
+    let Some(id) = p.param("TZID") else {
+        return Some(Moment::At(at.to_zoned(local.clone()).ok()?.timestamp()));
+    };
+    if let Ok(zone) = TimeZone::get(id.trim_start_matches('/')) {
+        return Some(Moment::At(at.to_zoned(zone).ok()?.timestamp()));
+    }
+    // A zone the system doesn't know: the invitation's own definition of it.
+    let defined = calendar
+        .children("VTIMEZONE")
+        .find(|z| z.get("TZID").is_some_and(|t| t.value.trim() == id.trim()))
+        .and_then(|z| crate::vtimezone::offset_at(z, at));
+    let zone = match defined {
+        Some(seconds) => TimeZone::fixed(jiff::tz::Offset::from_seconds(seconds).ok()?),
+        None => local.clone(),
+    };
     Some(Moment::At(at.to_zoned(zone).ok()?.timestamp()))
 }
 

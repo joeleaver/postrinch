@@ -11,7 +11,25 @@ pub(crate) fn of(commands: &Commands, m: &Message) -> Value {
         return Value::Null;
     }
     match commands.invitation(&m.account, &m.id) {
-        Ok(Some(invitation)) => shown(&invitation),
+        Ok(Some(invitation)) => {
+            let mut out = shown(&invitation);
+            if invitation.kind == InvitationKind::Request {
+                // What in the person's calendars is at the same time.
+                let clashes = commands.clashes(&invitation).unwrap_or_default();
+                out["clashes"] = json!(
+                    clashes
+                        .iter()
+                        .map(|h| json!({
+                            "account": h.account,
+                            "calendar": h.event.calendar,
+                            "event": h.event.id,
+                            "summary": h.event.summary,
+                        }))
+                        .collect::<Vec<_>>()
+                );
+            }
+            out
+        }
         _ => Value::Null,
     }
 }

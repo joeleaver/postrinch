@@ -53,7 +53,7 @@ const INVITE: &str = concat!(
     "From: Ada <ada@example.org>\r\nTo: me@example.org\r\nSubject: Plans\r\n",
     "MIME-Version: 1.0\r\nContent-Type: text/calendar; method=REQUEST\r\n\r\n",
     "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:abc\r\n",
-    "DTSTART:20261124T150000Z\r\nDTEND:20261124T160000Z\r\nSUMMARY:Plans\r\n",
+    "DTSTART:20361124T150000Z\r\nDTEND:20361124T160000Z\r\nSUMMARY:Plans\r\n",
     "ORGANIZER:mailto:ada@example.org\r\nATTENDEE:mailto:me@example.org\r\n",
     "END:VEVENT\r\nEND:VCALENDAR\r\n",
 );
@@ -137,6 +137,11 @@ fn an_agent_reads_calendars_and_proposes_answers() {
         downloaded: true,
     };
     store.put_message(&invite, Some(INVITE.as_bytes())).unwrap();
+    // One for an event already over.
+    let past_raw = INVITE.replace("2036", "2020");
+    let mut past = invite.clone();
+    past.id = ProviderMessageId("m0".into());
+    store.put_message(&past, Some(past_raw.as_bytes())).unwrap();
 
     let agents_path = dir.path().join("agents.json");
     let mut agents = Agents::load(&agents_path).unwrap();
@@ -192,10 +197,12 @@ fn an_agent_reads_calendars_and_proposes_answers() {
             minutes: 60,
             day_starts: None,
             day_ends: None,
+            calendars: Vec::new(),
         })
         .unwrap();
     // Free from 09:30 to 12:00 and from 13:00 (the reminder leaves it free).
     assert_eq!(free["free"].as_array().unwrap().len(), 3, "{free}");
+    assert_eq!(free["calendars"][0]["calendar"], "me@example.org");
 
     let refused = client
         .call(&Call::Events {
@@ -205,6 +212,37 @@ fn an_agent_reads_calendars_and_proposes_answers() {
         })
         .unwrap_err();
     assert!(refused.contains("other@example.org"), "{refused}");
+
+    // What clashes with the invitation: an event during it, not one that
+    // leaves the person free, nor the event itself.
+    for record in [
+        event(
+            "dentist",
+            "2036-11-24T15:30:00Z",
+            "2036-11-24T16:30:00Z",
+            true,
+        ),
+        event(
+            "reading",
+            "2036-11-24T15:00:00Z",
+            "2036-11-24T16:00:00Z",
+            false,
+        ),
+        event("abc", "2036-11-24T15:00:00Z", "2036-11-24T16:00:00Z", true),
+    ] {
+        store.put_event(&me, "me@example.org", &record).unwrap();
+    }
+    let invitation = commands
+        .invitation(&me, &ProviderMessageId("m1".into()))
+        .unwrap()
+        .unwrap();
+    let clashes: Vec<_> = commands
+        .clashes(&invitation)
+        .unwrap()
+        .into_iter()
+        .map(|h| h.event.id)
+        .collect();
+    assert_eq!(clashes, ["dentist"]);
 
     // An answer waits for the person.
     let proposed = client
@@ -216,6 +254,16 @@ fn an_agent_reads_calendars_and_proposes_answers() {
         })
         .unwrap();
     assert_eq!(proposed["proposed"], "maybe");
+    commands
+        .propose_answer(
+            &me,
+            &ProviderMessageId("m0".into()),
+            postrinch_model::Answer::Yes,
+            "Test agent",
+            None,
+        )
+        .unwrap();
+    // The one for an event already over goes.
     let waiting = commands.answer_proposals().unwrap();
     assert_eq!(waiting.len(), 1);
     assert_eq!(waiting[0].1.summary.as_deref(), Some("Plans"));

@@ -70,6 +70,28 @@ pub fn event(when: &EventWhen, tz: &TimeZone) -> String {
     }
 }
 
+/// An event's hours, for a line about it beside another on the same day:
+/// "10:00\u{2013}11:00", with the day too when it runs past midnight.
+pub fn event_hours(when: &EventWhen, tz: &TimeZone) -> String {
+    match *when {
+        EventWhen::Times { start, end } => {
+            let (Some(s), Some(e)) = (zoned(start, tz), zoned(end, tz)) else {
+                return String::new();
+            };
+            if s.date() == e.date() {
+                format!("{}\u{2013}{}", s.strftime("%H:%M"), e.strftime("%H:%M"))
+            } else {
+                format!(
+                    "{}\u{2013}{}",
+                    s.strftime("%a %H:%M"),
+                    e.strftime("%a %H:%M")
+                )
+            }
+        }
+        EventWhen::Days { .. } => event(when, tz),
+    }
+}
+
 /// An event's first day, as a calendar page shows it: ("NOV", "24").
 pub fn event_page(when: &EventWhen, tz: &TimeZone) -> (String, String) {
     let day = match *when {

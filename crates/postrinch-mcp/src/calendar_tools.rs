@@ -36,6 +36,11 @@ pub struct FreeTimeArgs {
     /// When each day's working hours end, `HH:MM`.
     #[serde(default)]
     pub day_ends: Option<String>,
+    /// Count only these calendars' events, by the ids list_calendars
+    /// gives. By default each account's own calendar and the others it
+    /// may change and shows.
+    #[serde(default)]
+    pub calendars: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -88,9 +93,11 @@ impl Postrinch {
     }
 
     /// When the person is free between two moments: the stretches of at
-    /// least `minutes` that no event makes busy (counting each account's
-    /// own calendar, as Google's free/busy does, less events they declined;
-    /// whole-day events do not count), within working hours if given.
+    /// least `minutes` that no event makes busy, within working hours if
+    /// given. It counts each account's own calendar and the others it may
+    /// change and shows (or the `calendars` given), less events declined or
+    /// cancelled; whole-day events do not count. The answer names the
+    /// calendars it counted.
     #[tool(name = "find_free_time")]
     async fn find_free_time(
         &self,
@@ -103,6 +110,7 @@ impl Postrinch {
             minutes: args.minutes,
             day_starts: args.day_starts,
             day_ends: args.day_ends,
+            calendars: args.calendars,
         })
         .await
     }
