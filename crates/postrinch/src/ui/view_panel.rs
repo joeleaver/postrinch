@@ -5,7 +5,7 @@
 //! shows is in view_panel_mail.rs; here are the list's order, how the
 //! sidebar lists it, and Save.
 
-use postrinch_model::{ListOrder, SavedView, ViewCount};
+use postrinch_model::{ListOrder, SavedView, ViewCount, ViewRows};
 use rinch::prelude::*;
 
 use crate::state::State;
@@ -45,7 +45,7 @@ pub(crate) fn choice<T: Copy + PartialEq + 'static>(
     state: State,
     label: &'static str,
     choices: Vec<(T, &'static str)>,
-    get: fn(&SavedView) -> T,
+    get: impl Fn(&SavedView) -> T + Copy + 'static,
     set: fn(&mut SavedView, T),
 ) -> NodeHandle {
     let chips: Vec<NodeHandle> = choices
@@ -95,6 +95,18 @@ fn body(state: State) -> NodeHandle {
         Editing::New => "NEW VIEW",
         Editing::Search => "SEARCH",
     };
+    let rows = choice(
+        __scope,
+        state,
+        "Show",
+        vec![
+            (ViewRows::Conversations, "Conversations"),
+            (ViewRows::Messages, "One message at a time"),
+        ],
+        // A view that hasn't chosen shows as Settings › Reading says.
+        move |v| v.rows.unwrap_or_else(|| state.default_rows()),
+        |v, r| v.rows = Some(r),
+    );
     let orders = choice(
         __scope,
         state,
@@ -153,6 +165,7 @@ fn body(state: State) -> NodeHandle {
             p { class: "panel-group", "WHICH MAIL" }
             {crate::ui::view_panel_mail::which_mail(__scope, state)}
             p { class: "panel-group", "HOW IT SHOWS" }
+            {rows}
             {orders}
             {counts}
             {listing}

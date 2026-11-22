@@ -19,6 +19,7 @@ pub fn reading(state: State) -> NodeHandle {
                 {show_mail(__scope, state, ShowMail::Conversations, "As conversations", "A message and its replies are one row in the list, read together.")}
                 {show_mail(__scope, state, ShowMail::Messages, "One message at a time", "Every message is its own row, newest first. Archiving or labelling one leaves the rest of its conversation as it is.")}
             }
+            p { class: "settings-hint", "A view can choose for itself: the pencil on its row, then Show." }
             h2 { class: "settings-subheading", "In a conversation, show" }
             div { class: "choices",
                 {order(__scope, state, Order::NewestFirst, "The newest message at the top", "What just arrived is the first thing you see.")}

@@ -37,6 +37,20 @@ pub struct SavedView {
     /// Its list's order: remembered for the view, saved or not.
     #[serde(default)]
     pub order: ListOrder,
+    /// Conversations or one message at a time; `None` follows the
+    /// window's setting.
+    #[serde(default)]
+    pub rows: Option<ViewRows>,
+}
+
+/// What a row of a view's list is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewRows {
+    /// A message and its replies, read together.
+    Conversations,
+    /// One message, acted on alone.
+    Messages,
 }
 
 /// What the sidebar counts beside a view.
@@ -64,6 +78,7 @@ impl SavedView {
             hide_when_empty: false,
             hidden: false,
             order: ListOrder::default(),
+            rows: None,
         };
         view.rename(name)?;
         view.set_query(query)?;

@@ -6,6 +6,7 @@
 use std::collections::HashSet;
 
 use postrinch_commands::{Grouping, Thread};
+use postrinch_model::ViewRows;
 use postrinch_model::{Message, ProviderThreadId};
 use rinch::{Effect, batch, untracked};
 use serde::{Deserialize, Serialize};
@@ -75,11 +76,33 @@ pub fn in_order(order: Order, thread: &Thread) -> Vec<Message> {
 }
 
 impl State {
-    /// How the list groups mail, as set.
+    /// How the list groups mail: as the view shown (or the search, as
+    /// the panel has it) chooses, else as Settings › Reading says.
     pub fn grouping(self) -> Grouping {
+        let own = if self.search.get().is_some() {
+            self.view_edit.with(|e| {
+                e.as_ref()
+                    .filter(|e| e.kind == crate::view_edit::Editing::Search)
+                    .and_then(|e| e.draft.rows)
+            })
+        } else {
+            self.shown_view().and_then(|v| v.rows)
+        };
+        match own {
+            Some(ViewRows::Conversations) => Grouping::Conversations,
+            Some(ViewRows::Messages) => Grouping::Messages,
+            None => match self.show_mail.get() {
+                ShowMail::Conversations => Grouping::Conversations,
+                ShowMail::Messages => Grouping::Messages,
+            },
+        }
+    }
+
+    /// What a view's rows are when it doesn't choose: Settings' choice.
+    pub fn default_rows(self) -> ViewRows {
         match self.show_mail.get() {
-            ShowMail::Conversations => Grouping::Conversations,
-            ShowMail::Messages => Grouping::Messages,
+            ShowMail::Conversations => ViewRows::Conversations,
+            ShowMail::Messages => ViewRows::Messages,
         }
     }
 

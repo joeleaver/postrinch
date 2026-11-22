@@ -2,7 +2,7 @@
 //! shown, named, and one line saying in words what it holds. It only
 //! describes; changing a view is the panel's, from the pencil on its row.
 
-use postrinch_commands::{Archived, Filters, Last};
+use postrinch_commands::{Archived, Filters, Grouping, Last};
 use postrinch_model::ListOrder;
 use rinch::prelude::*;
 
@@ -106,6 +106,9 @@ fn describe(
         [one] => parts.push(one.to_string()),
         many if many.len() < known => parts.push(format!("{} accounts", many.len())),
         _ => {}
+    }
+    if state.grouping() == Grouping::Messages {
+        parts.push("one message at a time".into());
     }
     match order {
         ListOrder::NewestFirst => {}

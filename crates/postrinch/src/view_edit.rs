@@ -51,6 +51,7 @@ fn blank(query: &str) -> SavedView {
         hide_when_empty: false,
         hidden: false,
         order: ListOrder::default(),
+        rows: None,
     }
 }
 
@@ -104,13 +105,21 @@ impl State {
         let Some(mut edit) = self.view_edit.get() else {
             return;
         };
+        let rows = edit.draft.rows;
         change(&mut edit.draft);
+        // A row is a conversation or a message: the open one is neither
+        // once that changes.
+        let regrouped = edit.draft.rows != rows;
         edit.error = Commands::check_query(&edit.draft.query)
             .err()
             .map(|e| e.to_string());
         let search = (edit.kind == Editing::Search && edit.error.is_none())
             .then(|| (edit.draft.query.clone(), edit.draft.accounts.clone()));
         batch(|| {
+            if regrouped {
+                self.selected.set(None);
+                self.whole_conversation.set(false);
+            }
             self.view_edit.set(Some(edit));
             self.shown.set(PAGE);
             if let Some((query, accounts)) = search {
