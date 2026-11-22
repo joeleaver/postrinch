@@ -45,6 +45,10 @@ pub struct Find {
     pub from: Vec<String>,
     /// Each entry must match a recipient's (To, Cc or Bcc).
     pub to: Vec<String>,
+    /// No sender may match any of these, as `from`'s entries.
+    pub not_from: Vec<String>,
+    /// No recipient may match any of these, as `to`'s entries.
+    pub not_to: Vec<String>,
     /// Each entry must appear in the subject (any case).
     pub subject: Vec<String>,
     /// Each entry is a label as it is in each account, by provider id; the
@@ -143,6 +147,12 @@ impl Store {
         let mut without: HashSet<u64> = HashSet::new();
         for any in &find.without {
             without.extend(self.labelled(any)?);
+        }
+        for part in &find.not_from {
+            without.extend(self.people_messages(part, "sent")?);
+        }
+        for part in &find.not_to {
+            without.extend(self.people_messages(part, "received")?);
         }
 
         // A few candidates are read one by one; past BY_ONE, one pass over

@@ -17,7 +17,44 @@ use crate::{Store, StoreResult};
 
 const TYPE: &str = "Person";
 
+/// Someone mail was from or to, as the store knows them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersonEntry {
+    /// Lowercased.
+    pub address: String,
+    pub name: Option<String>,
+}
+
 impl Store {
+    /// People whose address or name holds `part` (any case): those whose
+    /// address, name or a word of it starts with it first, then by
+    /// address; at most `limit`.
+    pub fn find_people(&self, part: &str, limit: usize) -> StoreResult<Vec<PersonEntry>> {
+        let part = part.trim().to_lowercase();
+        if part.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut found = Vec::new();
+        for object in self.db.scan_type_projected(TYPE, &["address", "name"])? {
+            let person = Fields::new(TYPE, object);
+            let address = person.str("address")?;
+            let name = person.opt_str("name")?;
+            let lower = name.as_deref().unwrap_or_default().to_lowercase();
+            if !address.contains(&part) && !lower.contains(&part) {
+                continue;
+            }
+            let starts = address.starts_with(&part)
+                || lower.split_whitespace().any(|w| w.starts_with(&part));
+            found.push((!starts, address, name));
+        }
+        found.sort();
+        Ok(found
+            .into_iter()
+            .take(limit)
+            .map(|(_, address, name)| PersonEntry { address, name })
+            .collect())
+    }
+
     /// The store id of the person with `mailbox`'s address, created if new.
     /// A name is recorded the first time one is seen; later names do not
     /// overwrite it, so one odd `From:` cannot rename a contact.

@@ -16,6 +16,7 @@ pub(crate) mod list;
 mod list_head;
 mod logo;
 mod outgoing;
+mod people_picker;
 mod palette;
 mod reader;
 mod reading_settings;
@@ -33,7 +34,7 @@ mod style;
 pub(crate) mod thread_actions;
 mod view_head;
 mod view_panel;
-mod view_panel_mail;
+pub(crate) mod view_panel_mail;
 
 use std::rc::Rc;
 
@@ -123,7 +124,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {compose_files::CSS} {label_new::CSS} }
-                style { {view_head::CSS} {view_panel::CSS} {label_picker::CSS} }
+                style { {view_head::CSS} {view_panel::CSS} {label_picker::CSS} {people_picker::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}

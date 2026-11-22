@@ -1,10 +1,43 @@
-//! The search filters a window offers (who from and to, when, unread,
+//! The search filters a window offers (who it is from and to, or not, when, unread,
 //! starred, with attachments, who wrote last, which accounts, which labels),
 //! read from and written into the query text, so the text stays the one
 //! place a search lives: what the person types, what an agent sends and
 //! what a saved view keeps.
 
 use crate::query::{Last, label_matches, operator, tokens};
+
+/// The operators the panel writes as a group of "any of these"
+/// (`{label:a label:b}`, `{from:a from:b}`, `{to:a to:b}`).
+const GROUPED: [&str; 3] = ["label", "from", "to"];
+
+/// The groups the panel wrote, found in a query, by operator.
+#[derive(Debug, Default)]
+struct Groups {
+    label: Vec<String>,
+    from: Vec<String>,
+    to: Vec<String>,
+}
+
+impl Groups {
+    fn slot(&mut self, name: &str) -> &mut Vec<String> {
+        match name {
+            "label" => &mut self.label,
+            "from" => &mut self.from,
+            _ => &mut self.to,
+        }
+    }
+
+    /// Whether the query had a group of `name`: beside one, a lone
+    /// operator of the same name is the person's own.
+    fn has(&self, name: &str) -> bool {
+        match name {
+            "label" => !self.label.is_empty(),
+            "from" => !self.from.is_empty(),
+            "to" => !self.to.is_empty(),
+            _ => false,
+        }
+    }
+}
 
 /// What a filter asks of a label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,8 +62,15 @@ pub struct Filters {
     pub account: Option<String>,
     /// `newer_than:`'s value: `7d`, `1m`, `1y`.
     pub within: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    /// Senders it is from: any of them (`{from:a from:b}`), by a part of
+    /// their address or name.
+    pub from: Vec<String>,
+    /// Senders it is not from (`-from:a`).
+    pub not_from: Vec<String>,
+    /// Recipients (To, Cc or Bcc) it is to: any of them.
+    pub to: Vec<String>,
+    /// Recipients it is not to (`-to:a`).
+    pub not_to: Vec<String>,
     /// Labels a conversation has, by their provider's names: any of them
     /// (`{label:a label:b}`), or all of them when `all_labels`.
     pub labels: Vec<String>,
@@ -48,11 +88,10 @@ impl Filters {
     /// The filters `query` sets. Text that does not read is no filter.
     pub fn read(query: &str) -> Self {
         let mut filters = Filters::default();
-        let (rest, group) = take_label_group(query);
-        let grouped = !group.is_empty();
-        filters.labels = group;
+        let (rest, groups) = take_groups(query);
+        let grouped_labels = groups.has("label");
         for (token, top) in levels(tokens(&rest).unwrap_or_default()) {
-            if !top || !manages(&token, grouped) {
+            if !top || !manages(&token, &groups) {
                 continue;
             }
             let Some((negated, name, value)) = operator(&token) else {
@@ -68,15 +107,19 @@ impl Filters {
                 continue;
             }
             if negated {
-                filters.without.push(value);
+                match name {
+                    "label" => filters.without.push(value),
+                    "from" => filters.not_from.push(value),
+                    _ => filters.not_to.push(value),
+                }
                 continue;
             }
             let lower = value.to_lowercase();
             match (name, lower.as_str()) {
                 ("account", _) => filters.account = Some(value),
                 ("newer_than", _) => filters.within = Some(value),
-                ("from", _) => filters.from = Some(value),
-                ("to", _) => filters.to = Some(value),
+                ("from", _) => filters.from.push(value),
+                ("to", _) => filters.to.push(value),
                 ("label", _) => filters.labels.push(value),
                 ("is", "unread") => filters.unread = true,
                 ("is", "starred") => filters.starred = true,
@@ -87,7 +130,11 @@ impl Filters {
             }
         }
         // Labels side by side, outside a group, are all of them.
-        filters.all_labels = !grouped && filters.labels.len() > 1;
+        filters.all_labels = !grouped_labels && filters.labels.len() > 1;
+        let Groups { label, from, to } = groups;
+        filters.labels.splice(0..0, label);
+        filters.from.splice(0..0, from);
+        filters.to.splice(0..0, to);
         filters
     }
 
@@ -117,11 +164,10 @@ impl Filters {
     /// `query` with these filters in place of the ones it had; its words
     /// and other operators stay as they were.
     pub fn apply(&self, query: &str) -> String {
-        let (rest, group) = take_label_group(query);
-        let grouped = !group.is_empty();
+        let (rest, groups) = take_groups(query);
         let mut kept: Vec<String> = levels(tokens(&rest).unwrap_or_else(|_| vec![rest.clone()]))
             .into_iter()
-            .filter(|(token, top)| !top || !manages(token, grouped))
+            .filter(|(token, top)| !top || !manages(token, &groups))
             .map(|(token, _)| token)
             .collect();
         let mut add = |name: &str, value: &Option<String>| {
@@ -131,24 +177,17 @@ impl Filters {
         };
         add("account", &self.account);
         add("newer_than", &self.within);
-        add("from", &self.from);
-        add("to", &self.to);
+        any_of(&mut kept, "from", &self.from, false);
+        not(&mut kept, "from", &self.not_from);
+        any_of(&mut kept, "to", &self.to, false);
+        not(&mut kept, "to", &self.not_to);
         match self.archived {
             Archived::Include => {}
             Archived::LeaveOut => kept.push("in:inbox".to_owned()),
             Archived::Only => kept.push("-in:inbox".to_owned()),
         }
-        let labels: Vec<String> = self
-            .labels
-            .iter()
-            .map(|l| format!("label:{}", quote(l)))
-            .collect();
-        if labels.len() > 1 && !self.all_labels {
-            kept.push(format!("{{{}}}", labels.join(" ")));
-        } else {
-            kept.extend(labels);
-        }
-        kept.extend(self.without.iter().map(|l| format!("-label:{}", quote(l))));
+        any_of(&mut kept, "label", &self.labels, self.all_labels);
+        not(&mut kept, "label", &self.without);
         let last = match self.last {
             Some(Last::Me) => "last:me",
             Some(Last::Them) => "last:them",
@@ -190,8 +229,8 @@ fn levels(tokens: Vec<String>) -> Vec<(String, bool)> {
 }
 
 /// Whether `token` is one of the filters the panel sets. Beside a group
-/// of labels (`grouped`), a lone `label:` is the person's own.
-fn manages(token: &str, grouped: bool) -> bool {
+/// the panel wrote, a lone operator of its kind is the person's own.
+fn manages(token: &str, groups: &Groups) -> bool {
     let Some((negated, name, value)) = operator(token) else {
         return false;
     };
@@ -200,11 +239,11 @@ fn manages(token: &str, grouped: bool) -> bool {
         return value == "inbox";
     }
     if negated {
-        return name == "label";
+        return GROUPED.contains(&name);
     }
     match name {
-        "label" => !grouped,
-        "account" | "newer_than" | "from" | "to" => true,
+        "label" | "from" | "to" => !groups.has(name),
+        "account" | "newer_than" => true,
         "is" => matches!(value.as_str(), "unread" | "starred"),
         "has" => matches!(value.as_str(), "attachment" | "attachments"),
         "last" => matches!(value.as_str(), "me" | "them"),
@@ -212,29 +251,77 @@ fn manages(token: &str, grouped: bool) -> bool {
     }
 }
 
-/// The query without its group of labels (`{label:a label:b}`, which the
-/// panel writes for "any of these"), and the labels in it. A group with
-/// anything else in it is the person's own and is left as it is.
-fn take_label_group(query: &str) -> (String, Vec<String>) {
-    let (Some(open), Some(close)) = (query.find('{'), query.find('}')) else {
-        return (query.to_owned(), Vec::new());
-    };
-    if close < open {
-        return (query.to_owned(), Vec::new());
+/// Write `values` as `name:` terms: one alone, several as a group of any
+/// of them (`{from:a from:b}`), or side by side when all are needed.
+fn any_of(kept: &mut Vec<String>, name: &str, values: &[String], all: bool) {
+    let terms: Vec<String> = values
+        .iter()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .map(|v| format!("{name}:{}", quote(v)))
+        .collect();
+    if terms.len() > 1 && !all {
+        kept.push(format!("{{{}}}", terms.join(" ")));
+    } else {
+        kept.extend(terms);
     }
-    let inside = &query[open + 1..close];
-    let mut labels = Vec::new();
-    for token in tokens(inside).unwrap_or_default() {
-        match operator(&token) {
-            Some((false, "label", value)) => labels.push(value.trim_matches('"').to_owned()),
-            _ => return (query.to_owned(), Vec::new()),
+}
+
+/// Write `values` as `-name:` terms, each left out.
+fn not(kept: &mut Vec<String>, name: &str, values: &[String]) {
+    kept.extend(
+        values
+            .iter()
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
+            .map(|v| format!("-{name}:{}", quote(v))),
+    );
+}
+
+/// The query without the groups the panel writes (`{label:a label:b}`,
+/// `{from:a from:b}`, `{to:a to:b}`: one of each at most), and what was in
+/// them. A group with anything else in it, or a second of a kind, is the
+/// person's own and is left as it is.
+fn take_groups(query: &str) -> (String, Groups) {
+    let mut groups = Groups::default();
+    let mut rest = String::new();
+    let mut at = 0;
+    while let Some(open) = query[at..].find('{').map(|i| at + i) {
+        let Some(close) = query[open..].find('}').map(|i| open + i) else {
+            break;
+        };
+        let mut kind: Option<&'static str> = None;
+        let mut values = Vec::new();
+        for token in tokens(&query[open + 1..close]).unwrap_or_default() {
+            let one = match operator(&token) {
+                Some((false, name, value)) => GROUPED
+                    .into_iter()
+                    .find(|g| *g == name)
+                    .filter(|g| kind.is_none_or(|k| k == *g))
+                    .map(|g| (g, value.trim_matches('"').to_owned())),
+                _ => None,
+            };
+            match one {
+                Some((g, value)) => {
+                    kind = Some(g);
+                    values.push(value);
+                }
+                None => {
+                    kind = None;
+                    break;
+                }
+            }
         }
+        rest.push_str(&query[at..open]);
+        match kind {
+            Some(name) if !groups.has(name) => *groups.slot(name) = values,
+            _ => rest.push_str(&query[open..=close]),
+        }
+        rest.push(' ');
+        at = close + 1;
     }
-    let rest = format!("{} {}", &query[..open], &query[close + 1..]);
-    (
-        rest.split_whitespace().collect::<Vec<_>>().join(" "),
-        labels,
-    )
+    rest.push_str(&query[at..]);
+    (rest.split_whitespace().collect::<Vec<_>>().join(" "), groups)
 }
 
 fn quote(value: &str) -> String {
@@ -269,7 +356,7 @@ mod tests {
     fn filters_round_trip_through_the_text() {
         let query = r#"cover shift from:"Ada Lovelace" is:unread in:inbox"#;
         let mut filters = Filters::read(query);
-        assert_eq!(filters.from.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(filters.from, ["Ada Lovelace"]);
         assert!(filters.unread);
         filters.unread = false;
         filters.within = Some("1m".into());
@@ -301,8 +388,27 @@ mod tests {
         filters.pick_label("clients/acme", None);
         assert_eq!(filters.labels, ["Receipts 2024"]);
         // A group of the person's own stays.
-        let theirs = "{from:ann from:bob} label:x";
-        assert_eq!(Filters::default().apply(theirs), "{from:ann from:bob}");
+        let theirs = "{from:ann label:y} label:x";
+        assert_eq!(Filters::default().apply(theirs), "{from:ann label:y}");
+    }
+
+    #[test]
+    fn senders_and_recipients_any_of_or_not() {
+        let query = "invoice {from:ann from:\"Bob Smith\"} -from:noreply to:me@x.org";
+        let mut f = Filters::read(query);
+        assert_eq!(f.from, ["ann", "Bob Smith"]);
+        assert_eq!((f.not_from.as_slice(), f.to.as_slice()), (&["noreply".to_owned()][..], &["me@x.org".to_owned()][..]));
+        assert_eq!(f.apply(query), query);
+        f.from.retain(|p| p != "ann");
+        f.not_to.push("list@x.org".into());
+        assert_eq!(
+            f.apply(query),
+            "invoice from:\"Bob Smith\" -from:noreply to:me@x.org -to:list@x.org"
+        );
+        // Groups of each kind are read side by side.
+        let both = Filters::read("{label:a label:b} {to:c to:d}");
+        assert_eq!((both.labels.len(), both.to.len()), (2, 2));
+        assert_eq!(Filters::default().apply("{label:a label:b} {to:c to:d} word"), "word");
     }
 
     #[test]

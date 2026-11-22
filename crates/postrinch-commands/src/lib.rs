@@ -39,6 +39,7 @@ pub use labels::{AppLabels, Chip, LabelNode, LabelRole, LabelTree, app_of, label
 pub use messages::{Grouping, MessageRef};
 pub use postrinch_render::Part;
 pub use postrinch_render::Rendered;
+pub use postrinch_store::PersonEntry;
 pub use query::{LabelName, Last, Query, label_matches};
 pub use rules::{AlreadyHere, Matched, RulesPage};
 pub use rules_proposed::RuleProposal;

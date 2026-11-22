@@ -6,20 +6,20 @@
 use postrinch_commands::{Archived, Filters, Last};
 use postrinch_model::{EmailAddress, SavedView};
 use rinch::prelude::*;
-use rinch::{Effect, untracked};
 
 use crate::state::State;
 use crate::ui::account_color;
 use crate::ui::label_picker::label_picker;
+use crate::ui::people_picker::{Side, people_picker};
 use crate::ui::view_panel::{choice, read};
 
 /// The panel's search, read as filters.
-fn filters(state: State) -> Filters {
+pub(crate) fn filters(state: State) -> Filters {
     read(state, |e| Filters::read(&e.draft.query))
 }
 
 /// Change the panel's search through its filters.
-fn change(state: State, edit: impl FnOnce(&mut Filters)) {
+pub(crate) fn change(state: State, edit: impl FnOnce(&mut Filters)) {
     state.change_edit(|v| {
         let mut f = Filters::read(&v.query);
         edit(&mut f);
@@ -118,8 +118,8 @@ pub fn which_mail(state: State) -> NodeHandle {
         {archived}
         div { class: "panel-labels", {labels} }
         {accounts(__scope, state)}
-        {person(__scope, state, "From", |f| &mut f.from)}
-        {person(__scope, state, "To", |f| &mut f.to)}
+        {people_picker(__scope, state, Side::From)}
+        {people_picker(__scope, state, Side::To)}
         {when}
         div { class: "panel-field",
             span { class: "panel-name", "Only" }
@@ -133,37 +133,6 @@ pub fn which_mail(state: State) -> NodeHandle {
                 onsubmit: move || state.save_edit(),
             }
         }
-        }
-    }
-}
-
-/// From or To. What is typed is kept as typed (a trailing space and all),
-/// and follows the search text only when that says something else.
-#[component]
-fn person(
-    state: State,
-    label: &'static str,
-    field: fn(&mut Filters) -> &mut Option<String>,
-) -> NodeHandle {
-    let in_text = move || field(&mut filters(state)).clone().unwrap_or_default();
-    let typed = Signal::new(untracked(in_text));
-    Effect::new(move || {
-        let now = in_text();
-        if untracked(|| typed.get()).trim() != now.trim() {
-            typed.set(now);
-        }
-    });
-    rsx! {
-        div { class: "panel-field",
-            span { class: "panel-name", {label} }
-            TextInput {
-                placeholder: "Anyone",
-                value_fn: move || typed.get(),
-                oninput: move |v: String| {
-                    typed.set(v.clone());
-                    change(state, move |f| *field(f) = Some(v));
-                },
-            }
         }
     }
 }

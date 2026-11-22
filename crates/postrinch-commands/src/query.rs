@@ -6,7 +6,8 @@
 //! `has:` `after:` `before:` `newer_than:` `older_than:`, and Postrinch's
 //! own `account:` and `last:` (`last:me`, the account answered last;
 //! `last:them`, someone else wrote last). A value with spaces is quoted
-//! (`from:"Ada Lovelace"`); `-label:` and `-in:` leave a label out.
+//! (`from:"Ada Lovelace"`); `-label:` and `-in:` leave a label out, and
+//! `-from:` and `-to:` a sender or a recipient.
 
 use jiff::civil::Date;
 use jiff::tz::TimeZone;
@@ -22,6 +23,10 @@ pub struct Query {
     pub words: Vec<String>,
     pub from: Vec<String>,
     pub to: Vec<String>,
+    /// `-from:`: senders it is not from.
+    pub not_from: Vec<String>,
+    /// `-to:` (or `-cc:`, `-bcc:`): recipients it is not to.
+    pub not_to: Vec<String>,
     pub subject: Vec<String>,
     /// `label:`/`in:`/`category:` values, each a label to find in every
     /// account.
@@ -85,13 +90,19 @@ impl Query {
             if value.is_empty() {
                 return Err(invalid(format!("{operator}: needs something after it.")));
             }
-            if negated && !matches!(operator, "label" | "in" | "category") {
+            let leaves_out = matches!(
+                operator,
+                "label" | "in" | "category" | "from" | "to" | "cc" | "bcc"
+            );
+            if negated && !leaves_out {
                 return Err(invalid(format!(
-                    "Leaving out with -{operator}: is not supported yet; -label: and -in: are."
+                    "Leaving out with -{operator}: is not supported yet; -label:, -in:, -from: and -to: are."
                 )));
             }
             match operator {
+                "from" if negated => query.not_from.push(value),
                 "from" => query.from.push(value),
+                "to" | "cc" | "bcc" if negated => query.not_to.push(value),
                 "to" | "cc" | "bcc" => query.to.push(value),
                 "subject" => query.subject.push(value),
                 "account" => query.accounts.push(value),
@@ -380,11 +391,13 @@ mod tests {
             "after:yesterday",
             "older_than:3q",
             "\"open",
-            "-from:x",
+            "-subject:x",
             "from:",
         ] {
             assert!(Query::parse(bad, now).is_err(), "{bad}");
         }
+        let left_out = parse("-from:noreply -cc:list@x.org");
+        assert_eq!((left_out.not_from, left_out.not_to), (vec!["noreply".to_owned()], vec!["list@x.org".to_owned()]));
         // An unknown word with a colon is just a word.
         assert_eq!(parse("re:invoice").words, ["re:invoice"]);
     }

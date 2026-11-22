@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use postrinch_model::{
     EmailAddress, LabelKind, Message, ProviderMessageId, ProviderThreadId, ThreadSummary, Timestamp,
 };
-use postrinch_store::{Find, Found};
+use postrinch_store::{Find, Found, PersonEntry};
 use serde::{Deserialize, Serialize};
 
 use crate::messages::message_row;
@@ -359,6 +359,8 @@ impl Commands {
             accounts: accounts.to_vec(),
             from: query.from.clone(),
             to: query.to.clone(),
+            not_from: query.not_from.clone(),
+            not_to: query.not_to.clone(),
             subject: query.subject.clone(),
             labels: resolve(&query.labels)?,
             without: resolve(&query.without)?,
@@ -370,6 +372,12 @@ impl Commands {
             set_aside_too: query.set_aside_too,
             every: false,
         })
+    }
+
+    /// People mail was from or to whose address or name holds `part`, for
+    /// choosing senders and recipients to search by.
+    pub fn people(&self, part: &str, limit: usize) -> CommandResult<Vec<PersonEntry>> {
+        Ok(self.store.find_people(part, limit)?)
     }
 
     /// The provider's ids for the account's trash and spam.

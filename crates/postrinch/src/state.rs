@@ -72,6 +72,10 @@ pub struct State {
     pub search: Signal<Option<String>>,
     /// The accounts the search looks in (every account for none).
     pub search_accounts: Signal<Vec<EmailAddress>>,
+    /// What a sender or recipient picker is finding people by.
+    pub people_find: Signal<String>,
+    /// The people found, with what they were found by.
+    pub people: Signal<(String, Vec<postrinch_commands::PersonEntry>)>,
     pub results: Signal<Option<SearchResults>>,
     /// Why the search as typed could not run (an unknown operator, a bad
     /// date), shown in place of its results.
@@ -186,6 +190,8 @@ impl State {
             search_draft: Signal::new(String::new()),
             search: Signal::new(None),
             search_accounts: Signal::new(Vec::new()),
+            people_find: Signal::new(String::new()),
+            people: Signal::new((String::new(), Vec::new())),
             results: Signal::new(None),
             search_error: Signal::new(None),
             remote: Signal::new(None),
@@ -325,6 +331,13 @@ impl State {
                 accounts: self.search_accounts.get(),
                 grouping: self.grouping(),
             });
+        });
+        let people = ask.clone();
+        Effect::new(move || {
+            let part = self.people_find.get();
+            if !part.trim().is_empty() {
+                people(Request::People(part));
+            }
         });
         let labels = ask.clone();
         Effect::new(move || {

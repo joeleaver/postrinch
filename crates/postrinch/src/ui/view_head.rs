@@ -73,11 +73,13 @@ fn describe(
     if !rest.is_empty() {
         parts.push(rest);
     }
-    if let Some(from) = &f.from {
-        parts.push(format!("from {from}"));
-    }
-    if let Some(to) = &f.to {
-        parts.push(format!("to {to}"));
+    for (any, not, word) in [(&f.from, &f.not_from, "from"), (&f.to, &f.not_to, "to")] {
+        if !any.is_empty() {
+            parts.push(format!("{word} {}", any.join(" or ")));
+        }
+        if !not.is_empty() {
+            parts.push(format!("not {word} {}", not.join(" or ")));
+        }
     }
     if let Some(within) = &f.within {
         parts.push(match within.as_str() {
