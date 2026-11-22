@@ -164,6 +164,8 @@ fn each_account_has_an_inbox_under_inbox_when_there_are_several() {
     // A category is Gmail's: its search stays as it is.
     let mut changed = updates.view.clone();
     changed.query = "is:starred".into();
+    assert!(commands.save_view(&changed).is_err());
+    changed.query = updates.view.query.clone();
     changed.count = ViewCount::All;
     commands.save_view(&changed).unwrap();
     let again = commands
@@ -177,22 +179,11 @@ fn each_account_has_an_inbox_under_inbox_when_there_are_several() {
         ("in:inbox category:updates", ViewCount::All)
     );
 
-    // They follow Inbox: changed there, changed in each.
+    // Inbox's mail is fixed, as every built-in view's is.
     let mut inbox = commands.views().unwrap()[0].view.clone();
     inbox.query = "in:inbox".into();
-    commands.save_view(&inbox).unwrap();
-    let mine = commands
-        .views()
-        .unwrap()
-        .into_iter()
-        .find(|e| e.view.key == mine.view.key)
-        .unwrap();
-    assert_eq!(mine.view.query, "in:inbox");
-    assert_eq!(
-        listed_view(&commands, &mine.view),
-        ["dinner", "invoice", "acme"]
-    );
-    commands.remove_view("inbox").unwrap();
+    let why = commands.save_view(&inbox).unwrap_err().to_string();
+    assert!(why.contains("built in"), "{why}");
 
     // Hidden, it stays an account inbox, not a view of the person's own.
     let mut hidden = mine.view.clone();
@@ -317,11 +308,20 @@ fn saving_checks_and_removing_puts_built_ins_back() {
     };
     let mut changed = sent(&commands).view;
     changed.query = "in:sent is:starred".into();
+    assert!(commands.save_view(&changed).is_err(), "its mail is fixed");
+    changed.query = "in:sent".into();
+    changed.order = ListOrder::OldestFirst;
     commands.save_view(&changed).unwrap();
     let entry = sent(&commands);
-    assert_eq!(entry.view.query, changed.query);
-    assert_eq!(entry.original.unwrap().query, "in:sent");
+    assert_eq!(entry.view.order, ListOrder::OldestFirst);
+    assert_eq!(entry.original.unwrap().order, ListOrder::NewestFirst);
     commands.remove_view("sent").unwrap();
+    assert_eq!(sent(&commands).view.order, ListOrder::NewestFirst);
+
+    // Its mail saved before it was fixed is passed over.
+    let mut old_sent = changed.clone();
+    old_sent.query = "is:starred".into();
+    commands.store.put_view(&old_sent).unwrap();
     assert_eq!(sent(&commands).view.query, "in:sent");
 
     // A Primary saved before it was the inbox is passed over, not made

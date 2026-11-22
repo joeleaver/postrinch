@@ -1,8 +1,9 @@
 //! Views: saved searches the sidebar lists in place of labels. Gmail's
 //! inbox (with each account's, and each account's categories, under it),
 //! Sent, Drafts and All mail are views built in; the
-//! person's own come between them. A built-in view can be saved over and
-//! put back; the person's can be removed.
+//! person's own come between them. What mail a built-in view shows is
+//! fixed; how it shows it can be saved over and put back. The person's
+//! own can be removed.
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -172,11 +173,18 @@ impl Commands {
                 .iter()
                 .filter(move |b| b.4 == place)
                 .filter_map(|b| built_in(b.0))
-                .map(|(original, place)| ViewEntry {
-                    view: saved(&original.key).unwrap_or_else(|| original.clone()),
-                    place,
-                    original: Some(original),
-                    under: None,
+                .map(|(original, place)| {
+                    // What mail a built-in view shows is fixed; how it
+                    // shows it is the person's.
+                    let mut view = saved(&original.key).unwrap_or_else(|| original.clone());
+                    view.query = original.query.clone();
+                    view.accounts = original.accounts.clone();
+                    ViewEntry {
+                        view,
+                        place,
+                        original: Some(original),
+                        under: None,
+                    }
                 })
         };
         let accounts = self.visible_accounts()?;
@@ -209,7 +217,7 @@ impl Commands {
     }
 
     /// Save a view, new or changed. Its search must read and its accounts
-    /// must be ones Postrinch has.
+    /// must be ones Postrinch has; a built-in view's are its own.
     pub fn save_view(&self, view: &SavedView) -> CommandResult<()> {
         if view.name.trim().is_empty() {
             return Err(CommandError::Invalid("A view needs a name.".into()));
@@ -227,6 +235,15 @@ impl Commands {
         let before = before.or_else(|| built_in(&view.key).map(|(v, _)| v));
         if !self.may_change_view(view) || before.is_some_and(|v| !self.may_change_view(&v)) {
             return Err(limited());
+        }
+        let listed = self.views()?.into_iter().find(|e| e.view.key == view.key);
+        if let Some(original) = listed.and_then(|e| e.original)
+            && (original.query != view.query.trim() || original.accounts != view.accounts)
+        {
+            return Err(CommandError::Invalid(format!(
+                "{} is built in: what mail it shows is fixed, and only how it shows it can change. Make a view of your own to show other mail.",
+                original.name
+            )));
         }
         Ok(self.store.put_view(view)?)
     }

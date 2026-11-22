@@ -5,7 +5,7 @@
 //! shows is in view_panel_mail.rs; here are the list's order, how the
 //! sidebar lists it, and Save.
 
-use postrinch_commands::followed;
+use postrinch_commands::built_in_holds;
 use postrinch_model::{ListOrder, SavedView, ViewCount, ViewRows};
 use rinch::prelude::*;
 
@@ -144,23 +144,17 @@ fn body(state: State) -> NodeHandle {
         listed,
         set_listed,
     );
-    // An account's inbox shows Inbox's mail, changed on Inbox; an
-    // account's category is Gmail's, as it is.
-    let parent = read(state, |e| followed(&e.draft.key));
-    let follows = parent.is_some();
-    let (said, change_inbox) = match parent {
-        Some("inbox") => (
-            "Inbox\u{2019}s mail, in this account alone. What the inbox shows is set on Inbox, for every account.".to_owned(),
-            "",
-        ),
-        _ => {
-            let name = read(state, |e| Some(e.original.name.clone())).unwrap_or_default();
-            (
-                format!("Gmail\u{2019}s {name} category, in this account. Make a view of your own to choose other mail."),
-                "display: none",
-            )
-        }
-    };
+    // What mail a built-in view shows is fixed: the panel says what it
+    // holds instead.
+    let key = read(state, |e| Some(e.draft.key.clone())).unwrap_or_default();
+    let built = state.views.with(|v| {
+        v.iter()
+            .find(|e| e.view.key == key)
+            .and_then(|e| e.original.as_ref())
+            .map(|o| built_in_holds(&key, &o.name))
+    });
+    let fixed = built.is_some();
+    let said = built.unwrap_or_default();
     let name_hint = match kind {
         Editing::Search => "Name it to keep it as a view",
         _ => "Name",
@@ -181,11 +175,11 @@ fn body(state: State) -> NodeHandle {
         }
         div { class: "panel-body",
             p { class: "panel-group", "WHICH MAIL" }
-            div { class: "panel-follows", style: {if follows { "" } else { "display: none" }},
-                p { {said} }
-                button { class: "panel-link", style: change_inbox, onclick: move || state.edit_view("inbox"), "Change Inbox" }
+            div { class: "panel-fixed", style: {if fixed { "" } else { "display: none" }},
+                p { class: "panel-holds", {said} }
+                p { class: "panel-aside", "Built in, so the mail it shows stays as it is. Make a view of your own to show other mail." }
             }
-            div { style: {if follows { "display: none" } else { "" }},
+            div { style: {if fixed { "display: none" } else { "" }},
                 {crate::ui::view_panel_mail::which_mail(__scope, state)}
             }
             p { class: "panel-group", "HOW IT SHOWS" }
@@ -282,10 +276,9 @@ pub const CSS: &str = r#"
 .panel-parts { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .panel-mail { display: flex; flex-direction: column; gap: 8px; }
 .panel-head { padding: 12px 24px 14px; border-bottom: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 6px; }
-.panel-follows { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 13px; color: var(--muted); }
-.panel-follows p { margin: 0; }
-.panel-link { border: 0; padding: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
-.panel-link:hover { text-decoration: underline; }
+.panel-fixed { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 13px; color: var(--muted); }
+.panel-fixed p { margin: 0; }
+.panel-fixed .panel-holds { color: var(--ink); }
 .panel-kind { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); }
 .panel-title .rinch-text-input__input { height: 38px; font-size: 17px; font-weight: 600; }
 .view-panel .rinch-text-input__input { min-height: 32px; }

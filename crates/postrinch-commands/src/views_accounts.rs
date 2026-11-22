@@ -3,9 +3,8 @@
 //! (Updates, Promotions, Social, Forums); with one, its categories under
 //! Inbox itself. There is no Promotions of every account: a category is
 //! an account's. An account's inbox follows Inbox, narrowed to the
-//! account; a category is Gmail's, as it is. Each one's name, count,
-//! order and place in the sidebar can be saved; its search and accounts
-//! cannot.
+//! account; a category is Gmail's, as it is. As with every built-in view,
+//! what mail it shows is fixed; how it shows it can be saved.
 
 use postrinch_model::{Account, EmailAddress, Provider, SavedView};
 
@@ -72,4 +71,19 @@ pub(crate) fn account_views(
         }
     }
     entries
+}
+
+/// What a built-in view holds, in words, for its panel: the view's key
+/// and its name as built.
+pub fn built_in_holds(key: &str, name: &str) -> String {
+    match (followed(key), key) {
+        (Some("inbox"), _) => "This account\u{2019}s inbox: mail in Gmail\u{2019}s Primary.".into(),
+        (Some(_), _) => format!("Gmail\u{2019}s {name} category, in this account."),
+        (None, "inbox") => "Your inbox: mail in Gmail\u{2019}s Primary, in every account.".into(),
+        (None, "everything-else") => "Inbox mail that no other view shows.".into(),
+        (None, "all-mail") => "All mail, in every account.".into(),
+        (None, "sent") => "Mail you sent.".into(),
+        (None, "drafts") => "Your drafts.".into(),
+        _ => format!("{name}, as built in."),
+    }
 }
