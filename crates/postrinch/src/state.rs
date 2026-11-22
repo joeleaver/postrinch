@@ -180,6 +180,8 @@ pub struct State {
     pub update_ready: Signal<Option<String>>,
     /// Settings › Rules and its editor.
     pub rules: crate::rules_ui::RulesUi,
+    /// The invitations the reader shows.
+    pub invitations: crate::invitations::Invitations,
 }
 
 impl State {
@@ -251,6 +253,7 @@ impl State {
             update: Signal::new(crate::update::UpdateStatus::NotInstalled),
             update_ready: Signal::new(None),
             rules: crate::rules_ui::RulesUi::new(),
+            invitations: crate::invitations::Invitations::new(),
         }
     }
 

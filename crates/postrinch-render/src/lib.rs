@@ -12,6 +12,8 @@
 
 mod colour;
 mod dark;
+mod ics;
+mod invitation;
 mod parts;
 mod plain;
 mod quotes;
@@ -21,6 +23,7 @@ use mail_parser::{MessageParser, PartKind};
 
 pub use colour::Rgba;
 pub use dark::{DarkColours, for_dark};
+pub use invitation::invitation;
 pub use parts::{Part, attachment};
 pub use plain::has_own_design;
 pub use quotes::{QUOTE_SELECTORS, quote_sheet, text_document};

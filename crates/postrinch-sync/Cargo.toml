@@ -13,6 +13,7 @@ postrinch-store = { workspace = true }
 base64 = "0.22"
 bytes = "1"
 dirs = "7"
+jiff = "0.2"
 keyring = "4.2"
 keyring-core = "1"
 mail-parser = "1.0"

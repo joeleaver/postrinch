@@ -10,6 +10,7 @@
 //! interrupted repeats work when it runs again, and never skips any.
 
 mod backfill;
+mod calendar;
 mod cursor;
 mod full;
 mod incremental;
@@ -21,6 +22,7 @@ mod outgoing;
 mod rules;
 mod search;
 
+pub use calendar::Answered;
 pub use keep::{KeepOptions, SyncEvent, SyncEventFn};
 pub use outbox::SendReport;
 pub use rules::{RulesReport, SETTINGS_LABEL};

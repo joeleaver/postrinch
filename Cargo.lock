@@ -4368,7 +4368,9 @@ name = "postrinch-render"
 version = "0.1.30"
 dependencies = [
  "base64 0.22.1",
+ "jiff",
  "mail-parser",
+ "postrinch-model",
  "rinch-html",
 ]
 
@@ -4420,6 +4422,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "dirs",
+ "jiff",
  "keyring",
  "keyring-core",
  "mail-builder",

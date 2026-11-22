@@ -290,7 +290,7 @@ fn show(cx: &Context, account: &EmailAddress, id: String) -> Result<()> {
     println!("Subject: {}", m.subject());
     println!("Labels:  {}", m.labels.join(", "));
     println!("Thread:  {}", m.thread.0);
-    for a in m.attachments.iter().filter(|a| !a.inline) {
+    for a in m.attachments.iter().filter(|a| a.is_file()) {
         println!(
             "Attached: {} ({}, {} bytes)",
             a.filename.as_deref().unwrap_or("unnamed"),

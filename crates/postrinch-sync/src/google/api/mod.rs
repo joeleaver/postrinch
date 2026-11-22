@@ -7,12 +7,14 @@ use postrinch_model::EmailAddress;
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 
+mod calendar;
 mod labels;
 mod outgoing;
 mod settings;
 mod snippet;
 mod types;
 
+pub(crate) use calendar::{EventResource, is_time, response_status, to_event};
 #[cfg(test)]
 pub(crate) use settings::Criteria;
 pub(crate) use settings::FilterResource;
@@ -27,6 +29,7 @@ use crate::{SyncError, SyncResult};
 const FG: Priority = Priority::Foreground;
 
 const GMAIL: &str = "https://gmail.googleapis.com/gmail/v1/users/me";
+const CALENDAR: &str = "https://www.googleapis.com/calendar/v3";
 /// Attempts per request before a retryable failure is returned.
 const ATTEMPTS: u32 = 8;
 const MAX_BACKOFF: Duration = Duration::from_secs(32);
@@ -36,15 +39,20 @@ pub struct GmailApi {
     auth: Arc<GoogleAuth>,
     http: reqwest::Client,
     base: String,
+    /// The Calendar API's address.
+    calendar: String,
     quota: Quota,
 }
 
 impl GmailApi {
     pub fn new(auth: Arc<GoogleAuth>) -> Self {
-        Self::with_base(auth, GMAIL.to_owned())
+        let mut api = Self::with_base(auth, GMAIL.to_owned());
+        api.calendar = CALENDAR.to_owned();
+        api
     }
 
-    /// Point at another server: for tests.
+    /// Point at another server: for tests. The Calendar API is then at
+    /// `{base}/calendar`.
     pub fn with_base(auth: Arc<GoogleAuth>, base: String) -> Self {
         Self {
             auth,
@@ -58,6 +66,7 @@ impl GmailApi {
                 .http1_only()
                 .build()
                 .expect("a default HTTP client builds"),
+            calendar: format!("{base}/calendar"),
             base,
             quota: Quota::default(),
         }
@@ -310,7 +319,32 @@ impl GmailApi {
             }
             _ => format!("{}/{path}", self.base),
         };
-        let query = query.as_slice();
+        self.call(
+            method,
+            account,
+            (cost, priority),
+            (&url, "Gmail"),
+            &query,
+            payload,
+            resend,
+        )
+        .await
+    }
+
+    /// One request to `url` of `service` (named in errors), retried as
+    /// [`Self::request`] says.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn call(
+        &self,
+        method: reqwest::Method,
+        account: &EmailAddress,
+        (cost, priority): (Cost, Priority),
+        (url, service): (&str, &'static str),
+        query: &[(&str, &str)],
+        payload: Option<Payload<'_>>,
+        resend: bool,
+    ) -> SyncResult<bytes::Bytes> {
+        let path = url.rsplit('/').next().unwrap_or(url);
         // An upload's body, made once for every attempt.
         let upload = match payload {
             Some(Payload::Upload { metadata, raw }) => Some(related(metadata, raw)),
@@ -322,7 +356,7 @@ impl GmailApi {
             attempt += 1;
             self.quota.acquire(&account.key(), cost, priority).await;
             let token = self.auth.access_token(account).await?;
-            let mut request = self.http.request(method.clone(), &url);
+            let mut request = self.http.request(method.clone(), url);
             match (payload, &upload) {
                 (Some(Payload::Json(body)), _) => request = request.json(body),
                 (_, Some(body)) => {
@@ -335,7 +369,7 @@ impl GmailApi {
             let response = match request.bearer_auth(&token).query(query).send().await {
                 Ok(r) => r,
                 Err(e) if resend && attempt < ATTEMPTS && is_transient(&e) => {
-                    tracing::debug!("Gmail {path}: {}, retrying", chain(&e));
+                    tracing::debug!("{service} {path}: {}, retrying", chain(&e));
                     tokio::time::sleep(backoff(attempt, None)).await;
                     continue;
                 }
@@ -348,7 +382,7 @@ impl GmailApi {
                 let body = match response.bytes().await {
                     Ok(body) => body,
                     Err(e) if resend && attempt < ATTEMPTS && is_transient(&e) => {
-                        tracing::debug!("Gmail {path}: {}, retrying", chain(&e));
+                        tracing::debug!("{service} {path}: {}, retrying", chain(&e));
                         tokio::time::sleep(backoff(attempt, None)).await;
                         continue;
                     }
@@ -371,18 +405,18 @@ impl GmailApi {
                 continue;
             }
             if attempt < ATTEMPTS && is_rate_limit(status, &reasons) {
-                tracing::debug!("Gmail {path}: {status} {reasons:?}, pausing the account");
+                tracing::debug!("{service} {path}: {status} {reasons:?}, pausing the account");
                 self.quota
                     .back_off(&account.key(), backoff(attempt, retry_after))
                     .await;
                 continue;
             }
             if attempt < ATTEMPTS && is_server_error(status) {
-                tracing::debug!("Gmail {path}: {status}, retrying");
+                tracing::debug!("{service} {path}: {status}, retrying");
                 tokio::time::sleep(backoff(attempt, retry_after)).await;
                 continue;
             }
-            return Err(SyncError::api("Gmail", status.as_u16(), message));
+            return Err(SyncError::api(service, status.as_u16(), message));
         }
     }
 }
@@ -423,32 +457,6 @@ fn related(metadata: &serde_json::Value, raw: &[u8]) -> bytes::Bytes {
     body.extend_from_slice(raw);
     body.extend_from_slice(format!("\r\n--{BOUNDARY}--\r\n").as_bytes());
     body.into()
-}
-
-#[cfg(test)]
-mod upload_tests {
-    use super::*;
-
-    #[test]
-    fn uploads_go_to_gmail_s_upload_address() {
-        assert_eq!(
-            upload_base("https://gmail.googleapis.com/gmail/v1/users/me"),
-            "https://gmail.googleapis.com/upload/gmail/v1/users/me"
-        );
-        assert_eq!(
-            upload_base("http://127.0.0.1:9/x"),
-            "http://127.0.0.1:9/x/upload"
-        );
-        let body = related(
-            &serde_json::json!({"threadId": "t"}),
-            b"Subject: hi\r\n\r\nbody",
-        );
-        let text = String::from_utf8(body.to_vec()).unwrap();
-        assert!(text.starts_with("--postrinch-upload-7f3a9c1e5b\r\n"));
-        assert!(text.contains("{\"threadId\":\"t\"}"));
-        assert!(text.contains("message/rfc822\r\n\r\nSubject: hi"));
-        assert!(text.ends_with("--postrinch-upload-7f3a9c1e5b--\r\n"));
-    }
 }
 
 /// Whether a request failed on the way, rather than being refused: a
@@ -512,51 +520,5 @@ fn backoff(attempt: u32, retry_after: Option<Duration>) -> Duration {
 }
 
 #[cfg(test)]
-mod tests {
-    use base64::Engine;
-    use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
-
-    use super::*;
-
-    #[test]
-    fn retries_rate_limits_not_permissions() {
-        assert!(is_rate_limit(StatusCode::TOO_MANY_REQUESTS, &[]));
-        assert!(is_server_error(StatusCode::SERVICE_UNAVAILABLE));
-        assert!(is_rate_limit(
-            StatusCode::FORBIDDEN,
-            &["userRateLimitExceeded".into()]
-        ));
-        assert!(!is_rate_limit(
-            StatusCode::FORBIDDEN,
-            &["insufficientPermissions".into()]
-        ));
-        assert!(!is_rate_limit(StatusCode::NOT_FOUND, &[]));
-        assert!(!is_server_error(StatusCode::NOT_FOUND));
-    }
-
-    #[test]
-    fn backoff_grows_and_caps() {
-        assert!(backoff(1, None) >= Duration::from_secs(1));
-        assert!(backoff(1, None) < Duration::from_millis(1300));
-        assert!(backoff(20, None) <= MAX_BACKOFF + MAX_BACKOFF / 4);
-        assert_eq!(
-            backoff(1, Some(Duration::from_secs(3))),
-            Duration::from_secs(3)
-        );
-    }
-
-    #[test]
-    fn decodes_raw_padded_or_not() {
-        let mut m = RawMessage {
-            id: "m".into(),
-            thread_id: "t".into(),
-            label_ids: vec![],
-            snippet: String::new(),
-            internal_date: "0".into(),
-            raw: URL_SAFE_NO_PAD.encode(b"Subject: hi\r\n\r\n?>"),
-        };
-        assert_eq!(m.bytes().unwrap(), b"Subject: hi\r\n\r\n?>");
-        m.raw = URL_SAFE.encode(b"Subject: hi\r\n\r\n?>");
-        assert_eq!(m.bytes().unwrap(), b"Subject: hi\r\n\r\n?>");
-    }
-}
+#[path = "mod_tests.rs"]
+mod tests;

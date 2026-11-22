@@ -8,6 +8,7 @@ mod changes;
 mod conversations;
 mod dates;
 mod gmail_labels;
+mod invitations;
 mod links;
 mod loader;
 mod menus;

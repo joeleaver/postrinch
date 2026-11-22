@@ -72,7 +72,7 @@ impl Commands {
     ) -> CommandResult<Vec<DraftAttachment>> {
         let mut out = Vec::new();
         for (index, info) in message.attachments.iter().enumerate() {
-            if info.inline {
+            if !info.is_file() {
                 continue;
             }
             if let Some(a) =

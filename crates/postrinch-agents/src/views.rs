@@ -357,6 +357,8 @@ fn message(commands: &Commands, labels: &mut LabelNames, m: &Message) -> Value {
             "reply_to": people(&h.reply_to),
             "body": if m.downloaded { Value::String(body) } else { Value::Null },
             "hidden_text": hidden,
+            // The event a calendar part describes, if it carries one.
+            "invitation": crate::invitations::of(commands, m),
         },
         // Numbered as read_attachment takes them. Inline ones are pictures
         // the body shows.

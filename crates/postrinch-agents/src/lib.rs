@@ -12,6 +12,7 @@
 mod change;
 pub mod client;
 mod gmail;
+mod invitations;
 mod later;
 pub mod registry;
 pub mod rule_shape;

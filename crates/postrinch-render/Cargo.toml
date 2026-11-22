@@ -10,3 +10,5 @@ repository.workspace = true
 rinch-html = { workspace = true }
 base64 = "0.22"
 mail-parser = "1.0"
+jiff = "0.2"
+postrinch-model = { workspace = true }

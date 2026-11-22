@@ -2,7 +2,7 @@
 
 use jiff::tz::TimeZone;
 use jiff::{Timestamp as Instant, Zoned};
-use postrinch_model::Timestamp;
+use postrinch_model::{Day, EventWhen, Timestamp};
 
 /// A list row's date: the time today, the weekday this week, the day and
 /// month this year, and the year as well before that.
@@ -27,6 +27,66 @@ pub fn long(at: Timestamp, tz: &TimeZone) -> String {
     zoned(at, tz)
         .map(|at| at.strftime("%a %-d %b %Y, %H:%M").to_string())
         .unwrap_or_default()
+}
+
+/// When an event is, in full: "Tue 24 Nov 2026, 10:00 – 11:00", "Thu 24
+/// Dec 2026", "Thu 24 Dec – Sat 26 Dec 2026", or across days with times
+/// on both.
+pub fn event(when: &EventWhen, tz: &TimeZone) -> String {
+    match *when {
+        EventWhen::Days { first, last } => {
+            let (Some(first), Some(last)) = (civil(first), civil(last)) else {
+                return String::new();
+            };
+            if first == last {
+                first.strftime("%a %-d %b %Y").to_string()
+            } else if first.year() == last.year() {
+                format!(
+                    "{} \u{2013} {}",
+                    first.strftime("%a %-d %b"),
+                    last.strftime("%a %-d %b %Y")
+                )
+            } else {
+                format!(
+                    "{} \u{2013} {}",
+                    first.strftime("%a %-d %b %Y"),
+                    last.strftime("%a %-d %b %Y")
+                )
+            }
+        }
+        EventWhen::Times { start, end } => {
+            let (Some(start), Some(end)) = (zoned(start, tz), zoned(end, tz)) else {
+                return String::new();
+            };
+            let from = start.strftime("%a %-d %b %Y, %H:%M");
+            if end <= start {
+                from.to_string()
+            } else if end.date() == start.date() {
+                format!("{from} \u{2013} {}", end.strftime("%H:%M"))
+            } else {
+                format!("{from} \u{2013} {}", end.strftime("%a %-d %b %Y, %H:%M"))
+            }
+        }
+    }
+}
+
+/// An event's first day, as a calendar page shows it: ("NOV", "24").
+pub fn event_page(when: &EventWhen, tz: &TimeZone) -> (String, String) {
+    let day = match *when {
+        EventWhen::Days { first, .. } => civil(first),
+        EventWhen::Times { start, .. } => zoned(start, tz).map(|z| z.date()),
+    };
+    day.map(|d| {
+        (
+            d.strftime("%b").to_string().to_uppercase(),
+            d.day().to_string(),
+        )
+    })
+    .unwrap_or_default()
+}
+
+fn civil(d: Day) -> Option<jiff::civil::Date> {
+    jiff::civil::Date::new(d.year, d.month, d.day).ok()
 }
 
 /// Now, in the person's time zone.
@@ -67,6 +127,38 @@ mod tests {
         assert_eq!(
             long(at("2026-11-02T14:05:00Z"), &TimeZone::UTC),
             "Mon 2 Nov 2026, 14:05"
+        );
+    }
+
+    #[test]
+    fn events_say_when_without_saying_it_twice() {
+        let tz = TimeZone::UTC;
+        let times = |a, b| EventWhen::Times {
+            start: at(a),
+            end: at(b),
+        };
+        assert_eq!(
+            event(&times("2026-11-24T10:00:00Z", "2026-11-24T11:00:00Z"), &tz),
+            "Tue 24 Nov 2026, 10:00 \u{2013} 11:00"
+        );
+        assert_eq!(
+            event(&times("2026-11-24T22:00:00Z", "2026-11-25T01:00:00Z"), &tz),
+            "Tue 24 Nov 2026, 22:00 \u{2013} Wed 25 Nov 2026, 01:00"
+        );
+        let d = |month, day| Day {
+            year: 2026,
+            month,
+            day,
+        };
+        let days = |first, last| EventWhen::Days { first, last };
+        assert_eq!(event(&days(d(12, 24), d(12, 24)), &tz), "Thu 24 Dec 2026");
+        assert_eq!(
+            event(&days(d(12, 24), d(12, 26)), &tz),
+            "Thu 24 Dec \u{2013} Sat 26 Dec 2026"
+        );
+        assert_eq!(
+            event_page(&days(d(12, 24), d(12, 26)), &tz),
+            ("DEC".to_owned(), "24".to_owned())
         );
     }
 }

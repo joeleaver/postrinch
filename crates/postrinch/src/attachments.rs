@@ -132,7 +132,7 @@ impl State {
             return;
         };
         for (index, info) in message.attachments.iter().enumerate() {
-            if info.inline {
+            if !info.is_file() {
                 continue;
             }
             let Some(part) = self.attachment_part(message, index) else {

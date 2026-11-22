@@ -49,7 +49,7 @@ pub fn attachment_cards(state: State, message: Message) -> NodeHandle {
         .iter()
         .cloned()
         .enumerate()
-        .filter(|(_, a)| !a.inline)
+        .filter(|(_, a)| a.is_file())
         .collect();
     if files.is_empty() {
         return rsx! { span {} };

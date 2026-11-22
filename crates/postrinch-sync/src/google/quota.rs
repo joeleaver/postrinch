@@ -68,6 +68,10 @@ pub(crate) enum Cost {
     InsertMessage,
     /// `messages.delete`.
     DeleteMessage,
+    /// A Calendar API call. Calendar keeps its own quota, far above what
+    /// answering invitations asks; its calls are drawn from the account's
+    /// bucket too, at a small cost, so they are paced with the rest.
+    Calendar,
 }
 
 impl Cost {
@@ -85,6 +89,7 @@ impl Cost {
             Cost::Settings => 5.0,
             Cost::InsertMessage => 25.0,
             Cost::DeleteMessage => 10.0,
+            Cost::Calendar => 5.0,
         }
     }
 }

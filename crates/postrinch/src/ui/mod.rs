@@ -9,6 +9,7 @@ mod chooser;
 mod compose;
 mod compose_files;
 mod icons;
+mod invitation_card;
 mod keys;
 mod label_edit;
 mod label_new;
@@ -88,6 +89,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     actions::init(commands.clone(), sync);
     update::start(state);
     state.mark_read_when_opened();
+    state.look_up_invitations();
     state.save_edits_as_they_come();
     state.open_by_setting();
     crate::pictures::fetch_web_pictures();
@@ -127,7 +129,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {about::CSS} }
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
-                style { {list_head::CSS} {attachment_cards::CSS} {compose_files::CSS} {label_new::CSS} }
+                style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {compose_files::CSS} {label_new::CSS} }
                 style { {list_bar::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}

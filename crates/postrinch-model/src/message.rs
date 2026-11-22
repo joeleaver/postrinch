@@ -89,6 +89,15 @@ pub struct AttachmentInfo {
     pub inline: bool,
 }
 
+impl AttachmentInfo {
+    /// Whether it is a file the person would save: not a picture the body
+    /// shows, nor the calendar part an invitation carries in its body
+    /// (unnamed `text/calendar`), which is shown as the invitation.
+    pub fn is_file(&self) -> bool {
+        !self.inline && !(self.filename.is_none() && self.mime_type == "text/calendar")
+    }
+}
+
 /// One message in one account.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
@@ -127,7 +136,7 @@ impl Message {
     }
 
     pub fn has_attachments(&self) -> bool {
-        self.attachments.iter().any(|a| !a.inline)
+        self.attachments.iter().any(AttachmentInfo::is_file)
     }
 }
 

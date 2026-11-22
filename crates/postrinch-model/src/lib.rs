@@ -6,6 +6,7 @@
 
 mod account;
 mod address;
+mod calendar;
 mod change;
 mod draft;
 mod label;
@@ -16,6 +17,7 @@ mod view;
 
 pub use account::{Account, AccountState, Provider, SignInReason};
 pub use address::{AddressError, EmailAddress, Mailbox};
+pub use calendar::{Answer, Attendee, CalendarEvent, Day, EventWhen, Invitation, InvitationKind};
 pub use change::MessageChange;
 pub use draft::{
     Answering, AttachmentOrigin, Draft, DraftAttachment, MAX_ATTACHED, NotAnAddress, Proposal,

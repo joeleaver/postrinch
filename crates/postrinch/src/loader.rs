@@ -244,6 +244,10 @@ fn answer(commands: &Commands, state: State, request: Request) {
                     state
                         .thumbnails
                         .send(crate::attachments::thumbnails(commands, thread));
+                    state
+                        .invitations
+                        .found
+                        .send(crate::invitations::read(commands, thread));
                 }
                 state.thread.send(thread);
             }

@@ -286,6 +286,23 @@ mod tests {
     }
 
     #[test]
+    fn an_inline_calendar_part_is_listed() {
+        // As Outlook sends an invitation: the event only in the alternative.
+        let raw = concat!(
+            "From: a@example.org\r\nSubject: Meet\r\nMIME-Version: 1.0\r\n",
+            "Content-Type: multipart/alternative; boundary=\"a\"\r\n\r\n",
+            "--a\r\nContent-Type: text/plain\r\n\r\nMeet?\r\n",
+            "--a\r\nContent-Type: text/calendar; method=REQUEST\r\n\r\n",
+            "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n",
+            "--a--\r\n",
+        );
+        let m = parse_message(envelope(None), raw.as_bytes()).unwrap();
+        let types: Vec<_> = m.attachments.iter().map(|a| a.mime_type.as_str()).collect();
+        assert_eq!(types, ["text/calendar"]);
+        assert_eq!(m.body_text, "Meet?");
+    }
+
+    #[test]
     fn plain_message_without_mime() {
         let raw = b"From: x@example.org\r\nSubject: hi\r\n\r\nJust text.\r\n";
         let m = parse_message(envelope(None), raw).unwrap();

@@ -199,6 +199,7 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
     };
     let attachments =
         crate::ui::attachment_cards::attachment_cards(__scope, state, message.clone());
+    let invitation = crate::ui::invitation_card::invitation_card(__scope, state, message.clone());
     rsx! {
         div { class: "message",
             div { class: "message-head",
@@ -209,6 +210,7 @@ fn message(state: State, message: Message, when: String) -> NodeHandle {
                 {answer_icons(__scope, state, message.id.clone())}
             }
             {to}
+            {invitation}
             {body}
             {attachments}
         }
