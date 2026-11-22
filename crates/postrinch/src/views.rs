@@ -201,6 +201,7 @@ impl State {
                             view: view.clone(),
                             place: Place::Yours,
                             original: None,
+                            nested: false,
                         },
                     );
                 }

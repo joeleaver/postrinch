@@ -108,6 +108,7 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 }
 .view-add:hover { background: var(--hover); color: var(--ink); }
 .folder.hidden-view .name-text { color: var(--muted); font-style: italic; }
+.folder.nested { padding-left: 24px; }
 .folder.chosen { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
 .folder-name {
     min-width: 0;

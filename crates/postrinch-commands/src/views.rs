@@ -19,6 +19,15 @@ use crate::{CommandError, CommandResult, Commands, ThreadPage};
 /// The built-in view of mail in the inbox and in no other view.
 pub const EVERYTHING_ELSE: &str = "everything-else";
 
+/// What an account's own inbox view's key starts with; the account's
+/// address (lowercased) follows.
+const ACCOUNT_INBOX: &str = "inbox:";
+
+/// Whether a view is one account's inbox, listed under Inbox.
+pub fn is_account_inbox(key: &str) -> bool {
+    key.starts_with(ACCOUNT_INBOX)
+}
+
 /// Searches already run, by query and accounts.
 type Found = HashMap<(String, Vec<EmailAddress>), Vec<ThreadEntry>>;
 
@@ -43,6 +52,9 @@ pub struct ViewEntry {
     /// A built-in view as it first was, to put back; `None` for the
     /// person's own, which can be removed instead.
     pub original: Option<SavedView>,
+    /// Listed under the view above it: each account's inbox under Inbox.
+    #[serde(default)]
+    pub nested: bool,
 }
 
 /// How many conversations a view has.
@@ -141,10 +153,24 @@ fn built_in(key: &str) -> Option<(SavedView, Place)> {
         })
 }
 
+/// One account's inbox, as it first was.
+fn account_inbox(account: &EmailAddress) -> SavedView {
+    SavedView {
+        key: format!("{ACCOUNT_INBOX}{}", account.key()),
+        name: account.to_string(),
+        query: "in:inbox".to_owned(),
+        accounts: vec![account.clone()],
+        count: ViewCount::Unread,
+        hide_when_empty: false,
+        hidden: false,
+        order: ListOrder::default(),
+    }
+}
+
 impl Commands {
-    /// Every view, in the sidebar's order: the inbox and its tabs, the
-    /// person's own in the order made, then Everything else, All mail,
-    /// Sent and Drafts.
+    /// Every view, in the sidebar's order: the inbox with each account's
+    /// under it (when there are several), its tabs, the person's own in
+    /// the order made, then Everything else, All mail, Sent and Drafts.
     pub fn views(&self) -> CommandResult<Vec<ViewEntry>> {
         let stored = self.store.views()?;
         let saved = |key: &str| stored.iter().find(|v| v.key == key).cloned();
@@ -157,17 +183,35 @@ impl Commands {
                     view: saved(&original.key).unwrap_or_else(|| original.clone()),
                     place,
                     original: Some(original),
+                    nested: false,
                 })
         };
-        let mut entries: Vec<ViewEntry> = built(Place::Top).collect();
+        let accounts = self.visible_accounts()?;
+        let mut entries = Vec::new();
+        for entry in built(Place::Top) {
+            let inbox = entry.view.key == "inbox";
+            entries.push(entry);
+            if inbox && accounts.len() > 1 {
+                entries.extend(accounts.iter().map(|a| {
+                    let original = account_inbox(&a.address);
+                    ViewEntry {
+                        view: saved(&original.key).unwrap_or_else(|| original.clone()),
+                        place: Place::Top,
+                        original: Some(original),
+                        nested: true,
+                    }
+                }));
+            }
+        }
         entries.extend(
             stored
                 .iter()
-                .filter(|v| built_in(&v.key).is_none())
+                .filter(|v| built_in(&v.key).is_none() && !is_account_inbox(&v.key))
                 .map(|v| ViewEntry {
                     view: v.clone(),
                     place: Place::Yours,
                     original: None,
+                    nested: false,
                 }),
         );
         entries.extend(built(Place::Bottom));
@@ -299,6 +343,7 @@ impl Commands {
             let mut elsewhere: HashSet<(String, String)> = HashSet::new();
             for other in self.views()? {
                 let skip = matches!(other.view.key.as_str(), "inbox" | EVERYTHING_ELSE)
+                    || is_account_inbox(&other.view.key)
                     || other.place == Place::Bottom
                     || other.view.hidden;
                 if skip {

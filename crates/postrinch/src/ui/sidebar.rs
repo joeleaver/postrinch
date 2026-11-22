@@ -1,4 +1,5 @@
-//! The sidebar, after the views mockup: the inbox and its tabs, a thin
+//! The sidebar, after the views mockup: the inbox (with each account's
+//! under it, when there are several) and its tabs, a thin
 //! line with + to make a view, the person's own views, another line, then
 //! Everything else, All mail, Sent and Drafts; and sync below.
 
@@ -85,15 +86,15 @@ fn views_in(state: State, place: Place) -> NodeHandle {
             views
                 .iter()
                 .filter(|e| e.place == place && crate::views::listed(&e.view, &counts, show_hidden))
-                .map(|e| e.view.clone())
+                .map(|e| (e.view.clone(), e.nested))
                 .collect::<Vec<_>>()
         })
     };
     rsx! {
         div { class: "view-group",
-            for view in listed() {
-                div { key: format!("{}|{}|{:?}|{:?}|{}", view.key, view.name, view.accounts, view.count, view.hidden),
-                    {view_row(__scope, state, view.clone())}
+            for (view, nested) in listed() {
+                div { key: format!("{}|{}|{:?}|{:?}|{}|{nested}", view.key, view.name, view.accounts, view.count, view.hidden),
+                    {view_row(__scope, state, view.clone(), nested)}
                 }
             }
         }
@@ -101,7 +102,7 @@ fn views_in(state: State, place: Place) -> NodeHandle {
 }
 
 #[component]
-fn view_row(state: State, view: SavedView) -> NodeHandle {
+fn view_row(state: State, view: SavedView, nested: bool) -> NodeHandle {
     let key = view.key.clone();
     let chosen = view.key.clone();
     let counted = view.clone();
@@ -134,6 +135,9 @@ fn view_row(state: State, view: SavedView) -> NodeHandle {
                 }
                 if hidden {
                     class.push_str(" hidden-view");
+                }
+                if nested {
+                    class.push_str(" nested");
                 }
                 class
             }},

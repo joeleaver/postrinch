@@ -107,6 +107,55 @@ fn built_in_views_come_first_and_last() {
 }
 
 #[test]
+fn each_account_has_an_inbox_under_inbox_when_there_are_several() {
+    let (_dir, commands, me) = setup();
+    let nested = |commands: &Commands| -> Vec<String> {
+        let entries = commands.views().unwrap();
+        assert_eq!(entries[0].view.key, "inbox");
+        entries
+            .iter()
+            .skip(1)
+            .take_while(|e| e.nested)
+            .map(|e| e.view.name.clone())
+            .collect()
+    };
+    assert!(nested(&commands).is_empty(), "one account: no inbox of its own");
+
+    let work = address("me@work.example");
+    commands
+        .store
+        .put_account(&Account::new(work.clone(), Provider::Google))
+        .unwrap();
+    assert_eq!(nested(&commands), [me.to_string(), work.to_string()]);
+    let mine = commands
+        .views()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.view.name == me.to_string())
+        .unwrap();
+    assert_eq!(listed_view(&commands, &mine.view), ["dinner", "invoice", "acme"]);
+
+    // Hidden, it stays an account inbox, not a view of the person's own.
+    let mut hidden = mine.view.clone();
+    hidden.hidden = true;
+    commands.save_view(&hidden).unwrap();
+    let entries = commands.views().unwrap();
+    let again = entries.iter().find(|e| e.view.key == hidden.key).unwrap();
+    assert!(again.nested && again.view.hidden && again.original.is_some());
+    assert!(entries.iter().all(|e| e.place != Place::Yours));
+}
+
+fn listed_view(commands: &Commands, view: &postrinch_model::SavedView) -> Vec<String> {
+    let page = commands
+        .list_view(view, ListOrder::NewestFirst, 0, 50)
+        .unwrap();
+    page.threads
+        .iter()
+        .map(|r| r.summary.id.0.clone())
+        .collect()
+}
+
+#[test]
 fn labels_alone_and_searches_list_the_same() {
     let (_dir, commands, _) = setup();
     assert_eq!(listed(&commands, "in:inbox"), ["dinner", "invoice", "acme"]);
