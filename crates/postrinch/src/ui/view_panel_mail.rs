@@ -1,5 +1,5 @@
-//! The view panel's "which mail": archived mail, labels, accounts, who it
-//! is from and to, when, what the conversation is, and the search text
+//! The view panel's "which mail": where (accounts, archived mail, when),
+//! who (from, to), what (labels, unread and the rest), and the search text
 //! all of these write into (`Filters`), so the text stays the one place a
 //! view's search lives and each field follows the others.
 
@@ -68,14 +68,6 @@ pub fn which_mail(state: State) -> NodeHandle {
             v.query = f.apply(&v.query);
         },
     );
-    let labels = label_picker(
-        __scope,
-        state,
-        "Labels",
-        "panel-name",
-        move || filters(state),
-        move |l: Filters| change(state, move |f| *f = l),
-    );
     let flags: Vec<NodeHandle> = [
         ("Unread", (|f: &mut Filters| &mut f.unread) as fn(&mut Filters) -> &mut bool),
         ("Starred", |f| &mut f.starred),
@@ -115,12 +107,12 @@ pub fn which_mail(state: State) -> NodeHandle {
         .collect();
     rsx! {
         div { class: "panel-mail",
-        {archived}
-        div { class: "panel-labels", {labels} }
         {accounts(__scope, state)}
+        {archived}
+        {when}
         {people_picker(__scope, state, Side::From)}
         {people_picker(__scope, state, Side::To)}
-        {when}
+        {label_picker(__scope, state)}
         div { class: "panel-field",
             span { class: "panel-name", "Only" }
             div { class: "view-chips", {flags} {lasts} }
@@ -128,6 +120,7 @@ pub fn which_mail(state: State) -> NodeHandle {
         div { class: "panel-field panel-query",
             span { class: "panel-name", "Search text" }
             TextInput {
+                size: "sm",
                 value_fn: move || read(state, |e| e.draft.query.clone()),
                 oninput: move |v: String| state.change_edit(|view| view.query = v),
                 onsubmit: move || state.save_edit(),

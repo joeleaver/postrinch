@@ -91,9 +91,9 @@ pub fn view_panel(state: State) -> NodeHandle {
 fn body(state: State) -> NodeHandle {
     let kind = read(state, |e| Some(e.kind)).unwrap_or(Editing::View);
     let title = match kind {
-        Editing::View => "Edit view",
-        Editing::New => "New view",
-        Editing::Search => "Search",
+        Editing::View => "EDIT VIEW",
+        Editing::New => "NEW VIEW",
+        Editing::Search => "SEARCH",
     };
     let orders = choice(
         __scope,
@@ -122,7 +122,7 @@ fn body(state: State) -> NodeHandle {
     let listing = choice(
         __scope,
         state,
-        "Listed",
+        "In the sidebar",
         vec![
             (Listed::Always, "Always"),
             (Listed::WhenItHasMail, "Only when it has mail"),
@@ -133,19 +133,14 @@ fn body(state: State) -> NodeHandle {
     );
     let name_hint = match kind {
         Editing::Search => "Name it to keep it as a view",
-        _ => "",
+        _ => "Name",
     };
     rsx! {
         div { class: "panel-parts",
-        div { class: "panel-head", h2 { {title} } }
-        div { class: "panel-body",
-            p { class: "panel-group", "WHICH MAIL" }
-            {crate::ui::view_panel_mail::which_mail(__scope, state)}
-            p { class: "panel-group", "THE LIST" }
-            {orders}
-            p { class: "panel-group", "IN THE SIDEBAR" }
-            div { class: "panel-field",
-                span { class: "panel-name", "Name" }
+        // The view's name heads the panel, as it heads the list.
+        div { class: "panel-head",
+            p { class: "panel-kind", {title} }
+            div { class: "panel-title",
                 TextInput {
                     placeholder: name_hint,
                     value_fn: move || read(state, |e| e.draft.name.clone()),
@@ -153,6 +148,12 @@ fn body(state: State) -> NodeHandle {
                     onsubmit: move || state.save_edit(),
                 }
             }
+        }
+        div { class: "panel-body",
+            p { class: "panel-group", "WHICH MAIL" }
+            {crate::ui::view_panel_mail::which_mail(__scope, state)}
+            p { class: "panel-group", "HOW IT SHOWS" }
+            {orders}
             {counts}
             {listing}
         }
@@ -205,8 +206,10 @@ pub const CSS: &str = r#"
 .panel-inner { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .panel-parts { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .panel-mail { display: flex; flex-direction: column; gap: 8px; }
-.panel-head { padding: 14px 24px; border-bottom: 1px solid var(--line-soft); }
-.panel-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.panel-head { padding: 12px 24px 14px; border-bottom: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 6px; }
+.panel-kind { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); }
+.panel-title .rinch-text-input__input { height: 38px; font-size: 17px; font-weight: 600; }
+.view-panel .rinch-text-input__input { min-height: 32px; }
 .panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 24px 16px; display: flex; flex-direction: column; gap: 8px; }
 .panel-group { margin: 12px 0 2px; padding-top: 12px; border-top: 1px solid var(--line-soft); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); }
 .panel-group:first-child { border-top: 0; padding-top: 0; }
