@@ -84,34 +84,67 @@ fn has_own(state: State) -> bool {
         .with(|v| v.iter().any(|e| e.place == Place::Yours && !e.view.hidden))
 }
 
-/// The views listed in one part of the sidebar. Keyed by what a row shows
-/// but its count: a row is built once and its count follows in place.
+/// The views listed in one part of the sidebar, as a tree: each account
+/// under Inbox, its categories under it, a row's rows shown while it is
+/// open. Keyed by what a row shows but its count: a row is built once and
+/// its count follows in place.
 #[component]
 fn views_in(state: State, place: Place) -> NodeHandle {
     let listed = move || {
         let counts = state.view_counts.get();
         let show_hidden = state.show_hidden.get();
+        state.view_tree.get();
         state.views.with(|views| {
+            let under = |key: &str| {
+                views
+                    .iter()
+                    .find(|e| e.view.key == key)
+                    .and_then(|e| e.under.clone())
+            };
             views
                 .iter()
                 .filter(|e| e.place == place && crate::views::listed(&e.view, &counts, show_hidden))
-                .map(|e| (e.view.clone(), e.nested))
+                .filter_map(|e| {
+                    // Shown while every row it is under is open.
+                    let mut depth = 0;
+                    let mut above = e.under.clone();
+                    while let Some(key) = above {
+                        if !state.row_open(&key) {
+                            return None;
+                        }
+                        depth += 1;
+                        above = under(&key);
+                    }
+                    let parent = views
+                        .iter()
+                        .any(|c| c.under.as_deref() == Some(e.view.key.as_str()));
+                    Some((e.view.clone(), Tree { depth, parent }))
+                })
                 .collect::<Vec<_>>()
         })
     };
     rsx! {
         div { class: "view-group",
-            for (view, nested) in listed() {
-                div { key: format!("{}|{}|{:?}|{:?}|{}|{nested}", view.key, view.name, view.accounts, view.count, view.hidden),
-                    {view_row(__scope, state, view.clone(), nested)}
+            for (view, tree) in listed() {
+                div { key: format!("{}|{}|{:?}|{:?}|{}|{tree:?}", view.key, view.name, view.accounts, view.count, view.hidden),
+                    {view_row(__scope, state, view.clone(), tree)}
                 }
             }
         }
     }
 }
 
+/// Where a row stands in the sidebar's tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Tree {
+    /// How many rows it is under.
+    depth: usize,
+    /// Whether rows are under it, which it opens and closes.
+    parent: bool,
+}
+
 #[component]
-fn view_row(state: State, view: SavedView, nested: bool) -> NodeHandle {
+fn view_row(state: State, view: SavedView, tree: Tree) -> NodeHandle {
     let key = view.key.clone();
     let chosen = view.key.clone();
     let counted = view.clone();
@@ -125,8 +158,9 @@ fn view_row(state: State, view: SavedView, nested: bool) -> NodeHandle {
     });
     // A view of one account says which, by the account's colour (once
     // the accounts are loaded).
+    // Not under an account's row, which says it already.
     let one = match view.accounts.as_slice() {
-        [one] => Some(one.clone()),
+        [one] if tree.depth < 2 => Some(one.clone()),
         _ => None,
     };
     let dot_style = Memo::new(
@@ -155,11 +189,10 @@ fn view_row(state: State, view: SavedView, nested: bool) -> NodeHandle {
                 if hidden {
                     class.push_str(" hidden-view");
                 }
-                if nested {
-                    class.push_str(" nested");
-                }
                 class
             }},
+            style: {format!("padding-left: {}px", 2 + tree.depth * 14)},
+            {chevron(__scope, state, view.key.clone(), tree.parent)}
             div { class: "row-open", onclick: move || state.open_view(&key),
                 span { class: "folder-name",
                     span { class: "name-text", {view.name.clone()} }
@@ -174,6 +207,23 @@ fn view_row(state: State, view: SavedView, nested: bool) -> NodeHandle {
             {pencil(__scope, view.name.clone(), move || pressed.get(), move || {
                 if pressed.get() { state.finish_edit() } else { state.edit_view(&edit) }
             })}
+        }
+    }
+}
+
+/// What opens and closes a row's rows; room for one on a row without.
+fn chevron(__scope: &mut RenderScope, state: State, key: String, parent: bool) -> NodeHandle {
+    if !parent {
+        return rsx! { span { class: "chevron" } };
+    }
+    let shown = key.clone();
+    let open = Memo::new(move || state.row_open(&shown));
+    rsx! {
+        button {
+            class: "chevron row-chevron",
+            aria-label: {move || if open.get() { "Close" } else { "Open" }},
+            onclick: move || state.toggle_row(&key),
+            {move || if open.get() { "\u{25be}" } else { "\u{25b8}" }}
         }
     }
 }

@@ -7,12 +7,34 @@ use postrinch_commands::{LabelName, Place, Query, ViewEntry, ViewTally, label_ma
 use postrinch_model::{EmailAddress, SavedView, SystemLabel, Timestamp};
 use rinch::batch;
 
+use crate::appearance::Settings;
 use crate::state::{PAGE, State, View};
 
 /// The view the window opens on.
 pub const FIRST: &str = "inbox";
 
 impl State {
+    /// Whether a sidebar row with rows under it shows them: as the person
+    /// left it, else Inbox open and each account closed.
+    pub fn row_open(self, key: &str) -> bool {
+        self.view_tree
+            .with(|t| t.get(key).copied())
+            .unwrap_or(key == "inbox")
+    }
+
+    /// Open or close a row with rows under it, and keep that for next time.
+    pub fn toggle_row(self, key: &str) {
+        let open = !self.row_open(key);
+        self.view_tree.update(|t| {
+            t.insert(key.to_owned(), open);
+        });
+        let mut settings = Settings::load();
+        settings.view_tree = self.view_tree.get();
+        if let Err(e) = settings.save() {
+            tracing::warn!("the sidebar's open rows were not saved: {e}");
+        }
+    }
+
     /// The open view as saved, once the views are loaded.
     pub fn saved_view(self) -> Option<ViewEntry> {
         let key = self.open_view.get();
@@ -116,7 +138,7 @@ impl State {
                             view: view.clone(),
                             place: Place::Yours,
                             original: None,
-                            nested: false,
+                            under: None,
                         },
                     );
                 }

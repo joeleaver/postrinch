@@ -99,6 +99,8 @@ pub struct State {
     pub sync: Signal<Vec<AccountSync>>,
     /// Bumped whenever sync changed the store, so what is shown reloads.
     pub revision: Signal<u64>,
+    /// Sidebar rows opened or closed by the person (`row_open`).
+    pub view_tree: Signal<std::collections::BTreeMap<String, bool>>,
     /// The label being renamed or coloured.
     pub editing: Signal<Option<LabelEdit>>,
     /// The label being made.
@@ -206,6 +208,7 @@ impl State {
             thread: Signal::new(None),
             sync: Signal::new(Vec::new()),
             revision: Signal::new(0),
+            view_tree: Signal::new(settings.view_tree.clone()),
             editing: Signal::new(None),
             making: Signal::new(None),
             downloaded: Signal::new(Vec::new()),

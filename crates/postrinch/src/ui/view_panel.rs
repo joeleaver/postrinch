@@ -5,7 +5,7 @@
 //! shows is in view_panel_mail.rs; here are the list's order, how the
 //! sidebar lists it, and Save.
 
-use postrinch_commands::is_account_inbox;
+use postrinch_commands::followed;
 use postrinch_model::{ListOrder, SavedView, ViewCount, ViewRows};
 use rinch::prelude::*;
 
@@ -144,8 +144,23 @@ fn body(state: State) -> NodeHandle {
         listed,
         set_listed,
     );
-    // An account's inbox shows Inbox's mail: that is changed on Inbox.
-    let follows = read(state, |e| Some(is_account_inbox(&e.draft.key))).unwrap_or(false);
+    // An account's inbox shows Inbox's mail, changed on Inbox; an
+    // account's category is Gmail's, as it is.
+    let parent = read(state, |e| followed(&e.draft.key));
+    let follows = parent.is_some();
+    let (said, change_inbox) = match parent {
+        Some("inbox") => (
+            "Inbox\u{2019}s mail, in this account alone. What the inbox shows is set on Inbox, for every account.".to_owned(),
+            "",
+        ),
+        _ => {
+            let name = read(state, |e| Some(e.original.name.clone())).unwrap_or_default();
+            (
+                format!("Gmail\u{2019}s {name} category, in this account. Make a view of your own to choose other mail."),
+                "display: none",
+            )
+        }
+    };
     let name_hint = match kind {
         Editing::Search => "Name it to keep it as a view",
         _ => "Name",
@@ -167,8 +182,8 @@ fn body(state: State) -> NodeHandle {
         div { class: "panel-body",
             p { class: "panel-group", "WHICH MAIL" }
             div { class: "panel-follows", style: {if follows { "" } else { "display: none" }},
-                p { "Inbox\u{2019}s mail, in this account alone. What the inbox shows is set on Inbox, for every account." }
-                button { class: "panel-link", onclick: move || state.edit_view("inbox"), "Change Inbox" }
+                p { {said} }
+                button { class: "panel-link", style: change_inbox, onclick: move || state.edit_view("inbox"), "Change Inbox" }
             }
             div { style: {if follows { "display: none" } else { "" }},
                 {crate::ui::view_panel_mail::which_mail(__scope, state)}

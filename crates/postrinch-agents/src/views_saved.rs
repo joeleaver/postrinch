@@ -3,7 +3,7 @@
 //! limited to some accounts sees only views of every account or of its
 //! own, and changes only those of its own (`Commands::may_change_view`).
 
-use postrinch_commands::{Commands, ViewEntry, is_account_inbox};
+use postrinch_commands::{Commands, ViewEntry, followed};
 use postrinch_model::{SavedView, ViewCount};
 use serde_json::{Value, json};
 
@@ -76,10 +76,19 @@ fn save(commands: &Commands, named: Option<&str>, change: &ViewShape) -> Result<
             view
         }
     };
-    if is_account_inbox(&view.key) && (change.search.is_some() || change.accounts.is_some()) {
-        return Err(
-            "An account's inbox shows Inbox's mail in that account: change Inbox's search instead, and every account's inbox follows.".into(),
-        );
+    let fixed = change.search.is_some() || change.accounts.is_some();
+    match followed(&view.key) {
+        Some("inbox") if fixed => {
+            return Err(
+                "An account's inbox shows Inbox's mail in that account: change Inbox's search instead, and every account's inbox follows.".into(),
+            );
+        }
+        Some(_) if fixed => {
+            return Err(
+                "An account's category is Gmail's, as it is: its search and accounts cannot change. Make a view of your own instead.".into(),
+            );
+        }
+        _ => {}
     }
     change.apply(&mut view)?;
     commands.save_view(&view).map_err(say)?;

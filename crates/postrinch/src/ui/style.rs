@@ -108,8 +108,9 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 }
 .view-add:hover { background: var(--hover); color: var(--ink); }
 .folder.hidden-view .name-text { color: var(--muted); font-style: italic; }
-.folder.nested .row-open { padding-left: 14px; }
-.view-row { padding: 0 4px 0 10px; gap: 2px; }
+.view-row { padding: 0 4px 0 2px; gap: 2px; }
+.row-chevron { height: 100%; display: flex; align-items: center; justify-content: center; border: 0; padding: 0; background: none; font-family: inherit; font-size: 11px; line-height: 1; color: var(--muted); cursor: pointer; }
+.row-chevron:hover { color: var(--ink); }
 .row-open { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .view-row .count { padding-right: 4px; }
 .folder.unsaved .name-text { font-style: italic; }

@@ -1,5 +1,6 @@
 //! Views: saved searches the sidebar lists in place of labels. Gmail's
-//! inbox, its tabs, Sent, Drafts and All mail are views built in; the
+//! inbox (with each account's, and each account's categories, under it),
+//! Sent, Drafts and All mail are views built in; the
 //! person's own come between them. A built-in view can be saved over and
 //! put back; the person's can be removed.
 
@@ -14,6 +15,7 @@ use crate::labels::Chip;
 use crate::messages::message_row;
 use crate::query::{LabelName, Query, label_matches};
 use crate::query_or::Either;
+use crate::views_accounts::{TABS, account_views, followed};
 use crate::{CommandError, CommandResult, Commands, ThreadPage};
 
 /// The built-in view of mail in the inbox and in no other view.
@@ -22,15 +24,6 @@ pub const EVERYTHING_ELSE: &str = "everything-else";
 /// Built-in views there are no more, whose saved settings are passed
 /// over: Primary is the inbox now.
 const RETIRED: [&str; 1] = ["primary"];
-
-/// What an account's own inbox view's key starts with; the account's
-/// address (lowercased) follows.
-const ACCOUNT_INBOX: &str = "inbox:";
-
-/// Whether a view is one account's inbox, listed under Inbox.
-pub fn is_account_inbox(key: &str) -> bool {
-    key.starts_with(ACCOUNT_INBOX)
-}
 
 /// Searches already run, by query and accounts.
 type Found = HashMap<(String, Vec<EmailAddress>), Vec<ThreadEntry>>;
@@ -56,9 +49,10 @@ pub struct ViewEntry {
     /// A built-in view as it first was, to put back; `None` for the
     /// person's own, which can be removed instead.
     pub original: Option<SavedView>,
-    /// Listed under the view above it: each account's inbox under Inbox.
+    /// The view it is listed under, by key: each account's inbox under
+    /// Inbox, and its categories under its inbox (views_accounts.rs).
     #[serde(default)]
-    pub nested: bool,
+    pub under: Option<String>,
 }
 
 /// How many conversations a view has.
@@ -84,7 +78,7 @@ impl ViewTally {
 /// The built-in views: key, name, search, count, place.
 const BUILT_IN: [(&str, &str, &str, ViewCount, Place); 9] = [
     // Gmail's inbox as Gmail shows it with its tabs: Primary. The other
-    // tabs follow it.
+    // tabs are each account's, listed under it (views_accounts.rs).
     (
         "inbox",
         "Inbox",
@@ -139,7 +133,7 @@ const BUILT_IN: [(&str, &str, &str, ViewCount, Place); 9] = [
 ];
 
 /// A built-in view as it first was.
-fn built_in(key: &str) -> Option<(SavedView, Place)> {
+pub(crate) fn built_in(key: &str) -> Option<(SavedView, Place)> {
     BUILT_IN
         .iter()
         .find(|(k, ..)| *k == key)
@@ -166,21 +160,6 @@ fn limited() -> CommandError {
     )
 }
 
-/// One account's inbox, as it first was: Inbox's search, in that account.
-fn account_inbox(account: &EmailAddress, inbox: &str) -> SavedView {
-    SavedView {
-        key: format!("{ACCOUNT_INBOX}{}", account.key()),
-        name: account.to_string(),
-        query: inbox.to_owned(),
-        accounts: vec![account.clone()],
-        count: ViewCount::Unread,
-        hide_when_empty: false,
-        hidden: false,
-        order: ListOrder::default(),
-        rows: None,
-    }
-}
-
 impl Commands {
     /// Every view, in the sidebar's order: the inbox with each account's
     /// under it (when there are several), its tabs, the person's own in
@@ -197,29 +176,16 @@ impl Commands {
                     view: saved(&original.key).unwrap_or_else(|| original.clone()),
                     place,
                     original: Some(original),
-                    nested: false,
+                    under: None,
                 })
         };
         let accounts = self.visible_accounts()?;
         let mut entries = Vec::new();
-        for entry in built(Place::Top) {
-            let inbox = (entry.view.key == "inbox").then(|| entry.view.query.clone());
+        for entry in built(Place::Top).filter(|e| !TABS.contains(&e.view.key.as_str())) {
+            let inbox = (entry.view.key == "inbox").then(|| entry.view.clone());
             entries.push(entry);
-            if let Some(inbox) = inbox.filter(|_| accounts.len() > 1) {
-                // Each shows Inbox's mail, whatever its own settings: Inbox
-                // is the one place that says what the inbox is.
-                entries.extend(accounts.iter().map(|a| {
-                    let original = account_inbox(&a.address, &inbox);
-                    let mut view = saved(&original.key).unwrap_or_else(|| original.clone());
-                    view.query = inbox.clone();
-                    view.accounts = original.accounts.clone();
-                    ViewEntry {
-                        view,
-                        place: Place::Top,
-                        original: Some(original),
-                        nested: true,
-                    }
-                }));
+            if let Some(inbox) = inbox {
+                entries.extend(account_views(&inbox, &accounts, saved));
             }
         }
         entries.extend(
@@ -227,14 +193,14 @@ impl Commands {
                 .iter()
                 .filter(|v| {
                     built_in(&v.key).is_none()
-                        && !is_account_inbox(&v.key)
+                        && followed(&v.key).is_none()
                         && !RETIRED.contains(&v.key.as_str())
                 })
                 .map(|v| ViewEntry {
                     view: v.clone(),
                     place: Place::Yours,
                     original: None,
-                    nested: false,
+                    under: None,
                 }),
         );
         entries.extend(built(Place::Bottom));
@@ -383,10 +349,11 @@ impl Commands {
         if view.key == EVERYTHING_ELSE {
             let mut elsewhere: HashSet<(String, String)> = HashSet::new();
             for other in self.views()? {
-                // Inbox counts (it is Primary unless changed); each
-                // account's is part of it.
+                // Inbox counts (it is Primary unless changed), and each
+                // account's categories; an account's inbox is part of
+                // Inbox.
                 let skip = other.view.key == EVERYTHING_ELSE
-                    || is_account_inbox(&other.view.key)
+                    || followed(&other.view.key) == Some("inbox")
                     || other.place == Place::Bottom
                     || other.view.hidden;
                 if skip {

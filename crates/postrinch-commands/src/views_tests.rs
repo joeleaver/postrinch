@@ -95,7 +95,15 @@ fn built_in_views_come_first_and_last() {
         .into_iter()
         .map(|e| e.view.key)
         .collect();
-    assert_eq!(keys[..2], ["inbox", "updates"], "Primary is the inbox");
+    assert_eq!(
+        keys[..2],
+        ["inbox", "updates:me@example.org"],
+        "Primary is the inbox; the other tabs are the account's"
+    );
+    assert!(
+        !keys.contains(&"updates".to_owned()),
+        "no tab of every account"
+    );
     assert_eq!(keys.last().unwrap(), "drafts");
     let clients = commands.new_view("Clients", "label:clients").unwrap();
     commands.save_view(&clients).unwrap();
@@ -116,8 +124,7 @@ fn each_account_has_an_inbox_under_inbox_when_there_are_several() {
         assert_eq!(entries[0].view.key, "inbox");
         entries
             .iter()
-            .skip(1)
-            .take_while(|e| e.nested)
+            .filter(|e| crate::followed(&e.view.key) == Some("inbox"))
             .map(|e| e.view.name.clone())
             .collect()
     };
@@ -139,6 +146,36 @@ fn each_account_has_an_inbox_under_inbox_when_there_are_several() {
         .find(|e| e.view.name == me.to_string())
         .unwrap();
     assert_eq!(listed_view(&commands, &mine.view), ["dinner", "acme"]);
+
+    // Under each, its categories, each following the tab of every account.
+    let entries = commands.views().unwrap();
+    let under_mine: Vec<&str> = entries
+        .iter()
+        .filter(|e| e.under.as_deref() == Some(mine.view.key.as_str()))
+        .map(|e| e.view.name.as_str())
+        .collect();
+    assert_eq!(under_mine, ["Updates", "Promotions", "Social", "Forums"]);
+    let updates = entries
+        .iter()
+        .find(|e| e.view.key == format!("updates:{}", me.key()))
+        .unwrap();
+    assert_eq!(updates.view.accounts, std::slice::from_ref(&me));
+    assert_eq!(listed_view(&commands, &updates.view), ["invoice"]);
+    // A category is Gmail's: its search stays as it is.
+    let mut changed = updates.view.clone();
+    changed.query = "is:starred".into();
+    changed.count = ViewCount::All;
+    commands.save_view(&changed).unwrap();
+    let again = commands
+        .views()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.view.key == changed.key)
+        .unwrap();
+    assert_eq!(
+        (again.view.query.as_str(), again.view.count),
+        ("in:inbox category:updates", ViewCount::All)
+    );
 
     // They follow Inbox: changed there, changed in each.
     let mut inbox = commands.views().unwrap()[0].view.clone();
@@ -163,7 +200,7 @@ fn each_account_has_an_inbox_under_inbox_when_there_are_several() {
     commands.save_view(&hidden).unwrap();
     let entries = commands.views().unwrap();
     let again = entries.iter().find(|e| e.view.key == hidden.key).unwrap();
-    assert!(again.nested && again.view.hidden && again.original.is_some());
+    assert!(again.under.is_some() && again.view.hidden && again.original.is_some());
     assert!(entries.iter().all(|e| e.place != Place::Yours));
 }
 
@@ -230,7 +267,7 @@ fn counts_and_everything_else() {
     };
     assert_eq!(count("inbox"), Some(1));
     assert_eq!(count(&clients.key), Some(1));
-    assert_eq!(count("promotions"), None, "counts nothing");
+    assert_eq!(count("promotions:me@example.org"), None, "counts nothing");
     // Every inbox conversation is in a tab, so nothing else is left.
     let everything_else = views.iter().find(|v| v.key == EVERYTHING_ELSE).unwrap();
     let page = commands
@@ -238,7 +275,11 @@ fn counts_and_everything_else() {
         .unwrap();
     assert_eq!(page.total, 0);
     // Hide Updates, and its conversation is left for Everything else.
-    let mut updates = views.iter().find(|v| v.key == "updates").unwrap().clone();
+    let mut updates = views
+        .iter()
+        .find(|v| v.key == "updates:me@example.org")
+        .unwrap()
+        .clone();
     updates.hidden = true;
     commands.save_view(&updates).unwrap();
     let page = commands
@@ -267,21 +308,25 @@ fn saving_checks_and_removing_puts_built_ins_back() {
     bad.accounts = vec![address("stranger@example.org")];
     assert!(commands.save_view(&bad).is_err());
 
-    let mut updates = commands.views().unwrap()[1].view.clone();
-    updates.query = "in:inbox category:updates is:unread".into();
-    commands.save_view(&updates).unwrap();
-    let entry = commands.views().unwrap()[1].clone();
-    assert_eq!(entry.view.query, updates.query);
-    assert_eq!(entry.original.unwrap().query, "in:inbox category:updates");
-    commands.remove_view("updates").unwrap();
-    assert_eq!(
-        commands.views().unwrap()[1].view.query,
-        "in:inbox category:updates"
-    );
+    let sent = |c: &Commands| {
+        c.views()
+            .unwrap()
+            .into_iter()
+            .find(|e| e.view.key == "sent")
+            .unwrap()
+    };
+    let mut changed = sent(&commands).view;
+    changed.query = "in:sent is:starred".into();
+    commands.save_view(&changed).unwrap();
+    let entry = sent(&commands);
+    assert_eq!(entry.view.query, changed.query);
+    assert_eq!(entry.original.unwrap().query, "in:sent");
+    commands.remove_view("sent").unwrap();
+    assert_eq!(sent(&commands).view.query, "in:sent");
 
     // A Primary saved before it was the inbox is passed over, not made
     // one of the person's own.
-    let mut old = updates;
+    let mut old = changed;
     old.key = "primary".into();
     commands.store.put_view(&old).unwrap();
     assert!(

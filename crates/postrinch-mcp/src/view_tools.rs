@@ -34,7 +34,7 @@ impl Postrinch {
     /// key, name, search, accounts (empty for every account), what the
     /// sidebar counts beside it, whether the sidebar lists it, its order,
     /// whether its rows are conversations or single messages, its kind
-    /// (built_in, account_inbox or yours), whether you may change it, and
+    /// (built_in, account_inbox, account_category or yours), whether you may change it, and
     /// how many conversations it has (and how many unread). Everything
     /// else shows inbox mail no other view does.
     #[tool(name = "list_views")]

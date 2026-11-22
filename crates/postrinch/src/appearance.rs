@@ -46,6 +46,10 @@ pub struct Settings {
     /// `EmailAddress::key` gives them).
     #[serde(default)]
     pub pictures_from: Vec<String>,
+    /// Sidebar rows with rows under them, opened or closed by the person,
+    /// by view key (views.rs `row_open` has the rest).
+    #[serde(default)]
+    pub view_tree: std::collections::BTreeMap<String, bool>,
 }
 
 impl Settings {

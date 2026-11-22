@@ -2,7 +2,7 @@
 //! the view panel offers them, rather than Postrinch's own types. Only
 //! the settings given are changed.
 
-use postrinch_commands::{ViewEntry, ViewTally};
+use postrinch_commands::{ViewEntry, ViewTally, followed};
 use postrinch_model::{EmailAddress, ListOrder, SavedView, ViewCount, ViewRows};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -122,10 +122,11 @@ fn word<T: Copy>(name: &str, text: &str, words: &[(&str, T)]) -> Result<T, Strin
 /// conversations it shows.
 pub fn read(entry: &ViewEntry, tally: Option<&ViewTally>, may_change: bool) -> Value {
     let v = &entry.view;
-    let kind = match (&entry.original, entry.nested) {
+    let kind = match (&entry.original, followed(&v.key)) {
         (None, _) => "yours",
-        (Some(_), true) => "account_inbox",
-        (Some(_), false) => "built_in",
+        (Some(_), Some("inbox")) => "account_inbox",
+        (Some(_), Some(_)) => "account_category",
+        (Some(_), None) => "built_in",
     };
     let sidebar = match (v.hidden, v.hide_when_empty) {
         (true, _) => "hidden",
