@@ -22,6 +22,10 @@ use crate::{CommandError, CommandResult, Commands, ThreadPage};
 /// The built-in view of mail in the inbox and in no other view.
 pub const EVERYTHING_ELSE: &str = "everything-else";
 
+/// Built-in views of mail outside the inbox, which Everything else does
+/// not leave out.
+const OUTSIDE_INBOX: [&str; 3] = ["all-mail", "sent", "drafts"];
+
 /// Built-in views there are no more, whose saved settings are passed
 /// over: Primary is the inbox now.
 const RETIRED: [&str; 1] = ["primary"];
@@ -33,12 +37,11 @@ type Found = HashMap<(String, Vec<EmailAddress>), Vec<ThreadEntry>>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Place {
-    /// The inbox and its tabs, first.
-    Top,
+    /// The built-in views, first: Inbox with each account's tree under
+    /// it, Everything else, All mail, Sent and Drafts.
+    BuiltIn,
     /// The person's own views.
     Yours,
-    /// Everything else, All mail, Sent and Drafts, last.
-    Bottom,
 }
 
 /// A view as the sidebar lists it.
@@ -76,8 +79,8 @@ impl ViewTally {
     }
 }
 
-/// The built-in views: key, name, search, count, place.
-const BUILT_IN: [(&str, &str, &str, ViewCount, Place); 9] = [
+/// The built-in views, in the sidebar's order: key, name, search, count.
+const BUILT_IN: [(&str, &str, &str, ViewCount); 9] = [
     // Gmail's inbox as Gmail shows it with its tabs: Primary. The other
     // tabs are each account's, listed under it (views_accounts.rs).
     (
@@ -85,72 +88,57 @@ const BUILT_IN: [(&str, &str, &str, ViewCount, Place); 9] = [
         "Inbox",
         "in:inbox category:primary",
         ViewCount::Unread,
-        Place::Top,
     ),
     (
         "updates",
         "Updates",
         "in:inbox category:updates",
         ViewCount::Unread,
-        Place::Top,
     ),
     (
         "promotions",
         "Promotions",
         "in:inbox category:promotions",
         ViewCount::None,
-        Place::Top,
     ),
     (
         "social",
         "Social",
         "in:inbox category:social",
         ViewCount::None,
-        Place::Top,
     ),
     (
         "forums",
         "Forums",
         "in:inbox category:forums",
         ViewCount::None,
-        Place::Top,
     ),
     (
         EVERYTHING_ELSE,
         "Everything else",
         "in:inbox",
         ViewCount::Unread,
-        Place::Bottom,
     ),
-    ("all-mail", "All mail", "", ViewCount::None, Place::Bottom),
-    ("sent", "Sent", "in:sent", ViewCount::None, Place::Bottom),
-    (
-        "drafts",
-        "Drafts",
-        "in:drafts",
-        ViewCount::All,
-        Place::Bottom,
-    ),
+    ("all-mail", "All mail", "", ViewCount::None),
+    ("sent", "Sent", "in:sent", ViewCount::None),
+    ("drafts", "Drafts", "in:drafts", ViewCount::All),
 ];
 
 /// A built-in view as it first was.
-pub(crate) fn built_in(key: &str) -> Option<(SavedView, Place)> {
+pub(crate) fn built_in(key: &str) -> Option<SavedView> {
     BUILT_IN
         .iter()
         .find(|(k, ..)| *k == key)
-        .map(|&(key, name, query, count, place)| {
-            let view = SavedView {
-                key: key.to_owned(),
-                name: name.to_owned(),
-                query: query.to_owned(),
-                accounts: Vec::new(),
-                count,
-                hide_when_empty: false,
-                hidden: false,
-                order: ListOrder::default(),
-                rows: None,
-            };
-            (view, place)
+        .map(|&(key, name, query, count)| SavedView {
+            key: key.to_owned(),
+            name: name.to_owned(),
+            query: query.to_owned(),
+            accounts: Vec::new(),
+            count,
+            hide_when_empty: false,
+            hidden: false,
+            order: ListOrder::default(),
+            rows: None,
         })
 }
 
@@ -162,18 +150,17 @@ fn limited() -> CommandError {
 }
 
 impl Commands {
-    /// Every view, in the sidebar's order: the inbox with each account's
-    /// under it (when there are several), its tabs, the person's own in
-    /// the order made, then Everything else, All mail, Sent and Drafts.
+    /// Every view, in the sidebar's order: the built-in ones (Inbox with
+    /// each account's tree under it, Everything else, All mail, Sent and
+    /// Drafts), then the person's own in the order made.
     pub fn views(&self) -> CommandResult<Vec<ViewEntry>> {
         let stored = self.store.views()?;
         let saved = |key: &str| stored.iter().find(|v| v.key == key).cloned();
-        let built = |place: Place| {
+        let built = || {
             BUILT_IN
                 .iter()
-                .filter(move |b| b.4 == place)
                 .filter_map(|b| built_in(b.0))
-                .map(|(original, place)| {
+                .map(|original| {
                     // What mail a built-in view shows is fixed; how it
                     // shows it is the person's.
                     let mut view = saved(&original.key).unwrap_or_else(|| original.clone());
@@ -181,7 +168,7 @@ impl Commands {
                     view.accounts = original.accounts.clone();
                     ViewEntry {
                         view,
-                        place,
+                        place: Place::BuiltIn,
                         original: Some(original),
                         under: None,
                     }
@@ -189,7 +176,7 @@ impl Commands {
         };
         let accounts = self.visible_accounts()?;
         let mut entries = Vec::new();
-        for entry in built(Place::Top).filter(|e| !TABS.contains(&e.view.key.as_str())) {
+        for entry in built().filter(|e| !TABS.contains(&e.view.key.as_str())) {
             let inbox = (entry.view.key == "inbox").then(|| entry.view.clone());
             entries.push(entry);
             if let Some(inbox) = inbox {
@@ -211,7 +198,6 @@ impl Commands {
                     under: None,
                 }),
         );
-        entries.extend(built(Place::Bottom));
         entries.retain(|e| self.sees_view(&e.view));
         Ok(entries)
     }
@@ -232,7 +218,7 @@ impl Commands {
             return Err(CommandError::UnknownAccount(stray.clone()));
         }
         let before = self.store.views()?.into_iter().find(|v| v.key == view.key);
-        let before = before.or_else(|| built_in(&view.key).map(|(v, _)| v));
+        let before = before.or_else(|| built_in(&view.key));
         if !self.may_change_view(view) || before.is_some_and(|v| !self.may_change_view(&v)) {
             return Err(limited());
         }
@@ -371,7 +357,7 @@ impl Commands {
                 // Inbox.
                 let skip = other.view.key == EVERYTHING_ELSE
                     || followed(&other.view.key) == Some("inbox")
-                    || other.place == Place::Bottom
+                    || OUTSIDE_INBOX.contains(&other.view.key.as_str())
                     || other.view.hidden;
                 if skip {
                     continue;

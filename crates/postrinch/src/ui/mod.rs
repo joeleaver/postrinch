@@ -157,13 +157,20 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     window
 }
 
-/// The right of the title bar: Write (a pencil, after the title bar mockup),
-/// search, and anything that went wrong.
+/// The title bar's own part: Write (a pencil, after the title bar mockup)
+/// and search together in the middle of the window, and on the right an
+/// update waiting and anything that went wrong.
 #[component]
 fn title_status(state: State) -> NodeHandle {
     rsx! {
+        div { class: "title-parts",
         div { class: "title-status",
             {about::update_pill(__scope, state)}
+            for error in state.error.get() {
+                div { key: error.clone(), class: "header-error", {error.clone()} }
+            }
+        }
+        div { class: "title-center",
             button {
                 class: "title-write",
                 title: "Write (C)",
@@ -180,9 +187,7 @@ fn title_status(state: State) -> NodeHandle {
                     onsubmit: move || state.run_search(),
                 }
             }
-            for error in state.error.get() {
-                div { key: error.clone(), class: "header-error", {error.clone()} }
-            }
+        }
         }
     }
 }

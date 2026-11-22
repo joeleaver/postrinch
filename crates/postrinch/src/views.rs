@@ -188,19 +188,12 @@ impl State {
             .update(|views| match views.iter_mut().find(|e| e.view.key == key) {
                 Some(entry) => entry.view = view.clone(),
                 None => {
-                    let at = views
-                        .iter()
-                        .position(|e| e.place == Place::Bottom)
-                        .unwrap_or(views.len());
-                    views.insert(
-                        at,
-                        ViewEntry {
-                            view: view.clone(),
-                            place: Place::Yours,
-                            original: None,
-                            under: None,
-                        },
-                    );
+                    views.push(ViewEntry {
+                        view: view.clone(),
+                        place: Place::Yours,
+                        original: None,
+                        under: None,
+                    });
                 }
             });
         Ok(())

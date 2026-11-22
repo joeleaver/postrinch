@@ -87,7 +87,7 @@ fn listed(commands: &Commands, query: &str) -> Vec<String> {
 }
 
 #[test]
-fn built_in_views_come_first_and_last() {
+fn built_in_views_come_first_then_the_persons_own() {
     let (_dir, commands, _) = setup();
     let keys: Vec<String> = commands
         .views()
@@ -111,9 +111,11 @@ fn built_in_views_come_first_and_last() {
     let mine = entries.iter().find(|e| e.view.key == clients.key).unwrap();
     assert_eq!((mine.place, mine.original.is_none()), (Place::Yours, true));
     assert_eq!(
-        entries[5].view.name, "Clients",
-        "after the five inbox views"
+        entries.last().unwrap().view.name,
+        "Clients",
+        "after every built-in view"
     );
+    assert_eq!(entries[entries.len() - 2].view.key, "drafts");
 }
 
 #[test]

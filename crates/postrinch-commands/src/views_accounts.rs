@@ -46,7 +46,7 @@ pub(crate) fn account_views(
         view.accounts = original.accounts.clone();
         ViewEntry {
             view,
-            place: Place::Top,
+            place: Place::BuiltIn,
             original: Some(original),
             under: Some(under.to_owned()),
         }
@@ -66,7 +66,7 @@ pub(crate) fn account_views(
         if a.provider != Provider::Google {
             continue;
         }
-        for (tab, _) in TABS.iter().filter_map(|t| built_in(t)) {
+        for tab in TABS.iter().filter_map(|t| built_in(t)) {
             entries.push(own(&tab, &a.address, tab.name.clone(), &under));
         }
     }

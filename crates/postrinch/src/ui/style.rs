@@ -19,6 +19,13 @@ html, body { margin: 0; height: 100%; background: transparent; }
 .logo-line { stroke: var(--logo-line); }
 .logo-outline { stroke: var(--logo-line); fill: var(--logo-line); }
 .title-status { display: flex; align-items: center; gap: 12px; padding-right: 8px; }
+/* Write and search, centred on the window whatever is either side. */
+.rinch-borderlesswindow__titlebar { position: relative; }
+.title-parts { display: flex; align-items: center; }
+.title-center {
+    position: absolute; top: 0; bottom: 0; left: 50%; width: 400px; margin-left: -200px;
+    display: flex; align-items: center; gap: 8px;
+}
 /* Write, in the title bar beside search: the accent, so it is easy to find. */
 .title-write {
     width: 30px;
@@ -35,7 +42,7 @@ html, body { margin: 0; height: 100%; background: transparent; }
 }
 .title-write:hover { filter: brightness(1.1); }
 .title-write svg { width: 16px; height: 16px; }
-.title-search { width: 360px; margin-right: 8px; }
+.title-search { flex: 1; min-width: 0; }
 .title-search .rinch-text-input__input {
     height: 26px;
     min-height: 26px;

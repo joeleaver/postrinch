@@ -25,7 +25,7 @@ pub fn sidebar(state: State) -> NodeHandle {
                         {unsaved_row(__scope, state, Editing::Search)}
                         div { class: "view-line", span { class: "view-rule" } }
                     }
-                    {views_in(__scope, state, Place::Top)}
+                    {views_in(__scope, state, Place::BuiltIn)}
                     div { class: "view-line",
                         span { class: "view-rule" }
                         button {
@@ -40,14 +40,6 @@ pub fn sidebar(state: State) -> NodeHandle {
                         {unsaved_row(__scope, state, Editing::New)}
                     }
                     {views_in(__scope, state, Place::Yours)}
-                    // A second line only when there are views of the person's
-                    // own between the two.
-                    div {
-                        class: "view-line",
-                        style: {move || if has_own(state) { "" } else { "display: none" }},
-                        span { class: "view-rule" }
-                    }
-                    {views_in(__scope, state, Place::Bottom)}
                     div {
                         class: "show-all",
                         style: {move || if any_hidden(state) { "" } else { "display: none" }},
@@ -75,12 +67,6 @@ pub fn sidebar(state: State) -> NodeHandle {
 
 fn any_hidden(state: State) -> bool {
     state.views.with(|v| v.iter().any(|e| e.view.hidden))
-}
-
-fn has_own(state: State) -> bool {
-    state
-        .views
-        .with(|v| v.iter().any(|e| e.place == Place::Yours && !e.view.hidden))
 }
 
 /// The views listed in one part of the sidebar, as a tree: each account
