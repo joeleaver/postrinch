@@ -212,7 +212,7 @@ fn body(state: State) -> NodeHandle {
                     oninput: move |v: String| change(state, |view| view.query = v),
                     onsubmit: move || save(state),
                 }
-                p { class: "dialog-hint", "The search box\u{2019}s words. They follow the labels above, and the other way round." }
+                p { class: "dialog-hint", "What you\u{2019}d type in the search box." }
             }
             // Shown or not once: the accounts don't change while it is open.
             div { class: "view-part", style: {if several { "" } else { "display: none" }},
