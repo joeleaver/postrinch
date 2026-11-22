@@ -225,14 +225,14 @@ fn row(
 }
 
 /// Settings › Labels: every account's labels, to make, rename, colour,
-/// pin or hide. Mail is found by label in Filters and in views.
+/// pin or hide. Mail is found by label in views.
 #[component]
 pub fn labels_page(state: State) -> NodeHandle {
     rsx! {
         main { class: "settings-main",
             h1 { class: "settings-heading", "Labels" }
             p { class: "settings-hint",
-                "To see mail by label, pick labels in Filters beside the search box, or make a view of them. Click a label here to rename it or change its colour; right-click it for more."
+                "To see mail by label, make a view of it: + in the sidebar, or the pencil on a view, then Labels. Click a label here to rename it or change its colour; right-click it for more."
             }
             div { class: "labels-page", {labels_section(__scope, state)} }
         }

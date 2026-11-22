@@ -173,6 +173,13 @@ fn labels_alone_and_searches_list_the_same() {
         ["invoice", "acme"]
     );
     assert_eq!(listed(&commands, "in:inbox last:me"), ["acme"]);
+    // Every inbox message is Ann's; leaving her out leaves nothing, and
+    // any of two senders finds hers.
+    assert!(listed(&commands, "in:inbox -from:ann").is_empty());
+    assert_eq!(
+        listed(&commands, "in:inbox {from:ann from:nobody}"),
+        ["dinner", "invoice", "acme"]
+    );
     assert_eq!(
         listed(&commands, "in:inbox last:them"),
         ["dinner", "invoice"]

@@ -4,9 +4,9 @@ mod about;
 mod agent_dialogs;
 mod agents_settings;
 mod attachment_cards;
+mod chooser;
 mod compose;
 mod compose_files;
-mod filters;
 mod icons;
 mod keys;
 mod label_edit;
@@ -17,6 +17,7 @@ pub(crate) mod list;
 mod list_head;
 mod logo;
 mod outgoing;
+mod people_picker;
 mod palette;
 mod reader;
 mod reading_settings;
@@ -32,8 +33,9 @@ mod sidebar;
 mod splitter;
 mod style;
 pub(crate) mod thread_actions;
-pub(crate) mod view_dialog;
 mod view_head;
+mod view_panel;
+pub(crate) mod view_panel_mail;
 
 use std::rc::Rc;
 
@@ -84,6 +86,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     actions::init(commands.clone(), sync);
     update::start(state);
     state.mark_read_when_opened();
+    state.save_edits_as_they_come();
     state.open_by_setting();
     crate::pictures::fetch_web_pictures();
     appearance::watch_system(state.system_dark);
@@ -123,10 +126,9 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {compose_files::CSS} {label_new::CSS} }
-                style { {view_head::CSS} {view_dialog::CSS} {filters::CSS} {label_picker::CSS} }
+                style { {view_head::CSS} {view_panel::CSS} {chooser::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}
-                {view_dialog::view_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}
                 if state.view.get() == View::Mail {
                     div { class: "panes",
@@ -134,7 +136,13 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                         {splitter::splitter(__scope, state, splitter::Pane::Sidebar)}
                         {list::thread_list(__scope, state)}
                         {splitter::splitter(__scope, state, splitter::Pane::List)}
-                        {reader::reader(__scope, state)}
+                        // The view panel stands where the reader does, so
+                        // the list beside it shows the view as changed.
+                        if state.view_edit.get().is_some() {
+                            {view_panel::view_panel(__scope, state)}
+                        } else {
+                            {reader::reader(__scope, state)}
+                        }
                     }
                 } else {
                     {settings::settings(__scope, state)}
@@ -169,7 +177,6 @@ fn title_status(state: State) -> NodeHandle {
                     oninput: move |v: String| state.search_draft.set(v),
                     onsubmit: move || state.run_search(),
                 }
-                {filters::search_filters(__scope, state)}
             }
             for error in state.error.get() {
                 div { key: error.clone(), class: "header-error", {error.clone()} }

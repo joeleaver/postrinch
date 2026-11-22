@@ -60,10 +60,11 @@ pub struct State {
     pub view_counts: Signal<HashMap<String, ViewTally>>,
     /// The open view's key.
     pub open_view: Signal<String>,
-    /// What the person changed about the open view and not saved.
-    pub view_changes: Signal<crate::views::ViewChanges>,
-    /// The view being made or changed, in its dialog.
-    pub view_dialog: Signal<Option<crate::ui::view_dialog::ViewDialog>>,
+    /// The view being changed or made, or the search refined, in the
+    /// view panel.
+    pub view_edit: Signal<Option<crate::view_edit::ViewEdit>>,
+    /// The panel's change whose moment to be saved has come.
+    pub save_due: Signal<u64>,
     /// How many of the view's threads to show.
     pub shown: Signal<usize>,
     pub page: Signal<Option<ThreadPage>>,
@@ -71,14 +72,18 @@ pub struct State {
     pub search_draft: Signal<String>,
     /// The search being shown in place of the folder, if any.
     pub search: Signal<Option<String>>,
+    /// The accounts the search looks in (every account for none).
+    pub search_accounts: Signal<Vec<EmailAddress>>,
+    /// What a sender or recipient picker is finding people by.
+    pub people_find: Signal<String>,
+    /// The people found, with what they were found by.
+    pub people: Signal<(String, Vec<postrinch_commands::PersonEntry>)>,
     pub results: Signal<Option<SearchResults>>,
     /// Why the search as typed could not run (an unknown operator, a bad
     /// date), shown in place of its results.
     pub search_error: Signal<Option<String>>,
     /// Gmail's part of the search, for mail not downloaded yet.
     pub remote: Signal<Option<crate::remote_search::RemoteSearch>>,
-    /// Whether the search filters are open.
-    pub filters_open: Signal<bool>,
     /// Whether the sidebar shows every label, hidden ones included.
     pub show_all: Signal<bool>,
     /// Whether the sidebar lists the views hidden from it too.
@@ -181,16 +186,18 @@ impl State {
             views: Signal::new(Vec::new()),
             view_counts: Signal::new(HashMap::new()),
             open_view: Signal::new(crate::views::FIRST.to_owned()),
-            view_changes: Signal::new(Default::default()),
-            view_dialog: Signal::new(None),
+            view_edit: Signal::new(None),
+            save_due: Signal::new(0),
             shown: Signal::new(PAGE),
             page: Signal::new(None),
             search_draft: Signal::new(String::new()),
             search: Signal::new(None),
+            search_accounts: Signal::new(Vec::new()),
+            people_find: Signal::new(String::new()),
+            people: Signal::new((String::new(), Vec::new())),
             results: Signal::new(None),
             search_error: Signal::new(None),
             remote: Signal::new(None),
-            filters_open: Signal::new(false),
             show_all: Signal::new(false),
             show_hidden: Signal::new(false),
             toggled: Signal::new(HashSet::new()),
@@ -268,13 +275,17 @@ impl State {
         }
         // Only when what it shows changes, not whenever the views reload.
         let shown_view = Memo::new(move || self.shown_view());
+        // Likewise: the grouping reads the views, which every list's
+        // answer reloads; a list asked again for that alone would ask
+        // again for ever.
+        let grouping = Memo::new(move || self.grouping());
         let lists = ask.clone();
         Effect::new(move || {
             self.revision.get();
             let Some(view) = shown_view.get() else {
                 return;
             };
-            let grouping = self.grouping();
+            let grouping = grouping.get();
             // Another list than before: show it as last loaded (or nothing,
             // rather than the list left) until the loader answers.
             let key = recent::ListKey {
@@ -324,8 +335,16 @@ impl State {
             self.revision.get();
             search(Request::Search {
                 query: self.search.get(),
-                grouping: self.grouping(),
+                accounts: self.search_accounts.get(),
+                grouping: grouping.get(),
             });
+        });
+        let people = ask.clone();
+        Effect::new(move || {
+            let part = self.people_find.get();
+            if !part.trim().is_empty() {
+                people(Request::People(part));
+            }
         });
         let labels = ask.clone();
         Effect::new(move || {
@@ -372,18 +391,36 @@ impl State {
     /// Show the threads that match what the search box holds.
     pub fn run_search(self) {
         let query = self.search_draft.get();
+        let refining = self
+            .view_edit
+            .with(|e| e.as_ref().is_some_and(|e| e.kind == crate::view_edit::Editing::Search));
         batch(|| {
             self.selected.set(None);
             self.view.set(View::Mail);
+            if refining {
+                self.change_edit(|v| v.query = query.clone());
+                return;
+            }
+            // A search from the box starts over in every account, and
+            // closes the panel on whatever was being changed (kept).
+            self.finish_edit();
+            self.search_accounts.set(Vec::new());
             self.search.set((!query.trim().is_empty()).then_some(query));
         });
     }
 
     /// Go back from search results to the folder.
     pub fn close_search(self) {
+        let refining = self
+            .view_edit
+            .with(|e| e.as_ref().is_some_and(|e| e.kind == crate::view_edit::Editing::Search));
         batch(|| {
             self.search.set(None);
             self.search_draft.set(String::new());
+            self.search_accounts.set(Vec::new());
+            if refining {
+                self.view_edit.set(None);
+            }
         });
     }
 

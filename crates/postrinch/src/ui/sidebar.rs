@@ -8,6 +8,8 @@ use postrinch_model::{EmailAddress, SavedView};
 use rinch::prelude::*;
 
 use crate::state::State;
+use crate::ui::icons::{Icon, icon};
+use crate::view_edit::Editing;
 use crate::sync::thousands;
 use crate::ui::account_color;
 
@@ -20,6 +22,10 @@ pub fn sidebar(state: State) -> NodeHandle {
             {crate::ui::outgoing::outgoing_lines(__scope, state)}
             div { class: "folders",
                 div { class: "folder-group",
+                    if state.search.get().is_some() {
+                        {unsaved_row(__scope, state, Editing::Search)}
+                        div { class: "view-line", span { class: "view-rule" } }
+                    }
                     {views_in(__scope, state, Place::Top)}
                     div { class: "view-line",
                         span { class: "view-rule" }
@@ -30,6 +36,9 @@ pub fn sidebar(state: State) -> NodeHandle {
                             onclick: move || state.new_view(),
                             "+"
                         }
+                    }
+                    if state.view_edit.get().is_some_and(|e| e.kind == Editing::New) {
+                        {unsaved_row(__scope, state, Editing::New)}
                     }
                     {views_in(__scope, state, Place::Yours)}
                     // A second line only when there are views of the person's
@@ -126,11 +135,21 @@ fn view_row(state: State, view: SavedView, nested: bool) -> NodeHandle {
             None => "display: none".to_owned(),
         },
     );
+    let editing = view.key.clone();
+    let edit = view.key.clone();
+    let pressed = Memo::new(move || {
+        state.view_edit.with(|e| {
+            e.as_ref()
+                .is_some_and(|e| e.kind == Editing::View && e.draft.key == editing)
+        })
+    });
     rsx! {
         div {
             class: {move || {
-                let mut class = String::from("folder");
-                if state.open_view.get() == chosen && state.search.get().is_none() {
+                let mut class = String::from("folder view-row");
+                let elsewhere = state.search.get().is_some()
+                    || state.view_edit.with(|e| e.as_ref().is_some_and(|e| e.kind == Editing::New));
+                if state.open_view.get() == chosen && !elsewhere {
                     class.push_str(" chosen");
                 }
                 if hidden {
@@ -141,16 +160,74 @@ fn view_row(state: State, view: SavedView, nested: bool) -> NodeHandle {
                 }
                 class
             }},
-            onclick: move || state.open_view(&key),
-            span { class: "folder-name",
-                span { class: "name-text", {view.name.clone()} }
-                span { class: "dot", style: {move || dot_style.get()} }
+            div { class: "row-open", onclick: move || state.open_view(&key),
+                span { class: "folder-name",
+                    span { class: "name-text", {view.name.clone()} }
+                    span { class: "dot", style: {move || dot_style.get()} }
+                }
+                span {
+                    class: "count",
+                    style: {move || if count.get() > 0 { "" } else { "display: none" }},
+                    {move || thousands(count.get())}
+                }
             }
-            span {
-                class: "count",
-                style: {move || if count.get() > 0 { "" } else { "display: none" }},
-                {move || thousands(count.get())}
+            {pencil(__scope, view.name.clone(), move || pressed.get(), move || {
+                if pressed.get() { state.finish_edit() } else { state.edit_view(&edit) }
+            })}
+        }
+    }
+}
+
+/// The pencil on a row, which opens (or closes) the view panel on it.
+fn pencil(
+    __scope: &mut RenderScope,
+    name: String,
+    pressed: impl Fn() -> bool + Copy + 'static,
+    onclick: impl Fn() + 'static,
+) -> NodeHandle {
+    rsx! {
+        button {
+            class: {move || if pressed() { "row-pencil pressed" } else { "row-pencil" }},
+            title: "Edit view",
+            aria-label: {format!("Edit {name}")},
+            aria-pressed: {move || if pressed() { "true" } else { "false" }},
+            onclick: onclick,
+            {icon(__scope, Icon::Write)}
+        }
+    }
+}
+
+/// A row for what is shown but not in the sidebar yet: a search, or a
+/// view being made. It has the pencil every view has.
+#[component]
+fn unsaved_row(state: State, kind: Editing) -> NodeHandle {
+    let pressed = move || {
+        state
+            .view_edit
+            .with(|e| e.as_ref().is_some_and(|e| e.kind == kind))
+    };
+    let (name, close_title) = match kind {
+        Editing::Search => ("Search", "Close search"),
+        _ => ("New view", "Don't make it"),
+    };
+    let close = move || match kind {
+        Editing::Search => state.close_search(),
+        // A view not made yet is let go of, name or not.
+        _ => state.view_edit.set(None),
+    };
+    rsx! {
+        div { class: "folder view-row chosen unsaved",
+            div { class: "row-open", onclick: move || if !pressed() && kind == Editing::Search { state.edit_search() },
+                span { class: "folder-name", span { class: "name-text", {name} } }
             }
+            {pencil(__scope, name.to_owned(), pressed, move || {
+                match (pressed(), kind) {
+                    (true, _) => state.finish_edit(),
+                    (false, Editing::Search) => state.edit_search(),
+                    (false, _) => {}
+                }
+            })}
+            button { class: "row-close", title: close_title, aria-label: close_title, onclick: close, "×" }
         }
     }
 }

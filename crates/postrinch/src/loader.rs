@@ -19,6 +19,8 @@ use crate::state::State;
 
 /// The least time between two hand-backs of freed memory (`serve`).
 const RELEASE_EVERY: Duration = Duration::from_secs(30);
+/// How many people a sender or recipient picker offers.
+const PEOPLE_LIMIT: usize = 30;
 /// How many threads a search shows.
 const SEARCH_LIMIT: usize = 100;
 /// Loads slower than this are logged, to find what to make faster.
@@ -40,6 +42,8 @@ pub enum Request {
     /// A search's results, or none.
     Search {
         query: Option<String>,
+        /// The accounts it looks in (every account for none).
+        accounts: Vec<EmailAddress>,
         grouping: Grouping,
     },
     /// The open thread, or none.
@@ -50,6 +54,9 @@ pub enum Request {
     },
     /// The labels an account's mail can be given, for the label menu.
     Labels(EmailAddress),
+    /// People whose address or name holds this, to pick as senders or
+    /// recipients.
+    People(String),
 }
 
 impl Request {
@@ -61,6 +68,7 @@ impl Request {
             Request::Search { .. } => 2,
             Request::Thread { .. } => 3,
             Request::Labels(_) => 4,
+            Request::People(_) => 5,
         }
     }
 }
@@ -77,7 +85,9 @@ pub struct Loader {
 impl Loader {
     pub fn send(&self, request: Request) -> Result<(), mpsc::SendError<Request>> {
         match request {
-            Request::Thread { .. } | Request::Labels(_) => self.quick.send(request),
+            Request::Thread { .. } | Request::Labels(_) | Request::People(_) => {
+                self.quick.send(request)
+            }
             _ => self.slow.send(request),
         }
     }
@@ -103,7 +113,7 @@ fn serve(commands: &Commands, state: State, rx: &Receiver<Request>) {
     let mut released: Option<Instant> = None;
     while let Ok(first) = rx.recv() {
         // Everything asked for meanwhile; the newest of each kind wins.
-        let mut latest: [Option<Request>; 5] = Default::default();
+        let mut latest: [Option<Request>; 6] = Default::default();
         let k = first.kind();
         latest[k] = Some(first);
         while let Ok(more) = rx.try_recv() {
@@ -197,8 +207,9 @@ fn answer(commands: &Commands, state: State, request: Request) {
         }
         Request::Search {
             query: Some(query),
+            accounts,
             grouping,
-        } => match commands.search_grouped(&query, SEARCH_LIMIT, grouping) {
+        } => match commands.search_grouped(&query, &accounts, SEARCH_LIMIT, grouping) {
             Ok(results) => {
                 state.search_error.send(None);
                 state.results.send(Some(results));
@@ -212,6 +223,10 @@ fn answer(commands: &Commands, state: State, request: Request) {
                     remote: None,
                 }));
             }
+            Err(e) => failed(e.to_string()),
+        },
+        Request::People(part) => match commands.people(&part, PEOPLE_LIMIT) {
+            Ok(people) => state.people.send((part, people)),
             Err(e) => failed(e.to_string()),
         },
         Request::Thread { thread: None, .. } => state.thread.send(None),

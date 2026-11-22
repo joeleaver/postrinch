@@ -148,6 +148,7 @@ fn built_in(key: &str) -> Option<(SavedView, Place)> {
                 hide_when_empty: false,
                 hidden: false,
                 order: ListOrder::default(),
+                rows: None,
             };
             (view, place)
         })
@@ -164,6 +165,7 @@ fn account_inbox(account: &EmailAddress) -> SavedView {
         hide_when_empty: false,
         hidden: false,
         order: ListOrder::default(),
+        rows: None,
     }
 }
 
@@ -240,6 +242,11 @@ impl Commands {
     /// first was.
     pub fn remove_view(&self, key: &str) -> CommandResult<()> {
         Ok(self.store.remove_view(key)?)
+    }
+
+    /// Why `query` does not read as a search, if it does not.
+    pub fn check_query(query: &str) -> CommandResult<()> {
+        Either::parse(query, now()).map(|_| ())
     }
 
     /// A new view of the person's, named and searching as given.

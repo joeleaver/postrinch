@@ -49,10 +49,13 @@ fn step(state: State, by: isize) -> bool {
     true
 }
 
-/// Step back: out of Settings, out of a search, or close the open thread.
+/// Step back: out of Settings, out of the view panel (its changes kept), out of a
+/// search, or close the open thread.
 fn back(state: State) -> bool {
     if state.view.get() == View::Settings {
         state.view.set(View::Mail);
+    } else if state.view_edit.get().is_some() {
+        state.finish_edit();
     } else if state.search.get().is_some() {
         state.close_search();
     } else if state.selected.get().is_some() {

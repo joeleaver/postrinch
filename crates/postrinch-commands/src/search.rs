@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use postrinch_model::{
     EmailAddress, LabelKind, Message, ProviderMessageId, ProviderThreadId, ThreadSummary, Timestamp,
 };
-use postrinch_store::{Find, Found};
+use postrinch_store::{Find, Found, PersonEntry};
 use serde::{Deserialize, Serialize};
 
 use crate::messages::message_row;
@@ -61,14 +61,16 @@ impl Commands {
     /// `older_than:`, `category:`) plus `account:`. At most `limit`
     /// threads come back, newest first.
     pub fn search(&self, query: &str, limit: usize) -> CommandResult<SearchResults> {
-        self.search_grouped(query, limit, Grouping::Conversations)
+        self.search_grouped(query, &[], limit, Grouping::Conversations)
     }
 
-    /// [`Commands::search`], listing what matched as conversations or as
-    /// messages, each its own row.
+    /// [`Commands::search`] in only these accounts (every account for
+    /// none), listing what matched as conversations or as messages, each
+    /// its own row.
     pub fn search_grouped(
         &self,
         query: &str,
+        only: &[EmailAddress],
         limit: usize,
         grouping: Grouping,
     ) -> CommandResult<SearchResults> {
@@ -84,7 +86,7 @@ impl Commands {
         }
         let now = Timestamp::from_millis(jiff::Timestamp::now().as_millisecond());
         let query = Either::parse(text, now)?;
-        let (found, accounts) = self.found(&query, false)?;
+        let (found, accounts) = self.found_in(&query, false, only)?;
 
         let mut threads: Vec<(EmailAddress, ProviderThreadId, ProviderMessageId)> = Vec::new();
         let mut seen: HashSet<(String, String)> = HashSet::new();
@@ -357,6 +359,8 @@ impl Commands {
             accounts: accounts.to_vec(),
             from: query.from.clone(),
             to: query.to.clone(),
+            not_from: query.not_from.clone(),
+            not_to: query.not_to.clone(),
             subject: query.subject.clone(),
             labels: resolve(&query.labels)?,
             without: resolve(&query.without)?,
@@ -368,6 +372,12 @@ impl Commands {
             set_aside_too: query.set_aside_too,
             every: false,
         })
+    }
+
+    /// People mail was from or to whose address or name holds `part`, for
+    /// choosing senders and recipients to search by.
+    pub fn people(&self, part: &str, limit: usize) -> CommandResult<Vec<PersonEntry>> {
+        Ok(self.store.find_people(part, limit)?)
     }
 
     /// The provider's ids for the account's trash and spam.
