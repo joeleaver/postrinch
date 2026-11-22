@@ -15,6 +15,7 @@ mod label_new;
 mod label_picker;
 mod labels;
 pub(crate) mod list;
+mod list_bar;
 mod list_head;
 mod logo;
 mod outgoing;
@@ -34,7 +35,7 @@ mod sidebar;
 mod splitter;
 mod style;
 pub(crate) mod thread_actions;
-mod view_head;
+
 mod view_panel;
 pub(crate) mod view_panel_mail;
 
@@ -127,7 +128,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {compose_files::CSS} {label_new::CSS} }
-                style { {view_head::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
+                style { {list_bar::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}

@@ -19,9 +19,8 @@ pub fn thread_list(state: State) -> NodeHandle {
         section {
             class: "list",
             style: {move || format!("width: {}px", state.list_width.get())},
-            {crate::ui::view_head::view_head(__scope, state)}
+            {crate::ui::list_bar::list_bar(__scope, state)}
             if searching() {
-                div { class: "search-count", {move || search_line(state)} }
                 {crate::ui::search::search_notes(__scope, state)}
             }
             // What the open conversation can have done to it.
@@ -123,25 +122,6 @@ fn row_keys(state: State) -> Vec<(RowId, Timestamp)> {
 fn find_row(state: State, id: &RowId) -> Option<ThreadRow> {
     let found = with_rows(state, |rows| rows.iter().find(|r| id_of(r) == *id).cloned());
     found.map(|row| state.patched(row))
-}
-
-/// "6 for “cover my shift”".
-fn search_line(state: State) -> String {
-    match state.results.get() {
-        Some(r) => {
-            let n = r.threads.len();
-            let messages = r.threads.first().is_some_and(|t| t.message.is_some());
-            let what = match (messages, n == 1) {
-                (false, true) => "conversation",
-                (false, false) => "conversations",
-                (true, true) => "message",
-                (true, false) => "messages",
-            };
-            let more = if r.more { "+" } else { "" };
-            format!("{}{more} {what}", thousands(n))
-        }
-        None => String::new(),
-    }
 }
 
 /// "Show more (100 of 1,799)".

@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use postrinch_commands::{LabelName, Place, Query, ViewEntry, ViewTally, label_matches};
-use postrinch_model::{EmailAddress, SavedView, SystemLabel, Timestamp};
+use postrinch_model::{EmailAddress, ListOrder, SavedView, SystemLabel, Timestamp};
 use rinch::batch;
 
 use crate::appearance::Settings;
@@ -13,7 +13,66 @@ use crate::state::{PAGE, State, View};
 /// The view the window opens on.
 pub const FIRST: &str = "inbox";
 
+/// `view` narrowed by the list's filter text: its search and the text,
+/// both. The view's key stays, so Everything else is still itself.
+pub fn filtered(mut view: SavedView, filter: &str) -> SavedView {
+    let filter = filter.trim();
+    if filter.is_empty() || postrinch_commands::Commands::check_query(filter).is_err() {
+        return view;
+    }
+    view.query = if view.query.trim().is_empty() {
+        filter.to_owned()
+    } else {
+        format!("({}) {filter}", view.query.trim())
+    };
+    view
+}
+
 impl State {
+    /// Narrow the open view's list by `text`, from the list's filter box.
+    pub fn filter_list(self, text: String) {
+        batch(|| {
+            self.shown.set(PAGE);
+            self.list_filter.set(text);
+        });
+    }
+
+    /// The open view's order, as the list shows it.
+    pub fn shown_order(self) -> ListOrder {
+        self.shown_view().map(|v| v.order).unwrap_or_default()
+    }
+
+    /// Change the open view's order, from the list's bar: through the
+    /// panel when it is open, else saved at once.
+    pub fn set_view_order(self, order: ListOrder) {
+        if self.view_edit.with(|e| e.is_some()) {
+            self.change_edit(|v| v.order = order);
+            return;
+        }
+        let Some(mut view) = self.saved_view().map(|e| e.view) else {
+            return;
+        };
+        if view.order == order {
+            return;
+        }
+        view.order = order;
+        if let Err(e) = self.store_view(view) {
+            self.error
+                .set(Some(format!("The order was not saved: {e}")));
+        }
+    }
+
+    /// ✎ over the list: open the panel on what is shown, or close it.
+    pub fn toggle_edit(self) {
+        if self.view_edit.with(|e| e.is_some()) {
+            self.finish_edit();
+        } else if self.search.get().is_some() {
+            self.edit_search();
+        } else {
+            self.edit_view(&self.open_view.get());
+        }
+    }
+
     /// Whether a sidebar row with rows under it shows them: as the person
     /// left it, else Inbox open and each account closed.
     pub fn row_open(self, key: &str) -> bool {
@@ -113,6 +172,7 @@ impl State {
             self.selected.set(None);
             self.search_accounts.set(Vec::new());
             self.view_edit.set(None);
+            self.list_filter.set(String::new());
             self.open_view.set(key.to_owned());
         });
     }

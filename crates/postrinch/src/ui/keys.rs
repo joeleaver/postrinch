@@ -16,6 +16,15 @@ pub fn listen(root: NodeHandle, state: State) {
             .active_element()
             .and_then(|el| el.tag_name())
             .is_some_and(|t| t == "input" || t == "textarea");
+        // Escape in the list's filter box clears it.
+        let in_filter = root
+            .active_element()
+            .and_then(|el| el.get_attribute("id"))
+            .is_some_and(|id| id == crate::ui::list_bar::FILTER_ID);
+        if key.is_down() && in_filter && key.key == "Escape" {
+            state.filter_list(String::new());
+            return true;
+        }
         if !key.is_down() || in_field || key.ctrl || key.alt || key.meta {
             return false;
         }

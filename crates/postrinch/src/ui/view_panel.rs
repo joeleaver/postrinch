@@ -6,7 +6,7 @@
 //! sidebar lists it, and Save.
 
 use postrinch_commands::built_in_holds;
-use postrinch_model::{ListOrder, SavedView, ViewCount, ViewRows};
+use postrinch_model::{SavedView, ViewCount, ViewRows};
 use rinch::prelude::*;
 
 use crate::state::State;
@@ -108,18 +108,6 @@ fn body(state: State) -> NodeHandle {
         move |v| v.rows.unwrap_or_else(|| state.default_rows()),
         |v, r| v.rows = Some(r),
     );
-    let orders = choice(
-        __scope,
-        state,
-        "Order",
-        vec![
-            (ListOrder::NewestFirst, "Newest first"),
-            (ListOrder::OldestFirst, "Oldest first"),
-            (ListOrder::UnreadFirst, "Unread first"),
-        ],
-        |v| v.order,
-        |v, o| v.order = o,
-    );
     let counts = choice(
         __scope,
         state,
@@ -184,7 +172,6 @@ fn body(state: State) -> NodeHandle {
             }
             p { class: "panel-group", "HOW IT SHOWS" }
             {rows}
-            {orders}
             {counts}
             {listing}
         }

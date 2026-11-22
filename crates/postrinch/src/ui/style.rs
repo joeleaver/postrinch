@@ -114,16 +114,14 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .row-open { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .view-row .count { padding-right: 4px; }
 .folder.unsaved .name-text { font-style: italic; }
-.row-pencil, .row-close {
+.row-close {
     width: 24px; height: 24px; flex-shrink: 0; padding: 0;
     display: none; align-items: center; justify-content: center;
     border: 0; border-radius: 5px; background: transparent; color: var(--ink-2);
     font: inherit; font-size: 15px; cursor: pointer;
 }
-.row-pencil svg { width: 14px; height: 14px; }
-.folder:hover .row-pencil, .folder.chosen .row-pencil, .row-pencil.pressed, .folder.unsaved .row-close { display: flex; }
-.row-pencil:hover, .row-close:hover { background: var(--field); }
-.row-pencil.pressed { background: var(--accent); color: var(--surface); }
+.folder.unsaved .row-close { display: flex; }
+.row-close:hover { background: var(--field); }
 .folder.chosen { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
 .folder-name {
     min-width: 0;
@@ -193,7 +191,6 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     min-height: 0;
     border-right: 1px solid var(--line);
 }
-.search-count { padding: 6px 20px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font-size: 12px; }
 .rows { flex: 1; overflow-y: auto; border-top: 1px solid var(--line-soft); }
 .row {
     display: flex;

@@ -74,6 +74,8 @@ pub struct State {
     pub search: Signal<Option<String>>,
     /// The accounts the search looks in (every account for none).
     pub search_accounts: Signal<Vec<EmailAddress>>,
+    /// Text narrowing the open view's list, never saved (list_bar.rs).
+    pub list_filter: Signal<String>,
     /// What a sender or recipient picker is finding people by.
     pub people_find: Signal<String>,
     /// The people found, with what they were found by.
@@ -195,6 +197,7 @@ impl State {
             search_draft: Signal::new(String::new()),
             search: Signal::new(None),
             search_accounts: Signal::new(Vec::new()),
+            list_filter: Signal::new(String::new()),
             people_find: Signal::new(String::new()),
             people: Signal::new((String::new(), Vec::new())),
             results: Signal::new(None),
@@ -288,6 +291,7 @@ impl State {
             let Some(view) = shown_view.get() else {
                 return;
             };
+            let view = crate::views::filtered(view, &self.list_filter.get());
             let grouping = grouping.get();
             // Another list than before: show it as last loaded (or nothing,
             // rather than the list left) until the loader answers.
@@ -408,6 +412,7 @@ impl State {
             // A search from the box starts over in every account, and
             // closes the panel on whatever was being changed (kept).
             self.finish_edit();
+            self.list_filter.set(String::new());
             self.search_accounts.set(Vec::new());
             self.search.set((!query.trim().is_empty()).then_some(query));
         });

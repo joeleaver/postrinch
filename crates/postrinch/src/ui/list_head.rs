@@ -1,6 +1,6 @@
 //! The row above the list, after the list header mockup: what can be done
 //! to the open conversation (archive, trash, mark unread, its labels, the
-//! star). The list's order is in the view's header (view_head.rs).
+//! star). The filter, the order and ✎ are in the bar above (list_bar.rs).
 
 use rinch::prelude::*;
 
@@ -27,7 +27,7 @@ pub const CSS: &str = r#"
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 12px 14px 8px;
+    padding: 8px 14px 8px;
 }
 .list-actions .icon-button { width: 30px; height: 30px; }
 .list-tools.idle { opacity: 0.4; pointer-events: none; }
