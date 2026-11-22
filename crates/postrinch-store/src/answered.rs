@@ -109,11 +109,12 @@ impl Store {
     /// `thread_lock`.
     fn work_out_answered(&self, thread: u64) -> StoreResult<bool> {
         let key = self.get(THREAD, thread)?.str("key")?;
-        let Some(account_key) = key.split('\u{1f}').next() else {
-            return Ok(false);
+        let account = match key.split('\u{1f}').next() {
+            Some(account_key) => self.accounts_by_key()?.remove(account_key),
+            None => None,
         };
-        let Some(account) = self.accounts_by_key()?.remove(account_key) else {
-            return Ok(false);
+        let Some(account) = account else {
+            return self.nobody_answered(thread);
         };
         let ids = self.links(THREAD, thread, "messages")?;
         let mut by_time: Vec<(i64, u64)> = Vec::with_capacity(ids.len());
@@ -130,6 +131,14 @@ impl Store {
             self.set_answered(thread, at, mine)?;
             return Ok(mine);
         }
+        self.nobody_answered(thread)
+    }
+
+    /// Keep that nobody answered a thread with nothing but drafts (or
+    /// with no account), so the fill passes it by from now on; its first
+    /// message that is not a draft decides.
+    fn nobody_answered(&self, thread: u64) -> StoreResult<bool> {
+        self.set_answered(thread, 0, false)?;
         Ok(false)
     }
 
@@ -247,5 +256,12 @@ mod tests {
         assert_eq!(store.fill_replied_last().unwrap(), 1);
         assert_eq!(store.fill_replied_last().unwrap(), 0);
         assert_eq!(mine(&store, true), 1);
+
+        // A thread of nothing but a draft is filled once, not every time.
+        let mut draft = message("d1", 500, "me@example.org", &["DRAFT"]);
+        draft.thread = ProviderThreadId("t2".into());
+        store.put_message(&draft, None).unwrap();
+        assert_eq!(store.fill_replied_last().unwrap(), 1);
+        assert_eq!(store.fill_replied_last().unwrap(), 0);
     }
 }

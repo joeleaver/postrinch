@@ -34,6 +34,11 @@ pub struct LabelNode {
     pub segment: String,
     /// What this level is called: its segment, or the person's own name.
     pub name: String,
+    /// The provider's whole name for the label at this level
+    /// (`Work/Clients`, `[Superhuman]/AI/News`), as `label:` takes it;
+    /// empty where no label stands for the level.
+    #[serde(default)]
+    pub full: String,
     /// The label at this level; `None` where a name has parts no label of
     /// its own stands for (`Work` in `Work/Clients` when there is no `Work`).
     pub entry: Option<FolderEntry>,
@@ -243,6 +248,7 @@ pub fn label_tree(
         let leaf = LabelNode {
             segment: String::new(),
             name: prefs.name.clone().unwrap_or_default(),
+            full: label.name.clone(),
             entry: Some(entry.clone()),
             role: role(&stats),
             color: prefs
@@ -305,6 +311,7 @@ fn insert(nodes: &mut Vec<LabelNode>, path: &[&str], mut leaf: LabelNode) {
             nodes.push(LabelNode {
                 segment: (*first).to_owned(),
                 name: (*first).to_owned(),
+                full: String::new(),
                 entry: None,
                 role: LabelRole::Tag,
                 color: None,

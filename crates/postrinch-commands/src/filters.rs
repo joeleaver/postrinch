@@ -7,6 +7,13 @@
 use crate::query::{Last, label_matches, operator, tokens};
 
 /// The filters a query sets, as the filter panel shows them.
+/// What a filter asks of a label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabelPick {
+    Has,
+    Not,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Filters {
     pub account: Option<String>,
@@ -14,8 +21,12 @@ pub struct Filters {
     pub within: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
-    /// Labels by their provider's names, any of them (`{label:a label:b}`).
+    /// Labels a conversation has, by their provider's names: any of them
+    /// (`{label:a label:b}`), or all of them when `all_labels`.
     pub labels: Vec<String>,
+    pub all_labels: bool,
+    /// Labels it has none of (`-label:a`).
+    pub without: Vec<String>,
     pub unread: bool,
     pub starred: bool,
     pub attachments: bool,
@@ -27,15 +38,20 @@ impl Filters {
     pub fn read(query: &str) -> Self {
         let mut filters = Filters::default();
         let (rest, group) = take_label_group(query);
+        let grouped = !group.is_empty();
         filters.labels = group;
         for (token, top) in levels(tokens(&rest).unwrap_or_default()) {
-            if !top {
+            if !top || !manages(&token, grouped) {
                 continue;
             }
-            let Some((false, name, value)) = operator(&token) else {
+            let Some((negated, name, value)) = operator(&token) else {
                 continue;
             };
             let value = value.trim_matches('"').to_owned();
+            if negated {
+                filters.without.push(value);
+                continue;
+            }
             let lower = value.to_lowercase();
             match (name, lower.as_str()) {
                 ("account", _) => filters.account = Some(value),
@@ -51,30 +67,42 @@ impl Filters {
                 _ => {}
             }
         }
+        // Labels side by side, outside a group, are all of them.
+        filters.all_labels = !grouped && filters.labels.len() > 1;
         filters
     }
 
-    /// Whether the label named `name` is among the filter's.
-    pub fn has_label(&self, name: &str) -> bool {
-        self.labels.iter().any(|l| label_matches(l, name))
+    /// What the filter asks of the label named `name`, if anything.
+    pub fn label(&self, name: &str) -> Option<LabelPick> {
+        let among = |list: &[String]| list.iter().any(|l| label_matches(l, name));
+        if among(&self.labels) {
+            Some(LabelPick::Has)
+        } else if among(&self.without) {
+            Some(LabelPick::Not)
+        } else {
+            None
+        }
     }
 
-    /// Put a label in, or take it out.
-    pub fn toggle_label(&mut self, name: &str) {
-        if self.has_label(name) {
-            self.labels.retain(|l| !label_matches(l, name));
-        } else {
-            self.labels.push(name.to_owned());
+    /// Ask `pick` of the label named `name`, or nothing.
+    pub fn pick_label(&mut self, name: &str, pick: Option<LabelPick>) {
+        self.labels.retain(|l| !label_matches(l, name));
+        self.without.retain(|l| !label_matches(l, name));
+        match pick {
+            Some(LabelPick::Has) => self.labels.push(name.to_owned()),
+            Some(LabelPick::Not) => self.without.push(name.to_owned()),
+            None => {}
         }
     }
 
     /// `query` with these filters in place of the ones it had; its words
     /// and other operators stay as they were.
     pub fn apply(&self, query: &str) -> String {
-        let (rest, _) = take_label_group(query);
+        let (rest, group) = take_label_group(query);
+        let grouped = !group.is_empty();
         let mut kept: Vec<String> = levels(tokens(&rest).unwrap_or_else(|_| vec![rest.clone()]))
             .into_iter()
-            .filter(|(token, top)| !top || !manages(token))
+            .filter(|(token, top)| !top || !manages(token, grouped))
             .map(|(token, _)| token)
             .collect();
         let mut add = |name: &str, value: &Option<String>| {
@@ -91,11 +119,12 @@ impl Filters {
             .iter()
             .map(|l| format!("label:{}", quote(l)))
             .collect();
-        match labels.len() {
-            0 => {}
-            1 => kept.extend(labels),
-            _ => kept.push(format!("{{{}}}", labels.join(" "))),
+        if labels.len() > 1 && !self.all_labels {
+            kept.push(format!("{{{}}}", labels.join(" ")));
+        } else {
+            kept.extend(labels);
         }
+        kept.extend(self.without.iter().map(|l| format!("-label:{}", quote(l))));
         let last = match self.last {
             Some(Last::Me) => "last:me",
             Some(Last::Them) => "last:them",
@@ -136,14 +165,19 @@ fn levels(tokens: Vec<String>) -> Vec<(String, bool)> {
         .collect()
 }
 
-/// Whether `token` is one of the filters the panel sets.
-fn manages(token: &str) -> bool {
-    let Some((false, name, value)) = operator(token) else {
+/// Whether `token` is one of the filters the panel sets. Beside a group
+/// of labels (`grouped`), a lone `label:` is the person's own.
+fn manages(token: &str, grouped: bool) -> bool {
+    let Some((negated, name, value)) = operator(token) else {
         return false;
     };
+    if negated {
+        return name == "label";
+    }
     let value = value.trim_matches('"').to_lowercase();
     match name {
-        "account" | "newer_than" | "from" | "to" | "label" => true,
+        "label" => !grouped,
+        "account" | "newer_than" | "from" | "to" => true,
         "is" => matches!(value.as_str(), "unread" | "starred"),
         "has" => matches!(value.as_str(), "attachment" | "attachments"),
         "last" => matches!(value.as_str(), "me" | "them"),
@@ -207,8 +241,8 @@ mod tests {
     #[test]
     fn labels_are_any_of_and_last_is_kept() {
         let mut filters = Filters::default();
-        filters.toggle_label("Clients/Acme");
-        filters.toggle_label("Receipts 2024");
+        filters.pick_label("Clients/Acme", Some(LabelPick::Has));
+        filters.pick_label("Receipts 2024", Some(LabelPick::Has));
         filters.last = Some(Last::Me);
         filters.attachments = true;
         let query = filters.apply("has:attachment");
@@ -218,12 +252,39 @@ mod tests {
         );
         let read = Filters::read(&query);
         assert_eq!(read.labels, ["Clients/Acme", "Receipts 2024"]);
-        assert!(read.attachments && read.has_label("clients-acme"));
+        assert!(read.attachments && read.label("clients-acme") == Some(LabelPick::Has));
+        assert!(!read.all_labels);
         assert_eq!(read.last, Some(Last::Me));
-        filters.toggle_label("clients/acme");
+        filters.pick_label("clients/acme", None);
         assert_eq!(filters.labels, ["Receipts 2024"]);
         // A group of the person's own stays.
         let theirs = "{from:ann from:bob} label:x";
         assert_eq!(Filters::default().apply(theirs), "{from:ann from:bob}");
+    }
+
+    #[test]
+    fn labels_all_of_and_left_out() {
+        let query = "invoice label:Clients label:Receipts -label:Newsletters";
+        let mut filters = Filters::read(query);
+        assert_eq!(filters.labels, ["Clients", "Receipts"]);
+        assert!(filters.all_labels);
+        assert_eq!(filters.label("newsletters"), Some(LabelPick::Not));
+        assert_eq!(filters.apply(query), query);
+        filters.all_labels = false;
+        filters.pick_label("Receipts", Some(LabelPick::Not));
+        assert_eq!(
+            filters.apply(query),
+            "invoice label:Clients -label:Newsletters -label:Receipts"
+        );
+        filters.pick_label("Old", Some(LabelPick::Has));
+        assert_eq!(
+            filters.apply(query),
+            "invoice {label:Clients label:Old} -label:Newsletters -label:Receipts"
+        );
+        // A label beside a group is the person's own, and stays.
+        let theirs = "{label:a label:b} label:c -label:d";
+        let read = Filters::read(theirs);
+        assert_eq!((read.labels.len(), read.without.len()), (2, 1));
+        assert_eq!(Filters::default().apply(theirs), "label:c");
     }
 }

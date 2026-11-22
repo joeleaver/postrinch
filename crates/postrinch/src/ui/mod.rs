@@ -11,6 +11,7 @@ mod icons;
 mod keys;
 mod label_edit;
 mod label_new;
+mod label_picker;
 mod labels;
 pub(crate) mod list;
 mod list_head;
@@ -122,7 +123,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {compose_files::CSS} {label_new::CSS} }
-                style { {view_head::CSS} {view_dialog::CSS} {filters::CSS} }
+                style { {view_head::CSS} {view_dialog::CSS} {filters::CSS} {label_picker::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}
                 {view_dialog::view_dialog(__scope, state)}

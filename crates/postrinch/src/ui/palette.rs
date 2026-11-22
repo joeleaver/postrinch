@@ -27,6 +27,7 @@ pub const LIGHT: &str = r#"
     --warn-line: #f0cf96;
     --red-tint: #f9dedc;
     --red-ink: #8c1d18;
+    --red-line: #e8b4ae;
     --green-tint: #d7f0e0;
     --green-ink: #1d5b36;
     --rinch-primary-color: #2456b8;
@@ -65,6 +66,7 @@ pub const DARK: &str = r#"
     --warn-line: #6b5120;
     --red-tint: #4a2626;
     --red-ink: #f2b8b5;
+    --red-line: #6b3a36;
     --green-tint: #1f3d2c;
     --green-ink: #a8dcbc;
     --rinch-titlebar-hover: rgba(231, 233, 238, 0.08);

@@ -4,11 +4,13 @@
 //! by + in the sidebar, Save as new view… on the changed bar and in
 //! Filters, and Edit view… on a view's menu.
 
+use postrinch_commands::Filters;
 use postrinch_model::{EmailAddress, ListOrder, SavedView, Timestamp, ViewCount};
 use rinch::prelude::*;
 
 use crate::state::State;
 use crate::ui::account_color;
+use crate::ui::label_picker::label_picker;
 
 /// The view the dialog is making or changing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +182,18 @@ fn body(state: State) -> NodeHandle {
         }
     })
     .collect();
+    let labels = label_picker(
+        __scope,
+        state,
+        "Labels",
+        "view-part-name",
+        move || {
+            state
+                .view_dialog
+                .with(|d| d.as_ref().map(|d| Filters::read(&d.view.query)).unwrap_or_default())
+        },
+        move |l: Filters| change(state, move |v| v.query = l.apply(&v.query)),
+    );
     rsx! {
         div { class: "view-fields",
             h2 { class: "dialog-title", {title} }
@@ -189,6 +203,7 @@ fn body(state: State) -> NodeHandle {
                 oninput: move |v: String| change(state, |view| view.name = v),
                 onsubmit: move || save(state),
             }
+            {labels}
             div { class: "view-query",
                 TextInput {
                     label: "Shows",
@@ -197,7 +212,7 @@ fn body(state: State) -> NodeHandle {
                     oninput: move |v: String| change(state, |view| view.query = v),
                     onsubmit: move || save(state),
                 }
-                p { class: "dialog-hint", "The same words the search box takes. Edit them here or in Filters." }
+                p { class: "dialog-hint", "The search box\u{2019}s words. They follow the labels above, and the other way round." }
             }
             // Shown or not once: the accounts don't change while it is open.
             div { class: "view-part", style: {if several { "" } else { "display: none" }},
