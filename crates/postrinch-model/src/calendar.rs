@@ -187,3 +187,38 @@ pub struct ProposedAnswer {
     pub summary: Option<String>,
     pub made: Timestamp,
 }
+
+/// An event being made or changed: what the editor and agents give.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventDraft {
+    /// The calendar it goes in.
+    pub calendar: String,
+    pub summary: String,
+    pub location: String,
+    pub description: String,
+    pub when: EventWhen,
+    /// The zone its times are written in (the calendar's, by default).
+    pub time_zone: Option<String>,
+    /// Who is invited, beside the account.
+    pub guests: Vec<crate::Mailbox>,
+}
+
+impl EventDraft {
+    /// The event as it is, to change.
+    pub fn of(event: &CalendarEvent, account: &crate::EmailAddress) -> Self {
+        Self {
+            calendar: event.calendar.clone(),
+            summary: event.summary.clone().unwrap_or_default(),
+            location: event.location.clone().unwrap_or_default(),
+            description: event.description.clone().unwrap_or_default(),
+            when: event.when,
+            time_zone: None,
+            guests: event
+                .attendees
+                .iter()
+                .map(|a| a.mailbox.clone())
+                .filter(|m| m.address.key() != account.key())
+                .collect(),
+        }
+    }
+}

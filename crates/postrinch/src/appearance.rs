@@ -50,6 +50,13 @@ pub struct Settings {
     /// by view key (views.rs `row_open` has the rest).
     #[serde(default)]
     pub view_tree: std::collections::BTreeMap<String, bool>,
+    /// Calendars the person hid in the calendar view, as
+    /// `<account key>\u{1f}<calendar id>`.
+    #[serde(default)]
+    pub hidden_calendars: Vec<String>,
+    /// What the calendar view shows: a day, a week or a month.
+    #[serde(default)]
+    pub calendar_span: crate::calendar_ui::CalSpan,
 }
 
 impl Settings {

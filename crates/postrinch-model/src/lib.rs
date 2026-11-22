@@ -18,8 +18,8 @@ mod view;
 pub use account::{Account, AccountState, Provider, SignInReason};
 pub use address::{AddressError, EmailAddress, Mailbox};
 pub use calendar::{
-    Answer, Attendee, CalendarEvent, CalendarInfo, Day, EventRecord, EventStart, EventWhen,
-    Invitation, InvitationKind, ProposedAnswer,
+    Answer, Attendee, CalendarEvent, CalendarInfo, Day, EventDraft, EventRecord, EventStart,
+    EventWhen, Invitation, InvitationKind, ProposedAnswer,
 };
 pub use change::MessageChange;
 pub use draft::{

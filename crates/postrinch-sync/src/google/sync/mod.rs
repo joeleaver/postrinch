@@ -11,6 +11,7 @@
 
 mod backfill;
 mod calendar;
+mod calendar_events;
 mod calendar_sync;
 mod cursor;
 mod full;

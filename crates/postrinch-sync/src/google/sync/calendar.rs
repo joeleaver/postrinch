@@ -52,7 +52,18 @@ impl GmailSync {
             return Ok(Answered::NotAGuest);
         };
         me.response_status = Some(response_status(answer).to_owned());
-        let changed = self.api.set_attendees(account, &event.id, &guests).await?;
+        let changed = self
+            .api
+            .patch_event(
+                account,
+                "primary",
+                &event.id,
+                &serde_json::json!({ "attendees": guests }),
+                true,
+            )
+            .await?;
+        // The account's own calendar is named by its address.
+        self.after_change(account, &account.to_string()).await;
         Ok(match to_event(&changed, &account.to_string()) {
             Some(event) => Answered::Done(Box::new(event)),
             None => Answered::NotInCalendar,

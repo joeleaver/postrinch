@@ -19,7 +19,7 @@ use crate::state::State;
 use crate::sync::SyncHandle;
 
 /// Said when sync, and so the calendar, is off.
-const OFF: &str = "Postrinch can\u{2019}t reach Google Calendar now (sync is off), so it can\u{2019}t answer this.";
+pub(crate) const OFF: &str = "Postrinch can\u{2019}t reach Google Calendar now (sync is off), so it can\u{2019}t answer this.";
 
 /// The reader's invitations. `Copy`, like the window's state.
 #[derive(Clone, Copy)]
@@ -262,7 +262,7 @@ fn settle(commands: &postrinch_commands::Commands, account: &EmailAddress, id: &
 }
 
 /// A calendar failure in a sentence.
-fn say(e: &postrinch_sync::SyncError) -> String {
+pub(crate) fn say(e: &postrinch_sync::SyncError) -> String {
     match e {
         postrinch_sync::SyncError::NeedsSignIn(_) => {
             "That account must sign in again in Postrinch first.".to_owned()

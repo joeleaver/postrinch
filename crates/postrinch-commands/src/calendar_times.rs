@@ -175,6 +175,7 @@ fn by_rule(
             )
         }
     };
+    let rules: Vec<String> = rules.iter().map(|r| until_in_utc(r)).collect();
     let text = format!("{dtstart}\n{}", rules.join("\n"));
     let set: rrule::RRuleSet = match text.parse() {
         Ok(set) => set,
@@ -203,6 +204,25 @@ fn by_rule(
         });
     }
     out
+}
+
+/// A rule whose `UNTIL` is a bare day (`UNTIL=20250603`, as Google writes
+/// for whole-day series), with it as the end of that day in UTC: the rule
+/// reader takes `UNTIL` only in UTC beside a start in a zone or in UTC.
+fn until_in_utc(rule: &str) -> String {
+    rule.split(';')
+        .map(|part| match part.split_once('=') {
+            Some((name, value))
+                if name.eq_ignore_ascii_case("UNTIL")
+                    && value.len() == 8
+                    && value.bytes().all(|b| b.is_ascii_digit()) =>
+            {
+                format!("{name}={value}T235959Z")
+            }
+            _ => part.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(";")
 }
 
 /// The dates on a series' `name` lines (`EXDATE`, `RDATE`): days, UTC

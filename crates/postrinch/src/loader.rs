@@ -57,10 +57,19 @@ pub enum Request {
     /// People whose address or name holds this, to pick as senders or
     /// recipients.
     People(String),
+    /// The calendars, and the events between two moments.
+    Calendar {
+        from: postrinch_model::Timestamp,
+        to: postrinch_model::Timestamp,
+    },
 }
 
+/// How many kinds of request there are: [`Request::kind`] counts them.
+const KINDS: usize = 7;
+
 impl Request {
-    /// Requests of the same kind replace each other.
+    /// Requests of the same kind replace each other; each is below
+    /// [`KINDS`].
     fn kind(&self) -> usize {
         match self {
             Request::Lists { .. } => 0,
@@ -69,6 +78,7 @@ impl Request {
             Request::Thread { .. } => 3,
             Request::Labels(_) => 4,
             Request::People(_) => 5,
+            Request::Calendar { .. } => 6,
         }
     }
 }
@@ -113,7 +123,7 @@ fn serve(commands: &Commands, state: State, rx: &Receiver<Request>) {
     let mut released: Option<Instant> = None;
     while let Ok(first) = rx.recv() {
         // Everything asked for meanwhile; the newest of each kind wins.
-        let mut latest: [Option<Request>; 6] = Default::default();
+        let mut latest: [Option<Request>; KINDS] = Default::default();
         let k = first.kind();
         latest[k] = Some(first);
         while let Ok(more) = rx.try_recv() {
@@ -256,6 +266,16 @@ fn answer(commands: &Commands, state: State, request: Request) {
             }
             Err(e) => failed(e.to_string()),
         },
+        Request::Calendar { from, to } => {
+            match commands.calendars() {
+                Ok(calendars) => state.calendar.calendars.send(calendars),
+                Err(e) => failed(e.to_string()),
+            }
+            match commands.events_between(&[], from, to) {
+                Ok(found) => state.calendar.happenings.send(found),
+                Err(e) => failed(e.to_string()),
+            }
+        }
         Request::Labels(account) => match commands.label_choices(&account) {
             Ok(choices) => state.label_choices.send(choices),
             Err(e) => failed(e.to_string()),

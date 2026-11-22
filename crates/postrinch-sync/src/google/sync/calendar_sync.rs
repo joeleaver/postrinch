@@ -75,6 +75,16 @@ impl GmailSync {
         Ok(report)
     }
 
+    /// Bring one calendar's events up to date now, after a change made
+    /// here; returns how many were kept and removed.
+    pub(crate) async fn sync_calendar_now(
+        &self,
+        account: &EmailAddress,
+        calendar: &str,
+    ) -> SyncResult<(usize, usize)> {
+        self.sync_events(account, calendar).await
+    }
+
     /// Bring one calendar's events up to date; returns how many were kept
     /// and removed. A sync from the start keeps what changed and removes
     /// what is no longer listed, rather than clearing first, so unchanged

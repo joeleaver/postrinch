@@ -4,10 +4,15 @@ mod about;
 mod agent_dialogs;
 mod agents_settings;
 mod attachment_cards;
+mod calendar_month;
+mod calendar_side;
+mod calendar_view;
 mod category_picker;
 mod chooser;
 mod compose;
 mod compose_files;
+mod event_editor;
+mod event_pane;
 mod icons;
 mod invitation_card;
 mod keys;
@@ -131,6 +136,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {compose_files::CSS} {label_new::CSS} }
                 style { {list_bar::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
+                style { {calendar_side::CSS} {calendar_view::CSS} {calendar_month::CSS} {event_pane::CSS} {event_editor::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}
@@ -147,6 +153,13 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                         } else {
                             {reader::reader(__scope, state)}
                         }
+                    }
+                } else if state.view.get() == View::Calendar {
+                    div { class: "panes",
+                        {calendar_side::calendar_sidebar(__scope, state)}
+                        {splitter::splitter(__scope, state, splitter::Pane::Sidebar)}
+                        {calendar_view::calendar_view(__scope, state)}
+                        {event_pane::event_pane(__scope, state)}
                     }
                 } else {
                     {settings::settings(__scope, state)}

@@ -239,3 +239,77 @@ async fn a_calendar_no_longer_listed_goes() {
     f.sync.sync_calendars(&f.me).await.unwrap();
     assert!(f.store.calendars(&f.me).unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn makes_changes_and_deletes_events_keeping_guests_answers() {
+    use postrinch_model::{Day, EmailAddress, EventDraft, EventWhen, Mailbox};
+    let f = common::fixture().await;
+    let guest = |a: &str| Mailbox::new(None, EmailAddress::parse(a).unwrap());
+    let d = Day {
+        year: 2026,
+        month: 12,
+        day: 24,
+    };
+    let mut draft = EventDraft {
+        calendar: "me@example.org".into(),
+        summary: "Walkthrough".into(),
+        location: String::new(),
+        description: String::new(),
+        when: EventWhen::Days { first: d, last: d },
+        time_zone: None,
+        guests: vec![guest("bob@example.org")],
+    };
+    Mock::given(method("POST"))
+        .and(path(MINE))
+        .and(query_param("sendUpdates", "all"))
+        .and(body_partial_json(json!({
+            "summary": "Walkthrough",
+            "start": {"date": "2026-12-24"}, "end": {"date": "2026-12-25"},
+            "attendees": [{"email": "bob@example.org"}],
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "n1"})))
+        .expect(1)
+        .mount(&f.server)
+        .await;
+    assert_eq!(f.sync.create_event(&f.me, &draft).await.unwrap(), "n1");
+
+    // Bob stays with his answer, Carol is new, Dan goes.
+    Mock::given(method("GET"))
+        .and(path(format!("{MINE}/n1")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "n1",
+            "attendees": [
+                {"email": "me@example.org", "self": true, "organizer": true, "responseStatus": "accepted"},
+                {"email": "bob@example.org", "responseStatus": "accepted"},
+                {"email": "dan@example.org", "responseStatus": "needsAction"},
+            ],
+        })))
+        .mount(&f.server)
+        .await;
+    draft.guests = vec![guest("bob@example.org"), guest("carol@example.org")];
+    Mock::given(method("PATCH"))
+        .and(path(format!("{MINE}/n1")))
+        .and(query_param("sendUpdates", "all"))
+        .and(body_partial_json(json!({"attendees": [
+            {"email": "me@example.org", "self": true, "organizer": true, "responseStatus": "accepted"},
+            {"email": "bob@example.org", "responseStatus": "accepted"},
+            {"email": "carol@example.org"},
+        ]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "n1"})))
+        .expect(1)
+        .mount(&f.server)
+        .await;
+    f.sync.change_event(&f.me, "n1", &draft).await.unwrap();
+
+    Mock::given(method("DELETE"))
+        .and(path(format!("{MINE}/n1")))
+        .and(query_param("sendUpdates", "all"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&f.server)
+        .await;
+    f.sync
+        .delete_event(&f.me, "me@example.org", "n1", true)
+        .await
+        .unwrap();
+}

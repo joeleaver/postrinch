@@ -4,9 +4,9 @@
 use postrinch_model::EmailAddress;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
-use super::{FG, GmailApi, Payload};
+use super::{FG, GmailApi};
 use crate::google::quota::Cost;
 use crate::{SyncError, SyncResult};
 
@@ -112,31 +112,5 @@ impl GmailApi {
         let list: EventList = serde_json::from_slice(&body)
             .map_err(|e| SyncError::api(SERVICE, 200, format!("unreadable events: {e}")))?;
         Ok(list.items)
-    }
-
-    /// Give the event these guests (the whole list, as the API asks), and
-    /// tell the organizer.
-    pub(crate) async fn set_attendees(
-        &self,
-        account: &EmailAddress,
-        event: &str,
-        attendees: &[AttendeeResource],
-    ) -> SyncResult<EventResource> {
-        let url = format!("{}/calendars/primary/events/{event}", self.calendar);
-        let body = json!({ "attendees": attendees });
-        let answer = self
-            .call(
-                Method::PATCH,
-                account,
-                (Cost::Calendar, FG),
-                (&url, SERVICE),
-                &[("sendUpdates", "all")],
-                Some(Payload::Json(&body)),
-                // Answering twice says the same thing twice.
-                true,
-            )
-            .await?;
-        serde_json::from_slice(&answer)
-            .map_err(|e| SyncError::api(SERVICE, 200, format!("unreadable event: {e}")))
     }
 }

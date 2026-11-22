@@ -34,6 +34,7 @@ pub const PAGE: usize = 100;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     Mail,
+    Calendar,
     Settings,
 }
 
@@ -182,6 +183,8 @@ pub struct State {
     pub rules: crate::rules_ui::RulesUi,
     /// The invitations the reader shows.
     pub invitations: crate::invitations::Invitations,
+    /// The calendar view.
+    pub calendar: crate::calendar_ui::CalendarUi,
 }
 
 impl State {
@@ -254,6 +257,7 @@ impl State {
             update_ready: Signal::new(None),
             rules: crate::rules_ui::RulesUi::new(),
             invitations: crate::invitations::Invitations::new(),
+            calendar: crate::calendar_ui::CalendarUi::new(&settings),
         }
     }
 
@@ -311,6 +315,7 @@ impl State {
                 grouping,
             });
         });
+        self.load_calendar(ask.clone());
         let accounts = ask.clone();
         Effect::new(move || {
             self.revision.get();

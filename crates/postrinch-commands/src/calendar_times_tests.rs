@@ -192,3 +192,29 @@ fn a_split_series_names_its_times_as_google_does() {
     // Only a split's own suffix goes.
     assert_eq!(instance_id("a_Rx", &when), "a_Rx_20261125T233000Z");
 }
+
+#[test]
+fn a_whole_day_series_may_end_on_a_bare_day() {
+    let day = Day {
+        year: 2020,
+        month: 6,
+        day: 3,
+    };
+    let anniversary = record(
+        "a",
+        EventWhen::Days {
+            first: day,
+            last: day,
+        },
+        &["RRULE:FREQ=YEARLY;UNTIL=20250603"],
+        None,
+    );
+    let found = between(
+        &[anniversary],
+        at("2020-01-01T00:00:00Z"),
+        at("2030-01-01T00:00:00Z"),
+        &TimeZone::UTC,
+    );
+    // 2020 to 2025, its last.
+    assert_eq!(found.len(), 6);
+}

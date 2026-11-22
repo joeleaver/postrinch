@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 
 mod calendar;
 mod calendar_convert;
+mod calendar_events;
 mod calendar_list;
 mod labels;
 mod outgoing;
@@ -16,7 +17,7 @@ mod settings;
 mod snippet;
 mod types;
 
-pub(crate) use calendar::EventResource;
+pub(crate) use calendar::{AttendeeResource, EventResource};
 pub(crate) use calendar_convert::{is_time, response_status, to_calendar, to_event, to_record};
 #[cfg(test)]
 pub(crate) use settings::Criteria;
