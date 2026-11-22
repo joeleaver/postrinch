@@ -201,8 +201,10 @@ async fn keeps_calendars_and_their_events_in_step() {
             "error": {"code": 410, "message": "Sync token is no longer valid", "errors": []}})))
         .mount(&f.server)
         .await;
+    // Listed again from the start: A as it was, B back as it was first, C
+    // again; only what changed is written.
     let report = f.sync.sync_calendars(&f.me).await.unwrap();
-    assert_eq!(report.kept, 3);
+    assert_eq!((report.kept, report.removed), (2, 0));
     assert_eq!(f.store.events(&f.me).unwrap().len(), 3);
     assert_eq!(
         f.store
@@ -211,6 +213,9 @@ async fn keeps_calendars_and_their_events_in_step() {
             .as_deref(),
         Some("t1")
     );
+    // A calendar that refused its token rests before the next full sync.
+    let report = f.sync.sync_calendars(&f.me).await.unwrap();
+    assert_eq!((report.kept, report.removed), (0, 0));
 }
 
 #[tokio::test]

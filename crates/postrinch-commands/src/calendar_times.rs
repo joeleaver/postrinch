@@ -86,6 +86,7 @@ pub(crate) fn span(when: &EventWhen, tz: &TimeZone) -> (Timestamp, Timestamp) {
 /// Google's id for one time of a series: the series' id, then the time
 /// it starts, in UTC (`20261124T150000Z`) or as a day (`20261124`).
 fn instance_id(series: &str, when: &EventWhen) -> String {
+    let series = without_split(series);
     match *when {
         EventWhen::Days { first, .. } => format!(
             "{series}_{:04}{:02}{:02}",
@@ -96,6 +97,24 @@ fn instance_id(series: &str, when: &EventWhen) -> String {
                 .unwrap_or(jiff::Timestamp::UNIX_EPOCH);
             format!("{series}_{}", at.strftime("%Y%m%dT%H%M%SZ"))
         }
+    }
+}
+
+/// A series split at "this and following" is `<id>_R<when split>`; the
+/// times of it are named after `<id>` alone.
+fn without_split(series: &str) -> &str {
+    match series.rsplit_once("_R") {
+        Some((base, when))
+            if !base.is_empty()
+                && (when.len() == 8 || when.len() == 15)
+                && when
+                    .bytes()
+                    .enumerate()
+                    .all(|(i, b)| b.is_ascii_digit() || (i == 8 && b == b'T')) =>
+        {
+            base
+        }
+        _ => series,
     }
 }
 

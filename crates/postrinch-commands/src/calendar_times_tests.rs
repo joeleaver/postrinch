@@ -177,3 +177,18 @@ fn single_events_are_found_by_overlap() {
     assert_eq!(found("2026-11-24T13:00:00Z", "2026-11-24T14:00:00Z"), 0);
     assert_eq!(found("2026-11-24T10:00:00Z", "2026-11-24T12:00:00Z"), 0);
 }
+
+#[test]
+fn a_split_series_names_its_times_as_google_does() {
+    let when = EventWhen::Times {
+        start: at("2026-11-25T23:30:00Z"),
+        end: at("2026-11-26T00:30:00Z"),
+    };
+    assert_eq!(
+        instance_id("70r3_R20260701T223000", &when),
+        "70r3_20261125T233000Z"
+    );
+    assert_eq!(instance_id("70r3", &when), "70r3_20261125T233000Z");
+    // Only a split's own suffix goes.
+    assert_eq!(instance_id("a_Rx", &when), "a_Rx_20261125T233000Z");
+}

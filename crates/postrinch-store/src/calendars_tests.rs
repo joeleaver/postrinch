@@ -72,9 +72,17 @@ fn calendars_and_events_are_kept_per_account() {
     );
     assert_eq!(store.calendars(&me).unwrap().len(), 2);
 
-    store
-        .put_event(&me, "me@example.com", &record("a"))
-        .unwrap();
+    assert!(
+        store
+            .put_event(&me, "me@example.com", &record("a"))
+            .unwrap()
+    );
+    // The same again changes nothing.
+    assert!(
+        !store
+            .put_event(&me, "me@example.com", &record("a"))
+            .unwrap()
+    );
     store.put_event(&me, "holidays", &record("b")).unwrap();
     store
         .put_event(&other, "other@example.com", &record("c"))
@@ -95,4 +103,32 @@ fn calendars_and_events_are_kept_per_account() {
     assert!(store.events(&me).unwrap().is_empty());
     assert_eq!(store.calendars(&me).unwrap().len(), 1);
     assert_eq!(store.events(&other).unwrap().len(), 1);
+}
+
+#[test]
+fn a_sync_from_the_start_removes_what_it_did_not_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let me = EmailAddress::parse("me@example.com").unwrap();
+    store.put_calendar(&me, &info("me@example.com")).unwrap();
+    store.put_calendar(&me, &info("holidays")).unwrap();
+    for id in ["a", "b", "a_20261124"] {
+        store.put_event(&me, "me@example.com", &record(id)).unwrap();
+    }
+    store.put_event(&me, "holidays", &record("h")).unwrap();
+    let keep = ["a".to_owned()].into_iter().collect();
+    assert_eq!(
+        store
+            .remove_events_except(&me, "me@example.com", &keep)
+            .unwrap(),
+        2
+    );
+    let mut left: Vec<_> = store
+        .events(&me)
+        .unwrap()
+        .into_iter()
+        .map(|(_, r)| r.event.id)
+        .collect();
+    left.sort();
+    assert_eq!(left, ["a", "h"]);
 }

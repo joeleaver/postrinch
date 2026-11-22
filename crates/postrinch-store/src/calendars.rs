@@ -92,15 +92,22 @@ impl Store {
         Ok(())
     }
 
-    /// Keep an event as its calendar has it.
+    /// Keep an event as its calendar has it. Returns whether that changed
+    /// anything: some calendars (Google's holidays) give every event again
+    /// on each sync, and those are not written again.
     pub fn put_event(
         &self,
         account: &EmailAddress,
         calendar: &str,
         record: &EventRecord,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<bool> {
         let calendar = calendar_key(account, calendar);
         let key = format!("{calendar}{SEP}{}", record.event.id);
+        if let Some(kept) = self.find(EVENT, "key", &key)?
+            && kept.opt_json::<EventRecord>("record")?.as_ref() == Some(record)
+        {
+            return Ok(false);
+        }
         let update = FieldsBuilder::new().json("record", record).build();
         let create = FieldsBuilder::new()
             .str("key", key.clone())
@@ -108,7 +115,7 @@ impl Store {
             .json("record", record)
             .build();
         self.upsert(EVENT, "key", &key, create, update)?;
-        Ok(())
+        Ok(true)
     }
 
     /// Forget an event its calendar deleted.
@@ -139,6 +146,35 @@ impl Store {
             self.db_delete(EVENT, id)?;
         }
         Ok(())
+    }
+
+    /// Forget a calendar's events but those in `keep`, by id: what a sync
+    /// from the start did not list. Returns how many went.
+    pub fn remove_events_except(
+        &self,
+        account: &EmailAddress,
+        calendar: &str,
+        keep: &std::collections::HashSet<String>,
+    ) -> StoreResult<usize> {
+        let calendar = calendar_key(account, calendar);
+        let prefix = format!("{calendar}{SEP}");
+        let mut ids = Vec::new();
+        for object in self.db.scan_type_projected(EVENT, &["key", "calendar"])? {
+            let event = Fields::new(EVENT, object);
+            if event.str("calendar")? != calendar {
+                continue;
+            }
+            let key = event.str("key")?;
+            let id = key.strip_prefix(&prefix).unwrap_or(&key);
+            if !keep.contains(id) {
+                ids.push(event.id());
+            }
+        }
+        let gone = ids.len();
+        for id in ids {
+            self.db_delete(EVENT, id)?;
+        }
+        Ok(gone)
     }
 
     /// Every event of the account's calendars, with its calendar's id.

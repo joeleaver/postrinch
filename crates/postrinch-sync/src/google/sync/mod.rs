@@ -108,6 +108,9 @@ pub struct GmailSync {
     settings_labels: Arc<std::sync::Mutex<HashMap<String, String>>>,
     /// When each account's rules were last brought in step with Gmail.
     rules_checked: Arc<std::sync::Mutex<HashMap<String, std::time::Instant>>>,
+    /// Calendars that refuse their own sync token, by account and
+    /// calendar, with when each was last synced from the start.
+    calendars_resting: Arc<std::sync::Mutex<HashMap<String, std::time::Instant>>>,
 }
 
 impl GmailSync {
@@ -118,6 +121,7 @@ impl GmailSync {
             whole_first: full::WHOLE_FIRST,
             settings_labels: Arc::default(),
             rules_checked: Arc::default(),
+            calendars_resting: Arc::default(),
         }
     }
 
