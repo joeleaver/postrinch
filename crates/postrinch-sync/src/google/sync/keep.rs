@@ -239,6 +239,12 @@ impl GmailSync {
                 Err(e) => tracing::warn!("{account}: keeping rules in Gmail: {e}"),
             }
         }
+        // Calendar trouble is logged; mail keeps syncing.
+        match self.sync_calendars(account).await {
+            Ok(_) => {}
+            Err(SyncError::NeedsSignIn(reason)) => return Err(SyncError::NeedsSignIn(reason)),
+            Err(e) => tracing::warn!("{account}: keeping calendars: {e}"),
+        }
         events(SyncEvent::Synced {
             account: account.clone(),
             report,

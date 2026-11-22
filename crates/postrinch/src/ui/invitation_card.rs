@@ -2,20 +2,23 @@
 //! and lines (what, when, where, who), and, when it asks for an answer and
 //! the account is a guest, Yes, Maybe and No, the account's own answer
 //! marked. The calendar's copy of the event is shown once it is found; the
-//! invitation's own words until then.
+//! invitation's own words until then. An agent's answer waiting for the
+//! person shows above the buttons, its answer ringed: pressing any answer
+//! gives that one, and Dismiss drops the agent's.
 
 use postrinch_commands::may_invite;
 use postrinch_model::{
     Answer, Attendee, CalendarEvent, EmailAddress, EventWhen, Invitation, InvitationKind, Mailbox,
-    Message,
+    Message, ProposedAnswer,
 };
 use rinch::prelude::*;
 
 use crate::invitations::Lookup;
 use crate::state::State;
 
-/// What the card shows: the invitation, and its calendar's answer.
-type Shown = (Invitation, Option<Lookup>);
+/// What the card shows: the invitation, its calendar's answer, and an
+/// agent's answer waiting.
+type Shown = (Invitation, Option<Lookup>, Option<ProposedAnswer>);
 
 #[component]
 pub fn invitation_card(state: State, message: Message) -> NodeHandle {
@@ -26,34 +29,31 @@ pub fn invitation_card(state: State, message: Message) -> NodeHandle {
     let account = message.account.clone();
     rsx! {
         div {
-            for shown in shown(state, &id) {
+            for shown in shown(state, &account, &id) {
                 div { key: key(shown),
-                    {card(__scope, state, account.clone(), id.clone(), shown.0.clone(), shown.1.clone())}
+                    {card(__scope, state, account.clone(), id.clone(), shown.clone())}
                 }
             }
         }
     }
 }
 
-fn shown(state: State, id: &str) -> Option<Shown> {
+fn shown(state: State, account: &EmailAddress, id: &str) -> Option<Shown> {
     let invitation = state.invitations.found.get().get(id).cloned()?;
     let lookup = state.invitations.events.get().get(id).cloned();
-    Some((invitation, lookup))
+    Some((invitation, lookup, state.proposed_answer(account, id)))
 }
 
 /// Changes whenever what the card shows does.
 fn key(shown: &Shown) -> String {
-    format!("{:?}|{:?}", shown.0.kind, shown.1)
+    let proposed = shown.2.as_ref().map(|p| (p.answer, p.made));
+    format!("{:?}|{:?}|{proposed:?}", shown.0.kind, shown.1)
 }
 
 #[component]
-fn card(
-    state: State,
-    account: EmailAddress,
-    id: String,
-    invitation: Invitation,
-    lookup: Option<Lookup>,
-) -> NodeHandle {
+fn card(state: State, account: EmailAddress, id: String, shown: Shown) -> NodeHandle {
+    let (invitation, lookup, proposed) = shown;
+    let proposed = proposed.filter(|_| invitation.kind == InvitationKind::Request);
     let event = match &lookup {
         Some(Lookup::Found(e) | Lookup::Answering(e, _)) => Some(e.clone()),
         _ => None,
@@ -83,7 +83,17 @@ fn card(
         .unwrap_or_else(|| invitation.attendees.clone());
     let who = who(organizer.as_ref(), &guests, &account);
     let repeats = invitation.repeats || event.as_ref().is_some_and(|e| e.repeating);
-    let foot = foot(__scope, state, &account, &id, &invitation, lookup.as_ref());
+    let suggested = proposed.as_ref().map(|p| p.answer);
+    let foot = foot(
+        __scope,
+        state,
+        &account,
+        &id,
+        &invitation,
+        lookup.as_ref(),
+        suggested,
+    );
+    let suggestion = proposed.map(|p| suggestion(__scope, state, account.clone(), p));
     let cancelled =
         invitation.kind == InvitationKind::Cancel || event.as_ref().is_some_and(|e| e.cancelled);
     let class = if cancelled {
@@ -113,6 +123,7 @@ fn card(
                 for line in who.clone() {
                     div { key: line.clone(), class: "invite-line muted", {line.clone()} }
                 }
+                {suggestion}
                 {foot}
             }
         }
@@ -144,12 +155,42 @@ fn who(organizer: Option<&Mailbox>, guests: &[Attendee], account: &EmailAddress)
     })
 }
 
+/// An agent's answer waiting for the person, with its reason.
+#[component]
+fn suggestion(state: State, account: EmailAddress, proposed: ProposedAnswer) -> NodeHandle {
+    let word = label(proposed.answer);
+    let line = format!(
+        "{} suggests answering \u{201c}{word}\u{201d}.",
+        proposed.agent
+    );
+    let reason = proposed.reason.clone();
+    let message = proposed.message.clone();
+    rsx! {
+        div { class: "invite-suggest",
+            div { class: "invite-suggest-line",
+                span { class: "invite-suggest-who", {line} }
+                button {
+                    class: "link-button",
+                    onclick: move || state.dismiss_answer(&account, &message),
+                    "Dismiss"
+                }
+            }
+            for reason in reason.clone() {
+                div { key: reason.clone(), class: "invite-suggest-reason", {reason.clone()} }
+            }
+        }
+    }
+}
+
 /// What the card's last line holds.
 enum Foot {
     Nothing,
     Note(String),
     /// The event as the calendar has it, and an answer on its way.
     Answers(Box<CalendarEvent>, Option<Answer>),
+    /// Not in the calendar, but the account is a guest: answered by mail
+    /// to the organizer.
+    ByMail(Mailbox),
 }
 
 fn what_foot(account: &EmailAddress, invitation: &Invitation, lookup: Option<&Lookup>) -> Foot {
@@ -176,9 +217,28 @@ fn what_foot(account: &EmailAddress, invitation: &Invitation, lookup: Option<&Lo
         None | Some(Lookup::Looking) => {
             Foot::Note("Looking for it in your calendar\u{2026}".into())
         }
-        Some(Lookup::NotInCalendar) => Foot::Note(format!(
-            "It isn\u{2019}t in {account}\u{2019}s Google Calendar, so it can\u{2019}t be answered here."
-        )),
+        Some(Lookup::NotInCalendar) => {
+            let guest = invitation
+                .attendees
+                .iter()
+                .any(|a| a.mailbox.address.key() == account.key());
+            match (&invitation.organizer, guest) {
+                (Some(organizer), true) => Foot::ByMail(organizer.clone()),
+                _ => Foot::Note(format!(
+                    "It isn\u{2019}t in {account}\u{2019}s Google Calendar, and {account} isn\u{2019}t among its guests, so there is nothing to answer here."
+                )),
+            }
+        }
+        Some(Lookup::Mailed(answer)) => {
+            let to = invitation
+                .organizer
+                .as_ref()
+                .map_or_else(|| "the organizer".to_owned(), Mailbox::display_name);
+            Foot::Note(format!(
+                "Answered \u{201c}{}\u{201d}: on its way to {to} by mail.",
+                label(*answer)
+            ))
+        }
         Some(Lookup::Failed(why)) => Foot::Note(why.clone()),
         Some(Lookup::Found(e)) if e.cancelled => Foot::Note("This event is cancelled.".into()),
         Some(Lookup::Found(e)) => Foot::Answers(Box::new(e.clone()), None),
@@ -194,10 +254,27 @@ fn foot(
     id: &str,
     invitation: &Invitation,
     lookup: Option<&Lookup>,
+    suggested: Option<Answer>,
 ) -> NodeHandle {
     let (event, sending) = match what_foot(account, invitation, lookup) {
         Foot::Nothing => return rsx! { span {} },
         Foot::Note(text) => return rsx! { div { class: "invite-note", {text} } },
+        Foot::ByMail(organizer) => {
+            let note = format!(
+                "It isn\u{2019}t in {account}\u{2019}s Google Calendar, so your answer goes to {} by mail.",
+                organizer.display_name()
+            );
+            let buttons = answer_buttons(__scope, state, account, id, (None, suggested), true);
+            return rsx! {
+                div {
+                    div { class: "invite-note", {note} }
+                    div { class: "invite-answers",
+                        span { class: "invite-going", "Going?" }
+                        {buttons}
+                    }
+                }
+            };
+        }
         Foot::Answers(event, sending) => (event, sending),
     };
     let link = event.link.clone().map(|href| {
@@ -213,29 +290,7 @@ fn foot(
         return rsx! { div { class: "invite-answers", {link} } };
     }
     let chosen = sending.or(event.answer);
-    let buttons: Vec<NodeHandle> = Answer::ALL
-        .into_iter()
-        .map(|answer| {
-            let label = match answer {
-                Answer::Yes => "Yes",
-                Answer::Maybe => "Maybe",
-                Answer::No => "No",
-            };
-            let class = if chosen == Some(answer) {
-                "invite-answer chosen"
-            } else {
-                "invite-answer"
-            };
-            let (account, id) = (account.clone(), id.to_owned());
-            rsx! {
-                button {
-                    class: {class},
-                    onclick: move || state.answer_invitation(&account, &id, answer),
-                    {label}
-                }
-            }
-        })
-        .collect();
+    let buttons = answer_buttons(__scope, state, account, id, (chosen, suggested), false);
     let status = sending.map(|_| {
         rsx! { span { class: "invite-sending", "Answering\u{2026}" } }
     });
@@ -247,6 +302,48 @@ fn foot(
             {link}
         }
     }
+}
+
+fn label(answer: Answer) -> &'static str {
+    match answer {
+        Answer::Yes => "Yes",
+        Answer::Maybe => "Maybe",
+        Answer::No => "No",
+    }
+}
+
+/// Yes, Maybe and No: the account's answer (`chosen`) filled, an agent's
+/// (`suggested`) ringed. Each gives its answer in the calendar, or `by_mail`.
+fn answer_buttons(
+    __scope: &mut RenderScope,
+    state: State,
+    account: &EmailAddress,
+    id: &str,
+    (chosen, suggested): (Option<Answer>, Option<Answer>),
+    by_mail: bool,
+) -> Vec<NodeHandle> {
+    Answer::ALL
+        .into_iter()
+        .map(|answer| {
+            let class = match (chosen == Some(answer), suggested == Some(answer)) {
+                (true, _) => "invite-answer chosen",
+                (false, true) => "invite-answer suggested",
+                (false, false) => "invite-answer",
+            };
+            let (account, id) = (account.clone(), id.to_owned());
+            rsx! {
+                button {
+                    class: {class},
+                    onclick: move || if by_mail {
+                        state.answer_by_mail(&account, &id, answer)
+                    } else {
+                        state.answer_invitation(&account, &id, answer)
+                    },
+                    {label(answer)}
+                }
+            }
+        })
+        .collect()
 }
 
 /// The card's styles.
@@ -294,6 +391,16 @@ pub const CSS: &str = r#"
 }
 .invite-answer:hover { background: var(--hover); }
 .invite-answer.chosen { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+.invite-answer.suggested { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.invite-suggest {
+    margin-top: 8px; padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--warn-bg);
+    display: flex; flex-direction: column; gap: 2px;
+}
+.invite-suggest-line { display: flex; align-items: center; gap: 10px; }
+.invite-suggest-who { flex: 1; font-size: 13px; font-weight: 600; color: var(--ink); }
+.invite-suggest-reason { font-size: 13px; color: var(--ink-2); }
 .invite-sending { font-size: 12px; color: var(--muted); margin-left: 4px; }
 .invite-open { margin-left: auto; }
 "#;

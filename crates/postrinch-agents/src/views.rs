@@ -48,6 +48,10 @@ pub(crate) fn run(commands: &Commands, call: Call, asker: &Asker) -> Result<Valu
         Call::Views | Call::ListView { .. } | Call::SaveView { .. } | Call::DeleteView { .. } => {
             views_saved::run(commands, call)
         }
+        Call::Calendars
+        | Call::Events { .. }
+        | Call::FreeTime { .. }
+        | Call::AnswerInvitation { .. } => crate::calendar::run(commands, call, agent),
         Call::CreateLabel { .. } | Call::RenameLabel { .. } | Call::DeleteLabel { .. } => {
             gmail::run(commands, call, asker.gmail)
         }

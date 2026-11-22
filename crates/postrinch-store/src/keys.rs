@@ -4,7 +4,7 @@ use postrinch_model::EmailAddress;
 
 /// The separator between an account and a provider id in a key: the ASCII
 /// unit separator, which appears in neither an address nor a provider id.
-const SEP: char = '\u{1f}';
+pub(crate) const SEP: char = '\u{1f}';
 
 /// The store key for `provider_id` in `account`.
 pub(crate) fn scoped(account: &EmailAddress, provider_id: &str) -> String {

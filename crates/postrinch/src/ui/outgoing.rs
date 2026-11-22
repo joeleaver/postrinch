@@ -12,11 +12,16 @@ use crate::state::State;
 pub fn outgoing_lines(state: State) -> NodeHandle {
     rsx! {
         div { class: "outgoing",
-            style: {move || if state.outgoing.with(|all| all.is_empty()) && state.rules.proposals.with(|all| all.is_empty()) { "display: none".to_owned() } else { String::new() }},
+            style: {move || if state.outgoing.with(|all| all.is_empty()) && state.rules.proposals.with(|all| all.is_empty()) && state.invitations.proposals.with(|all| all.is_empty()) { "display: none".to_owned() } else { String::new() }},
             // Keyed by what each is, so a line is built once.
             for queued in state.outgoing.get().into_iter().filter(|q| q.kind == OutgoingKind::Proposed || q.refused) {
                 div { key: format!("{}|{}", queued.id, queued.refused),
                     {needs_you(__scope, state, queued.clone())}
+                }
+            }
+            for (account, proposal) in state.invitations.proposals.get() {
+                div { key: format!("{}|{}|{:?}", account.key(), proposal.message.0, proposal.answer),
+                    {answer_proposed(__scope, state, account.clone(), proposal.clone())}
                 }
             }
             for proposal in state.rules.proposals.get() {
@@ -95,6 +100,32 @@ fn rule_proposed(state: State, proposal: RuleProposal) -> NodeHandle {
                 state.settings_section.set(crate::state::SettingsSection::Rules);
                 state.rules.open_proposal(&proposal);
             },
+            span { class: "needs-you-title", {title} }
+            span { class: "needs-you-detail", {detail} }
+        }
+    }
+}
+
+/// An agent's answer to an invitation: opens its conversation.
+#[component]
+fn answer_proposed(
+    state: State,
+    account: postrinch_model::EmailAddress,
+    proposal: postrinch_model::ProposedAnswer,
+) -> NodeHandle {
+    let title = format!("{} suggests an answer to an invitation", proposal.agent);
+    let word = match proposal.answer {
+        postrinch_model::Answer::Yes => "Yes",
+        postrinch_model::Answer::Maybe => "Maybe",
+        postrinch_model::Answer::No => "No",
+    };
+    let detail = match &proposal.summary {
+        Some(s) => format!("{word}: {s}"),
+        None => word.to_owned(),
+    };
+    rsx! {
+        div { class: "needs-you", role: "button",
+            onclick: move || state.open_answer(&account, &proposal),
             span { class: "needs-you-title", {title} }
             span { class: "needs-you-detail", {detail} }
         }

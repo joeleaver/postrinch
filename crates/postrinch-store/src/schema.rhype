@@ -168,3 +168,32 @@ type AccountRules {
     settings: Json
     local: Json
 }
+
+// One of an account's calendars (calendars.rs): `info` is its
+// CalendarInfo, `sync_token` where the sync of its events got to (null
+// before the first, or after the calendar said to start again).
+type Calendar {
+    // "<account address key>\u001f<calendar id>".
+    key: String @unique
+    account: String
+    info: Json
+    sync_token: String
+}
+
+// An event as its calendar keeps it: an EventRecord (a single event, a
+// repeating series, or one changed or cancelled time of one).
+type Event {
+    // "<calendar key>\u001f<event id>".
+    key: String @unique
+    calendar: String
+    record: Json
+}
+
+// An agent's answer to an invitation, waiting for the person to give it or
+// not (answers.rs): `proposal` is the ProposedAnswer.
+type ProposedAnswer {
+    // "<account address key>\u001f<message provider id>".
+    key: String @unique
+    account: String
+    proposal: Json
+}

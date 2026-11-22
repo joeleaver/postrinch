@@ -143,6 +143,50 @@ fn property(line: &str) -> Option<Property> {
     })
 }
 
+/// `component` as iCalendar text: CRLF lines folded at 75 octets,
+/// parameter values quoted where they hold `:`, `;` or `,`.
+pub(crate) fn write(component: &Component) -> String {
+    let mut out = String::new();
+    write_into(component, &mut out);
+    out
+}
+
+fn write_into(component: &Component, out: &mut String) {
+    fold(&format!("BEGIN:{}", component.name), out);
+    for p in &component.properties {
+        let mut line = p.name.clone();
+        for (name, value) in &p.params {
+            let quoted = value.contains([':', ';', ',']);
+            if quoted {
+                line.push_str(&format!(";{name}=\"{value}\""));
+            } else {
+                line.push_str(&format!(";{name}={value}"));
+            }
+        }
+        line.push(':');
+        line.push_str(&p.value);
+        fold(&line, out);
+    }
+    for child in &component.children {
+        write_into(child, out);
+    }
+    fold(&format!("END:{}", component.name), out);
+}
+
+/// One content line, folded so no line passes 75 octets.
+fn fold(line: &str, out: &mut String) {
+    let mut width = 0;
+    for c in line.chars() {
+        if width + c.len_utf8() > 75 {
+            out.push_str("\r\n ");
+            width = 1;
+        }
+        out.push(c);
+        width += c.len_utf8();
+    }
+    out.push_str("\r\n");
+}
+
 fn split_unquoted(text: &str, at: char) -> Vec<&str> {
     let mut parts = Vec::new();
     let (mut quoted, mut start) = (false, 0);
@@ -196,6 +240,26 @@ mod tests {
         assert_eq!(organizer.param("CN"), Some("Ada; L"));
         assert_eq!(organizer.value, "mailto:ada@example.org");
         assert_eq!(event.children("VALARM").count(), 1);
+    }
+
+    #[test]
+    fn writes_what_it_reads() {
+        let text = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nORGANIZER;CN=\"Ada; L\":mailto:ada@example.org\r\n\
+                    SUMMARY:x\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let back = write(&parse(text)[0]);
+        assert_eq!(back, text);
+        let long = Component {
+            name: "VEVENT".into(),
+            properties: vec![Property {
+                name: "SUMMARY".into(),
+                params: Vec::new(),
+                value: "é".repeat(60),
+            }],
+            children: Vec::new(),
+        };
+        let written = write(&long);
+        assert!(written.split("\r\n").all(|l| l.len() <= 75));
+        assert_eq!(parse(&written)[0], long);
     }
 
     #[test]

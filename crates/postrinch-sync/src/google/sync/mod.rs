@@ -11,6 +11,7 @@
 
 mod backfill;
 mod calendar;
+mod calendar_sync;
 mod cursor;
 mod full;
 mod incremental;
@@ -23,6 +24,7 @@ mod rules;
 mod search;
 
 pub use calendar::Answered;
+pub use calendar_sync::CalendarReport;
 pub use keep::{KeepOptions, SyncEvent, SyncEventFn};
 pub use outbox::SendReport;
 pub use rules::{RulesReport, SETTINGS_LABEL};

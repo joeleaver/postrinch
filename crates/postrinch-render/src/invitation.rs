@@ -20,6 +20,13 @@ use crate::ics::{self, Component, Property};
 /// The invitation in a raw message, reading floating times in `local`.
 /// `None` when it has no calendar part, or none with an event.
 pub fn invitation(raw: &[u8], local: &TimeZone) -> Option<Invitation> {
+    from_text(&calendar_text(raw)?, local)
+}
+
+/// The text of a message's calendar part: the first that says what it
+/// asks (its `method`), else the first with an event. An attached copy
+/// sometimes leaves the method out.
+pub(crate) fn calendar_text(raw: &[u8]) -> Option<String> {
     let parsed = MessageParser::default().parse(raw)?;
     let mut found = None;
     for part in parsed.parts() {
@@ -39,14 +46,13 @@ pub fn invitation(raw: &[u8], local: &TimeZone) -> Option<Invitation> {
             continue;
         }
         let text = String::from_utf8_lossy(&part.decoded()).into_owned();
-        if let Some(invitation) = from_text(&text, local) {
-            // The inline part says what it asks (its METHOD); an attached
-            // copy sometimes leaves that out, so the first with one wins.
-            let asks = ct.attribute("method").is_some();
-            found = Some(invitation);
-            if asks {
-                break;
-            }
+        if !text.contains("BEGIN:VEVENT") {
+            continue;
+        }
+        let asks = ct.attribute("method").is_some();
+        found = Some(text);
+        if asks {
+            break;
         }
     }
     found

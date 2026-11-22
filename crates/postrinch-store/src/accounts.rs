@@ -100,6 +100,8 @@ impl Store {
     /// them.
     pub fn remove_account(&self, address: &EmailAddress) -> StoreResult<()> {
         let id = self.account_id(address)?;
+        self.remove_calendars(address)?;
+        self.remove_proposed_answers(address)?;
         self.db_delete(TYPE, id)?;
         Ok(())
     }

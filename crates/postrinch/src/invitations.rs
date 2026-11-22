@@ -6,12 +6,15 @@
 use std::collections::HashMap;
 
 use postrinch_commands::{Commands, Thread, may_invite};
-use postrinch_model::{Answer, CalendarEvent, EmailAddress, Invitation, InvitationKind};
+use postrinch_model::{
+    Answer, CalendarEvent, EmailAddress, Invitation, InvitationKind, ProposedAnswer,
+    ProviderMessageId,
+};
 use postrinch_sync::google::Answered;
 use rinch::prelude::*;
 use rinch::{Effect, untracked};
 
-use crate::actions::sync;
+use crate::actions::{commands, sync};
 use crate::state::State;
 use crate::sync::SyncHandle;
 
@@ -25,6 +28,8 @@ pub struct Invitations {
     pub found: Signal<HashMap<String, Invitation>>,
     /// What each one's account's calendar says of it, by message id.
     pub events: Signal<HashMap<String, Lookup>>,
+    /// Agents' answers waiting for the person, in every account.
+    pub proposals: Signal<Vec<(EmailAddress, ProposedAnswer)>>,
 }
 
 /// An invitation's event, as far as its calendar has been asked.
@@ -35,6 +40,8 @@ pub enum Lookup {
     /// The person's answer, on its way to the calendar.
     Answering(CalendarEvent, Answer),
     NotInCalendar,
+    /// Not in the calendar, so answered by mail to the organizer.
+    Mailed(Answer),
     /// The calendar could not be asked, and why, in a sentence.
     Failed(String),
 }
@@ -44,6 +51,7 @@ impl Invitations {
         Self {
             found: Signal::new(HashMap::new()),
             events: Signal::new(HashMap::new()),
+            proposals: Signal::new(Vec::new()),
         }
     }
 }
@@ -123,7 +131,8 @@ impl State {
             return;
         };
         self.set_lookup(id, Lookup::Answering(event.clone(), answer));
-        let (events, error) = (self.invitations.events, self.error);
+        let (events, error, revision) = (self.invitations.events, self.error, self.revision);
+        let here = commands().map(|c| (*c).clone());
         let (account, id) = (account.clone(), id.to_owned());
         std::thread::spawn(move || {
             let sync = handle.sync_engine();
@@ -132,7 +141,14 @@ impl State {
                     .runtime
                     .block_on(sync.answer_invitation(&account, &invitation, answer));
             let (lookup, trouble) = match done {
-                Ok(Answered::Done(event)) => (Lookup::Found(*event), None),
+                Ok(Answered::Done(event)) => {
+                    // Given: an agent's answer waiting for it is settled.
+                    if let Some(here) = &here {
+                        settle(here, &account, &id);
+                    }
+                    revision.update_send(|n| *n += 1);
+                    (Lookup::Found(*event), None)
+                }
                 Ok(Answered::NotInCalendar) => (Lookup::NotInCalendar, None),
                 Ok(Answered::NotAGuest) => (
                     Lookup::Found(event),
@@ -149,6 +165,51 @@ impl State {
                 error.send(Some(trouble));
             }
         });
+    }
+
+    /// Answer by mail the invitation in message `id`, which its account's
+    /// calendar does not have.
+    pub fn answer_by_mail(self, account: &EmailAddress, id: &str, answer: Answer) {
+        let Some(here) = commands() else {
+            return;
+        };
+        let message = ProviderMessageId(id.to_owned());
+        if let Err(e) = here.answer_by_mail(account, &message, answer) {
+            self.error.set(Some(e.to_string()));
+            return;
+        }
+        settle(&here, account, id);
+        self.set_lookup(id, Lookup::Mailed(answer));
+        self.revision.update(|n| *n += 1);
+        match sync() {
+            Some(sync) => sync.send.notify_one(),
+            None => self
+                .error
+                .set(Some("Saved here; it goes when sync is on.".to_owned())),
+        }
+    }
+
+    /// Drop an agent's answer to the invitation in `message`, unanswered.
+    pub fn dismiss_answer(self, account: &EmailAddress, message: &ProviderMessageId) {
+        if let Some(here) = commands() {
+            settle(&here, account, &message.0);
+        }
+        self.revision.update(|n| *n += 1);
+    }
+
+    /// Open the conversation an agent's answer is about.
+    pub fn open_answer(self, account: &EmailAddress, proposal: &ProposedAnswer) {
+        self.view.set(crate::state::View::Mail);
+        self.open_row((account.clone(), proposal.thread.clone(), None));
+    }
+
+    /// The agent's answer waiting on the invitation in message `id`.
+    pub fn proposed_answer(self, account: &EmailAddress, id: &str) -> Option<ProposedAnswer> {
+        self.invitations.proposals.with(|all| {
+            all.iter()
+                .find(|(a, p)| a == account && p.message.0 == id)
+                .map(|(_, p)| p.clone())
+        })
     }
 
     fn set_lookup(self, id: &str, lookup: Lookup) {
@@ -171,6 +232,13 @@ fn look_up(handle: &SyncHandle, account: &EmailAddress, invitation: &Invitation)
             tracing::warn!("looking up an invitation in {account}'s calendar: {e}");
             Lookup::Failed(say(&e))
         }
+    }
+}
+
+/// The agent's answer to the invitation in message `id` is settled.
+fn settle(commands: &postrinch_commands::Commands, account: &EmailAddress, id: &str) {
+    if let Err(e) = commands.settle_answer(account, &ProviderMessageId(id.to_owned())) {
+        tracing::warn!("settling an agent's answer: {e}");
     }
 }
 

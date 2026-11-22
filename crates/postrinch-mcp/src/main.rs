@@ -8,6 +8,7 @@
 // A GUI client that launches this on Windows shows no console window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod calendar_tools;
 mod change_tools;
 mod files;
 mod rules_tools;

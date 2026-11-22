@@ -118,6 +118,31 @@ mod tests {
     }
 
     #[test]
+    fn a_calendar_reply_keeps_its_method() {
+        let mut draft = Draft::new(EmailAddress::parse("me@example.org").unwrap());
+        draft.to = vec![postrinch_model::Mailbox::new(
+            None,
+            EmailAddress::parse("ada@example.org").unwrap(),
+        )];
+        draft.subject = "Accepted: Plans".into();
+        draft.body = "me@example.org has accepted this invitation.\n".into();
+        draft.attachments = vec![postrinch_model::DraftAttachment {
+            name: "invite.ics".into(),
+            mime_type: "text/calendar; method=REPLY".into(),
+            size: 0,
+            blob: String::new(),
+            origin: Default::default(),
+        }];
+        let ics = b"BEGIN:VCALENDAR\r\nMETHOD:REPLY\r\nEND:VCALENDAR\r\n".to_vec();
+        let raw = build_message(&draft, None, "m@example.org", &[ics]);
+        let parsed = mail_parser::MessageParser::default().parse(&raw).unwrap();
+        let part = parsed.attachments().next().unwrap();
+        let ct = part.content_type().unwrap();
+        assert_eq!((ct.ctype(), ct.subtype()), ("text", Some("calendar")));
+        assert_eq!(ct.attribute("method"), Some("REPLY"));
+    }
+
+    #[test]
     fn attachments_go_as_files() {
         let mut draft = Draft::new(EmailAddress::parse("ada@example.org").unwrap());
         draft.to = vec![mailbox(None, "bob@example.org")];

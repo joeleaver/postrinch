@@ -204,6 +204,38 @@ pub enum Call {
     DeleteView {
         view: String,
     },
+    /// Each account's calendars.
+    Calendars,
+    /// The events between two moments (RFC 3339, or a date for its
+    /// midnight in the person's zone), each repeating one at each time.
+    Events {
+        #[serde(default)]
+        accounts: Vec<EmailAddress>,
+        from: String,
+        to: String,
+    },
+    /// When the person is free between two moments.
+    FreeTime {
+        #[serde(default)]
+        accounts: Vec<EmailAddress>,
+        from: String,
+        to: String,
+        /// The shortest stretch worth giving, in minutes.
+        minutes: i64,
+        /// Each day's working hours, `HH:MM`, in the person's zone.
+        #[serde(default)]
+        day_starts: Option<String>,
+        #[serde(default)]
+        day_ends: Option<String>,
+    },
+    /// Answer the invitation in a message: kept for the person to give.
+    AnswerInvitation {
+        account: EmailAddress,
+        message: ProviderMessageId,
+        /// `yes`, `maybe` or `no`.
+        answer: String,
+        reason: Option<String>,
+    },
 }
 
 /// A file an agent attaches to a proposal.
@@ -233,6 +265,8 @@ pub enum Changed {
     Mail,
     Rules(EmailAddress),
     Views,
+    /// An answer to an invitation waits for the person.
+    Answers,
 }
 
 impl Call {
@@ -250,6 +284,7 @@ impl Call {
             | Call::SetRuleOn { account, .. }
             | Call::MoveRule { account, .. } => Some(Changed::Rules(account.clone())),
             Call::SaveView { .. } | Call::DeleteView { .. } => Some(Changed::Views),
+            Call::AnswerInvitation { .. } => Some(Changed::Answers),
             _ => None,
         }
     }

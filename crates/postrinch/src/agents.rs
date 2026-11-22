@@ -60,7 +60,7 @@ pub fn start(commands: Commands, state: State, sync: Option<SyncHandle>) {
     let on_change: serve::OnChange = Arc::new(move |changed: &Changed| {
         // Views stay here: nothing for sync to send.
         if let Some((send, wake)) = &wakes
-            && *changed != Changed::Views
+            && !matches!(changed, Changed::Views | Changed::Answers)
         {
             send.notify_one();
             if matches!(changed, Changed::Rules(_)) {

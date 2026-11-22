@@ -33,7 +33,7 @@ impl GmailSync {
             .event_for(account, invitation)
             .await?
             .as_ref()
-            .and_then(to_event))
+            .and_then(|e| to_event(e, &account.to_string())))
     }
 
     /// Answer an invitation as the account: in its calendar, telling the
@@ -53,7 +53,7 @@ impl GmailSync {
         };
         me.response_status = Some(response_status(answer).to_owned());
         let changed = self.api.set_attendees(account, &event.id, &guests).await?;
-        Ok(match to_event(&changed) {
+        Ok(match to_event(&changed, &account.to_string()) {
             Some(event) => Answered::Done(Box::new(event)),
             None => Answered::NotInCalendar,
         })

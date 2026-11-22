@@ -9,6 +9,7 @@
 //! agent's accounts ([`serve`]). The agents file is read again on every
 //! call, so removing an agent or narrowing it takes effect at once.
 
+mod calendar;
 mod change;
 pub mod client;
 mod gmail;

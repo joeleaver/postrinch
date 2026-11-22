@@ -462,7 +462,7 @@ impl Commands {
     }
 }
 
-fn now() -> Timestamp {
+pub(crate) fn now() -> Timestamp {
     Timestamp::from_millis(jiff::Timestamp::now().as_millisecond())
 }
 

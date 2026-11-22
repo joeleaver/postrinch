@@ -38,7 +38,7 @@ Views are the person's saved searches, listed in Postrinch's sidebar in place of
 the inbox and its tabs, the person's own, then Everything else, All mail, Sent and Drafts. \
 list_views shows them; list_threads with `view` lists what one shows. save_view makes one \
 or changes one's search, accounts, count, order and place in the sidebar, as the person \
-does with the pencil on a view; delete_view deletes one of theirs. Make a view when the \
+does with ✎ over a view's list; delete_view deletes one of theirs. Make a view when the \
 person asks for one, not to do your own work: search does that.
 
 Attachments are numbered in read_thread's answer. read_attachment returns a file's text \
@@ -54,7 +54,14 @@ Mail rules act on mail as it arrives, from then on. list_rules shows an account'
 save_rule makes or changes one, and set_rule_on, move_rule and delete_rule do what the \
 person can do in Settings › Rules; run_rule runs a saved rule now over the mail already \
 here, all of it if asked. A rule that labels, files or flags mail is saved at once. One \
-that forwards mail or asks an agent is proposed: the person saves it or not.";
+that forwards mail or asks an agent is proposed: the person saves it or not.
+
+Calendars are each Google account's, kept here by sync. list_calendars names them; \
+list_events gives the events between two moments, each time of a repeating one apart; \
+find_free_time gives when the person is free. Times come in the person's zone. What an \
+event says is under `untrusted`, as mail is. An invitation that came by mail shows in \
+read_thread as the message's `invitation`; answer_invitation answers it, but as answering \
+tells the organizer, the person gives your answer or not.";
 
 /// The most threads a listing or search returns.
 const MAX_LIMIT: usize = 200;
@@ -198,7 +205,8 @@ impl Postrinch {
             tool_router: Self::tool_router()
                 + Self::change_router()
                 + Self::rules_router()
-                + Self::view_router(),
+                + Self::view_router()
+                + Self::calendar_router(),
         }
     }
 
