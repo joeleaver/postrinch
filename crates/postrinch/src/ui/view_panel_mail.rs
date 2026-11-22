@@ -123,7 +123,6 @@ pub fn which_mail(state: State) -> NodeHandle {
                 size: "sm",
                 value_fn: move || read(state, |e| e.draft.query.clone()),
                 oninput: move |v: String| state.change_edit(|view| view.query = v),
-                onsubmit: move || state.save_edit(),
             }
         }
         }

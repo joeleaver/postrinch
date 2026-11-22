@@ -81,8 +81,9 @@ impl State {
         }
     }
 
-    /// Open a view as saved.
+    /// Open a view as saved, keeping the panel's changes first.
     pub fn open_view(self, key: &str) {
+        self.finish_edit();
         batch(|| {
             self.view.set(View::Mail);
             self.search.set(None);
@@ -94,19 +95,17 @@ impl State {
         });
     }
 
-    /// Save a view and show it, opening it when it is new. Why it could
-    /// not be saved (a search that does not read), if it was not.
-    pub fn put_view(self, view: SavedView) -> Result<(), String> {
+    /// Save a view and show it in the sidebar. Why it could not be saved
+    /// (a search that does not read), if it was not.
+    pub fn store_view(self, view: SavedView) -> Result<(), String> {
         let commands = crate::actions::commands().ok_or("Views can't be saved now.")?;
         commands.save_view(&view).map_err(|e| e.to_string())?;
         self.revision.update(|n| *n += 1);
         let key = view.key.clone();
-        let mut is_new = false;
         self.views
             .update(|views| match views.iter_mut().find(|e| e.view.key == key) {
                 Some(entry) => entry.view = view.clone(),
                 None => {
-                    is_new = true;
                     let at = views
                         .iter()
                         .position(|e| e.place == Place::Bottom)
@@ -122,9 +121,6 @@ impl State {
                     );
                 }
             });
-        if is_new {
-            self.open_view(&key);
-        }
         Ok(())
     }
 

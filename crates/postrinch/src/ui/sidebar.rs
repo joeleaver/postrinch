@@ -172,7 +172,7 @@ fn view_row(state: State, view: SavedView, nested: bool) -> NodeHandle {
                 }
             }
             {pencil(__scope, view.name.clone(), move || pressed.get(), move || {
-                if pressed.get() { state.cancel_edit() } else { state.edit_view(&edit) }
+                if pressed.get() { state.finish_edit() } else { state.edit_view(&edit) }
             })}
         }
     }
@@ -212,7 +212,8 @@ fn unsaved_row(state: State, kind: Editing) -> NodeHandle {
     };
     let close = move || match kind {
         Editing::Search => state.close_search(),
-        _ => state.cancel_edit(),
+        // A view not made yet is let go of, name or not.
+        _ => state.view_edit.set(None),
     };
     rsx! {
         div { class: "folder view-row chosen unsaved",
@@ -221,7 +222,7 @@ fn unsaved_row(state: State, kind: Editing) -> NodeHandle {
             }
             {pencil(__scope, name.to_owned(), pressed, move || {
                 match (pressed(), kind) {
-                    (true, _) => state.cancel_edit(),
+                    (true, _) => state.finish_edit(),
                     (false, Editing::Search) => state.edit_search(),
                     (false, _) => {}
                 }

@@ -63,6 +63,8 @@ pub struct State {
     /// The view being changed or made, or the search refined, in the
     /// view panel.
     pub view_edit: Signal<Option<crate::view_edit::ViewEdit>>,
+    /// The panel's change whose moment to be saved has come.
+    pub save_due: Signal<u64>,
     /// How many of the view's threads to show.
     pub shown: Signal<usize>,
     pub page: Signal<Option<ThreadPage>>,
@@ -185,6 +187,7 @@ impl State {
             view_counts: Signal::new(HashMap::new()),
             open_view: Signal::new(crate::views::FIRST.to_owned()),
             view_edit: Signal::new(None),
+            save_due: Signal::new(0),
             shown: Signal::new(PAGE),
             page: Signal::new(None),
             search_draft: Signal::new(String::new()),
@@ -399,8 +402,8 @@ impl State {
                 return;
             }
             // A search from the box starts over in every account, and
-            // closes the panel on whatever was being changed.
-            self.view_edit.set(None);
+            // closes the panel on whatever was being changed (kept).
+            self.finish_edit();
             self.search_accounts.set(Vec::new());
             self.search.set((!query.trim().is_empty()).then_some(query));
         });

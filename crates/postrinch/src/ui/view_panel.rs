@@ -76,9 +76,9 @@ pub(crate) fn choice<T: Copy + PartialEq + 'static>(
 pub fn view_panel(state: State) -> NodeHandle {
     rsx! {
         section { class: "view-panel", aria-label: "View",
-            // Keyed on the view and what is being done to it, so the
-            // fields start from it.
-            for key in state.view_edit.get().map(|e| format!("{}|{:?}", e.draft.key, e.kind)) {
+            // Keyed on the view, so the fields start from it (and stay put
+            // when a new view is made as its name is typed).
+            for key in state.view_edit.get().map(|e| e.draft.key) {
                 div { key: key.clone(), class: "panel-inner",
                     {body(__scope, state)}
                 }
@@ -90,11 +90,11 @@ pub fn view_panel(state: State) -> NodeHandle {
 #[component]
 fn body(state: State) -> NodeHandle {
     let kind = read(state, |e| Some(e.kind)).unwrap_or(Editing::View);
-    let title = match kind {
-        Editing::View => "EDIT VIEW",
-        Editing::New => "NEW VIEW",
-        Editing::Search => "SEARCH",
-    };
+    let title = Memo::new(move || match read(state, |e| Some(e.kind)) {
+        Some(Editing::New) => "NEW VIEW",
+        Some(Editing::Search) => "SEARCH",
+        _ => "EDIT VIEW",
+    });
     let rows = choice(
         __scope,
         state,
@@ -151,13 +151,13 @@ fn body(state: State) -> NodeHandle {
         div { class: "panel-parts",
         // The view's name heads the panel, as it heads the list.
         div { class: "panel-head",
-            p { class: "panel-kind", {title} }
+            p { class: "panel-kind", {move || title.get()} }
             div { class: "panel-title",
                 TextInput {
                     placeholder: name_hint,
                     value_fn: move || read(state, |e| e.draft.name.clone()),
                     oninput: move |v: String| state.change_edit(|view| view.name = v),
-                    onsubmit: move || state.save_edit(),
+                    onsubmit: move || if kind == Editing::Search { state.keep_search() } else { state.finish_edit() },
                 }
             }
         }
@@ -174,18 +174,21 @@ fn body(state: State) -> NodeHandle {
         for error in read(state, |e| e.error.clone()) {
             p { key: error.clone(), class: "panel-trouble", {error.clone()} }
         }
-        {footer(__scope, state, kind)}
+        {footer(__scope, state)}
         }
     }
 }
 
-/// Delete (or put back) on the left; Cancel, then Save, on the right.
+/// Delete (or put back) on the left; Undo changes, then Done, on the right.
+/// A view's changes keep themselves, so there is nothing to save; a search
+/// has Keep as view instead.
 #[component]
-fn footer(state: State, kind: Editing) -> NodeHandle {
+fn footer(state: State) -> NodeHandle {
+    let kind = Memo::new(move || read(state, |e| Some(e.kind)).unwrap_or(Editing::View));
     // What the left button does to the view, if anything: a built-in view
     // that is as it first was has nothing to put back.
     let remove = Memo::new(move || {
-        if kind != Editing::View {
+        if kind.get() != Editing::View {
             return None;
         }
         let entry = state.saved_view()?;
@@ -195,21 +198,54 @@ fn footer(state: State, kind: Editing) -> NodeHandle {
             Some(_) => None,
         }
     });
-    let (cancel, save) = match kind {
-        Editing::Search => ("Close", "Save as view"),
-        _ => ("Cancel", "Save"),
-    };
+    let confirming = Signal::new(false);
+    let changed = Memo::new(move || read(state, |e| e.changed()));
+    let unnamed = Memo::new(move || {
+        read(state, |e| e.kind == Editing::New && e.draft.name.trim().is_empty())
+    });
+    let searching = move || kind.get() == Editing::Search;
+    let name = move || read(state, |e| e.draft.name.clone());
     rsx! {
         div { class: "panel-foot",
             button {
                 class: "panel-remove",
-                style: {move || if remove.get().is_some() { "" } else { "display: none" }},
-                onclick: move || state.remove_edited(),
+                style: {move || if remove.get().is_some() && !confirming.get() { "" } else { "display: none" }},
+                onclick: move || match remove.get() {
+                    // Deleting can't be taken back: it asks first.
+                    Some("Delete view") => confirming.set(true),
+                    _ => state.remove_edited(),
+                },
                 {move || remove.get().unwrap_or_default()}
             }
+            div {
+                class: "panel-confirm",
+                style: {move || if confirming.get() { "" } else { "display: none" }},
+                span { {move || format!("Delete \u{201c}{}\u{201d}? This can\u{2019}t be undone.", name())} }
+                Button { variant: "default", size: "sm", onclick: move || confirming.set(false), "Keep it" }
+                Button { variant: "filled", size: "sm", color: "red", onclick: move || state.remove_edited(), "Delete" }
+            }
+            span {
+                class: "panel-note",
+                style: {move || if unnamed.get() { "" } else { "display: none" }},
+                "Give it a name to make it."
+            }
             span { class: "spacer" }
-            Button { variant: "default", size: "sm", onclick: move || state.cancel_edit(), {cancel} }
-            Button { variant: "filled", size: "sm", onclick: move || state.save_edit(), {save} }
+            div {
+                style: {move || if confirming.get() { "display: none" } else { "display: contents" }},
+                button {
+                    class: "panel-undo",
+                    style: {move || if changed.get() { "" } else { "display: none" }},
+                    onclick: move || state.undo_edit(),
+                    "Undo changes"
+                }
+                div { style: {move || if searching() { "display: contents" } else { "display: none" }},
+                    Button { variant: "default", size: "sm", onclick: move || state.finish_edit(), "Close" }
+                    Button { variant: "filled", size: "sm", onclick: move || state.keep_search(), "Keep as view" }
+                }
+                div { style: {move || if searching() { "display: none" } else { "display: contents" }},
+                    Button { variant: "filled", size: "sm", onclick: move || state.finish_edit(), "Done" }
+                }
+            }
         }
     }
 }
@@ -234,6 +270,10 @@ pub const CSS: &str = r#"
 .panel-foot .spacer { flex: 1; }
 .panel-remove { border: 0; background: transparent; padding: 0 4px; color: var(--danger); font: inherit; font-size: 13px; cursor: pointer; }
 .panel-remove:hover { text-decoration: underline; }
+.panel-confirm { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.panel-note { font-size: 13px; color: var(--muted); }
+.panel-undo { border: 0; background: transparent; padding: 0 6px; color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; }
+.panel-undo:hover { text-decoration: underline; }
 .view-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .view-chip {
     height: 28px; padding: 0 12px;

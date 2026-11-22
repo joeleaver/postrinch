@@ -53,16 +53,14 @@ fn describe(
 ) -> String {
     let f = Filters::read(query);
     let mut parts: Vec<String> = Vec::new();
+    let join = if f.all_labels { " and " } else { " or " };
     match f.labels.as_slice() {
         [] => {}
         [one] => parts.push(format!("Label {one}")),
-        many => {
-            let join = if f.all_labels { " and " } else { " or " };
-            parts.push(format!("Labels {}", many.join(join)));
-        }
+        many => parts.push(format!("Labels {}", few(many, join, "labels"))),
     }
     if !f.without.is_empty() {
-        parts.push(format!("not {}", f.without.join(", ")));
+        parts.push(format!("not {}", few(&f.without, ", ", "labels")));
     }
     match f.archived {
         Archived::Include => {}
@@ -75,10 +73,10 @@ fn describe(
     }
     for (any, not, word) in [(&f.from, &f.not_from, "from"), (&f.to, &f.not_to, "to")] {
         if !any.is_empty() {
-            parts.push(format!("{word} {}", any.join(" or ")));
+            parts.push(format!("{word} {}", few(any, " or ", "people")));
         }
         if !not.is_empty() {
-            parts.push(format!("not {word} {}", not.join(" or ")));
+            parts.push(format!("not {word} {}", few(not, " or ", "people")));
         }
     }
     if let Some(within) = &f.within {
@@ -123,6 +121,15 @@ fn describe(
         line = first.to_uppercase() + &line[1..];
     }
     line
+}
+
+/// Two named, or more counted (`8 people`), so the line stays short.
+fn few(names: &[String], join: &str, many: &str) -> String {
+    if names.len() <= 2 {
+        names.join(join)
+    } else {
+        format!("{} {many}", names.len())
+    }
 }
 
 /// The header's styles.
