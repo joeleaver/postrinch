@@ -107,8 +107,10 @@ impl State {
         Effect::new(move || {
             let due = self.save_due.get();
             let waiting = untracked(|| {
-                self.view_edit
-                    .with(|e| e.as_ref().is_some_and(|e| e.changes == due && e.saved != due))
+                self.view_edit.with(|e| {
+                    e.as_ref()
+                        .is_some_and(|e| e.changes == due && e.saved != due)
+                })
             });
             if waiting {
                 untracked(|| self.keep_edit());
@@ -190,10 +192,7 @@ impl State {
 
     /// Open the panel on the search shown.
     pub fn edit_search(self) {
-        let query = self
-            .search
-            .get()
-            .unwrap_or_else(|| self.search_draft.get());
+        let query = self.search.get().unwrap_or_else(|| self.search_draft.get());
         let mut draft = blank(&query);
         draft.accounts = self.search_accounts.get();
         self.view_edit
@@ -262,7 +261,10 @@ impl State {
 
     /// Put the view back as it was when the panel opened, and save that.
     pub fn undo_edit(self) {
-        let Some(original) = self.view_edit.with(|e| e.as_ref().map(|e| e.original.clone())) else {
+        let Some(original) = self
+            .view_edit
+            .with(|e| e.as_ref().map(|e| e.original.clone()))
+        else {
             return;
         };
         self.change_edit(move |v| *v = original);
@@ -298,9 +300,11 @@ impl State {
             return;
         };
         let key = edit.draft.key;
-        let original = self
-            .views
-            .with(|v| v.iter().find(|e| e.view.key == key).and_then(|e| e.original.clone()));
+        let original = self.views.with(|v| {
+            v.iter()
+                .find(|e| e.view.key == key)
+                .and_then(|e| e.original.clone())
+        });
         // Closed first, so nothing of it is kept again on the way out.
         self.view_edit.set(None);
         self.remove_view(&key);

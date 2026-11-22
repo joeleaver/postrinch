@@ -143,20 +143,21 @@ fn row(
         let value = offer.value.clone();
         Memo::new(move || asked(&value))
     };
-    let button = |__scope: &mut RenderScope, pick: LabelPick, name: &'static str, on: &'static str| {
-        let value = offer.value.clone();
-        rsx! {
-            button {
-                class: {move || if now.get() == Some(pick) { on } else { "" }},
-                aria-pressed: {move || if now.get() == Some(pick) { "true" } else { "false" }},
-                onclick: move || {
-                    let again = now.get() == Some(pick);
-                    set(value.clone(), (!again).then_some(pick));
-                },
-                {name}
+    let button =
+        |__scope: &mut RenderScope, pick: LabelPick, name: &'static str, on: &'static str| {
+            let value = offer.value.clone();
+            rsx! {
+                button {
+                    class: {move || if now.get() == Some(pick) { on } else { "" }},
+                    aria-pressed: {move || if now.get() == Some(pick) { "true" } else { "false" }},
+                    onclick: move || {
+                        let again = now.get() == Some(pick);
+                        set(value.clone(), (!again).then_some(pick));
+                    },
+                    {name}
+                }
             }
-        }
-    };
+        };
     let has = button(__scope, LabelPick::Has, "Has", "has");
     let not = button(__scope, LabelPick::Not, "Not", "not");
     let dot = offer

@@ -119,7 +119,10 @@ fn each_account_has_an_inbox_under_inbox_when_there_are_several() {
             .map(|e| e.view.name.clone())
             .collect()
     };
-    assert!(nested(&commands).is_empty(), "one account: no inbox of its own");
+    assert!(
+        nested(&commands).is_empty(),
+        "one account: no inbox of its own"
+    );
 
     let work = address("me@work.example");
     commands
@@ -133,7 +136,10 @@ fn each_account_has_an_inbox_under_inbox_when_there_are_several() {
         .into_iter()
         .find(|e| e.view.name == me.to_string())
         .unwrap();
-    assert_eq!(listed_view(&commands, &mine.view), ["dinner", "invoice", "acme"]);
+    assert_eq!(
+        listed_view(&commands, &mine.view),
+        ["dinner", "invoice", "acme"]
+    );
 
     // Hidden, it stays an account inbox, not a view of the person's own.
     let mut hidden = mine.view.clone();

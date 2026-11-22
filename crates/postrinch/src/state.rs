@@ -391,9 +391,10 @@ impl State {
     /// Show the threads that match what the search box holds.
     pub fn run_search(self) {
         let query = self.search_draft.get();
-        let refining = self
-            .view_edit
-            .with(|e| e.as_ref().is_some_and(|e| e.kind == crate::view_edit::Editing::Search));
+        let refining = self.view_edit.with(|e| {
+            e.as_ref()
+                .is_some_and(|e| e.kind == crate::view_edit::Editing::Search)
+        });
         batch(|| {
             self.selected.set(None);
             self.view.set(View::Mail);
@@ -411,9 +412,10 @@ impl State {
 
     /// Go back from search results to the folder.
     pub fn close_search(self) {
-        let refining = self
-            .view_edit
-            .with(|e| e.as_ref().is_some_and(|e| e.kind == crate::view_edit::Editing::Search));
+        let refining = self.view_edit.with(|e| {
+            e.as_ref()
+                .is_some_and(|e| e.kind == crate::view_edit::Editing::Search)
+        });
         batch(|| {
             self.search.set(None);
             self.search_draft.set(String::new());

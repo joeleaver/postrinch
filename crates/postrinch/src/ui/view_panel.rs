@@ -201,7 +201,9 @@ fn footer(state: State) -> NodeHandle {
     let confirming = Signal::new(false);
     let changed = Memo::new(move || read(state, |e| e.changed()));
     let unnamed = Memo::new(move || {
-        read(state, |e| e.kind == Editing::New && e.draft.name.trim().is_empty())
+        read(state, |e| {
+            e.kind == Editing::New && e.draft.name.trim().is_empty()
+        })
     });
     let searching = move || kind.get() == Editing::Search;
     let name = move || read(state, |e| e.draft.name.clone());

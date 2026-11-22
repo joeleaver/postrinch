@@ -60,7 +60,12 @@ pub fn which_mail(state: State) -> NodeHandle {
         __scope,
         state,
         "When",
-        vec![("", "Any time"), ("7d", "Week"), ("1m", "Month"), ("1y", "Year")],
+        vec![
+            ("", "Any time"),
+            ("7d", "Week"),
+            ("1m", "Month"),
+            ("1y", "Year"),
+        ],
         within,
         |v, w| {
             let mut f = Filters::read(&v.query);
@@ -69,7 +74,10 @@ pub fn which_mail(state: State) -> NodeHandle {
         },
     );
     let flags: Vec<NodeHandle> = [
-        ("Unread", (|f: &mut Filters| &mut f.unread) as fn(&mut Filters) -> &mut bool),
+        (
+            "Unread",
+            (|f: &mut Filters| &mut f.unread) as fn(&mut Filters) -> &mut bool,
+        ),
         ("Starred", |f| &mut f.starred),
         ("Has an attachment", |f| &mut f.attachments),
     ]
@@ -89,22 +97,25 @@ pub fn which_mail(state: State) -> NodeHandle {
         }
     })
     .collect();
-    let lasts: Vec<NodeHandle> = [(Last::Me, "I replied last"), (Last::Them, "They replied last")]
-        .into_iter()
-        .map(|(which, name)| {
-            let on = move || filters(state).last == Some(which);
-            rsx! {
-                button {
-                    class: {move || if on() { "view-chip on" } else { "view-chip" }},
-                    aria-pressed: {move || if on() { "true" } else { "false" }},
-                    onclick: move || change(state, move |f| {
-                        f.last = if f.last == Some(which) { None } else { Some(which) };
-                    }),
-                    {name}
-                }
+    let lasts: Vec<NodeHandle> = [
+        (Last::Me, "I replied last"),
+        (Last::Them, "They replied last"),
+    ]
+    .into_iter()
+    .map(|(which, name)| {
+        let on = move || filters(state).last == Some(which);
+        rsx! {
+            button {
+                class: {move || if on() { "view-chip on" } else { "view-chip" }},
+                aria-pressed: {move || if on() { "true" } else { "false" }},
+                onclick: move || change(state, move |f| {
+                    f.last = if f.last == Some(which) { None } else { Some(which) };
+                }),
+                {name}
             }
-        })
-        .collect();
+        }
+    })
+    .collect();
     rsx! {
         div { class: "panel-mail",
         {accounts(__scope, state)}

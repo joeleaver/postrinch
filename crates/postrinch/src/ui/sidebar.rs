@@ -8,10 +8,10 @@ use postrinch_model::{EmailAddress, SavedView};
 use rinch::prelude::*;
 
 use crate::state::State;
-use crate::ui::icons::{Icon, icon};
-use crate::view_edit::Editing;
 use crate::sync::thousands;
 use crate::ui::account_color;
+use crate::ui::icons::{Icon, icon};
+use crate::view_edit::Editing;
 
 #[component]
 pub fn sidebar(state: State) -> NodeHandle {

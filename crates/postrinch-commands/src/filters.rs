@@ -321,7 +321,10 @@ fn take_groups(query: &str) -> (String, Groups) {
         at = close + 1;
     }
     rest.push_str(&query[at..]);
-    (rest.split_whitespace().collect::<Vec<_>>().join(" "), groups)
+    (
+        rest.split_whitespace().collect::<Vec<_>>().join(" "),
+        groups,
+    )
 }
 
 fn quote(value: &str) -> String {
@@ -344,7 +347,10 @@ mod tests {
         assert_eq!(read("label:clients -in:inbox"), Archived::Only);
         let mut f = Filters::read("in:inbox category:primary");
         f.archived = Archived::Only;
-        assert_eq!(f.apply("in:inbox category:primary"), "category:primary -in:inbox");
+        assert_eq!(
+            f.apply("in:inbox category:primary"),
+            "category:primary -in:inbox"
+        );
         f.archived = Archived::Include;
         assert_eq!(f.apply("in:inbox category:primary"), "category:primary");
         // Other folders stay the person's own.
@@ -397,7 +403,10 @@ mod tests {
         let query = "invoice {from:ann from:\"Bob Smith\"} -from:noreply to:me@x.org";
         let mut f = Filters::read(query);
         assert_eq!(f.from, ["ann", "Bob Smith"]);
-        assert_eq!((f.not_from.as_slice(), f.to.as_slice()), (&["noreply".to_owned()][..], &["me@x.org".to_owned()][..]));
+        assert_eq!(
+            (f.not_from.as_slice(), f.to.as_slice()),
+            (&["noreply".to_owned()][..], &["me@x.org".to_owned()][..])
+        );
         assert_eq!(f.apply(query), query);
         f.from.retain(|p| p != "ann");
         f.not_to.push("list@x.org".into());
@@ -408,7 +417,10 @@ mod tests {
         // Groups of each kind are read side by side.
         let both = Filters::read("{label:a label:b} {to:c to:d}");
         assert_eq!((both.labels.len(), both.to.len()), (2, 2));
-        assert_eq!(Filters::default().apply("{label:a label:b} {to:c to:d} word"), "word");
+        assert_eq!(
+            Filters::default().apply("{label:a label:b} {to:c to:d} word"),
+            "word"
+        );
     }
 
     #[test]

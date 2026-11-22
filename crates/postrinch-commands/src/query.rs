@@ -397,7 +397,10 @@ mod tests {
             assert!(Query::parse(bad, now).is_err(), "{bad}");
         }
         let left_out = parse("-from:noreply -cc:list@x.org");
-        assert_eq!((left_out.not_from, left_out.not_to), (vec!["noreply".to_owned()], vec!["list@x.org".to_owned()]));
+        assert_eq!(
+            (left_out.not_from, left_out.not_to),
+            (vec!["noreply".to_owned()], vec!["list@x.org".to_owned()])
+        );
         // An unknown word with a colon is just a word.
         assert_eq!(parse("re:invoice").words, ["re:invoice"]);
     }
