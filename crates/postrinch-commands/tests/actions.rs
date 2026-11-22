@@ -255,7 +255,7 @@ fn search_by_message_lists_each_match() {
     let by_thread = commands.search("thursday", 10).unwrap();
     assert_eq!(by_thread.threads.len(), 1);
     let by_message = commands
-        .search_grouped("thursday", 10, postrinch_commands::Grouping::Messages)
+        .search_grouped("thursday", &[], 10, postrinch_commands::Grouping::Messages)
         .unwrap();
     assert_eq!(by_message.threads.len(), 3);
     assert!(by_message.threads.iter().all(|r| r.message.is_some()));

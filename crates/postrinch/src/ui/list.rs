@@ -19,23 +19,10 @@ pub fn thread_list(state: State) -> NodeHandle {
         section {
             class: "list",
             style: {move || format!("width: {}px", state.list_width.get())},
+            {crate::ui::view_head::view_head(__scope, state)}
             if searching() {
-                div { class: "list-head",
-                    button {
-                        class: "back",
-                        title: "Close search",
-                        onclick: move || state.close_search(),
-                        "←"
-                    }
-                    div { class: "search-head",
-                        h1 { "Search results" }
-                        span { class: "list-count", {move || search_line(state)} }
-                    }
-                }
+                div { class: "search-count", {move || search_line(state)} }
                 {crate::ui::search::search_notes(__scope, state)}
-            }
-            if !searching() {
-                {crate::ui::view_head::view_head(__scope, state)}
             }
             // What the open conversation can have done to it.
             {crate::ui::list_head::list_actions(__scope, state)}
@@ -94,7 +81,16 @@ fn with_rows<R>(state: State, f: impl FnOnce(&[ThreadRow]) -> R) -> R {
                     .results
                     .with(|r| r.as_ref().is_some_and(|r| r.query == remote.query))
             {
-                rows.extend(remote.rows.iter().cloned());
+                // Gmail was asked in every account the text names; a
+                // search kept to some accounts shows only theirs.
+                let only = state.search_accounts.get();
+                rows.extend(
+                    remote
+                        .rows
+                        .iter()
+                        .filter(|r| only.is_empty() || only.contains(&r.summary.account))
+                        .cloned(),
+                );
             }
         });
         f(&rows)
@@ -142,11 +138,7 @@ fn search_line(state: State) -> String {
                 (true, false) => "messages",
             };
             let more = if r.more { "+" } else { "" };
-            format!(
-                "{}{more} {what} for \u{201c}{}\u{201d}",
-                thousands(n),
-                r.query
-            )
+            format!("{}{more} {what}", thousands(n))
         }
         None => String::new(),
     }
@@ -226,7 +218,7 @@ fn row(state: State, id: RowId) -> NodeHandle {
                         title: "Show only this label's mail here",
                         onclick: {
                             let term = chip.search.clone();
-                            move || state.add_filter(term.clone())
+                            move || state.edit_with(term.clone())
                         },
                         style: {match &chip.color {
                             Some(c) => format!("border-color: {c}; color: {c}"),

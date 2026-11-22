@@ -23,6 +23,7 @@ mod state;
 mod sync;
 mod ui;
 mod update;
+mod view_edit;
 mod views;
 mod writing;
 

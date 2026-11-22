@@ -33,7 +33,7 @@ pub use accounts::AccountInfo;
 pub use actions::{LabelChoice, ThreadAction, ThreadRef};
 pub use attachments::{file_name, is_program, mime_for, size_text};
 pub use error::{CommandError, CommandResult};
-pub use filters::{Filters, LabelPick};
+pub use filters::{Archived, Filters, LabelPick};
 pub use folders::{AccountFolders, Folder, FolderEntry, Sidebar};
 pub use labels::{AppLabels, Chip, LabelNode, LabelRole, LabelTree, app_of, label_term, role};
 pub use messages::{Grouping, MessageRef};

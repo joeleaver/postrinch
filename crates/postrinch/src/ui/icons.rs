@@ -21,8 +21,6 @@ pub enum Icon {
     Reply,
     ReplyAll,
     Forward,
-    /// Lines of falling length beside a down arrow: the list's order.
-    Sort,
     Paperclip,
     /// A down arrow onto a line: save a file.
     Save,
@@ -84,12 +82,6 @@ pub fn icon(which: Icon) -> NodeHandle {
             __scope,
             "M15 14l5-5-5-5",
             "M20 9H10a6 6 0 0 0-6 6v4",
-            "none",
-        ),
-        Icon::Sort => two(
-            __scope,
-            "M7 4v16M3 16l4 4 4-4",
-            "M14 6h7M14 12h5M14 18h3",
             "none",
         ),
         Icon::Paperclip => one(

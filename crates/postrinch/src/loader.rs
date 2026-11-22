@@ -40,6 +40,8 @@ pub enum Request {
     /// A search's results, or none.
     Search {
         query: Option<String>,
+        /// The accounts it looks in (every account for none).
+        accounts: Vec<EmailAddress>,
         grouping: Grouping,
     },
     /// The open thread, or none.
@@ -197,8 +199,9 @@ fn answer(commands: &Commands, state: State, request: Request) {
         }
         Request::Search {
             query: Some(query),
+            accounts,
             grouping,
-        } => match commands.search_grouped(&query, SEARCH_LIMIT, grouping) {
+        } => match commands.search_grouped(&query, &accounts, SEARCH_LIMIT, grouping) {
             Ok(results) => {
                 state.search_error.send(None);
                 state.results.send(Some(results));

@@ -1,6 +1,7 @@
 //! Search's own parts of the window, after the Search mockup: the lines
 //! under the results' heading about Gmail's part and about a query that
-//! does not read. The filters beside the search box are in filters.rs.
+//! does not read. A search is refined in the view panel, from the pencil
+//! on its row in the sidebar.
 
 use rinch::prelude::*;
 
@@ -30,17 +31,6 @@ pub fn search_notes(state: State) -> NodeHandle {
 pub const CSS: &str = r#"
 .title-search { display: flex; align-items: center; gap: 6px; }
 .title-search > :first-child { flex: 1; min-width: 0; }
-.filters-button {
-    flex-shrink: 0;
-    height: 26px;
-    padding: 0 10px;
-    border: 1px solid var(--field);
-    border-radius: 6px;
-    background: var(--panel);
-    color: var(--ink-2);
-    font-size: 13px;
-}
-.filters-button:hover, .filters-button.open { background: var(--accent-tint); color: var(--accent-ink); border-color: var(--accent-tint); }
 .search-notes { display: flex; flex-direction: column; }
 .search-note {
     padding: 8px 16px;

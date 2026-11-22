@@ -61,14 +61,16 @@ impl Commands {
     /// `older_than:`, `category:`) plus `account:`. At most `limit`
     /// threads come back, newest first.
     pub fn search(&self, query: &str, limit: usize) -> CommandResult<SearchResults> {
-        self.search_grouped(query, limit, Grouping::Conversations)
+        self.search_grouped(query, &[], limit, Grouping::Conversations)
     }
 
-    /// [`Commands::search`], listing what matched as conversations or as
-    /// messages, each its own row.
+    /// [`Commands::search`] in only these accounts (every account for
+    /// none), listing what matched as conversations or as messages, each
+    /// its own row.
     pub fn search_grouped(
         &self,
         query: &str,
+        only: &[EmailAddress],
         limit: usize,
         grouping: Grouping,
     ) -> CommandResult<SearchResults> {
@@ -84,7 +86,7 @@ impl Commands {
         }
         let now = Timestamp::from_millis(jiff::Timestamp::now().as_millisecond());
         let query = Either::parse(text, now)?;
-        let (found, accounts) = self.found(&query, false)?;
+        let (found, accounts) = self.found_in(&query, false, only)?;
 
         let mut threads: Vec<(EmailAddress, ProviderThreadId, ProviderMessageId)> = Vec::new();
         let mut seen: HashSet<(String, String)> = HashSet::new();

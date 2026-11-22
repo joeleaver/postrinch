@@ -6,7 +6,6 @@
 
 use crate::query::{Last, label_matches, operator, tokens};
 
-/// The filters a query sets, as the filter panel shows them.
 /// What a filter asks of a label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LabelPick {
@@ -14,6 +13,17 @@ pub enum LabelPick {
     Not,
 }
 
+/// Archived mail (out of the inbox): shown with the rest, left out
+/// (`in:inbox`), or shown alone (`-in:inbox`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Archived {
+    #[default]
+    Include,
+    LeaveOut,
+    Only,
+}
+
+/// The filters a query sets, as the filter panel shows them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Filters {
     pub account: Option<String>,
@@ -31,6 +41,7 @@ pub struct Filters {
     pub starred: bool,
     pub attachments: bool,
     pub last: Option<Last>,
+    pub archived: Archived,
 }
 
 impl Filters {
@@ -48,6 +59,14 @@ impl Filters {
                 continue;
             };
             let value = value.trim_matches('"').to_owned();
+            if name == "in" {
+                filters.archived = if negated {
+                    Archived::Only
+                } else {
+                    Archived::LeaveOut
+                };
+                continue;
+            }
             if negated {
                 filters.without.push(value);
                 continue;
@@ -114,6 +133,11 @@ impl Filters {
         add("newer_than", &self.within);
         add("from", &self.from);
         add("to", &self.to);
+        match self.archived {
+            Archived::Include => {}
+            Archived::LeaveOut => kept.push("in:inbox".to_owned()),
+            Archived::Only => kept.push("-in:inbox".to_owned()),
+        }
         let labels: Vec<String> = self
             .labels
             .iter()
@@ -171,10 +195,13 @@ fn manages(token: &str, grouped: bool) -> bool {
     let Some((negated, name, value)) = operator(token) else {
         return false;
     };
+    let value = value.trim_matches('"').to_lowercase();
+    if name == "in" {
+        return value == "inbox";
+    }
     if negated {
         return name == "label";
     }
-    let value = value.trim_matches('"').to_lowercase();
     match name {
         "label" => !grouped,
         "account" | "newer_than" | "from" | "to" => true,
@@ -223,6 +250,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn archived_mail_is_in_inbox_or_not() {
+        let read = |q: &str| Filters::read(q).archived;
+        assert_eq!(read("label:clients"), Archived::Include);
+        assert_eq!(read("in:inbox category:primary"), Archived::LeaveOut);
+        assert_eq!(read("label:clients -in:inbox"), Archived::Only);
+        let mut f = Filters::read("in:inbox category:primary");
+        f.archived = Archived::Only;
+        assert_eq!(f.apply("in:inbox category:primary"), "category:primary -in:inbox");
+        f.archived = Archived::Include;
+        assert_eq!(f.apply("in:inbox category:primary"), "category:primary");
+        // Other folders stay the person's own.
+        assert_eq!(Filters::read("in:sent").archived, Archived::Include);
+        assert_eq!(Filters::default().apply("in:sent"), "in:sent");
+    }
+
+    #[test]
     fn filters_round_trip_through_the_text() {
         let query = r#"cover shift from:"Ada Lovelace" is:unread in:inbox"#;
         let mut filters = Filters::read(query);
@@ -233,9 +276,9 @@ mod tests {
         filters.labels = vec!["Work/Clients".into()];
         assert_eq!(
             filters.apply(query),
-            r#"cover shift in:inbox newer_than:1m from:"Ada Lovelace" label:Work/Clients"#
+            r#"cover shift newer_than:1m from:"Ada Lovelace" in:inbox label:Work/Clients"#
         );
-        assert_eq!(Filters::default().apply(query), "cover shift in:inbox");
+        assert_eq!(Filters::default().apply(query), "cover shift");
     }
 
     #[test]
