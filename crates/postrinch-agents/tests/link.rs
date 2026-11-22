@@ -128,6 +128,7 @@ fn an_agent_reads_and_changes_only_what_it_was_given() {
         .call(&Call::Act {
             threads: t1.clone(),
             search: None,
+            messages: Vec::new(),
             actions: vec![ThreadAction::AddLabel("receipts".into())],
         })
         .unwrap();
@@ -136,6 +137,7 @@ fn an_agent_reads_and_changes_only_what_it_was_given() {
         .call(&Call::Act {
             threads: Vec::new(),
             search: Some("from:ada OR from:nobody".into()),
+            messages: Vec::new(),
             actions: vec![ThreadAction::MarkRead, ThreadAction::Archive],
         })
         .unwrap();

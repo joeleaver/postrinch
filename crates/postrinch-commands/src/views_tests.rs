@@ -1,6 +1,6 @@
 use postrinch_model::{
     Account, EmailAddress, Flags, Label, LabelKind, ListOrder, Mailbox, Message, MessageHeaders,
-    Provider, ProviderMessageId, ProviderThreadId, SystemLabel, Timestamp, ViewCount,
+    Provider, ProviderMessageId, ProviderThreadId, SavedView, SystemLabel, Timestamp, ViewCount,
 };
 use postrinch_store::Store;
 
@@ -263,4 +263,50 @@ fn saving_checks_and_removing_puts_built_ins_back() {
         commands.views().unwrap()[1].view.query,
         "in:inbox category:primary"
     );
+}
+
+#[test]
+fn an_agent_of_some_accounts_changes_only_views_of_those() {
+    let (_dir, commands, me) = setup();
+    let work = address("me@work.example");
+    commands
+        .store
+        .put_account(&Account::new(work.clone(), Provider::Google))
+        .unwrap();
+    let at = Timestamp::from_millis(1);
+    let mut theirs = commands.new_view("Work", "is:unread").unwrap();
+    theirs.accounts = vec![work.clone()];
+    commands.save_view(&theirs).unwrap();
+    let mut every = SavedView::new("Every", "is:starred", Timestamp::from_millis(2)).unwrap();
+    commands.save_view(&every).unwrap();
+
+    let agent = commands.limited_to(std::slice::from_ref(&me));
+    let keys: Vec<String> = agent
+        .views()
+        .unwrap()
+        .into_iter()
+        .map(|e| e.view.key)
+        .collect();
+    assert!(
+        !keys.contains(&theirs.key),
+        "another account's view is not there"
+    );
+    assert!(keys.contains(&every.key) && keys.contains(&"inbox".to_owned()));
+
+    // A view of every account, built in or not, is the person's.
+    every.name = "Changed".into();
+    assert!(agent.save_view(&every).is_err());
+    assert!(agent.remove_view("inbox").is_err());
+    let mut wider = SavedView::new("Mine", "is:unread", at).unwrap();
+    assert!(agent.save_view(&wider).is_err());
+    wider.accounts = vec![me.clone()];
+    agent.save_view(&wider).unwrap();
+    // Nor can it take over another account's view by its key.
+    let mut taken = theirs.clone();
+    taken.accounts = vec![me.clone()];
+    assert!(agent.save_view(&taken).is_err());
+    assert!(agent.remove_view(&theirs.key).is_err());
+    agent.remove_view(&wider.key).unwrap();
+    // The window changes any.
+    commands.save_view(&every).unwrap();
 }

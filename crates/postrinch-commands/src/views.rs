@@ -154,6 +154,13 @@ fn built_in(key: &str) -> Option<(SavedView, Place)> {
         })
 }
 
+/// Why a caller limited to some accounts may not change a view.
+fn limited() -> CommandError {
+    CommandError::Invalid(
+        "Only views of this agent's own accounts can be made or changed by it: a view of every account, or of others, shows the person mail it does not see. Give the view `accounts`.".into(),
+    )
+}
+
 /// One account's inbox, as it first was.
 fn account_inbox(account: &EmailAddress) -> SavedView {
     SavedView {
@@ -217,6 +224,7 @@ impl Commands {
                 }),
         );
         entries.extend(built(Place::Bottom));
+        entries.retain(|e| self.sees_view(&e.view));
         Ok(entries)
     }
 
@@ -235,12 +243,24 @@ impl Commands {
         if let Some(stray) = view.accounts.iter().find(|a| !known.contains(a)) {
             return Err(CommandError::UnknownAccount(stray.clone()));
         }
+        let before = self.store.views()?.into_iter().find(|v| v.key == view.key);
+        let before = before.or_else(|| built_in(&view.key).map(|(v, _)| v));
+        if !self.may_change_view(view) || before.is_some_and(|v| !self.may_change_view(&v)) {
+            return Err(limited());
+        }
         Ok(self.store.put_view(view)?)
     }
 
     /// Remove one of the person's views, or put a built-in one back as it
     /// first was.
     pub fn remove_view(&self, key: &str) -> CommandResult<()> {
+        let entry = self.views()?.into_iter().find(|e| e.view.key == key);
+        let Some(entry) = entry else {
+            return Err(CommandError::Invalid(format!("There is no view {key:?}.")));
+        };
+        if !self.may_change_view(&entry.view) {
+            return Err(limited());
+        }
         Ok(self.store.remove_view(key)?)
     }
 

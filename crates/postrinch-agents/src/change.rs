@@ -1,10 +1,11 @@
 //! change_threads: actions done to named threads, or to every thread a
-//! search matches, as selecting all and acting does in the window.
+//! search matches, as selecting all and acting does in the window, or to
+//! single messages, as one message at a time does.
 //! The answer waits for the changes only so long ([`later`]).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use postrinch_commands::{Commands, ThreadAction, ThreadRef};
+use postrinch_commands::{Commands, MessageRef, ThreadAction, ThreadRef};
 use postrinch_model::EmailAddress;
 use serde_json::{Value, json};
 
@@ -20,11 +21,18 @@ pub(crate) fn act(
     commands: &Commands,
     threads: Vec<ThreadRef>,
     search: Option<String>,
+    messages: Vec<MessageRef>,
     actions: Vec<ThreadAction>,
     on_change: &OnChange,
 ) -> Result<Value, String> {
     if actions.is_empty() {
         return Err("Name at least one action.".into());
+    }
+    if !messages.is_empty() {
+        if !threads.is_empty() || search.is_some() {
+            return Err("Name messages, threads or a search: one of them.".into());
+        }
+        return act_messages(commands, messages, &actions, on_change);
     }
     let (threads, not_searched) = match &search {
         Some(_) if !threads.is_empty() => {
@@ -79,6 +87,47 @@ pub(crate) fn act(
     Ok(answer)
 }
 
+/// Change messages each alone: archiving one leaves the rest of its
+/// conversation where it is.
+fn act_messages(
+    commands: &Commands,
+    messages: Vec<MessageRef>,
+    actions: &[ThreadAction],
+    on_change: &OnChange,
+) -> Result<Value, String> {
+    let mut plan: Vec<(Vec<MessageRef>, Vec<ThreadAction>)> = Vec::new();
+    for (account, group) in by_account(messages) {
+        let resolved = actions
+            .iter()
+            .map(|a| resolve(commands, &account, a))
+            .collect::<Result<Vec<_>, String>>()?;
+        plan.push((group, resolved));
+    }
+    let total: usize = plan.iter().map(|(group, _)| group.len()).sum();
+    let work = {
+        let commands = commands.clone();
+        move |done: &AtomicUsize| {
+            for (group, actions) in &plan {
+                for chunk in group.chunks(STEP) {
+                    for action in actions {
+                        commands.act_messages(chunk, action).map_err(say)?;
+                    }
+                    done.fetch_add(chunk.len(), Ordering::Relaxed);
+                }
+            }
+            Ok(())
+        }
+    };
+    Ok(match later::within(on_change, Changed::Mail, work)? {
+        Finished::Done(()) => json!({ "changed_messages": total }),
+        Finished::Going(so_far) => json!({
+            "changing_messages": total,
+            "changed_so_far": so_far.min(total),
+            "note": "Postrinch is still making these changes and will finish by itself.",
+        }),
+    })
+}
+
 /// Make the planned changes, counting threads done in `done`.
 fn change(
     commands: &Commands,
@@ -96,9 +145,10 @@ fn change(
     Ok(())
 }
 
-/// The threads, each account's together, in the order accounts come.
-fn by_account(threads: Vec<ThreadRef>) -> Vec<(EmailAddress, Vec<ThreadRef>)> {
-    let mut groups: Vec<(EmailAddress, Vec<ThreadRef>)> = Vec::new();
+/// Threads or messages, each account's together, in the order accounts
+/// come.
+fn by_account<T>(threads: Vec<(EmailAddress, T)>) -> Vec<(EmailAddress, Vec<(EmailAddress, T)>)> {
+    let mut groups: Vec<(EmailAddress, Vec<(EmailAddress, T)>)> = Vec::new();
     for thread in threads {
         match groups.iter_mut().find(|(a, _)| *a == thread.0) {
             Some((_, group)) => group.push(thread),

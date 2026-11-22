@@ -19,8 +19,8 @@ use crate::change;
 use crate::gmail::{self, Gmail};
 use crate::registry::Agents;
 use crate::serve::OnChange;
-use crate::views_rules;
 use crate::wire::{Call, ProposedFile};
+use crate::{views_rules, views_saved};
 
 /// The most body text one message carries, in chars.
 const BODY_CHARS: usize = 100_000;
@@ -45,6 +45,9 @@ pub(crate) fn run(commands: &Commands, call: Call, asker: &Asker) -> Result<Valu
         | Call::SetRuleOn { .. }
         | Call::MoveRule { .. }
         | Call::RunRule { .. } => views_rules::run(commands, call, asker),
+        Call::Views | Call::ListView { .. } | Call::SaveView { .. } | Call::DeleteView { .. } => {
+            views_saved::run(commands, call)
+        }
         Call::CreateLabel { .. } | Call::RenameLabel { .. } | Call::DeleteLabel { .. } => {
             gmail::run(commands, call, asker.gmail)
         }
@@ -234,8 +237,16 @@ pub(crate) fn run(commands: &Commands, call: Call, asker: &Asker) -> Result<Valu
         Call::Act {
             threads,
             search,
+            messages,
             actions,
-        } => change::act(commands, threads, search, actions, asker.on_change),
+        } => change::act(
+            commands,
+            threads,
+            search,
+            messages,
+            actions,
+            asker.on_change,
+        ),
     }
 }
 
@@ -283,7 +294,7 @@ fn folder(entry: &FolderEntry) -> Value {
     json!({ "name": entry.name, "folder": place, "unread": entry.unread })
 }
 
-fn rows(commands: &Commands, labels: &mut LabelNames, rows: &[ThreadRow]) -> Vec<Value> {
+pub(crate) fn rows(commands: &Commands, labels: &mut LabelNames, rows: &[ThreadRow]) -> Vec<Value> {
     rows.iter()
         .map(|row| {
             let s = &row.summary;
@@ -373,7 +384,7 @@ fn when(t: Timestamp) -> String {
 
 /// Labels by the person's names for them, read once per account per call.
 #[derive(Default)]
-struct LabelNames {
+pub(crate) struct LabelNames {
     by_account: HashMap<String, HashMap<String, String>>,
 }
 

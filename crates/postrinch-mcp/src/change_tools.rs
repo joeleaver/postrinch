@@ -4,7 +4,7 @@
 
 use postrinch_agents::Call;
 use postrinch_commands::ThreadAction;
-use postrinch_model::ProviderThreadId;
+use postrinch_model::{ProviderMessageId, ProviderThreadId};
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{tool, tool_router};
 use schemars::JsonSchema;
@@ -15,7 +15,7 @@ use crate::tools::{AccountArgs, Postrinch, ThreadArgs, address};
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ChangeArgs {
     /// The threads to change, as list_threads and search give them. Give
-    /// these or `search`.
+    /// these, `search` or `messages`.
     #[serde(default)]
     pub threads: Vec<ThreadArgs>,
     /// Change every thread this search matches here, however many: the
@@ -24,11 +24,25 @@ pub struct ChangeArgs {
     /// matches.
     #[serde(default)]
     pub search: Option<String>,
+    /// Or single messages, `{"account", "message"}` with ids as read_thread
+    /// gives them, each changed alone: archiving one leaves the rest of its
+    /// conversation in the inbox, as a view showing one message at a time
+    /// does.
+    #[serde(default)]
+    pub messages: Vec<MessageArgs>,
     /// What to do, in order: `mark_read`, `mark_unread`, `star`, `unstar`,
     /// `archive`, `move_to_inbox`, `trash`, `untrash`, `add_label:<name or
     /// id>`, `remove_label:<name or id>`. For example `["mark_read",
     /// "archive"]` or `["add_label:Personal"]`.
     pub actions: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MessageArgs {
+    /// The account's address.
+    pub account: String,
+    /// The message's id, as read_thread gives it.
+    pub message: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -91,10 +105,16 @@ impl Postrinch {
             .iter()
             .map(|t| Ok((address(&t.account)?, ProviderThreadId(t.thread.clone()))))
             .collect::<Result<Vec<_>, String>>()?;
+        let messages = args
+            .messages
+            .iter()
+            .map(|m| Ok((address(&m.account)?, ProviderMessageId(m.message.clone()))))
+            .collect::<Result<Vec<_>, String>>()?;
         let search = args.search.filter(|s| !s.trim().is_empty());
         self.call(Call::Act {
             threads,
             search,
+            messages,
             actions,
         })
         .await

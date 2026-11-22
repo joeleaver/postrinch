@@ -5,12 +5,13 @@
 //! answers with a [`Greeting`]. Then each [`Request`] gets one
 //! [`Response`] with the same id.
 
-use postrinch_commands::{Folder, ThreadAction, ThreadRef};
+use postrinch_commands::{Folder, MessageRef, ThreadAction, ThreadRef};
 use postrinch_model::{EmailAddress, Mailbox, ProviderMessageId, ProviderThreadId, SystemLabel};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::rule_shape::RuleShape;
+use crate::view_shape::ViewShape;
 
 /// Where the app listens, unless [`ADDR_ENV`] says otherwise.
 pub const DEFAULT_ADDR: &str = "127.0.0.1:7465";
@@ -103,6 +104,9 @@ pub enum Call {
         threads: Vec<ThreadRef>,
         #[serde(default)]
         search: Option<String>,
+        /// Or messages, each changed alone, as one message at a time does.
+        #[serde(default)]
+        messages: Vec<MessageRef>,
         actions: Vec<ThreadAction>,
     },
     /// A message for the person to check and send: a reply to `thread`'s
@@ -182,6 +186,24 @@ pub enum Call {
         account: EmailAddress,
         label: String,
     },
+    /// Every view, in the sidebar's order, each with its count.
+    Views,
+    /// A page of what a view shows, named by key or name.
+    ListView {
+        view: String,
+        offset: usize,
+        limit: usize,
+    },
+    /// Make a view, or change the one `view` names: only what `change`
+    /// gives.
+    SaveView {
+        view: Option<String>,
+        change: ViewShape,
+    },
+    /// Delete one of the person's views, or put a built-in one back.
+    DeleteView {
+        view: String,
+    },
 }
 
 /// A file an agent attaches to a proposal.
@@ -210,6 +232,7 @@ pub enum ProposedFile {
 pub enum Changed {
     Mail,
     Rules(EmailAddress),
+    Views,
 }
 
 impl Call {
@@ -226,6 +249,7 @@ impl Call {
             | Call::DeleteRule { account, .. }
             | Call::SetRuleOn { account, .. }
             | Call::MoveRule { account, .. } => Some(Changed::Rules(account.clone())),
+            Call::SaveView { .. } | Call::DeleteView { .. } => Some(Changed::Views),
             _ => None,
         }
     }

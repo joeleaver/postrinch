@@ -17,8 +17,10 @@ pub mod registry;
 pub mod rule_shape;
 pub mod serve;
 pub mod setup;
+pub mod view_shape;
 mod views;
 mod views_rules;
+mod views_saved;
 pub mod wire;
 
 pub use gmail::Gmail;

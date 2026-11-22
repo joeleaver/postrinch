@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use postrinch_model::{Account, EmailAddress};
+use postrinch_model::{Account, EmailAddress, SavedView};
 
 use crate::{CommandError, CommandResult, Commands};
 
@@ -38,6 +38,21 @@ impl Commands {
         } else {
             Err(CommandError::UnknownAccount(account.clone()))
         }
+    }
+
+    /// Whether this caller sees `view`: one of every account, or of
+    /// accounts it sees each of. A view of some account it does not see
+    /// is not there for it.
+    pub(crate) fn sees_view(&self, view: &SavedView) -> bool {
+        view.accounts.iter().all(|a| self.sees(a))
+    }
+
+    /// Whether this caller may make or change `view`. The window may
+    /// change any; an agent limited to some accounts only views of those
+    /// accounts alone, as a view of every account shows the person mail
+    /// the agent does not see.
+    pub fn may_change_view(&self, view: &SavedView) -> bool {
+        self.only.is_none() || (!view.accounts.is_empty() && self.sees_view(view))
     }
 
     /// The accounts this caller sees, in the order they were added.

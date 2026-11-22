@@ -12,6 +12,7 @@ mod change_tools;
 mod files;
 mod rules_tools;
 mod tools;
+mod view_tools;
 
 use std::sync::Arc;
 

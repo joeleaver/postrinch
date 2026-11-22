@@ -43,7 +43,8 @@ pub struct Ready {
 
 /// Listen for agents. A change an agent makes reloads what the window shows
 /// and wakes sync's sender, as the window's own changes do; a change to
-/// rules also wakes sync, to give Gmail the rules, and the rules runner.
+/// rules also wakes sync, to give Gmail the rules, and the rules runner;
+/// a change to views only reloads the window.
 /// With `sync`, agents can also make, rename and delete labels in Gmail.
 pub fn start(commands: Commands, state: State, sync: Option<SyncHandle>) {
     let Some(path) = Agents::default_path() else {
@@ -57,7 +58,10 @@ pub fn start(commands: Commands, state: State, sync: Option<SyncHandle>) {
         .map(|sync| Arc::new(crate::gmail_labels::GmailLabels(sync)) as Arc<dyn Gmail>);
     let wakes = sync.map(|s| (s.send, s.wake));
     let on_change: serve::OnChange = Arc::new(move |changed: &Changed| {
-        if let Some((send, wake)) = &wakes {
+        // Views stay here: nothing for sync to send.
+        if let Some((send, wake)) = &wakes
+            && *changed != Changed::Views
+        {
             send.notify_one();
             if matches!(changed, Changed::Rules(_)) {
                 wake.notify_one();
