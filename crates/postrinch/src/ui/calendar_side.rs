@@ -1,7 +1,7 @@
 //! The sidebar's Mail | Calendar switch, and the calendar's sidebar after
 //! the calendar mockup: a small month (a click shows that day's stretch)
-//! and each account's calendars, each with its colour and a tick to show
-//! it.
+//! and each account's calendars, each with a tick to show or hide it, its
+//! colour, and its name (a click opens it in the right pane).
 
 use jiff::civil::Date;
 use postrinch_model::{CalendarInfo, EmailAddress};
@@ -85,11 +85,10 @@ fn calendar_row(state: State, account: EmailAddress, info: CalendarInfo) -> Node
                 let on = state.panel.open.get().is_some_and(|(a, c)| a == on_account && c == on_id);
                 if on { "cal-row on" } else { "cal-row" }
             }},
-            input {
-                r#type: "checkbox",
-                aria-label: "Show it",
-                checked: {move || !state.calendar.hidden.get().contains(&shown_key)},
-                oninput: move |_: String| state.toggle_calendar(&account, &id),
+            Checkbox {
+                size: "sm",
+                checked_fn: move || !state.calendar.hidden.get().contains(&shown_key),
+                onchange: move || state.toggle_calendar(&account, &id),
             }
             span { class: "cal-dot", style: {dot.clone()} }
             span {
@@ -211,7 +210,6 @@ pub const CSS: &str = r#"
 }
 .cal-row:hover { background: var(--hover); }
 .cal-row.on { background: var(--accent-tint); color: var(--ink); }
-.cal-row input { margin: 0; }
 .cal-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 .cal-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 "#;
