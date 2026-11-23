@@ -32,6 +32,18 @@ pub trait Gmail: Send + Sync {
         event: &str,
         tell: bool,
     ) -> Result<(), String>;
+    /// Who one of the account's own calendars is shared with.
+    fn calendar_shares(
+        &self,
+        account: &EmailAddress,
+        calendar: &str,
+    ) -> Result<Vec<postrinch_model::CalendarShare>, String>;
+    /// Add a calendar shared with the account to its calendars.
+    fn add_calendar(
+        &self,
+        account: &EmailAddress,
+        calendar: &str,
+    ) -> Result<postrinch_model::CalendarInfo, String>;
 }
 
 const NO_GMAIL: &str = "Postrinch can't reach Gmail now (sync is off), so it can't change labels.";

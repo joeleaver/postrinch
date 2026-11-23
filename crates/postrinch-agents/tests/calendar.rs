@@ -76,6 +76,7 @@ fn an_agent_reads_calendars_and_proposes_answers() {
         color: None,
         primary: true,
         writable: true,
+        role: Default::default(),
         shown: true,
         time_zone: Some("UTC".into()),
         reminders: Vec::new(),
@@ -206,6 +207,61 @@ fn an_agent_reads_calendars_and_proposes_answers() {
     assert_eq!(free["free"].as_array().unwrap().len(), 3, "{free}");
     assert_eq!(free["calendars"][0]["calendar"], "me@example.org");
 
+    // Sharing: only an owner's calendar says who it is shared with; one
+    // already listed is not added again, and adding needs Google.
+    let not_owner = client
+        .call(&Call::CalendarShares {
+            account: me.clone(),
+            calendar: "me@example.org".into(),
+        })
+        .unwrap_err();
+    assert!(not_owner.contains("owners"), "{not_owner}");
+    let again = client
+        .call(&Call::AddCalendar {
+            account: me.clone(),
+            calendar: "me@example.org".into(),
+        })
+        .unwrap();
+    assert_eq!(again["added"], false, "{again}");
+    let offline = client
+        .call(&Call::AddCalendar {
+            account: me.clone(),
+            calendar: "friend@example.net".into(),
+        })
+        .unwrap_err();
+    assert!(offline.contains("sync is off"), "{offline}");
+    // Google's signed mail sharing a calendar shows in read_thread.
+    let share = Message {
+        id: ProviderMessageId("s1".into()),
+        thread: ProviderThreadId("ts".into()),
+        headers: MessageHeaders {
+            subject: Some("Accept your invitation to join shared calendar".into()),
+            from: vec![postrinch_model::Mailbox::new(
+                Some("Friend".into()),
+                address("friend@example.net"),
+            )],
+            sender: Some(postrinch_model::Mailbox::new(
+                Some("Google Calendar".into()),
+                address("calendar-notification@google.com"),
+            )),
+            ..Default::default()
+        },
+        attachments: Vec::new(),
+        size: SHARE.len() as u64,
+        ..invite.clone()
+    };
+    store.put_message(&share, Some(SHARE.as_bytes())).unwrap();
+    let read = client
+        .call(&Call::ReadThread {
+            account: me.clone(),
+            thread: ProviderThreadId("ts".into()),
+        })
+        .unwrap();
+    let shared = &read["messages"][0]["shares_calendar"];
+    assert_eq!(shared["calendar"], "friend@example.net", "{read}");
+    assert_eq!(shared["added"], false);
+    assert_eq!(shared["untrusted"]["by"], "Friend (friend@example.net)");
+
     let refused = client
         .call(&Call::Events {
             accounts: vec![other.clone()],
@@ -270,7 +326,11 @@ fn an_agent_reads_calendars_and_proposes_answers() {
     assert_eq!(waiting.len(), 1);
     assert_eq!(waiting[0].1.summary.as_deref(), Some("Plans"));
     assert_eq!(waiting[0].1.agent, "Test agent");
-    assert_eq!(changes.lock().unwrap().as_slice(), [Changed::Answers]);
+    // add_calendar above, then the answer.
+    assert_eq!(
+        changes.lock().unwrap().as_slice(),
+        [Changed::Calendar, Changed::Answers]
+    );
 
     // Calendar changes: what would tell other people waits.
     let guest = postrinch_model::Mailbox::new(None, address("bob@example.org"));
@@ -357,3 +417,12 @@ fn an_agent_reads_calendars_and_proposes_answers() {
     assert_eq!(waiting.len(), 3);
     assert_eq!(waiting[0].1.reason.as_deref(), Some("Bob asked"));
 }
+
+/// Google's mail sharing a calendar, as it sends it: from the sharer, sent
+/// and signed by Google.
+const SHARE: &str = "Authentication-Results: mx.google.com;\r\n       dkim=pass header.i=@google.com header.s=20260707\r\n\
+Sender: Google Calendar <calendar-notification@google.com>\r\n\
+From: Friend <friend@example.net>\r\nTo: me@example.org\r\n\
+Subject: Accept your invitation to join shared calendar\r\nMIME-Version: 1.0\r\n\
+Content-Type: text/plain; charset=UTF-8\r\n\r\n\
+To join shared calendar click https://calendar.google.com/calendar/r?cid=ZnJpZW5kQGV4YW1wbGUubmV0&es=3\r\n";

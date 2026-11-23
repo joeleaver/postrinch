@@ -64,6 +64,7 @@ fn reminders_fall_due_by_the_event_its_calendar_or_the_fallback() {
         color: None,
         primary: true,
         writable: true,
+        role: Default::default(),
         shown: true,
         time_zone: None,
         reminders,

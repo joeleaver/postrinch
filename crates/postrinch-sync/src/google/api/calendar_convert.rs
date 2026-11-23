@@ -1,8 +1,8 @@
 //! The Calendar API's events and calendars as Postrinch keeps them.
 
 use postrinch_model::{
-    Answer, Attendee, CalendarEvent, CalendarInfo, Day, EmailAddress, EventRecord, EventStart,
-    EventWhen, Mailbox, Timestamp,
+    Answer, Attendee, CalendarEvent, CalendarInfo, CalendarRole, Day, EmailAddress, EventRecord,
+    EventStart, EventWhen, Mailbox, Timestamp,
 };
 
 use super::calendar::{EventResource, EventTime, popups};
@@ -109,6 +109,11 @@ pub(crate) fn to_calendar(c: &CalendarResource) -> CalendarInfo {
         color: c.background_color.clone(),
         primary: c.primary,
         writable: matches!(c.access_role.as_deref(), Some("owner" | "writer")),
+        role: c
+            .access_role
+            .as_deref()
+            .and_then(CalendarRole::from_word)
+            .unwrap_or_default(),
         shown: c.selected,
         time_zone: c.time_zone.clone(),
         reminders: popups(&c.default_reminders),

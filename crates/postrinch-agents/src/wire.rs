@@ -206,6 +206,17 @@ pub enum Call {
     },
     /// Each account's calendars.
     Calendars,
+    /// Who one of the account's own calendars is shared with, and how.
+    CalendarShares {
+        account: EmailAddress,
+        calendar: String,
+    },
+    /// Add a calendar shared with the account (as Google's mail names it)
+    /// to its calendars.
+    AddCalendar {
+        account: EmailAddress,
+        calendar: String,
+    },
     /// The events between two moments (RFC 3339, or a date for its
     /// midnight in the person's zone), each repeating one at each time.
     Events {
@@ -333,9 +344,10 @@ impl Call {
             | Call::MoveRule { account, .. } => Some(Changed::Rules(account.clone())),
             Call::SaveView { .. } | Call::DeleteView { .. } => Some(Changed::Views),
             Call::AnswerInvitation { .. } => Some(Changed::Answers),
-            Call::SaveEvent { .. } | Call::DeleteEvent { .. } | Call::AnswerEvent { .. } => {
-                Some(Changed::Calendar)
-            }
+            Call::SaveEvent { .. }
+            | Call::DeleteEvent { .. }
+            | Call::AnswerEvent { .. }
+            | Call::AddCalendar { .. } => Some(Changed::Calendar),
             _ => None,
         }
     }

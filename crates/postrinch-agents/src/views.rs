@@ -55,6 +55,9 @@ pub(crate) fn run(commands: &Commands, call: Call, asker: &Asker) -> Result<Valu
         Call::SaveEvent { .. } | Call::DeleteEvent { .. } | Call::AnswerEvent { .. } => {
             crate::calendar_write::run(commands, call, agent, asker.gmail)
         }
+        Call::CalendarShares { .. } | Call::AddCalendar { .. } => {
+            crate::calendar_share::run(commands, call, asker.gmail)
+        }
         Call::CreateLabel { .. } | Call::RenameLabel { .. } | Call::DeleteLabel { .. } => {
             gmail::run(commands, call, asker.gmail)
         }
@@ -367,6 +370,8 @@ fn message(commands: &Commands, labels: &mut LabelNames, m: &Message) -> Value {
             // The event a calendar part describes, if it carries one.
             "invitation": crate::invitations::of(commands, m),
         },
+        // A calendar Google's own (signed) mail shares with the account.
+        "shares_calendar": crate::invitations::shared_calendar(commands, m),
         // Numbered as read_attachment takes them. Inline ones are pictures
         // the body shows.
         "attachments": m.attachments.iter().enumerate().map(|(i, a)| json!({

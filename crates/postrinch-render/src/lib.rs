@@ -10,6 +10,7 @@
 //! asked for them, as loading them tells the sender the mail was opened
 //! (sanitize.rs). A message with no HTML part is its text, escaped.
 
+mod calendar_share;
 mod colour;
 mod dark;
 mod ics;
@@ -23,6 +24,7 @@ mod vtimezone;
 
 use mail_parser::{MessageParser, PartKind};
 
+pub use calendar_share::{SharedCalendar, calendar_share};
 pub use colour::Rgba;
 pub use dark::{DarkColours, for_dark};
 pub use invitation::invitation;

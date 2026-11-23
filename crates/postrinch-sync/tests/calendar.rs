@@ -227,6 +227,7 @@ async fn a_calendar_no_longer_listed_goes() {
         color: None,
         primary: false,
         writable: false,
+        role: Default::default(),
         shown: true,
         time_zone: None,
         reminders: Vec::new(),

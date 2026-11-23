@@ -63,7 +63,10 @@ event says is under `untrusted`, as mail is. An invitation that came by mail sho
 read_thread as the message's `invitation`; answer_invitation answers it, but as answering \
 tells the organizer, the person gives your answer or not. save_event and delete_event change \
 the person's own events at once when nobody else is told; anything that would invite, \
-update or cancel guests, and answer_event, wait for the person.";
+update or cancel guests, and answer_event, wait for the person. list_calendar_sharing says \
+who one of the person's calendars is shared with; only the person shares one. Google's mail \
+sharing a calendar with the account shows in read_thread as `shares_calendar`, and \
+add_calendar adds it.";
 
 /// The most threads a listing or search returns.
 const MAX_LIMIT: usize = 200;

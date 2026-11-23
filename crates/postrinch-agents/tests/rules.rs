@@ -72,6 +72,22 @@ impl postrinch_agents::Gmail for FakeGmail {
     fn delete_event(&self, _: &EmailAddress, _: &str, _: &str, _: bool) -> Result<(), String> {
         Err("no calendars here".into())
     }
+
+    fn calendar_shares(
+        &self,
+        _: &EmailAddress,
+        _: &str,
+    ) -> Result<Vec<postrinch_model::CalendarShare>, String> {
+        Err("no calendars here".into())
+    }
+
+    fn add_calendar(
+        &self,
+        _: &EmailAddress,
+        _: &str,
+    ) -> Result<postrinch_model::CalendarInfo, String> {
+        Err("no calendars here".into())
+    }
 }
 
 fn shape(json: &str) -> RuleShape {

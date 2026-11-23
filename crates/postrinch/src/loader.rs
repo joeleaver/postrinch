@@ -278,6 +278,10 @@ fn answer(commands: &Commands, state: State, request: Request) {
                     let (found, clashes) = crate::invitations::read(commands, thread);
                     state.invitations.clashes.send(clashes);
                     state.invitations.found.send(found);
+                    state
+                        .invitations
+                        .shares
+                        .send(crate::calendar_shares::read(commands, thread));
                 }
                 state.thread.send(thread);
             }

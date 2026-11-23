@@ -5,6 +5,7 @@ mod agent_dialogs;
 mod agents_settings;
 mod attachment_cards;
 mod calendar_month;
+mod calendar_pane;
 mod calendar_side;
 mod calendar_view;
 mod category_picker;
@@ -38,6 +39,7 @@ mod rule_run_dialog;
 mod rules_page;
 mod search;
 mod settings;
+mod share_card;
 mod sidebar;
 mod splitter;
 mod style;
@@ -135,9 +137,9 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {about::CSS} }
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
-                style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {compose_files::CSS} {label_new::CSS} }
+                style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {share_card::CSS} {compose_files::CSS} {label_new::CSS} }
                 style { {list_bar::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
-                style { {calendar_side::CSS} {calendar_view::CSS} {calendar_month::CSS} {event_pane::CSS} {event_editor::CSS} {notices_settings::CSS} }
+                style { {calendar_side::CSS} {calendar_view::CSS} {calendar_month::CSS} {event_pane::CSS} {calendar_pane::CSS} {event_editor::CSS} {notices_settings::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}

@@ -44,6 +44,15 @@ pub struct FreeTimeArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct CalendarArgs {
+    /// The account the calendar is listed in.
+    pub account: String,
+    /// The calendar: the id list_calendars gives, or, to add one, the id a
+    /// message's `shares_calendar` gives.
+    pub calendar: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct AnswerArgs {
     /// The account the invitation came to.
     pub account: String,
@@ -134,6 +143,37 @@ impl Postrinch {
     #[tool(name = "list_calendars")]
     async fn list_calendars(&self) -> Result<String, String> {
         self.call(Call::Calendars).await
+    }
+
+    /// Who one of the account's own calendars (`role` owner) is shared
+    /// with, and what each may do. Only the person shares a calendar or
+    /// stops sharing it.
+    #[tool(name = "list_calendar_sharing")]
+    async fn list_calendar_sharing(
+        &self,
+        Parameters(args): Parameters<CalendarArgs>,
+    ) -> Result<String, String> {
+        self.call(Call::CalendarShares {
+            account: address(&args.account)?,
+            calendar: args.calendar,
+        })
+        .await
+    }
+
+    /// Add a calendar someone shared with the account to its calendars, as
+    /// read_thread's `shares_calendar` names it on Google's mail saying so.
+    /// Its events then show in the person's calendar; they can take it off
+    /// again.
+    #[tool(name = "add_calendar")]
+    async fn add_calendar(
+        &self,
+        Parameters(args): Parameters<CalendarArgs>,
+    ) -> Result<String, String> {
+        self.call(Call::AddCalendar {
+            account: address(&args.account)?,
+            calendar: args.calendar,
+        })
+        .await
     }
 
     /// The events between two moments in the person's calendars, soonest

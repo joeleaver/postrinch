@@ -1,7 +1,7 @@
 //! An invitation in mail as an agent reads it, beside its message. Every
 //! word of it is the sender's, so it sits under the message's `untrusted`.
 
-use postrinch_commands::{Commands, may_invite};
+use postrinch_commands::{Commands, may_invite, may_share_calendar};
 use postrinch_model::{EventWhen, Invitation, InvitationKind, Mailbox, Message, Timestamp};
 use serde_json::{Value, json};
 
@@ -32,6 +32,28 @@ pub(crate) fn of(commands: &Commands, m: &Message) -> Value {
         }
         _ => Value::Null,
     }
+}
+
+/// The calendar Google's signed mail shares with the account, or `null`:
+/// its id (to add_calendar), whether it is added, and who shared it (a
+/// name they chose, so under `untrusted`).
+pub(crate) fn shared_calendar(commands: &Commands, m: &Message) -> Value {
+    if !may_share_calendar(m) {
+        return Value::Null;
+    }
+    let Ok(Some(shared)) = commands.calendar_share(&m.account, &m.id) else {
+        return Value::Null;
+    };
+    let added = commands
+        .calendars()
+        .unwrap_or_default()
+        .iter()
+        .any(|(a, c)| a.key() == m.account.key() && c.id == shared.id);
+    json!({
+        "calendar": shared.id,
+        "added": added,
+        "untrusted": { "by": shared.by },
+    })
 }
 
 fn shown(i: &Invitation) -> Value {

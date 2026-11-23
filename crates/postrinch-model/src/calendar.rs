@@ -139,6 +139,9 @@ pub struct CalendarInfo {
     pub primary: bool,
     /// Whether the account may change its events.
     pub writable: bool,
+    /// What the account may do with it: an owner may share it.
+    #[serde(default)]
+    pub role: crate::CalendarRole,
     /// Whether the person shows it in Google Calendar.
     pub shown: bool,
     pub time_zone: Option<String>,

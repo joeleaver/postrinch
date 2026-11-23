@@ -8,6 +8,7 @@ use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 
 mod calendar;
+mod calendar_acl;
 mod calendar_convert;
 mod calendar_events;
 mod calendar_list;

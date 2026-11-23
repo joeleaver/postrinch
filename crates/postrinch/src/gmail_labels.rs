@@ -70,4 +70,22 @@ impl Gmail for GmailLabels {
         let sync = self.0.sync_engine();
         self.run(sync.delete_event(account, calendar, event, tell))
     }
+
+    fn calendar_shares(
+        &self,
+        account: &EmailAddress,
+        calendar: &str,
+    ) -> Result<Vec<postrinch_model::CalendarShare>, String> {
+        let sync = self.0.sync_engine();
+        self.run(sync.calendar_shares(account, calendar))
+    }
+
+    fn add_calendar(
+        &self,
+        account: &EmailAddress,
+        calendar: &str,
+    ) -> Result<postrinch_model::CalendarInfo, String> {
+        let sync = self.0.sync_engine();
+        self.run(sync.add_shared_calendar(account, calendar))
+    }
 }

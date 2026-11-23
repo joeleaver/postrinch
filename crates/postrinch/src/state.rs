@@ -186,6 +186,8 @@ pub struct State {
     pub invitations: crate::invitations::Invitations,
     /// The calendar view.
     pub calendar: crate::calendar_ui::CalendarUi,
+    /// The calendar open in the calendar's right pane.
+    pub panel: crate::calendar_panel::Panel,
     /// Desktop notices.
     pub notices: crate::notify::Notices,
 }
@@ -261,6 +263,7 @@ impl State {
             rules: crate::rules_ui::RulesUi::new(),
             invitations: crate::invitations::Invitations::new(),
             calendar: crate::calendar_ui::CalendarUi::new(&settings),
+            panel: crate::calendar_panel::Panel::new(),
             notices: crate::notify::Notices::new(settings.notices.clone()),
         }
     }
@@ -320,6 +323,7 @@ impl State {
             });
         });
         self.load_calendar(ask.clone());
+        self.watch_calendar_panel();
         self.watch_notices(ask.clone());
         let accounts = ask.clone();
         Effect::new(move || {

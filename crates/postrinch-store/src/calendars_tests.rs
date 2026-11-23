@@ -9,6 +9,7 @@ fn info(id: &str) -> CalendarInfo {
         color: None,
         primary: id == "me@example.com",
         writable: true,
+        role: Default::default(),
         shown: true,
         time_zone: Some("Europe/London".into()),
         reminders: Vec::new(),

@@ -25,8 +25,11 @@ pub fn event_pane(state: State) -> NodeHandle {
                         {detail(__scope, state, open.0.clone(), open.1)}
                     }
                 }
-                if state.calendar.open.get().is_none() {
-                    div { class: "event-empty", "Choose an event to see it here, or make one with + Event." }
+                if state.calendar.open.get().is_none() && state.panel.open.get().is_some() {
+                    {crate::ui::calendar_pane::calendar_pane(__scope, state)}
+                }
+                if state.calendar.open.get().is_none() && state.panel.open.get().is_none() {
+                    div { class: "event-empty", "Choose an event to see it here, or make one with + Event. A click on a calendar\u{2019}s name shows who it is shared with." }
                 }
             }
         }

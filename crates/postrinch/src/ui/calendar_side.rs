@@ -76,15 +76,27 @@ fn calendar_row(state: State, account: EmailAddress, info: CalendarInfo) -> Node
         info.color.clone().unwrap_or_else(|| "var(--accent)".into())
     );
     let id = info.id.clone();
+    let (opens, open_id) = (account.clone(), info.id.clone());
+    let (on_account, on_id) = (account.clone(), info.id.clone());
     rsx! {
-        label { key: key.clone(), class: "cal-row",
+        div {
+            key: key.clone(),
+            class: {move || {
+                let on = state.panel.open.get().is_some_and(|(a, c)| a == on_account && c == on_id);
+                if on { "cal-row on" } else { "cal-row" }
+            }},
             input {
                 r#type: "checkbox",
+                aria-label: "Show it",
                 checked: {move || !state.calendar.hidden.get().contains(&shown_key)},
                 oninput: move |_: String| state.toggle_calendar(&account, &id),
             }
             span { class: "cal-dot", style: {dot.clone()} }
-            span { class: "cal-name", {info.name.clone()} }
+            span {
+                class: "cal-name",
+                onclick: move || state.open_calendar_panel(&opens, &open_id),
+                {info.name.clone()}
+            }
         }
     }
 }
@@ -198,7 +210,8 @@ pub const CSS: &str = r#"
     border-radius: 6px; color: var(--ink-2); font-size: 13px; cursor: pointer;
 }
 .cal-row:hover { background: var(--hover); }
+.cal-row.on { background: var(--accent-tint); color: var(--ink); }
 .cal-row input { margin: 0; }
 .cal-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
-.cal-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 "#;

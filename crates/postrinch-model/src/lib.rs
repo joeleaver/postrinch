@@ -7,6 +7,7 @@
 mod account;
 mod address;
 mod calendar;
+mod calendar_share;
 mod change;
 mod draft;
 mod label;
@@ -21,6 +22,7 @@ pub use calendar::{
     Answer, Attendee, CalendarEvent, CalendarInfo, Day, EventChange, EventDraft, EventProposal,
     EventRecord, EventStart, EventWhen, Invitation, InvitationKind, ProposedAnswer,
 };
+pub use calendar_share::{CalendarRole, CalendarShare, ShareWho};
 pub use change::MessageChange;
 pub use draft::{
     Answering, AttachmentOrigin, Draft, DraftAttachment, MAX_ATTACHED, NotAnAddress, Proposal,

@@ -10,6 +10,7 @@
 //! call, so removing an agent or narrowing it takes effect at once.
 
 mod calendar;
+mod calendar_share;
 mod calendar_write;
 mod change;
 pub mod client;

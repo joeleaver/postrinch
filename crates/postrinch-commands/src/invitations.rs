@@ -16,7 +16,34 @@ pub fn may_invite(message: &Message) -> bool {
             .any(|a| matches!(a.mime_type.as_str(), "text/calendar" | "application/ics"))
 }
 
+/// Whether a message may be Google's mail sharing a calendar: downloaded,
+/// sent by a google.com address (Google sends it from the sharer, as
+/// itself), and no invitation. Cheap, from what is kept of it.
+pub fn may_share_calendar(message: &Message) -> bool {
+    let h = &message.headers;
+    message.downloaded
+        && !may_invite(message)
+        && h.sender
+            .iter()
+            .chain(h.from.iter())
+            .any(|f| f.address.domain() == "google.com")
+}
+
 impl Commands {
+    /// The calendar a downloaded message shares with its account, when it
+    /// is Google's own (signed) mail saying so.
+    pub fn calendar_share(
+        &self,
+        account: &EmailAddress,
+        message: &ProviderMessageId,
+    ) -> CommandResult<Option<postrinch_render::SharedCalendar>> {
+        self.check(account)?;
+        let Some(raw) = self.store.raw_message(account, message)? else {
+            return Ok(None);
+        };
+        Ok(postrinch_render::calendar_share(&raw))
+    }
+
     /// The invitation a downloaded message carries, its times read in the
     /// system's time zone where it names none. `None` when it carries none
     /// or is not downloaded.

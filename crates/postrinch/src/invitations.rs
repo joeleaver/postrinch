@@ -32,6 +32,8 @@ pub struct Invitations {
     pub clashes: Signal<HashMap<String, Vec<CalendarEvent>>>,
     /// Agents' answers waiting for the person, in every account.
     pub proposals: Signal<Vec<(EmailAddress, ProposedAnswer)>>,
+    /// The calendars the open thread's messages share, by message id.
+    pub shares: Signal<HashMap<String, crate::calendar_shares::Shared>>,
 }
 
 /// An invitation's event, as far as its calendar has been asked.
@@ -55,6 +57,7 @@ impl Invitations {
             events: Signal::new(HashMap::new()),
             proposals: Signal::new(Vec::new()),
             clashes: Signal::new(HashMap::new()),
+            shares: Signal::new(HashMap::new()),
         }
     }
 }
