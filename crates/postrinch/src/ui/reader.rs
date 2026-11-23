@@ -241,11 +241,7 @@ fn mail(state: State, message: Message, rendered: Rendered, dark: bool) -> NodeH
         let (html, body_style) = (rendered.html.clone(), rendered.body_style.clone());
         rsx! { HtmlView { html: html, body_style: body_style, onlink: move |href: String| crate::links::open(&href) } }
     } else {
-        let document = if dark {
-            postrinch_render::for_dark(&rendered.document, crate::ui::palette::DARK_MAIL)
-        } else {
-            rendered.document.clone()
-        };
+        let document = document(&rendered, dark);
         let policy = postrinch_render::policy(rendered.remote);
         rsx! {
             HtmlView {
@@ -296,6 +292,16 @@ fn mail(state: State, message: Message, rendered: Rendered, dark: bool) -> NodeH
             {host}
             {quote_toggle}
         }
+    }
+}
+
+/// What a rendered message draws: its document, redrawn in dark colours
+/// under `dark` (for mail with no design of its own).
+pub(crate) fn document(rendered: &Rendered, dark: bool) -> String {
+    if dark {
+        postrinch_render::for_dark(&rendered.document, crate::ui::palette::DARK_MAIL)
+    } else {
+        rendered.document.clone()
     }
 }
 

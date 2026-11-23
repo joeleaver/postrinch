@@ -32,15 +32,38 @@ pub fn invitation_card(state: State, message: Message) -> NodeHandle {
     }
     let id = message.id.0.clone();
     let account = message.account.clone();
+    // The mail names people the calendar knows only by address.
+    let h = &message.headers;
+    let named: Vec<Mailbox> = h
+        .from
+        .iter()
+        .chain(h.sender.iter())
+        .chain(h.to.iter())
+        .chain(h.cc.iter())
+        .filter(|m| m.name.as_deref().is_some_and(|n| !n.trim().is_empty()))
+        .cloned()
+        .collect();
     rsx! {
         div {
             for shown in shown(state, &account, &id) {
                 div { key: key(shown),
-                    {card(__scope, state, account.clone(), id.clone(), shown.clone())}
+                    {card(__scope, state, account.clone(), id.clone(), shown.clone(), named.clone())}
                 }
             }
         }
     }
+}
+
+/// A person as the mail names them, when the calendar gives no name.
+fn named(person: &Mailbox, named: &[Mailbox]) -> Mailbox {
+    if person.name.as_deref().is_some_and(|n| !n.trim().is_empty()) {
+        return person.clone();
+    }
+    named
+        .iter()
+        .find(|m| m.address.key() == person.address.key())
+        .cloned()
+        .unwrap_or_else(|| person.clone())
 }
 
 fn shown(state: State, account: &EmailAddress, id: &str) -> Option<Shown> {
@@ -69,7 +92,13 @@ fn key(shown: &Shown) -> String {
 }
 
 #[component]
-fn card(state: State, account: EmailAddress, id: String, shown: Shown) -> NodeHandle {
+fn card(
+    state: State,
+    account: EmailAddress,
+    id: String,
+    shown: Shown,
+    names: Vec<Mailbox>,
+) -> NodeHandle {
     let (invitation, lookup, proposed, clashes) = shown;
     let proposed = proposed.filter(|_| invitation.kind == InvitationKind::Request);
     let event = match &lookup {
@@ -99,6 +128,7 @@ fn card(state: State, account: EmailAddress, id: String, shown: Shown) -> NodeHa
         .as_ref()
         .map(|e| e.attendees.clone())
         .unwrap_or_else(|| invitation.attendees.clone());
+    let organizer = organizer.map(|o| named(&o, &names));
     let who = who(organizer.as_ref(), &guests, &account);
     let repeats = invitation.repeats || event.as_ref().is_some_and(|e| e.repeating);
     let clash_lines: Vec<String> = clashes
@@ -146,7 +176,9 @@ fn card(state: State, account: EmailAddress, id: String, shown: Shown) -> NodeHa
                     div { key: line.clone(), class: "invite-line", {line.clone()} }
                 }
                 for line in location.clone() {
-                    div { key: line.clone(), class: "invite-line", {line.clone()} }
+                    div { key: line.clone(),
+                        {crate::ui::event_notes::place(__scope, line.clone(), "invite-line")}
+                    }
                 }
                 for line in who.clone() {
                     div { key: line.clone(), class: "invite-line muted", {line.clone()} }

@@ -36,6 +36,35 @@ pub fn event_pane(state: State) -> NodeHandle {
     }
 }
 
+/// One guest as the pane lists them.
+#[derive(Clone, PartialEq, Default)]
+struct Guest {
+    name: String,
+    /// Their address, when the name is not it.
+    address: String,
+    organizer: bool,
+    said: &'static str,
+}
+
+#[component]
+fn guest_row(g: Guest) -> NodeHandle {
+    let address = g.address.clone();
+    rsx! {
+        div { class: "event-guest",
+            div { class: "event-guest-who",
+                span { class: "event-guest-name", {g.name.clone()} }
+                if !address.is_empty() {
+                    span { class: "event-sub event-guest-address", {address.clone()} }
+                }
+            }
+            if g.organizer {
+                span { class: "invite-chip", "Organizer" }
+            }
+            span { class: "event-sub event-guest-said", {g.said} }
+        }
+    }
+}
+
 fn writable(state: State, h: &Happening) -> bool {
     state
         .calendar
@@ -156,21 +185,30 @@ fn detail(state: State, h: Happening, answering: Option<Answer>) -> NodeHandle {
         Some(Answer::No) => "No",
         None => "Not answered",
     };
-    let guests: Vec<(String, &'static str)> = e
+    let guests: Vec<Guest> = e
         .attendees
         .iter()
         .map(|g| {
-            let mut name = g.mailbox.display_name();
-            if e.organizer
-                .as_ref()
-                .is_some_and(|o| o.address == g.mailbox.address)
-            {
-                name.push_str(" (organizer)");
+            let me = g.mailbox.address == h.account;
+            let address = g.mailbox.address.to_string();
+            let name = match (&g.mailbox.name, me) {
+                (_, true) => "You".to_owned(),
+                (Some(n), _) if !n.trim().is_empty() => n.trim().to_owned(),
+                _ => address.clone(),
+            };
+            Guest {
+                address: if name == address {
+                    String::new()
+                } else {
+                    address
+                },
+                name,
+                organizer: e
+                    .organizer
+                    .as_ref()
+                    .is_some_and(|o| o.address == g.mailbox.address),
+                said: said(g.answer),
             }
-            if g.mailbox.address == h.account {
-                name = "You".into();
-            }
-            (name, said(g.answer))
         })
         .collect();
     let guest_head = (!guests.is_empty()).then(|| {
@@ -210,7 +248,9 @@ fn detail(state: State, h: Happening, answering: Option<Answer>) -> NodeHandle {
                 }
             }
             for line in location.clone() {
-                div { key: line.clone(), class: "event-line", {line.clone()} }
+                div { key: line.clone(),
+                    {crate::ui::event_notes::place(__scope, line.clone(), "event-line")}
+                }
             }
             for line in clash_lines.clone() {
                 div { key: line.clone(), class: "event-line clash", {line.clone()} }
@@ -220,16 +260,17 @@ fn detail(state: State, h: Happening, answering: Option<Answer>) -> NodeHandle {
             for head in guest_head.clone() {
                 div { key: head.clone(), class: "event-guests",
                     span { class: "event-sub", {head.clone()} }
-                    for (name, said) in guests.clone() {
-                        div { key: name.clone(), class: "event-guest",
-                            span { class: "event-guest-name", {name.clone()} }
-                            span { class: "event-sub", {said} }
+                    for g in guests.clone() {
+                        div { key: format!("{}|{}", g.name, g.address),
+                            {guest_row(__scope, g.clone())}
                         }
                     }
                 }
             }
-            for note in notes.clone() {
-                div { key: note.len(), class: "event-notes", {note.clone()} }
+            for note in notes.clone().filter(|n| !n.trim().is_empty()) {
+                div { key: note.len(),
+                    {crate::ui::event_notes::event_notes(__scope, state, note.clone())}
+                }
             }
             div { class: "event-foot",
                 for href in link.clone() {
@@ -262,11 +303,10 @@ pub const CSS: &str = r#"
 .event-line.clash { color: var(--trouble); }
 .event-guests { border-top: 1px solid var(--line-soft); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .event-guest { display: flex; gap: 8px; align-items: center; }
-.event-guest-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
-.event-notes {
-    border-top: 1px solid var(--line-soft); padding-top: 10px; color: var(--ink-2);
-    font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
-}
+.event-guest-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.event-guest-name, .event-guest-address { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-guest-name { color: var(--ink); }
+.event-guest-said { flex-shrink: 0; }
 .event-foot { display: flex; gap: 14px; align-items: center; padding-top: 4px; }
 .link-button.danger { color: var(--danger); }
 "#;

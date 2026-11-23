@@ -34,6 +34,9 @@ pub struct Form {
     /// Addresses, as To: takes them.
     pub guests: String,
     pub notes: String,
+    /// Notes Google keeps as HTML: the text they were shown as here, and
+    /// the HTML, saved again as it was unless the text is changed.
+    pub notes_html: Option<(String, String)>,
     /// Why it can't be saved, or what went wrong saving it.
     pub error: Option<String>,
     pub busy: bool,
@@ -63,6 +66,7 @@ impl Form {
             location: String::new(),
             guests: String::new(),
             notes: String::new(),
+            notes_html: None,
             error: None,
             busy: false,
             proposal: None,
@@ -86,7 +90,13 @@ impl Form {
         form.event = event;
         form.summary = d.summary;
         form.location = d.location;
-        form.notes = d.description;
+        if postrinch_render::notes_are_html(&d.description) {
+            let text = postrinch_render::notes_text(&d.description);
+            form.notes = text.clone();
+            form.notes_html = Some((text, d.description));
+        } else {
+            form.notes = d.description;
+        }
         form.guests = format_mailboxes(&d.guests);
         match d.when {
             EventWhen::Days { first, last } => {
@@ -170,7 +180,10 @@ impl Form {
             calendar: self.calendar.clone(),
             summary: summary.to_owned(),
             location: self.location.trim().to_owned(),
-            description: self.notes.trim().to_owned(),
+            description: match &self.notes_html {
+                Some((shown, html)) if *shown == self.notes => html.clone(),
+                _ => self.notes.trim().to_owned(),
+            },
             when,
             time_zone: tz.iana_name().map(str::to_owned),
             guests,
@@ -348,6 +361,22 @@ mod tests {
         );
         f.summary = "Walkthrough".into();
         f
+    }
+
+    #[test]
+    fn google_s_html_notes_are_edited_as_text_and_kept_when_untouched() {
+        let html = "<p><b>Agenda</b></p><p><a href=\"https://meet.example/x\">Join</a></p>";
+        let mut d = form().draft(&TimeZone::UTC).unwrap();
+        d.description = html.into();
+        let account = EmailAddress::parse("me@example.org").unwrap();
+        let mut f = Form::of_draft(account, Some("e1".into()), d, &TimeZone::UTC);
+        assert!(!f.notes.contains('<'), "{}", f.notes);
+        assert!(f.notes.contains("Agenda"));
+        // Untouched, Google gets its HTML back; changed, the new text.
+        assert_eq!(f.draft(&TimeZone::UTC).unwrap().description, html);
+        f.notes.push_str("\nBring the slides");
+        let changed = f.draft(&TimeZone::UTC).unwrap().description;
+        assert!(changed.ends_with("Bring the slides") && !changed.contains('<'));
     }
 
     #[test]

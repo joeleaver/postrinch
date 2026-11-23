@@ -89,7 +89,7 @@ pub fn text_document(text: &str) -> String {
         while i < lines.len() && in_quote[i] == quote {
             i += 1;
         }
-        let run = escape(&lines[start..i].join("\n"));
+        let run = linked(&escape(&lines[start..i].join("\n")));
         if quote {
             out.push_str("<blockquote type=\"cite\" style=\"margin: 0\">");
             out.push_str(&run);
@@ -107,6 +107,43 @@ pub fn text_document(text: &str) -> String {
     out
 }
 
+/// Escaped text with each web address in it made a link. An address ends
+/// at a space or a quote; a full stop, comma or closing bracket after it is
+/// the sentence's.
+fn linked(escaped: &str) -> String {
+    let mut out = String::with_capacity(escaped.len());
+    let mut rest = escaped;
+    loop {
+        let found = ["https://", "http://"]
+            .iter()
+            .filter_map(|scheme| rest.find(scheme))
+            .min();
+        let Some(at) = found else {
+            out.push_str(rest);
+            return out;
+        };
+        out.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        let mut end = tail
+            .find(|c: char| c.is_whitespace() || c == '"')
+            .unwrap_or(tail.len());
+        // An escaped angle bracket ends it too.
+        for stop in ["&lt;", "&gt;"] {
+            if let Some(i) = tail[..end].find(stop) {
+                end = i;
+            }
+        }
+        let url = tail[..end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '\'']);
+        if url.len() <= "https://".len() {
+            out.push_str(&tail[..end]);
+        } else {
+            out.push_str(&format!("<a href=\"{url}\">{url}</a>"));
+            out.push_str(&tail[url.len()..end]);
+        }
+        rest = &tail[end..];
+    }
+}
+
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -116,6 +153,23 @@ fn escape(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn web_addresses_in_text_are_links() {
+        let doc = text_document("Join at https://zoom.us/j/1?pwd=a&b=c, or (http://x.org/a).");
+        assert!(
+            doc.contains("<a href=\"https://zoom.us/j/1?pwd=a&amp;b=c\">https://zoom.us/j/1?pwd=a&amp;b=c</a>, or"),
+            "{doc}"
+        );
+        assert!(
+            doc.contains("(<a href=\"http://x.org/a\">http://x.org/a</a>)."),
+            "{doc}"
+        );
+        assert!(
+            text_document("<https://a.org/b>")
+                .contains("&lt;<a href=\"https://a.org/b\">https://a.org/b</a>&gt;")
+        );
+    }
 
     #[test]
     fn quoted_lines_and_their_attribution_go_in_one_quote() {
