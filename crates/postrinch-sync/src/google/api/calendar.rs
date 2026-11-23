@@ -43,6 +43,38 @@ pub(crate) struct EventResource {
     /// A series' `RRULE`, `EXRULE`, `RDATE` and `EXDATE` lines.
     #[serde(default)]
     pub recurrence: Vec<String>,
+    #[serde(default)]
+    pub reminders: Option<Reminders>,
+}
+
+/// An event's reminders: its calendar's, or its own.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Reminders {
+    #[serde(default)]
+    pub use_default: bool,
+    #[serde(default)]
+    pub overrides: Vec<Reminder>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct Reminder {
+    /// `popup` or `email`.
+    #[serde(default)]
+    pub method: String,
+    pub minutes: i64,
+}
+
+/// The reminders that show on a screen, in minutes before.
+pub(crate) fn popups(list: &[Reminder]) -> Vec<i64> {
+    let mut out: Vec<i64> = list
+        .iter()
+        .filter(|r| r.method == "popup")
+        .map(|r| r.minutes)
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -11,6 +11,7 @@ fn info(id: &str) -> CalendarInfo {
         writable: true,
         shown: true,
         time_zone: Some("Europe/London".into()),
+        reminders: Vec::new(),
     }
 }
 
@@ -39,6 +40,7 @@ fn record(id: &str) -> EventRecord {
             cancelled: false,
             repeating: false,
             link: None,
+            reminders: None,
         },
         recurrence: Vec::new(),
         time_zone: None,

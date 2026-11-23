@@ -43,6 +43,7 @@ pub enum View {
 pub enum SettingsSection {
     Accounts,
     Reading,
+    Notifications,
     Labels,
     Rules,
     Agents,
@@ -185,6 +186,8 @@ pub struct State {
     pub invitations: crate::invitations::Invitations,
     /// The calendar view.
     pub calendar: crate::calendar_ui::CalendarUi,
+    /// Desktop notices.
+    pub notices: crate::notify::Notices,
 }
 
 impl State {
@@ -258,6 +261,7 @@ impl State {
             rules: crate::rules_ui::RulesUi::new(),
             invitations: crate::invitations::Invitations::new(),
             calendar: crate::calendar_ui::CalendarUi::new(&settings),
+            notices: crate::notify::Notices::new(settings.notices.clone()),
         }
     }
 
@@ -316,6 +320,7 @@ impl State {
             });
         });
         self.load_calendar(ask.clone());
+        self.watch_notices(ask.clone());
         let accounts = ask.clone();
         Effect::new(move || {
             self.revision.get();

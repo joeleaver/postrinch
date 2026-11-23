@@ -127,7 +127,10 @@ impl State {
     pub fn load_calendar(self, ask: impl Fn(Request) + 'static) {
         Effect::new(move || {
             self.revision.get();
-            if self.view.get() != View::Calendar {
+            // Settings › Notifications lists the calendars too.
+            let notices = self.view.get() == View::Settings
+                && self.settings_section.get() == crate::state::SettingsSection::Notifications;
+            if self.view.get() != View::Calendar && !notices {
                 return;
             }
             let (first, last) = stretch(self.calendar.day.get(), self.calendar.span.get());

@@ -174,6 +174,7 @@ mod tests {
                 cancelled: false,
                 repeating: false,
                 link: None,
+                reminders: None,
             },
         }
     }

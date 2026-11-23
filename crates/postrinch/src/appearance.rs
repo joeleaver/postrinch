@@ -57,6 +57,9 @@ pub struct Settings {
     /// What the calendar view shows: a day, a week or a month.
     #[serde(default)]
     pub calendar_span: crate::calendar_ui::CalSpan,
+    /// What desktop notices tell, and how.
+    #[serde(default)]
+    pub notices: crate::notices::NoticePrefs,
 }
 
 impl Settings {

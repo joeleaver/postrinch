@@ -30,6 +30,8 @@ pub(crate) struct CalendarResource {
     pub access_role: Option<String>,
     #[serde(default)]
     pub time_zone: Option<String>,
+    #[serde(default)]
+    pub default_reminders: Vec<super::calendar::Reminder>,
 }
 
 #[derive(Deserialize)]

@@ -181,6 +181,17 @@ Built in steps (the Overboard card "Google Calendar"): invitations in mail, then
 - **Dragging** (`calendar_drag.rs`): in the day and week, an event the account organizes in a calendar it may change moves by quarter hours (and across days in the week, kept at its wall time), or, pressed in its last 8 px, stretches or shrinks (never under a quarter hour); while dragged it shows its new hours. A move under 4 px is a click. Let go, one with nobody else to tell is saved at once and shown there at once; one with guests opens in the editor at its new time, so the person's Save tells them and a drag never sends mail by itself. Checked live on 2026-11-22: moved a day and an hour, stretched half an hour, and one with a guest opened in the editor.
 - **Not yet:** making a repeating event or changing all times of one (a time of a series changes alone); reminders; calendars other than Google's.
 
+### Notifications
+
+After the notifications mockup (https://claude.ai/artifact/1oYztUGqfBh8BVrQ2Ks869): one page, Settings › Notifications, for every notice Postrinch gives, kept in the settings file (`NoticePrefs`) and saved at each change.
+
+- **Desktop notices through rinch** (`rinch::notification`: org.freedesktop.Notifications on Linux), named "Postrinch". A click brings the window forward and opens what the notice is about: the conversation, the event (its week, then the event), or the proposal.
+- **New mail by view.** Every half minute, and whenever sync changes the store, the loader looks for unread mail the chosen views show (each by its own search, from the store's index of arrival time) that arrived since the window opened; each message is told once. The Inbox is on by default and each account's inbox follows it; categories, Everything else and the person's own views start off; Sent and Drafts are not offered. Options: only from people the person has written to; what a notice shows (who, subject and first words / who and subject / only that mail came); several at once (a notice each up to three, else one; or one for all).
+- **Reminders by calendar.** When they fall due is Google Calendar's to say: each event's popup reminders, or its calendar's defaults (synced with it), whole-day events counted back from their midnight. The person chooses only which calendars remind them (those the account may change are on by default, followed ones such as holidays off). Not for events declined or cancelled; an event in two accounts' calendars reminds once; a reminder up to fifteen minutes late (the window asleep) still shows.
+- **Also:** new invitations wherever they land in the inbox; an agent's proposal waiting (a message, rule, answer or calendar change); mail Gmail refused. What waits when the window opens is not told again.
+- **How:** quiet hours (from, to, which days; hours past midnight count from the day they start), with reminders let through or not; no mail notices while the window is in front, by default. Mail in quiet hours is not told later.
+- **Checked live on 2026-11-22:** the test notice, a reminder ("In 9 minutes, 17:53–18:22") for an event made in Postrinch with its calendar's default, and a new-mail notice for mail sent between the two accounts, each seen on D-Bus.
+
 ### Safety
 
 Mail is hostile input, for the renderer and for the agent.

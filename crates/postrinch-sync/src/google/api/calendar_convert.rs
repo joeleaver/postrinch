@@ -5,7 +5,7 @@ use postrinch_model::{
     EventWhen, Mailbox, Timestamp,
 };
 
-use super::calendar::{EventResource, EventTime};
+use super::calendar::{EventResource, EventTime, popups};
 use super::calendar_list::CalendarResource;
 
 /// The API's word for an answer.
@@ -69,6 +69,10 @@ pub(crate) fn to_event(r: &EventResource, calendar: &str) -> Option<CalendarEven
         cancelled: r.status.as_deref() == Some("cancelled"),
         repeating: r.recurring_event_id.is_some() || !r.recurrence.is_empty(),
         link: r.html_link.clone(),
+        reminders: match &r.reminders {
+            Some(rem) if !rem.use_default => Some(popups(&rem.overrides)),
+            _ => None,
+        },
     })
 }
 
@@ -107,6 +111,7 @@ pub(crate) fn to_calendar(c: &CalendarResource) -> CalendarInfo {
         writable: matches!(c.access_role.as_deref(), Some("owner" | "writer")),
         shown: c.selected,
         time_zone: c.time_zone.clone(),
+        reminders: popups(&c.default_reminders),
     }
 }
 

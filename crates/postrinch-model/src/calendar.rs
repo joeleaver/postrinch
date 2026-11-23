@@ -117,6 +117,10 @@ pub struct CalendarEvent {
     pub repeating: bool,
     /// The event in Google Calendar on the web.
     pub link: Option<String>,
+    /// When to remind the person, in minutes before it starts; `None` for
+    /// its calendar's [`CalendarInfo::reminders`].
+    #[serde(default)]
+    pub reminders: Option<Vec<i64>>,
 }
 
 fn yes() -> bool {
@@ -138,6 +142,10 @@ pub struct CalendarInfo {
     /// Whether the person shows it in Google Calendar.
     pub shown: bool,
     pub time_zone: Option<String>,
+    /// When its events remind the person by default, in minutes before
+    /// they start.
+    #[serde(default)]
+    pub reminders: Vec<i64>,
 }
 
 /// Where an event starts: a day, or a moment.

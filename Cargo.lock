@@ -5135,7 +5135,9 @@ version = "0.1.0"
 source = "git+https://github.com/joeleaver/rinch.git#55b79a46631175d0754d73b631a2f548d60e5995"
 dependencies = [
  "base64 0.22.1",
+ "block2 0.6.2",
  "bytemuck",
+ "futures-lite",
  "js-sys",
  "keyboard-types 0.7.0",
  "libloading 0.8.9",
@@ -5164,14 +5166,17 @@ dependencies = [
  "rustix",
  "serde_json",
  "softbuffer",
+ "tokio",
  "tracing",
  "tracing-subscriber",
  "url",
  "wasm-bindgen",
  "web-sys",
+ "windows",
  "windows-sys 0.59.0",
  "winit",
  "x11rb 0.13.2",
+ "zbus",
 ]
 
 [[package]]

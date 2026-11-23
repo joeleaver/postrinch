@@ -24,6 +24,7 @@ pub(crate) mod list;
 mod list_bar;
 mod list_head;
 mod logo;
+mod notices_settings;
 mod outgoing;
 mod palette;
 mod people_picker;
@@ -136,7 +137,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {compose_files::CSS} {label_new::CSS} }
                 style { {list_bar::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
-                style { {calendar_side::CSS} {calendar_view::CSS} {calendar_month::CSS} {event_pane::CSS} {event_editor::CSS} }
+                style { {calendar_side::CSS} {calendar_view::CSS} {calendar_month::CSS} {event_pane::CSS} {event_editor::CSS} {notices_settings::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}

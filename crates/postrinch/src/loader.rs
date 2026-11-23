@@ -57,6 +57,18 @@ pub enum Request {
     /// People whose address or name holds this, to pick as senders or
     /// recipients.
     People(String),
+    /// What to tell the person about: unread mail the `watched` views show
+    /// that arrived since `since`, and reminders due in a stretch.
+    Notices {
+        watched: Vec<postrinch_commands::Watched>,
+        since: postrinch_model::Timestamp,
+        known: bool,
+        reminders: Option<(
+            postrinch_model::Timestamp,
+            postrinch_model::Timestamp,
+            postrinch_commands::ReminderRules,
+        )>,
+    },
     /// The calendars, and the events between two moments.
     Calendar {
         from: postrinch_model::Timestamp,
@@ -65,7 +77,7 @@ pub enum Request {
 }
 
 /// How many kinds of request there are: [`Request::kind`] counts them.
-const KINDS: usize = 7;
+const KINDS: usize = 8;
 
 impl Request {
     /// Requests of the same kind replace each other; each is below
@@ -79,6 +91,7 @@ impl Request {
             Request::Labels(_) => 4,
             Request::People(_) => 5,
             Request::Calendar { .. } => 6,
+            Request::Notices { .. } => 7,
         }
     }
 }
@@ -270,6 +283,35 @@ fn answer(commands: &Commands, state: State, request: Request) {
             }
             Err(e) => failed(e.to_string()),
         },
+        Request::Notices {
+            watched,
+            since,
+            known,
+            reminders,
+        } => {
+            let arrived = commands
+                .arrived(&watched, since, known, 20)
+                .unwrap_or_else(|e| {
+                    tracing::warn!("looking for new mail to tell: {e}");
+                    Vec::new()
+                });
+            let due = match reminders {
+                Some((after, until, rules)) => commands
+                    .reminders_due(after, until, &rules)
+                    .unwrap_or_else(|e| {
+                        tracing::warn!("looking for reminders: {e}");
+                        Vec::new()
+                    }),
+                None => Vec::new(),
+            };
+            tracing::debug!("notices: {} arrived, {} due", arrived.len(), due.len());
+            if !arrived.is_empty() || !due.is_empty() {
+                state
+                    .notices
+                    .found
+                    .send(crate::notify::Found { arrived, due });
+            }
+        }
         Request::Calendar { from, to } => {
             match commands.calendars() {
                 Ok(calendars) => state.calendar.calendars.send(calendars),

@@ -26,6 +26,7 @@ pub fn settings(state: State) -> NodeHandle {
                 div { class: "settings-title", "Settings" }
                 {section_link(__scope, state, SettingsSection::Accounts, "Accounts")}
                 {section_link(__scope, state, SettingsSection::Reading, "Reading")}
+                {section_link(__scope, state, SettingsSection::Notifications, "Notifications")}
                 {section_link(__scope, state, SettingsSection::Labels, "Labels")}
                 {section_link(__scope, state, SettingsSection::Rules, "Rules")}
                 {section_link(__scope, state, SettingsSection::Agents, "Agents")}
@@ -36,6 +37,7 @@ pub fn settings(state: State) -> NodeHandle {
             match state.settings_section.get() {
                 SettingsSection::Accounts => {accounts(__scope, state)},
                 SettingsSection::Reading => {reading(__scope, state)},
+                SettingsSection::Notifications => {crate::ui::notices_settings::notices_page(__scope, state)},
                 SettingsSection::Labels => {labels_page(__scope, state)},
                 SettingsSection::Rules => {rules_page(__scope, state)},
                 SettingsSection::Agents => {agents_page(__scope, state)},

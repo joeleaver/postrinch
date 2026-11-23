@@ -41,6 +41,7 @@ fn event(id: &str, start: &str, end: &str, busy: bool) -> EventRecord {
             cancelled: false,
             repeating: false,
             link: None,
+            reminders: None,
         },
         recurrence: Vec::new(),
         time_zone: None,
@@ -77,6 +78,7 @@ fn an_agent_reads_calendars_and_proposes_answers() {
         writable: true,
         shown: true,
         time_zone: Some("UTC".into()),
+        reminders: Vec::new(),
     };
     store.put_calendar(&me, &calendar).unwrap();
     for record in [

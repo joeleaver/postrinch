@@ -328,7 +328,7 @@ impl Commands {
     }
 
     /// The store's form of a query over `accounts`, labels found by name.
-    fn to_find(&self, query: &Query, accounts: &[EmailAddress]) -> CommandResult<Find> {
+    pub(crate) fn to_find(&self, query: &Query, accounts: &[EmailAddress]) -> CommandResult<Find> {
         let resolve = |names: &[LabelName]| -> CommandResult<Vec<Vec<(EmailAddress, String)>>> {
             let mut all = Vec::new();
             for name in names {

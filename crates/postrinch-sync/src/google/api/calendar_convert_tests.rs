@@ -100,3 +100,29 @@ fn calendars_take_the_person_s_name_for_them() {
     assert_eq!(info.name, "Work team");
     assert!(!info.writable && info.shown && !info.primary);
 }
+
+#[test]
+fn reminders_are_the_event_s_or_its_calendar_s() {
+    let own = event(json!({
+        "id": "r1",
+        "start": {"dateTime": "2026-11-24T10:00:00Z"},
+        "end": {"dateTime": "2026-11-24T11:00:00Z"},
+        "reminders": {"useDefault": false, "overrides": [
+            {"method": "email", "minutes": 1440}, {"method": "popup", "minutes": 30},
+            {"method": "popup", "minutes": 5},
+        ]},
+    }));
+    assert_eq!(to_event(&own, "c").unwrap().reminders, Some(vec![5, 30]));
+    let default = event(json!({
+        "id": "r2",
+        "start": {"dateTime": "2026-11-24T10:00:00Z"},
+        "end": {"dateTime": "2026-11-24T11:00:00Z"},
+        "reminders": {"useDefault": true},
+    }));
+    assert_eq!(to_event(&default, "c").unwrap().reminders, None);
+    let c: CalendarResource = serde_json::from_value(json!({
+        "id": "c", "defaultReminders": [{"method": "popup", "minutes": 10}],
+    }))
+    .unwrap();
+    assert_eq!(to_calendar(&c).reminders, vec![10]);
+}

@@ -17,6 +17,8 @@ mod invitations;
 mod links;
 mod loader;
 mod menus;
+mod notices;
+mod notify;
 mod pictures;
 mod reading;
 mod recent;
@@ -50,6 +52,8 @@ fn main() -> ExitCode {
     // Before anything else: a window restarted into an update waits here
     // for the one it replaces to let go of the store.
     postrinch_update::at_start();
+    // Notices name the app as the desktop shows it.
+    rinch::notification::set_app_name("Postrinch");
     match std::env::args().nth(1).as_deref() {
         Some("--install") => {
             return match update::install() {

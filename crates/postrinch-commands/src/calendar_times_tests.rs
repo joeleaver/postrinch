@@ -22,6 +22,7 @@ fn event(id: &str, when: EventWhen) -> CalendarEvent {
         cancelled: false,
         repeating: false,
         link: None,
+        reminders: None,
     }
 }
 

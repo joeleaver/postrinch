@@ -9,6 +9,7 @@
 
 mod accounts;
 mod actions;
+mod arrived;
 mod attachments;
 mod bulk;
 mod calendar;
@@ -22,6 +23,7 @@ mod labels;
 mod messages;
 mod query;
 mod query_or;
+mod reminders;
 mod rules;
 mod rules_proposed;
 mod rules_run;
@@ -36,6 +38,7 @@ use postrinch_store::Store;
 
 pub use accounts::AccountInfo;
 pub use actions::{LabelChoice, ThreadAction, ThreadRef};
+pub use arrived::{Arrived, Watched};
 pub use attachments::{file_name, is_program, mime_for, size_text};
 pub use calendar::{FreeTime, Happening, Hours};
 pub use error::{CommandError, CommandResult};
@@ -48,6 +51,7 @@ pub use postrinch_render::Part;
 pub use postrinch_render::Rendered;
 pub use postrinch_store::PersonEntry;
 pub use query::{LabelName, Last, Query, label_matches};
+pub use reminders::{Due, ReminderRules};
 pub use rules::{AlreadyHere, Matched, RulesPage};
 pub use rules_proposed::RuleProposal;
 pub use rules_run::{AgentAsk, Ran};

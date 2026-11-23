@@ -229,6 +229,7 @@ async fn a_calendar_no_longer_listed_goes() {
         writable: false,
         shown: true,
         time_zone: None,
+        reminders: Vec::new(),
     };
     f.store.put_calendar(&f.me, &info).unwrap();
     Mock::given(method("GET"))
