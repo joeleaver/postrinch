@@ -51,6 +51,8 @@ pub struct CalendarUi {
     /// An event to open once the stretch holding it is loaded: its account
     /// and id.
     pub pending: Signal<Option<(EmailAddress, String)>>,
+    /// The event being dragged (its account and id), and how far.
+    pub dragging: Signal<Option<(EmailAddress, String, crate::calendar_drag::Moving)>>,
 }
 
 /// A calendar as the hidden set names it.
@@ -75,6 +77,7 @@ impl CalendarUi {
             editing: Signal::new(None),
             proposals: Signal::new(Vec::new()),
             pending: Signal::new(None),
+            dragging: Signal::new(None),
         }
     }
 }

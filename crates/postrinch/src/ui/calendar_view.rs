@@ -153,6 +153,7 @@ fn days(state: State) -> NodeHandle {
     };
     // The working day in view, not midnight.
     grid.set_scroll_top(7.5 * HOUR);
+    crate::calendar_drag::remember_grid(&grid);
     rsx! {
         div { class: "cal-days",
             div { class: "cal-head",
@@ -255,20 +256,56 @@ fn event_block(state: State, placed: Placed) -> NodeHandle {
     };
     let open = placed.happening.clone();
     let selected = placed.happening.clone();
-    rsx! {
+    let dragged = placed.happening.clone();
+    let timed = placed.happening.clone();
+    let grabbed = placed.happening.clone();
+    let movable = crate::calendar_drag::may_move(state, &placed.happening);
+    let class = if movable {
+        format!("{class} movable")
+    } else {
+        class
+    };
+    // The block itself, to tell a press at its foot from one on its body.
+    let block: std::rc::Rc<std::cell::RefCell<Option<NodeHandle>>> = std::rc::Rc::default();
+    let pressed = block.clone();
+    let node = rsx! {
         div {
             key: placed.happening.event.id.clone(),
             class: {move || {
                 let on = state.calendar.open.get().is_some_and(|o| o.account == selected.account && o.event.id == selected.event.id);
                 if on { format!("{class} selected") } else { class.clone() }
             }},
-            style: {style.clone()},
+            style: {move || match moving(state, &dragged) {
+                Some(m) if m.stretch => format!("{style}; height: {}px; z-index: 4", (placed.height - 2.0 + m.minutes as f64 / 60.0 * HOUR).max(HOUR / 4.0 - 2.0)),
+                Some(m) => format!("{style}; transform: translate({}px, {}px); z-index: 4; opacity: 0.9", m.across, m.minutes as f64 / 60.0 * HOUR),
+                None => style.clone(),
+            }},
             title: {tip.clone()},
-            onclick: move || state.open_event(Some(open.clone())),
+            onmousedown: move || state.drag_event(grabbed.clone(), pressed.clone()),
+            onclick: move || {
+                if !crate::calendar_drag::took_click() {
+                    state.open_event(Some(open.clone()));
+                }
+            },
             span { class: "cal-event-title", {summary.clone()} }
-            span { class: "cal-event-time", {time_text.clone()} }
+            span { class: "cal-event-time", {move || match moving(state, &timed) {
+                Some(m) => crate::dates::event_hours(&crate::calendar_drag::moved(timed.event.when, m, &TimeZone::system()), &TimeZone::system()),
+                None => time_text.clone(),
+            }} }
         }
-    }
+    };
+    *block.borrow_mut() = Some(node.clone());
+    node
+}
+
+/// How far `h` is being dragged, if it is.
+fn moving(state: State, h: &Happening) -> Option<crate::calendar_drag::Moving> {
+    state
+        .calendar
+        .dragging
+        .get()
+        .filter(|(a, id, _)| *a == h.account && *id == h.event.id)
+        .map(|(_, _, m)| m)
 }
 
 #[component]
@@ -370,6 +407,10 @@ pub const CSS: &str = r#"
 .cal-event.waiting { border: 2px dashed var(--cal-colour); background: var(--surface); }
 .cal-event.declined { opacity: 0.55; text-decoration: line-through; }
 .cal-event.selected { box-shadow: 0 0 0 2px var(--ink); z-index: 3; }
+.cal-event.movable { cursor: grab; }
+.cal-event.movable::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 6px; cursor: ns-resize;
+}
 .cal-event.chip {
     position: static; padding: 2px 6px; border-radius: 4px;
     white-space: nowrap; text-overflow: ellipsis; display: block;

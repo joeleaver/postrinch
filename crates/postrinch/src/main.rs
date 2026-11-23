@@ -4,6 +4,7 @@ mod actions;
 mod agents;
 mod appearance;
 mod attachments;
+mod calendar_drag;
 mod calendar_edit;
 mod calendar_layout;
 mod calendar_proposals;
