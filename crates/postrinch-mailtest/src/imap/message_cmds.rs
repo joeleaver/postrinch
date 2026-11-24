@@ -258,15 +258,14 @@ impl Session {
             });
             (gone, folder.highest_modseq)
         };
-        if gone.is_empty() {
-            return Reply::Ok("EXPUNGE completed".into());
+        if !gone.is_empty() {
+            self.shared.notify();
         }
-        self.shared.notify();
         // The EXPUNGE (or VANISHED) responses come from the report that
-        // follows every command. With QRESYNC on, the tagged OK carries
-        // the MODSEQ this expunge took (RFC 7162 3.2.7 and 3.2.9). Changes
-        // by others after it have
-        // higher MODSEQs and reach the client as FETCH or VANISHED.
+        // follows every command. With QRESYNC on, the tagged OK of every
+        // expunge carries the mailbox's HIGHESTMODSEQ, even one that removed
+        // nothing (RFC 7162 3.2.7 and 3.2.9). Changes by others after it
+        // have higher MODSEQs and reach the client as FETCH or VANISHED.
         if self.qresync {
             Reply::Ok(format!("[HIGHESTMODSEQ {modseq}] EXPUNGE completed"))
         } else {

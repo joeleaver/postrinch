@@ -156,9 +156,15 @@ async fn expunge_reports_highestmodseq_under_qresync() {
     raw.command("ENABLE QRESYNC").await;
     raw.command("SELECT INBOX").await;
 
+    // An expunge that removes nothing still reports HIGHESTMODSEQ.
     let lines = raw.command("EXPUNGE").await;
+    let highest = bob.folder("INBOX").unwrap().highest_modseq;
+    assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(
-        lines.last().unwrap().ends_with(" OK EXPUNGE completed"),
+        lines
+            .last()
+            .unwrap()
+            .ends_with(&format!(" OK [HIGHESTMODSEQ {highest}] EXPUNGE completed")),
         "{lines:?}"
     );
 
