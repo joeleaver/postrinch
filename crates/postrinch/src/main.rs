@@ -41,6 +41,7 @@ use std::process::ExitCode;
 
 use postrinch_store::Store;
 use rinch::prelude::*;
+use tracing_subscriber::prelude::*;
 
 const FONTS: &[AppFont] = &[
     AppFont::sans_serif(include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf")),
@@ -75,10 +76,12 @@ fn main() -> ExitCode {
         }
         _ => {}
     }
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "postrinch=info,postrinch_sync=info".into()),
+    // RUST_LOG or this default, never the mail protocols' raw lines
+    // (postrinch-log says why).
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_filter(postrinch_log::filter("postrinch=info,postrinch_sync=info")),
         )
         .init();
     let Some(data_dir) = dirs::data_dir().map(|d| d.join("postrinch")) else {

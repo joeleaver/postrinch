@@ -32,6 +32,7 @@ pub use imap::{
     Extension, FolderInfo, ImapConfig, ImapFault, ImapServer, MessageInfo, NewMessage, SpecialUse,
     UserHandle,
 };
+pub use sasl::Mechanism;
 pub use smtp::{ReceivedMessage, SmtpConfig, SmtpFault, SmtpServer, SmtpStage};
 pub use tls::{HOST, TestCertificate, crypto_provider};
 

@@ -1,6 +1,6 @@
 [package]
 name = "postrinch-sync"
-description = "Postrinch's providers: Google sign-in, Gmail sync into the store."
+description = "Postrinch's providers: Google sign-in and Gmail sync, IMAP and SMTP, into the store."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,21 +10,30 @@ repository.workspace = true
 postrinch-model = { workspace = true }
 postrinch-rules = { workspace = true }
 postrinch-store = { workspace = true }
+async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"] }
 base64 = "0.22"
 bytes = "1"
 dirs = "7"
+futures-util = "0.3"
 jiff = "0.2"
 keyring = "4.2"
 keyring-core = "1"
+# SMTP: only the transport (the message bytes come from mail-builder),
+# over rustls with aws-lc-rs and the platform's verifier, as reqwest.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls", "rustls-platform-verifier", "aws-lc-rs"] }
 mail-parser = "1.0"
 mail-builder = "2.0"
 rand = "0.10"
 reqwest = { version = "0.13", features = ["json", "form", "query", "gzip"] }
+# IMAP's TLS: the same stack reqwest and discovery use.
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
+rustls-platform-verifier = "0.7"
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt", "net", "io-util", "time", "sync", "macros"] }
+tokio-rustls = { version = "0.26", default-features = false }
 tracing = "0.1"
 url = "2"
 
@@ -33,6 +42,7 @@ url = "2"
 secret-service = { version = "5.2", features = ["crypto-rust"] }
 
 [dev-dependencies]
+postrinch-mailtest = { path = "../postrinch-mailtest" }
 tempfile = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
 wiremock = "0.6"

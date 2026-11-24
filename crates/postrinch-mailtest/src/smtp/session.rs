@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::data::{self, Data};
 use super::{ReceivedMessage, SmtpFault, SmtpShared, SmtpStage};
 use crate::conn::Conn;
-use crate::sasl::{self, Claim};
+use crate::sasl::{self, Claim, Mechanism};
 
 /// The envelope of the message being submitted.
 #[derive(Default)]
@@ -58,6 +58,12 @@ fn path<'a>(args: &'a str, keyword: &str) -> Option<(String, &'a str)> {
 }
 
 impl Session {
+    /// Whether this port offers STARTTLS: the plain-text port does unless
+    /// the test said otherwise.
+    fn offers_starttls(&self) -> bool {
+        !self.conn.is_tls() && self.shared.lock().config.offer_starttls
+    }
+
     async fn reply(&mut self, code: u16, text: &str) -> io::Result<()> {
         self.conn
             .write_all(format!("{code} {text}\r\n").as_bytes())
@@ -94,6 +100,9 @@ impl Session {
                 self.reply(250, "localhost").await?;
             }
             "STARTTLS" if self.conn.is_tls() => self.reply(503, "5.5.1 Already encrypted").await?,
+            "STARTTLS" if !self.offers_starttls() => {
+                self.reply(502, "5.5.1 Command not implemented").await?
+            }
             "STARTTLS" => {
                 self.reply(220, "2.0.0 Ready to start TLS").await?;
                 let acceptor = self.shared.acceptor.clone();
@@ -132,10 +141,20 @@ impl Session {
             "8BITMIME".to_string(),
             format!("SIZE {max}"),
         ];
-        if self.conn.is_tls() {
-            lines.push("AUTH PLAIN LOGIN XOAUTH2".to_string());
-        } else {
+        if self.offers_starttls() {
             lines.push("STARTTLS".to_string());
+        } else {
+            let mechanisms = self.shared.lock().config.mechanisms.clone();
+            let mut auth = vec!["AUTH"];
+            for mechanism in mechanisms {
+                auth.push(mechanism.name());
+                if mechanism == Mechanism::Plain {
+                    auth.push("LOGIN");
+                }
+            }
+            if auth.len() > 1 {
+                lines.push(auth.join(" "));
+            }
         }
         let mut out = String::new();
         for (i, line) in lines.iter().enumerate() {
@@ -176,7 +195,7 @@ impl Session {
             self.reply(503, "5.5.1 EHLO first").await?;
             return Ok(Next::Continue);
         }
-        if !self.conn.is_tls() {
+        if self.offers_starttls() {
             self.reply(530, "5.7.0 Must issue a STARTTLS command first")
                 .await?;
             return Ok(Next::Continue);
@@ -192,8 +211,10 @@ impl Session {
             Some((m, i)) => (m.to_ascii_uppercase(), Some(i.trim().as_bytes().to_vec())),
             None => (args.to_ascii_uppercase(), None),
         };
-        let claim = match mechanism.as_str() {
-            "PLAIN" | "XOAUTH2" => {
+        let offered = self.shared.lock().config.mechanisms.clone();
+        let sasl_mechanism = Mechanism::named(&mechanism).filter(|m| offered.contains(m));
+        let claim = match (sasl_mechanism, mechanism.as_str()) {
+            (Some(sasl_mechanism), _) => {
                 let response = match initial {
                     Some(r) => Some(r),
                     None => self.read_sasl("").await?,
@@ -203,13 +224,11 @@ impl Session {
                     return Ok(Next::Continue);
                 };
                 let message = sasl::decode(&response).unwrap_or_default();
-                if mechanism == "PLAIN" {
-                    sasl::parse_plain(&message)
-                } else {
-                    sasl::parse_xoauth2(&message)
-                }
+                sasl_mechanism.parse(&message)
             }
-            "LOGIN" => self.login_exchange(initial).await?,
+            (None, "LOGIN") if offered.contains(&Mechanism::Plain) => {
+                self.login_exchange(initial).await?
+            }
             _ => {
                 self.reply(504, "5.5.4 Unrecognized authentication type")
                     .await?;
@@ -234,10 +253,17 @@ impl Session {
                 self.reply(235, "2.7.0 Authentication successful").await?;
             }
             None => {
-                if mechanism == "XOAUTH2" {
-                    // As Google does: an error challenge, an empty answer, then 535.
-                    let challenge = sasl::encode(sasl::XOAUTH2_FAILURE);
+                if let Some(failure) = sasl_mechanism.and_then(Mechanism::failure_challenge) {
+                    // As Google does for XOAUTH2, and RFC 7628 3.2.2 for
+                    // OAUTHBEARER: an error challenge, the client's answer,
+                    // then 535.
+                    let challenge = sasl::encode(failure);
                     self.read_sasl(&challenge).await?;
+                    if self.shared.lock().config.challenges_again {
+                        while self.read_sasl(&challenge).await?.is_some() {}
+                        self.reply(501, "5.0.0 Authentication cancelled").await?;
+                        return Ok(Next::Continue);
+                    }
                 }
                 self.reply(535, "5.7.8 Authentication credentials invalid")
                     .await?;

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use tracing_subscriber::prelude::*;
 
 #[derive(Parser)]
 #[command(
@@ -105,11 +106,14 @@ enum AgentApp {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
+    // RUST_LOG or warnings, never the mail protocols' raw lines
+    // (postrinch-log says why).
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_filter(postrinch_log::filter("warn")),
         )
-        .with_writer(std::io::stderr)
         .init();
 
     let cli = Cli::parse();
