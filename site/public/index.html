@@ -46,13 +46,13 @@
   <section class="band" id="features">
     <div class="wrap">
       <h2>Mail that keeps up with you</h2>
-      <p class="intro">Postrinch keeps your mail and its index on your computer, so lists open at once, search answers in milliseconds, and it all works on a train.</p>
+      <p class="intro">Postrinch keeps your mail and its index on your computer, so lists open at once, search answers as you type, and it all works on a train.</p>
 
       <div class="feature">
         <div class="feature-text">
           <h3>Search for what you remember<span class="tag">Coming</span></h3>
           <p>You remember what an email was about, not the words in it. Ask for "the email where someone offered to cover my shift" and Postrinch will find it by meaning, with a language model that runs on your computer. Your mail never goes to a search service.</p>
-          <p>Today, search is instant over every account at once: 64,000 messages in tens of milliseconds, by words, people, labels, dates and attachments, with the filters you know from Gmail. Mail that hasn't downloaded yet is asked of Gmail and listed below.</p>
+          <p>Today, search covers every account at once, by words, people, labels, dates and attachments, with the filters you know from Gmail. Words alone search 64,000 messages in tens of milliseconds. Mail that hasn't downloaded yet is asked of Gmail and listed below.</p>
         </div>
         <figure class="shot"><img src="/assets/shots/search.png" width="1440" height="900" alt="A search with operators in the box and its results." loading="lazy"></figure>
       </div>
@@ -149,7 +149,7 @@
   <section class="band" id="yours">
     <div class="wrap narrow">
       <h2>Yours, on your computer</h2>
-      <p>There is no Postrinch server. Your mail, its index and search live on your computer, and your sign-ins are kept in your system's keychain, out of every agent's reach. Besides your mail and calendars, the only thing Postrinch asks the internet for is the daily update check, from GitHub. Read the <a href="/privacy.html">privacy policy</a>.</p>
+      <p>There is no Postrinch server. Your mail, its index and search live on your computer, and your sign-ins are kept in your system's keychain, out of every agent's reach. Postrinch talks to your mail provider, to GitHub for its daily update check, to a sender's server only when you choose to show their pictures, and to the agents you connect. Nothing goes to us. The <a href="/privacy.html">privacy policy</a> has the details.</p>
     </div>
   </section>
 
@@ -166,12 +166,12 @@
             <li><a data-signature href="https://github.com/joeleaver/postrinch/releases/latest">Signature</a> · <a href="/postrinch-update-key.pem">release key</a></li>
             <li><a href="https://github.com/joeleaver/postrinch/releases">All releases</a></li>
           </ul>
-          <p class="fineprint dl-req">64-bit x86 with glibc 2.39 or newer (Ubuntu 24.04, Fedora 40, Debian 13 or later), GTK 3, and a keyring: GNOME Keyring or KDE Wallet.</p>
+          <p class="fineprint dl-req">64-bit x86 with glibc 2.39 or newer (Ubuntu 24.04, Fedora 40, Debian 13 or later), GTK 3, libxdo (the <code>libxdo3</code> or <code>xdotool</code> package), and a keyring: GNOME Keyring or KDE Wallet.</p>
         </div>
         <div>
           <ol class="steps">
             <li><strong>Unpack and install.</strong> It installs into your home folder and your app menu, no root needed:
-<pre><code>mkdir postrinch && tar -xzf postrinch-*-linux-x86_64.tar.gz -C postrinch
+<pre><code>mkdir postrinch &amp;&amp; tar -xzf <span data-file>postrinch-&lt;version&gt;-linux-x86_64.tar.gz</span> -C postrinch
 ./postrinch/postrinch --install</code></pre></li>
             <li><strong>Set up Gmail sign-in.</strong> For now, Postrinch signs in with a Google client you make yourself: <a href="/gmail-setup.html">ten minutes, step by step</a>.</li>
             <li><strong>Add your accounts</strong> in Settings › Accounts, and connect an agent in Settings › Agents if you like.</li>
@@ -180,8 +180,8 @@
             <summary>Check the download's signature</summary>
 <pre><code>openssl pkeyutl -verify -rawin -pubin \
   -inkey postrinch-update-key.pem \
-  -in postrinch-*-linux-x86_64.tar.gz \
-  -sigfile postrinch-*-linux-x86_64.tar.gz.sig</code></pre>
+  -in <span data-file>postrinch-&lt;version&gt;-linux-x86_64.tar.gz</span> \
+  -sigfile <span data-file>postrinch-&lt;version&gt;-linux-x86_64.tar.gz</span>.sig</code></pre>
             <p class="fineprint">The same key is built into Postrinch, which refuses any update it doesn't verify.</p>
           </details>
         </div>

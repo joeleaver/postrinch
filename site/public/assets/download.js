@@ -51,6 +51,10 @@
       link.title = files.pkg.name;
       box.querySelector("[data-signature]").href = files.sig.browser_download_url;
     }
+    // The commands name the file itself: a glob would match every
+    // version someone has downloaded.
+    var names = document.querySelectorAll("[data-file]");
+    for (var k = 0; k < names.length; k++) names[k].textContent = files.pkg.name;
     var line = document.querySelector("[data-release-line]");
     if (line) line.textContent = "Version " + version + " · Linux x86-64 · keeps itself up to date";
   }

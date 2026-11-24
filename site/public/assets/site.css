@@ -57,7 +57,8 @@ code, pre, kbd {
   font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   font-size: .88em;
 }
-code { background: var(--code-bg); padding: .1em .35em; border-radius: 5px; }
+code { background: var(--code-bg); padding: .1em .35em; border-radius: 5px; overflow-wrap: anywhere; }
+pre code { overflow-wrap: normal; }
 pre {
   background: var(--code-bg);
   padding: 14px 16px;
@@ -134,6 +135,8 @@ section.band + section.band { border-top: 1px solid var(--line); }
   margin: 0 0 64px;
 }
 .feature:last-child { margin-bottom: 0; }
+/* Grid items may shrink below their content (a long <pre>), or the page scrolls sideways. */
+.feature > *, .download > * { min-width: 0; }
 .feature:nth-child(even) .feature-text { order: 2; }
 .feature h3 { font-size: 24px; margin: 0 0 10px; line-height: 1.25; }
 .feature p { margin: 0 0 12px; color: var(--muted); }

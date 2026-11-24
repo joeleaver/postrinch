@@ -26,20 +26,38 @@ check_key() {
     die "public/postrinch-update-key.pem is not crates/postrinch-update/update-key.pub; remake it (README.md)"
 }
 
-# Every href/src starting with "/" in a page names a file under public/.
+# Every link in a page is another site (https:), mail (mailto:), or a file
+# under public/ named from the root ("/assets/site.css", "/privacy.html"),
+# optionally with a #fragment that must be an id in that page. The pages
+# use nothing else, so anything else is refused rather than left unchecked.
+links_in() {
+  grep -oE "(href|src|srcset)=(\"|')[^\"']*" "$1" | sed -E "s/^(href|src|srcset)=[\"']//"
+}
+
 check_links() {
-  local missing=0 page path
+  local bad=0 page link path fragment target
   for page in "$public"/*.html; do
-    while read -r path; do
-      path="${path%%#*}"
-      [ -z "$path" ] || [ "$path" = "/" ] && continue
-      if [ ! -f "$public$path" ]; then
-        echo "missing: $path (linked from $(basename "$page"))" >&2
-        missing=1
+    while read -r link; do
+      case "$link" in
+        https://*|mailto:*) continue ;;
+        /*|\#*) ;;
+        *) echo "$(basename "$page"): $link is not root-relative, https: or mailto:" >&2; bad=1; continue ;;
+      esac
+      path="${link%%#*}"; path="${path%%\?*}"; path="${path%% *}"
+      fragment=""; [ "$link" != "${link#*#}" ] && fragment="${link#*#}"
+      case "$path" in
+        "") target="$page" ;;
+        /) target="$public/index.html" ;;
+        *) target="$public$path" ;;
+      esac
+      if [ ! -f "$target" ]; then
+        echo "$(basename "$page"): $link names no file under public/" >&2; bad=1
+      elif [ -n "$fragment" ] && ! grep -q "id=\"$fragment\"" "$target"; then
+        echo "$(basename "$page"): $link names no id=\"$fragment\" in $(basename "$target")" >&2; bad=1
       fi
-    done < <(grep -oE '(href|src)="/[^"]*"' "$page" | sed -E 's/^(href|src)="//; s/"$//')
+    done < <(links_in "$page")
   done
-  [ "$missing" -eq 0 ] || die "fix the links above before deploying"
+  [ "$bad" -eq 0 ] || die "fix the links above before deploying"
 }
 
 command -v openssl >/dev/null || die "openssl is required"
