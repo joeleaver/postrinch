@@ -6,7 +6,8 @@
 <title>Add Mail Account</title>
 <!--
   Mockup: adding an IMAP/SMTP account to Postrinch, and its settings once
-  added. The design for docs/imap.md "Adding an account". Colours are the
+  added, and importing accounts from Thunderbird. The design for docs/imap.md
+  "Adding an account". Colours are the
   window's own (crates/postrinch/src/ui/palette.rs). Each step of the flow
   is a state; the strip at the top switches between them.
 -->
@@ -91,6 +92,16 @@ body { margin: 0; background: var(--panel); color: var(--ink); font: 14px/1.45 "
 .servers { display: grid; grid-template-columns: 1fr 72px 120px; gap: 6px 8px; align-items: end; }
 .servers h4 { grid-column: 1 / -1; margin: 8px 0 0; font-size: 12.5px; }
 .servers .field { margin: 0; }
+/* Importing from Thunderbird */
+.profile { margin: 10px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.imp { display: grid; grid-template-columns: 20px 1fr auto; gap: 0 8px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; font-size: 13px; }
+.imp input { margin: 3px 0 0; }
+.imp .who { font-weight: 600; }
+.imp .name { color: var(--muted); }
+.imp .srv { grid-column: 2; color: var(--ink-2); font-family: ui-monospace, monospace; font-size: 12px; }
+.imp .how { grid-column: 3; grid-row: 1 / span 2; align-self: center; color: var(--ink-2); font-size: 12.5px; text-align: right; }
+.imp.off { color: var(--faint); background: var(--panel); }
+.imp.off .who, .imp.off .name, .imp.off .srv, .imp.off .how { color: var(--faint); }
 .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s .8s linear infinite; }
 @keyframes s { to { transform: rotate(360deg); } }
 @media (max-width: 720px) {
@@ -113,6 +124,7 @@ body { margin: 0; background: var(--panel); color: var(--ink); font: 14px/1.45 "
     <div class="list">
       <div class="acct"><span class="dot" style="background:#2456b8"></span><span><span class="a">joe@joeleaver.com</span><span class="s">Signed in</span></span></div>
       <div class="acct" id="newAcct" hidden><span class="dot" style="background:#1d7a4a"></span><span><span class="a">ada@fastmail.com</span><span class="s" id="newAcctState">Signed in</span></span></div>
+      <div class="acct" id="newAcct2" hidden><span class="dot" style="background:#8a4fb8"></span><span><span class="a">ada@outlook.com</span><span class="s">Syncing: 300 of 2,950</span></span></div>
       <div class="add"><button class="btn" data-go="choose">Add account…</button></div>
     </div>
     <div class="detail" id="detail"></div>
@@ -159,11 +171,12 @@ const imapDetail = (state) => `
 const states = {
   choose: {
     label: '1 · Which kind',
-    note: 'Add account… asks which kind first. Google keeps its own sign-in; everything else is IMAP and SMTP.',
+    note: 'Add account… asks which kind first. Google keeps its own sign-in; everything else is IMAP and SMTP. Import from Thunderbird shows only when Thunderbird profiles are found on this computer, and counts the accounts Postrinch can add from them.',
     dialog: `
       <h2>Add an account</h2><p class="sub">Which kind of account is it?</p>
       <div class="choice"><span>🅖</span><div><b>Google</b><span>Gmail and Google Workspace. Signs in in your browser; mail, labels and calendars.</span></div></div>
       <div class="choice" data-go="address"><span>✉</span><div><b>Other mail account</b><span>Fastmail, iCloud, Yahoo, your work's server: any IMAP and SMTP account. Mail only.</span></div></div>
+      <div class="choice" data-go="import-list"><span>⤓</span><div><b>Import from Thunderbird</b><span>Thunderbird on this computer has 3 accounts Postrinch can add.</span></div></div>
       <div class="actions"><button class="btn">Cancel</button></div>`,
   },
   address: {
@@ -298,6 +311,93 @@ const states = {
   },
 };
 
+// Importing from Thunderbird: one row per account found in its profiles.
+const impRow = (who, name, srv, how, on, off) => `
+  <label class="imp${off ? ' off' : ''}"><input type="checkbox" class="pick"${on ? ' checked' : ''}${off ? ' disabled' : ''}>
+    <span><span class="who">${who}</span> <span class="name">· ${name}</span></span>
+    <span class="srv">${srv}</span><span class="how">${how}</span></label>`;
+const importStep = (n, who) => `<h2>Import from Thunderbird</h2><p class="sub">${who} · ${n} of 3</p>`;
+const fromThunderbird = '<div class="hint" style="margin-top:4px">From Thunderbird\'s settings</div>';
+
+Object.assign(states, {
+  'import-list': {
+    label: 'T1 · From Thunderbird',
+    note: 'Every account in every Thunderbird profile is listed, under its profile\'s name when there is more than one. The ones Postrinch can add are ticked. Nothing in Thunderbird is changed.',
+    dialog: `
+      <h2>Import from Thunderbird</h2><p class="sub">Accounts found in Thunderbird on this computer.</p>
+      <div class="profile">Profile “default-release”</div>
+      ${impRow('ada@fastmail.com', 'Ada Lovelace', 'imap.fastmail.com', 'Password', true)}
+      ${impRow('ada.lovelace@gmail.com', 'Ada Lovelace', 'imap.gmail.com', 'Sign in with Google', true)}
+      ${impRow('ada@btinternet.com', 'Ada L.', 'mail.btinternet.com · POP', 'POP accounts aren\'t supported', false, true)}
+      <div class="profile">Profile “Work”</div>
+      ${impRow('ada@outlook.com', 'Ada Lovelace', 'outlook.office365.com', 'Sign in with Microsoft', true)}
+      ${impRow('joe@joeleaver.com', 'Joe Leaver', 'imap.gmail.com', 'Already in Postrinch', false, true)}
+      <p class="hint">Passwords stay in Thunderbird; you'll sign in to each account once.</p>
+      <div class="actions"><button class="btn" data-go="choose">Cancel</button><button class="btn filled" id="importGo" data-go="import-signin">Import 3 accounts</button></div>`,
+  },
+  'import-signin': {
+    label: 'T2 · Sign in, 1 of 3',
+    note: 'The chosen accounts come one at a time, each with the sign-in it would get when added by hand: here the app password, as in step 4. Each is checked as in step 5 before the next one comes up.',
+    dialog: `
+      ${importStep(1, 'ada@fastmail.com')}
+      <div class="found"><div class="row"><span class="who">Fastmail</span><span class="spacer"></span><button class="btn link" data-go="manual">Change</button></div>
+        <div class="srv">Incoming  imap.fastmail.com · 993 · TLS</div><div class="srv">Outgoing  smtp.fastmail.com · 465 · TLS</div>
+        ${fromThunderbird}</div>
+      <div class="warn">Fastmail needs an <b>app password</b> for mail apps, not your usual one. <button class="btn link">Make one at Fastmail ↗</button></div>
+      <div class="field"><label>App password</label><input type="password" value="xxxxxxxxxxxxxxxx"></div>
+      <p class="hint">Kept in the system keyring, never in Postrinch's files.</p>
+      <div class="actions"><button class="btn" data-go="import-signin-2">Skip this account</button><button class="btn filled" data-go="import-signin-2">Add account</button></div>`,
+  },
+  'import-signin-2': {
+    label: 'T2b · 2 of 3, Google',
+    note: 'A Gmail account in Thunderbird comes in as a Google account, with Google\'s own sign-in. Here the person skips it.',
+    dialog: `
+      ${importStep(2, 'ada.lovelace@gmail.com')}
+      <div class="found"><div class="row"><span class="who">Google</span></div>
+        <div class="hint" style="margin-top:2px">Added as a Google account: mail, labels and calendars.</div>
+        ${fromThunderbird}</div>
+      <p class="hint" style="margin:0 0 4px">Google signs you in in your browser. Postrinch keeps only a token, in the system keyring, and never sees your password.</p>
+      <div class="actions"><button class="btn" data-go="import-signin-3">Skip this account</button><button class="btn filled" data-go="import-signin-3">Sign in with Google</button></div>`,
+  },
+  'import-signin-3': {
+    label: 'T2c · 3 of 3, Microsoft',
+    note: 'Microsoft signs in in the browser, as in 4a; while it is open the dialog waits, as in 4b.',
+    dialog: `
+      ${importStep(3, 'ada@outlook.com')}
+      <div class="found"><div class="row"><span class="who">Outlook.com</span><span class="spacer"></span><button class="btn link" data-go="manual">Change</button></div>
+        <div class="srv">Incoming  outlook.office365.com · 993 · TLS</div><div class="srv">Outgoing  smtp-mail.outlook.com · 587 · STARTTLS</div>
+        ${fromThunderbird}</div>
+      <p class="hint" style="margin:0 0 4px">Microsoft signs you in in your browser. Postrinch keeps only a token, in the system keyring, and never sees your password.</p>
+      <div class="actions"><button class="btn" data-go="import-added">Skip this account</button><button class="btn filled" data-go="import-checking">Sign in with Microsoft</button></div>`,
+  },
+  'import-checking': {
+    label: 'T3 · Checking',
+    note: 'Each account is checked as in step 5, and saved only once both servers let it in. A refusal shows as in 5b, with Skip this account beside Try again.',
+    dialog: `
+      ${importStep(3, 'ada@outlook.com')}
+      <ul class="steps">
+        <li><span class="i ok">✓</span>Signed in to outlook.office365.com</li>
+        <li><span class="i ok">✓</span>Found 9 folders: Inbox, Archive, Sent Items, Drafts, Junk Email, Deleted Items and 3 of yours</li>
+        <li><span class="i"><span class="spin"></span></span>Signing in to smtp-mail.outlook.com…</li>
+      </ul>
+      <div class="actions"><button class="btn" disabled>Skip this account</button><button class="btn filled" disabled>Add account</button></div>`,
+  },
+  'import-added': {
+    label: 'T4 · Imported',
+    note: 'At the end the dialog says which accounts were added and which were skipped. The added ones are in the list behind it, already syncing.',
+    dialog: `
+      <h2>Imported from Thunderbird</h2><p class="sub">2 of 3 accounts added.</p>
+      <ul class="steps">
+        <li><span class="i ok">✓</span><span><b>ada@fastmail.com</b> · added, syncing</span></li>
+        <li><span class="i ok">✓</span><span><b>ada@outlook.com</b> · added, syncing</span></li>
+        <li><span class="i" style="color:var(--faint)">–</span><span style="color:var(--muted)"><b>ada.lovelace@gmail.com</b> · skipped</span></li>
+      </ul>
+      <p class="hint">A skipped account stays in Import from Thunderbird, under Add account….</p>
+      <div class="actions"><button class="btn filled">Done</button></div>`,
+    detail: () => imapDetail('ok'), added: 'Syncing: 1,200 of 4,210', imported: true,
+  },
+});
+
 const order = Object.keys(states);
 function show(name) {
   const st = states[name];
@@ -309,6 +409,7 @@ function show(name) {
   newAcct.classList.toggle('on', !!st.added);
   document.querySelector('.acct').classList.toggle('on', !st.added);
   if (st.added) document.getElementById('newAcctState').textContent = st.added;
+  document.getElementById('newAcct2').hidden = !st.imported;
   const scrim = document.getElementById('scrim');
   scrim.hidden = !dialog;
   if (dialog) document.getElementById('dialog').innerHTML = dialog;
@@ -324,6 +425,14 @@ order.forEach(name => {
 document.addEventListener('click', e => {
   const go = e.target.closest('[data-go]');
   if (go) show(go.dataset.go);
+});
+// Import N accounts counts the ticked rows.
+document.addEventListener('change', e => {
+  if (!e.target.classList.contains('pick')) return;
+  const n = document.querySelectorAll('#dialog .pick:checked').length;
+  const go = document.getElementById('importGo');
+  go.textContent = `Import ${n} account${n === 1 ? '' : 's'}`;
+  go.disabled = n === 0;
 });
 show('choose');
 </script>
