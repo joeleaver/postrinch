@@ -1,8 +1,9 @@
 //! Folders: what the sidebar lists and what a thread list shows.
 
-use postrinch_model::{Account, EmailAddress, Label, LabelKind, LabelPrefs, SystemLabel};
+use postrinch_model::{Account, EmailAddress, LabelPrefs, SystemLabel};
 
 use crate::labels::{LabelTree, label_tree};
+use crate::system_labels::system_label_in;
 use serde::{Deserialize, Serialize};
 
 use crate::{CommandError, CommandResult, Commands};
@@ -110,7 +111,8 @@ impl Commands {
             let labels = self.store.labels(address)?;
             let stats = self.store.label_stats(address)?;
             let prefs = self.store.label_prefs(address)?;
-            let inbox_id = system_label(&labels, SystemLabel::Inbox).map(|l| l.provider_id.clone());
+            let inbox_id =
+                system_label_in(&labels, SystemLabel::Inbox).map(|l| l.provider_id.clone());
             let inbox = FolderEntry {
                 folder: Folder::Label {
                     account: address.clone(),
@@ -163,7 +165,7 @@ impl Commands {
                 let mut sources = Vec::new();
                 for account in self.visible_accounts()? {
                     let labels = self.store.labels(&account.address)?;
-                    if let Some(label) = system_label(&labels, *system) {
+                    if let Some(label) = system_label_in(&labels, *system) {
                         sources.push((account.address.clone(), label.provider_id.clone()));
                     }
                 }
@@ -171,8 +173,4 @@ impl Commands {
             }
         }
     }
-}
-
-fn system_label(labels: &[Label], system: SystemLabel) -> Option<&Label> {
-    labels.iter().find(|l| l.kind == LabelKind::System(system))
 }

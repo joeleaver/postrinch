@@ -97,9 +97,13 @@ impl Store {
         self.db_update(TYPE, label.id(), update.build())
     }
 
-    /// Remove a label; messages that carried it lose it. Removing a label
-    /// that is not there does nothing.
+    /// Remove a label; messages that carried it lose it. On an IMAP
+    /// account the label is a folder, so the folder's sync state and its
+    /// copies go too. Removing a label that is not there does nothing.
     pub fn remove_label(&self, account: &EmailAddress, provider_id: &str) -> StoreResult<()> {
+        // The folder goes first: if this is interrupted, the label is left
+        // without sync state, which the next sync keeps again.
+        self.remove_imap_folder(account, provider_id)?;
         if let Some(label) = self.find_label(account, provider_id)? {
             self.db_delete(TYPE, label.id())?;
         }

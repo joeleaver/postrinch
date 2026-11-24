@@ -18,6 +18,7 @@ mod duplicates;
 mod error;
 mod find;
 mod format;
+mod imap_state;
 mod keys;
 mod labels;
 mod mailboxes;

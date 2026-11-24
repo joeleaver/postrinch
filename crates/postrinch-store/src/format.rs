@@ -20,7 +20,9 @@ use crate::codec::{Fields, FieldsBuilder};
 use crate::{SCHEMA, Store, StoreError, StoreResult, blobs};
 
 /// The format this code writes. Raise it with any change to `schema.rhype`
-/// or to how the store fills it that an older store would not match.
+/// or to how the store fills it that an older store would not match. Added
+/// types and fields are not such a change: an older store opens with them
+/// empty (`a_store_from_before_the_outbox_and_imap_opens`).
 pub(crate) const CURRENT: u32 = 3;
 
 const INFO: &str = "StoreInfo";
@@ -130,6 +132,42 @@ mod tests {
     }
 
     #[test]
+    fn schema_keeps_imap_state_small() {
+        let schema = rhypedb_schema::parser::parse_schema(SCHEMA).unwrap();
+        for (type_name, relation) in [("ImapFolder", "account"), ("ImapPlace", "folder")] {
+            let def = schema.get_type(type_name).unwrap();
+            let to_one: Vec<&str> = def
+                .fields
+                .iter()
+                .filter(|f| matches!(&f.field_type, FieldType::Relation(r) if !r.is_many))
+                .filter(|f| f.inverse().is_none())
+                .map(|f| f.name.as_str())
+                .collect();
+            assert_eq!(
+                to_one,
+                [relation],
+                "a second to-one relation would copy every {type_name} into its links"
+            );
+        }
+        // A place is copied into the index of `message`: only small fields.
+        let place = schema.get_type("ImapPlace").unwrap();
+        let fields: Vec<&str> = place.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(
+            fields,
+            [
+                "key",
+                "folder",
+                "label_id",
+                "uidvalidity",
+                "uid",
+                "message",
+                "flags",
+                "modseq"
+            ]
+        );
+    }
+
+    #[test]
     fn a_new_store_records_the_current_format() {
         let dir = tempfile::tempdir().unwrap();
         drop(Store::open(dir.path()).unwrap());
@@ -164,14 +202,19 @@ mod tests {
     }
 
     #[test]
-    fn a_store_from_before_the_outbox_opens() {
+    fn a_store_from_before_the_outbox_and_imap_opens() {
         let dir = tempfile::tempdir().unwrap();
         // A Windows checkout has CRLF line ends.
         let schema = SCHEMA.replace("\r\n", "\n");
         let start = schema.find("type OutboxEntry").expect("the outbox type");
         let comment = schema[..start].rfind("\n\n").expect("its comment");
-        let before = &schema[..comment];
-        let schema = rhypedb_schema::parser::parse_schema(before).unwrap();
+        // Every type from the outbox on goes, and with them the account's
+        // IMAP settings and folders.
+        let before: Vec<&str> = schema[..comment]
+            .lines()
+            .filter(|l| !matches!(l.trim(), "imap: Json") && !l.contains("[ImapFolder]"))
+            .collect();
+        let schema = rhypedb_schema::parser::parse_schema(&before.join("\n")).unwrap();
         let db = Database::open(schema, dir.path().join("db")).unwrap();
         let fields = || {
             FieldsBuilder::new()
@@ -179,7 +222,17 @@ mod tests {
                 .u32("version", CURRENT)
         };
         db.create(INFO, fields().build()).unwrap();
+        let account = FieldsBuilder::new()
+            .str("key", "ada@example.org")
+            .str("address", "ada@example.org")
+            .str("provider", "google")
+            .json("state", &postrinch_model::AccountState::Active)
+            .build();
+        db.create("Account", account).unwrap();
         drop(db);
-        Store::open(dir.path()).expect("an added type needs no new format");
+        let store = Store::open(dir.path()).expect("an added type needs no new format");
+        let accounts = store.accounts().unwrap();
+        assert_eq!(accounts[0].imap, None, "an added field reads as null");
+        assert!(store.imap_folders(&accounts[0].address).unwrap().is_empty());
     }
 }

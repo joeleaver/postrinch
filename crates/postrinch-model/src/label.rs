@@ -18,6 +18,66 @@ pub enum SystemLabel {
     CategoryForums,
 }
 
+impl SystemLabel {
+    /// Every system label, in the order above.
+    pub const ALL: [SystemLabel; 11] = [
+        Self::Inbox,
+        Self::Sent,
+        Self::Drafts,
+        Self::Spam,
+        Self::Trash,
+        Self::Important,
+        Self::CategoryPersonal,
+        Self::CategorySocial,
+        Self::CategoryPromotions,
+        Self::CategoryUpdates,
+        Self::CategoryForums,
+    ];
+
+    /// The label's provider id, the same in every account of every
+    /// provider. This is a contract: these are Gmail's own ids for its
+    /// system labels, and an IMAP account's special folders take them too
+    /// (its Sent folder is `SENT` whatever the server calls it). So
+    /// "archive is removing `INBOX`" and "trash is adding `TRASH`" hold for
+    /// every account, and code naming a system label uses this rather than
+    /// a string of its own.
+    pub const fn provider_id(&self) -> &'static str {
+        match self {
+            Self::Inbox => "INBOX",
+            Self::Sent => "SENT",
+            Self::Drafts => "DRAFT",
+            Self::Spam => "SPAM",
+            Self::Trash => "TRASH",
+            Self::Important => "IMPORTANT",
+            Self::CategoryPersonal => "CATEGORY_PERSONAL",
+            Self::CategorySocial => "CATEGORY_SOCIAL",
+            Self::CategoryPromotions => "CATEGORY_PROMOTIONS",
+            Self::CategoryUpdates => "CATEGORY_UPDATES",
+            Self::CategoryForums => "CATEGORY_FORUMS",
+        }
+    }
+
+    /// The system label whose [`provider_id`](Self::provider_id) is `id`,
+    /// if any.
+    pub fn from_provider_id(id: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|label| label.provider_id() == id)
+    }
+
+    /// Whether this is one of Gmail's inbox categories.
+    pub fn is_category(&self) -> bool {
+        matches!(
+            self,
+            Self::CategoryPersonal
+                | Self::CategorySocial
+                | Self::CategoryPromotions
+                | Self::CategoryUpdates
+                | Self::CategoryForums
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LabelKind {
     System(SystemLabel),
@@ -62,13 +122,14 @@ pub struct LabelPrefs {
 
 /// A Gmail label or an IMAP folder, in one account.
 ///
-/// Gmail lets a message carry many labels; an IMAP message is in exactly one
-/// folder. The model treats both as labels, and an IMAP message simply has
-/// one.
+/// Gmail lets a message carry many labels; an IMAP message is in the folders
+/// that hold a copy of it. The model treats both as labels, so an IMAP
+/// message has one label for each folder it is in (docs/imap.md).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Label {
     /// The provider's identifier: Gmail's label id (`Label_12`, `INBOX`), or
-    /// the IMAP folder's full path.
+    /// the id Postrinch minted for an IMAP user folder (`f` and 12 hex
+    /// digits). A system label's is always [`SystemLabel::provider_id`].
     pub provider_id: String,
     /// The name the person sees. For nested labels, the full path
     /// (`Work/Clients`).
@@ -114,5 +175,23 @@ mod tests {
             ["Work", "Clients", "Acme"]
         );
         assert!(!label.is_system());
+    }
+
+    #[test]
+    fn provider_ids_are_gmails_and_round_trip() {
+        assert_eq!(SystemLabel::Inbox.provider_id(), "INBOX");
+        assert_eq!(SystemLabel::Drafts.provider_id(), "DRAFT");
+        assert_eq!(
+            SystemLabel::CategoryPersonal.provider_id(),
+            "CATEGORY_PERSONAL"
+        );
+        for label in SystemLabel::ALL {
+            assert_eq!(
+                SystemLabel::from_provider_id(label.provider_id()),
+                Some(label)
+            );
+        }
+        assert_eq!(SystemLabel::from_provider_id("UNREAD"), None);
+        assert_eq!(SystemLabel::from_provider_id("Label_1"), None);
     }
 }

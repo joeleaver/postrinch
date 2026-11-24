@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{EmailAddress, Mailbox, Message, Timestamp};
+use crate::{EmailAddress, Mailbox, Message, SystemLabel, Timestamp};
 
 /// The provider's identifier for a thread within one account: Gmail's
 /// thread id, or for IMAP the id Postrinch's own threading gave it.
@@ -30,12 +30,6 @@ pub struct ThreadSummary {
     pub replied_last: Option<Vec<Mailbox>>,
 }
 
-/// The label a provider puts on drafts (Gmail's; the only provider yet).
-const DRAFT: &str = "DRAFT";
-/// The label a provider puts on what the account sent, from any of its
-/// addresses.
-const SENT: &str = "SENT";
-
 /// Whom the account answered, if its reply or reply-all is the latest of
 /// `sorted` (oldest first) that is not a draft.
 fn replied_last(account: &EmailAddress, sorted: &[&Message]) -> Option<Vec<Mailbox>> {
@@ -45,14 +39,14 @@ fn replied_last(account: &EmailAddress, sorted: &[&Message]) -> Option<Vec<Mailb
 
 /// Whether a message is a draft, which has not been sent yet.
 pub fn is_draft(message: &Message) -> bool {
-    message.has_label(DRAFT)
+    message.has_label(SystemLabel::Drafts.provider_id())
 }
 
 /// Whom the account answered with `last`, if it is the account's reply or
 /// reply-all. A forward passes mail on rather than answering it, and mail
 /// only to the account itself answers no one, so neither counts.
 pub fn answered(account: &EmailAddress, last: &Message) -> Option<Vec<Mailbox>> {
-    let mine = last.has_label(SENT)
+    let mine = last.has_label(SystemLabel::Sent.provider_id())
         || last
             .headers
             .from

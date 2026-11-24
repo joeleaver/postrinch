@@ -10,6 +10,8 @@ mod calendar;
 mod calendar_share;
 mod change;
 mod draft;
+mod imap;
+mod imap_state;
 mod label;
 mod message;
 mod thread;
@@ -28,6 +30,8 @@ pub use draft::{
     Answering, AttachmentOrigin, Draft, DraftAttachment, MAX_ATTACHED, NotAnAddress, Proposal,
     format_mailboxes, parse_mailboxes,
 };
+pub use imap::{FolderRoles, ImapSettings, Security, Server, SignInMethod};
+pub use imap_state::{FolderRole, ImapFolder, ImapPlace};
 pub use label::{Label, LabelColor, LabelKind, LabelPrefs, LabelVisibility, SystemLabel};
 pub use message::{AttachmentInfo, Flags, Message, MessageHeaders, ProviderMessageId};
 pub use thread::{ProviderThreadId, ThreadSummary, answered, is_draft};

@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::{EmailAddress, Mailbox, ProviderThreadId, Timestamp};
 
 /// The provider's identifier for a message within one account: Gmail's
-/// message id, or an IMAP folder's UIDVALIDITY and UID.
+/// message id, or for IMAP one derived from its `Message-ID` header, which a
+/// move between folders does not change (docs/imap.md, "A message's identity").
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ProviderMessageId(pub String);
 

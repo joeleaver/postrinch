@@ -156,6 +156,14 @@ impl FieldsBuilder {
         self
     }
 
+    /// A Json field, or null for `None`.
+    pub(crate) fn opt_json(self, name: &str, value: Option<&impl Serialize>) -> Self {
+        match value {
+            Some(value) => self.json(name, value),
+            None => self.null(name),
+        }
+    }
+
     /// A to-one relation, written in the same transaction as the create.
     pub(crate) fn relation(mut self, name: &str, target_id: u64) -> Self {
         self.0.insert(name.into(), Value::U64(target_id));

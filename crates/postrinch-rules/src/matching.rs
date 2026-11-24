@@ -2,13 +2,13 @@
 //! run, for "also apply to existing mail", and for rules that run as mail
 //! ages.
 
-use postrinch_model::{Mailbox, Message, Timestamp};
+use postrinch_model::{Mailbox, Message, SystemLabel, Timestamp};
 
 use crate::words::{has_all, has_phrase, words};
 use crate::{Condition, Match, Rule, Test};
 
 const DAY_MILLIS: i64 = 24 * 60 * 60 * 1000;
-const INBOX: &str = "INBOX";
+const INBOX: &str = SystemLabel::Inbox.provider_id();
 
 /// A rule's answer for one message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

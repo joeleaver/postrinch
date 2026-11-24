@@ -77,9 +77,13 @@ pub(crate) fn account_views(
 /// and its name as built.
 pub fn built_in_holds(key: &str, name: &str) -> String {
     match (followed(key), key) {
-        (Some("inbox"), _) => "This account\u{2019}s inbox: mail in Gmail\u{2019}s Primary.".into(),
+        (Some("inbox"), _) => {
+            "This account\u{2019}s inbox: mail in Gmail\u{2019}s Primary, or the whole inbox of an account without categories.".into()
+        }
         (Some(_), _) => format!("Gmail\u{2019}s {name} category, in this account."),
-        (None, "inbox") => "Your inbox: mail in Gmail\u{2019}s Primary, in every account.".into(),
+        (None, "inbox") => {
+            "Your inbox: mail in Gmail\u{2019}s Primary (the whole inbox of an account without categories), in every account.".into()
+        }
         (None, "everything-else") => "Inbox mail that no other view shows.".into(),
         (None, "all-mail") => "All mail, in every account.".into(),
         (None, "sent") => "Mail you sent.".into(),
