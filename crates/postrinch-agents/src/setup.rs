@@ -1,23 +1,28 @@
-//! Setting an app up to launch `postrinch-mcp`: one entry in the app's own
-//! MCP settings, and nothing else in its file changed.
+//! The apps Postrinch can set up by itself, and where each keeps its MCP
+//! servers. Connecting and disconnecting agents is [`crate::connect`];
+//! reading and changing one settings file is [`crate::setup_file`].
 //!
-//! Before a file is changed it is copied beside itself
-//! (`<file>.postrinch-backup`); the new one is written whole and renamed into
-//! place, keeping the old one's permissions. A file that does not parse,
-//! or whose servers are not where they should be, is left alone: the person
-//! gets the entry to paste instead.
+//! Claude is one choice that covers the Chat tab, the desktop app's Code
+//! tab and the terminal's `claude`. Chat reads only the desktop app's file
+//! and the terminal only `~/.claude.json`, while the Code tab reads both.
+//! So the same entry (one name, one command, one key) goes into each file
+//! whose Claude is here, and the Code tab, finding it twice under one name,
+//! loads it once.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::json;
 
+pub use crate::setup_file::{Kind, Place};
 use crate::wire::KEY_ENV;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SetupError {
     #[error("this system has no home folder")]
     NoHome,
+    #[error("{0} is not on this computer")]
+    NotHere(&'static str),
     #[error("{path}: {source}")]
     Io {
         path: PathBuf,
@@ -31,120 +36,78 @@ pub enum SetupError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum App {
-    ClaudeDesktop,
-    ClaudeCode,
+    /// Claude: the desktop app's Chat and Code tabs and the terminal's
+    /// `claude`. Agents set up before these were one choice read as it.
+    #[serde(alias = "claude_desktop", alias = "claude_code")]
+    Claude,
     Codex,
     Cursor,
 }
 
 impl App {
-    pub const ALL: [App; 4] = [App::ClaudeDesktop, App::ClaudeCode, App::Codex, App::Cursor];
+    pub const ALL: [App; 3] = [App::Claude, App::Codex, App::Cursor];
 
     pub fn name(self) -> &'static str {
         match self {
-            App::ClaudeDesktop => "Claude Desktop",
-            App::ClaudeCode => "Claude Code",
+            App::Claude => "Claude",
             App::Codex => "Codex",
             App::Cursor => "Cursor",
         }
     }
 
-    /// The file holding the app's MCP servers.
-    pub fn settings_path(self) -> Result<PathBuf, SetupError> {
-        let home = || dirs::home_dir().ok_or(SetupError::NoHome);
+    /// Every file the app may read its MCP servers from, whether or not
+    /// that part of it is on this computer.
+    pub fn places(self) -> Result<Vec<Place>, SetupError> {
+        let home = dirs::home_dir().ok_or(SetupError::NoHome)?;
+        let place = |path: PathBuf, kind: Kind, installed: bool| Place {
+            installed: installed || path.exists(),
+            path,
+            kind,
+        };
+        let beside = |path: &Path| path.parent().is_some_and(Path::is_dir);
         Ok(match self {
-            App::ClaudeDesktop => dirs::config_dir()
-                .ok_or(SetupError::NoHome)?
-                .join("Claude")
-                .join("claude_desktop_config.json"),
-            App::ClaudeCode => home()?.join(".claude.json"),
-            App::Cursor => home()?.join(".cursor").join("mcp.json"),
-            App::Codex => match std::env::var_os("CODEX_HOME") {
-                Some(dir) => PathBuf::from(dir).join("config.toml"),
-                None => home()?.join(".codex").join("config.toml"),
-            },
+            App::Claude => {
+                let desktop = dirs::config_dir()
+                    .ok_or(SetupError::NoHome)?
+                    .join("Claude")
+                    .join("claude_desktop_config.json");
+                let desktop_here = beside(&desktop);
+                vec![
+                    // ~/.claude.json sits in the home folder itself, so the
+                    // folder beside it says nothing: ~/.claude/ does.
+                    place(
+                        home.join(".claude.json"),
+                        Kind::ClaudeCode,
+                        home.join(".claude").is_dir(),
+                    ),
+                    place(desktop, Kind::ClaudeDesktop, desktop_here),
+                ]
+            }
+            App::Cursor => {
+                let path = home.join(".cursor").join("mcp.json");
+                let here = beside(&path);
+                vec![place(path, Kind::Cursor, here)]
+            }
+            App::Codex => {
+                let path = match std::env::var_os("CODEX_HOME") {
+                    Some(dir) => PathBuf::from(dir).join("config.toml"),
+                    None => home.join(".codex").join("config.toml"),
+                };
+                let here = beside(&path);
+                vec![place(path, Kind::Codex, here)]
+            }
         })
     }
 
-    /// Whether the app looks installed: its settings file or its folder is
-    /// there.
+    /// The files connecting writes: those of the parts that are here.
+    pub fn installed_places(self) -> Result<Vec<Place>, SetupError> {
+        Ok(self.places()?.into_iter().filter(|p| p.installed).collect())
+    }
+
+    /// Whether the app looks installed: some settings file of its, or the
+    /// folder it goes in, is there.
     pub fn found(self) -> bool {
-        self.settings_path().is_ok_and(|p| {
-            p.exists()
-                || match self {
-                    // ~/.claude.json sits in the home folder itself.
-                    App::ClaudeCode => dirs::home_dir().is_some_and(|h| h.join(".claude").is_dir()),
-                    _ => p.parent().is_some_and(Path::is_dir),
-                }
-        })
-    }
-
-    fn toml(self) -> bool {
-        self == App::Codex
-    }
-
-    /// Add (or replace) the entry `entry` launching `bridge` with `key`.
-    /// Returns the file changed.
-    pub fn add(self, entry: &str, bridge: &Path, key: &str) -> Result<PathBuf, SetupError> {
-        let path = self.settings_path()?;
-        self.add_at(&path, entry, bridge, key)?;
-        Ok(path)
-    }
-
-    fn add_at(self, path: &Path, entry: &str, bridge: &Path, key: &str) -> Result<(), SetupError> {
-        let path = path.to_owned();
-        let old = read(&path)?;
-        let new = if self.toml() {
-            toml_with(&path, old.as_deref(), entry, bridge, key)?
-        } else {
-            let mut server = json!({ "command": bridge, "env": { KEY_ENV: key } });
-            if self == App::ClaudeCode {
-                server["type"] = json!("stdio");
-            }
-            json_with(&path, old.as_deref(), |servers| {
-                servers.insert(entry.to_owned(), server);
-            })?
-        };
-        write(&path, old.is_some(), &new)
-    }
-
-    /// Take the entry out, if it is there. A file that is gone or does not
-    /// read is left as it is.
-    pub fn remove(self, entry: &str) -> Result<bool, SetupError> {
-        self.remove_at(&self.settings_path()?, entry)
-    }
-
-    fn remove_at(self, path: &Path, entry: &str) -> Result<bool, SetupError> {
-        let path = path.to_owned();
-        let Some(old) = read(&path)? else {
-            return Ok(false);
-        };
-        let new = if self.toml() {
-            let mut doc: toml_edit::DocumentMut = old
-                .parse()
-                .map_err(|_| SetupError::Unreadable(path.clone()))?;
-            let Some(servers) = doc
-                .get_mut("mcp_servers")
-                .and_then(|t| t.as_table_like_mut())
-            else {
-                return Ok(false);
-            };
-            if servers.remove(entry).is_none() {
-                return Ok(false);
-            }
-            doc.to_string()
-        } else {
-            let mut removed = false;
-            let new = json_with(&path, Some(&old), |servers| {
-                removed = servers.shift_remove(entry).is_some();
-            })?;
-            if !removed {
-                return Ok(false);
-            }
-            new
-        };
-        write(&path, true, &new)?;
-        Ok(true)
+        self.installed_places().is_ok_and(|p| !p.is_empty())
     }
 }
 
@@ -168,17 +131,26 @@ pub fn entry_name(agent: &str) -> String {
     }
 }
 
+const BRIDGE: &str = "postrinch-mcp";
+
 /// `postrinch-mcp`, beside the program running.
 pub fn bridge_path() -> PathBuf {
     let name = if cfg!(windows) {
         "postrinch-mcp.exe"
     } else {
-        "postrinch-mcp"
+        BRIDGE
     };
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
         .unwrap_or_else(|| PathBuf::from(name))
+}
+
+/// Whether a server's command launches Postrinch's bridge, wherever it is.
+pub fn is_bridge(command: &str) -> bool {
+    // Either separator: a file may have been written on the other system.
+    let file = command.rsplit(['/', '\\']).next().unwrap_or(command);
+    file == BRIDGE || file.eq_ignore_ascii_case("postrinch-mcp.exe")
 }
 
 /// The entry to paste, for apps set up by hand.
@@ -188,7 +160,7 @@ pub fn json_snippet(entry: &str, bridge: &Path, key: &str) -> String {
 }
 
 pub fn toml_snippet(entry: &str, bridge: &Path, key: &str) -> String {
-    toml_with(Path::new(""), None, entry, bridge, key).expect("a new file always works")
+    crate::setup_file::toml_snippet(entry, bridge, key)
 }
 
 pub fn command_snippet(bridge: &Path, key: &str) -> String {
@@ -196,100 +168,6 @@ pub fn command_snippet(bridge: &Path, key: &str) -> String {
         "Command:      {}\nEnvironment:  {KEY_ENV}={key}",
         bridge.display()
     )
-}
-
-fn read(path: &Path) -> Result<Option<String>, SetupError> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => Ok(Some(text)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(source) => Err(SetupError::Io {
-            path: path.to_owned(),
-            source,
-        }),
-    }
-}
-
-/// The JSON file with its `mcpServers` changed by `change`.
-fn json_with(
-    path: &Path,
-    old: Option<&str>,
-    change: impl FnOnce(&mut Map<String, Value>),
-) -> Result<String, SetupError> {
-    let unreadable = || SetupError::Unreadable(path.to_owned());
-    let mut doc: Value = match old {
-        Some(text) if !text.trim().is_empty() => {
-            serde_json::from_str(text).map_err(|_| unreadable())?
-        }
-        _ => json!({}),
-    };
-    let root = doc.as_object_mut().ok_or_else(unreadable)?;
-    let servers = root
-        .entry("mcpServers")
-        .or_insert_with(|| json!({}))
-        .as_object_mut()
-        .ok_or_else(unreadable)?;
-    change(servers);
-    let mut text = serde_json::to_string_pretty(&doc).expect("JSON serializes");
-    text.push('\n');
-    Ok(text)
-}
-
-/// The TOML file with `[mcp_servers.<entry>]` set, comments kept.
-fn toml_with(
-    path: &Path,
-    old: Option<&str>,
-    entry: &str,
-    bridge: &Path,
-    key: &str,
-) -> Result<String, SetupError> {
-    use toml_edit::{DocumentMut, Item, Table, value};
-    let mut doc: DocumentMut = old
-        .unwrap_or_default()
-        .parse()
-        .map_err(|_| SetupError::Unreadable(path.to_owned()))?;
-    let servers = doc
-        .entry("mcp_servers")
-        .or_insert_with(|| {
-            let mut t = Table::new();
-            t.set_implicit(true);
-            Item::Table(t)
-        })
-        .as_table_mut()
-        .ok_or_else(|| SetupError::Unreadable(path.to_owned()))?;
-    let mut server = Table::new();
-    server["command"] = value(bridge.display().to_string());
-    let mut env = Table::new();
-    env[KEY_ENV] = value(key);
-    server["env"] = Item::Table(env);
-    servers[entry] = Item::Table(server);
-    Ok(doc.to_string())
-}
-
-/// Write `text` to `path`: the old file backed up first, the new one
-/// renamed into place with the old one's permissions.
-fn write(path: &Path, existed: bool, text: &str) -> Result<(), SetupError> {
-    let io = |source| SetupError::Io {
-        path: path.to_owned(),
-        source,
-    };
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(io)?;
-    }
-    let tmp = sibling(path, "postrinch-tmp");
-    std::fs::write(&tmp, text).map_err(io)?;
-    if existed {
-        std::fs::copy(path, sibling(path, "postrinch-backup")).map_err(io)?;
-        let permissions = std::fs::metadata(path).map_err(io)?.permissions();
-        std::fs::set_permissions(&tmp, permissions).map_err(io)?;
-    }
-    std::fs::rename(&tmp, path).map_err(io)
-}
-
-fn sibling(path: &Path, suffix: &str) -> PathBuf {
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(".");
-    name.push(suffix);
-    path.with_file_name(name)
 }
 
 #[cfg(test)]

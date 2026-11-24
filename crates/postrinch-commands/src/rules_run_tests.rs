@@ -303,3 +303,27 @@ fn saving_checks_and_marks_the_rules_changed() {
     commands.delete_rule(&me, id).unwrap();
     assert!(commands.rules_page(&me).unwrap().rules.is_empty());
 }
+
+#[test]
+fn rules_asking_a_replaced_agent_ask_its_successor() {
+    let (_dir, _store, commands, me) = setup();
+    let mut rule = school(0);
+    rule.actions = vec![Action::AskAgent {
+        agent: "old".into(),
+        prompt: "file it".into(),
+    }];
+    commands.save_rule(&me, rule).unwrap();
+    commands.save_rule(&me, school(0)).unwrap();
+    let moved = |id: &str| (id == "old").then(|| "new".to_owned());
+    assert_eq!(commands.move_agent_asks(&me, moved).unwrap(), 1);
+    let rules = commands.rules_page(&me).unwrap().rules;
+    assert_eq!(
+        rules[0].actions,
+        [Action::AskAgent {
+            agent: "new".into(),
+            prompt: "file it".into()
+        }]
+    );
+    assert_eq!(rules[1], school(2), "the other rule is as it was");
+    assert_eq!(commands.move_agent_asks(&me, moved).unwrap(), 0);
+}

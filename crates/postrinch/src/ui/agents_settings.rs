@@ -102,7 +102,13 @@ fn app_card(state: State, app: Option<App>) -> NodeHandle {
                 Button { variant: "filled", size: "xs", onclick: open, "Connect" }
             }
             if found && connected() {
-                Button { variant: "default", size: "xs", onclick: open, "Connect another" }
+                Button {
+                    variant: "default",
+                    size: "xs",
+                    onclick: open,
+                    // Claude has one agent: connecting again replaces it.
+                    {if app == Some(App::Claude) { "Connect again" } else { "Connect another" }}
+                }
             }
             if !found {
                 Button { variant: "default", size: "xs", onclick: open, "Set up by hand" }

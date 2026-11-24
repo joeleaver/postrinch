@@ -75,7 +75,9 @@ enum Command {
 
 #[derive(Subcommand)]
 enum AgentCommand {
-    /// Make an agent and print its key, once, with the entry to give the app.
+    /// Make an agent. With --app, set that app up to launch it, as
+    /// Settings › Agents does; without, print its key, once, with the
+    /// entry to give the app.
     Add {
         /// What to call it: the app it is for, say.
         name: String,
@@ -83,11 +85,22 @@ enum AgentCommand {
         /// every account, those added later included.
         #[arg(long)]
         account: Vec<String>,
+        /// The app to set up. Claude covers its Chat and Code tabs and the
+        /// terminal's `claude`, and replaces the agents Claude had.
+        #[arg(long, value_enum)]
+        app: Option<AgentApp>,
     },
     /// List the agents.
     List,
     /// Remove an agent by name: its key stops working at once.
     Remove { name: String },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum AgentApp {
+    Claude,
+    Codex,
+    Cursor,
 }
 
 #[tokio::main]

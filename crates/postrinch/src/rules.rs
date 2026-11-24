@@ -8,7 +8,7 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use postrinch_agents::{Agents, App};
+use postrinch_agents::Agents;
 use postrinch_commands::{AgentAsk, Commands};
 use postrinch_model::EmailAddress;
 
@@ -75,6 +75,7 @@ fn run(
             }
         }
         for account in accounts {
+            settle_replaced(commands, &account);
             match commands.run_rules(&account, now()) {
                 Ok(ran) => {
                     if ran.changed > 0 {
@@ -94,22 +95,39 @@ fn run(
     }
 }
 
-/// The agents a rule can ask: those connected to Claude Code from
-/// Postrinch, which can be started without a window. By id, with names.
+/// The agents a rule can ask: those connected to Claude from Postrinch,
+/// which the terminal's `claude` can start without a window. By id, with
+/// names.
 pub fn askable() -> Vec<(String, String)> {
-    let Some(path) = Agents::default_path() else {
-        return Vec::new();
-    };
-    Agents::load(&path)
+    load_agents()
         .map(|agents| {
-            agents
-                .list()
-                .iter()
-                .filter(|a| a.setup.as_ref().is_some_and(|s| s.app == App::ClaudeCode))
-                .map(|a| (a.id.clone(), a.name.clone()))
+            postrinch_agents::connect::askable(&agents)
+                .into_iter()
+                .map(|a| (a.id, a.name))
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn load_agents() -> Option<Agents> {
+    Agents::load(&Agents::default_path()?).ok()
+}
+
+/// Rules that ask an agent which has since been replaced (connecting Claude
+/// again replaces the agents it had) ask the one that replaced it.
+fn settle_replaced(commands: &Commands, account: &EmailAddress) {
+    let Some(agents) = load_agents() else {
+        return;
+    };
+    if agents.list().iter().all(|a| a.replaces.is_empty()) {
+        return;
+    }
+    let moved = |id: &str| agents.get(id).filter(|a| a.id != id).map(|a| a.id.clone());
+    match commands.move_agent_asks(account, moved) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("{account}: {n} rules now ask the agent that replaced theirs"),
+        Err(e) => tracing::warn!("{account}: moving rules to a replacing agent: {e}"),
+    }
 }
 
 /// What an agent is told when a rule asks it about a message.
@@ -130,31 +148,31 @@ fn prompt(ask: &AgentAsk, tools: &str) -> String {
 
 /// Start the agent a rule asked and wait for it, up to [`AGENT_TIMEOUT`].
 fn ask_agent(ask: &AgentAsk) {
-    let Some(setup) = Agents::default_path()
-        .and_then(|p| Agents::load(&p).ok())
-        .and_then(|agents| {
-            agents
-                .list()
-                .iter()
-                .find(|a| a.id == ask.agent)
-                .and_then(|a| a.setup.clone())
-        })
-    else {
+    let Some(agents) = load_agents() else {
+        tracing::warn!("rule {}: the agents file does not read", ask.rule);
+        return;
+    };
+    let Some(agent) = agents.get(&ask.agent) else {
         tracing::warn!("rule {}: its agent is gone", ask.rule);
         return;
     };
-    if setup.app != App::ClaudeCode {
+    let askable = postrinch_agents::connect::askable(&agents);
+    let Some(entry) = askable
+        .into_iter()
+        .find(|a| a.id == agent.id)
+        .map(|a| a.entry)
+    else {
         tracing::warn!(
-            "rule {}: {} cannot be started unattended",
+            "rule {}: {} is not connected to Claude here, so it cannot be started unattended",
             ask.rule,
-            setup.app.name()
+            agent.name
         );
         return;
-    }
-    let tools = format!("mcp__{}", setup.entry);
+    };
+    let tools = format!("mcp__{entry}");
     let dir = std::env::temp_dir();
     let child = Command::new("claude")
-        .args(["-p", &prompt(ask, &setup.entry), "--allowedTools", &tools])
+        .args(["-p", &prompt(ask, &entry), "--allowedTools", &tools])
         .current_dir(&dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

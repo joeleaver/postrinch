@@ -6,7 +6,7 @@ use postrinch_agents::{Agent, App, Reach};
 use postrinch_model::EmailAddress;
 use rinch::prelude::*;
 
-use crate::agents::{AgentDialog, Ready, reach_of};
+use crate::agents::{AgentDialog, Ready, and_list, files_line, reach_of};
 use crate::state::State;
 
 /// Whichever agent dialog is open.
@@ -77,11 +77,18 @@ fn connect(state: State, app: Option<App>, editing: Option<Agent>) -> NodeHandle
             app.map_or("The app", App::name)
         ),
     };
-    // Where the entry goes, and what the app is called: the entry's own
-    // name follows the Name field.
+    // Where the entry goes, what the app is called and whom it replaces:
+    // the entry's own name follows the Name field.
     let note = app.filter(|_| editing.is_none()).map(|app| {
-        let path = app.settings_path().map(|p| tilde(&p)).unwrap_or_default();
-        (path, app.name())
+        let files = app
+            .installed_places()
+            .map(|places| {
+                let paths: Vec<_> = places.into_iter().map(|p| p.path).collect();
+                files_line(&paths)
+            })
+            .unwrap_or_default();
+        let replaced = state.agents_replaced_by(app);
+        (files, app.name(), replaced)
     });
     let accounts: Vec<NodeHandle> = state
         .accounts
@@ -158,9 +165,9 @@ fn connect(state: State, app: Option<App>, editing: Option<Agent>) -> NodeHandle
                     }
                 }
             }
-            for (path, app_name) in note.clone() {
-                div { key: path.clone(),
-                    {entry_note(__scope, name, path.clone(), app_name)}
+            for (files, app_name, replaced) in note.clone() {
+                div { key: files.clone(),
+                    {entry_note(__scope, name, files.clone(), app_name, replaced.clone())}
                 }
             }
             div { class: "dialog-actions",
@@ -176,18 +183,40 @@ fn connect(state: State, app: Option<App>, editing: Option<Agent>) -> NodeHandle
     }
 }
 
-/// Where Connect puts the entry; its name follows the Name field.
+/// Where Connect puts the entry, and the agents it replaces; the entry's
+/// name follows the Name field.
 #[component]
-fn entry_note(name: Signal<String>, path: String, app_name: &'static str) -> NodeHandle {
+fn entry_note(
+    name: Signal<String>,
+    files: String,
+    app_name: &'static str,
+    replaced: Vec<String>,
+) -> NodeHandle {
     // rsx closures capture only `Copy` values.
-    let path = Signal::new(path.clone());
+    let files = Signal::new(files.clone());
+    let replacing = match replaced.len() {
+        0 => None,
+        1 => Some(format!(
+            "It replaces {}: that key stops working, and rules that asked it ask this one.",
+            replaced[0]
+        )),
+        _ => Some(format!(
+            "It replaces {}: their keys stop working, and rules that asked them ask this one.",
+            and_list(&replaced)
+        )),
+    };
     rsx! {
-        p { class: "agent-note",
-            {move || format!(
-                "Adds a {} entry to {}, after a backup beside it. Restart {app_name} to connect.",
-                postrinch_agents::setup::entry_name(&name.get()),
-                path.get(),
-            )}
+        div {
+            p { class: "agent-note",
+                {move || format!(
+                    "Adds a {} entry to {}, after a backup beside each. Restart {app_name} to connect.",
+                    postrinch_agents::setup::entry_name(&name.get()),
+                    files.get(),
+                )}
+            }
+            for text in replacing.clone() {
+                p { key: text.clone(), class: "agent-note", {text.clone()} }
+            }
         }
     }
 }
@@ -272,7 +301,7 @@ fn confirm_remove(state: State, agent: Agent) -> NodeHandle {
             "Its key stops working at once, and its entry comes out of {}\u{2019}s settings.",
             setup.app.name()
         ),
-        None => "Its key stops working at once. Take its entry out of the app\u{2019}s settings yourself.".to_owned(),
+        None => "Its key stops working at once. Where you pasted it into Claude, Codex or Cursor, its entry comes out too; take it out of any other app yourself.".to_owned(),
     };
     let title = format!("Remove {}?", agent.name);
     rsx! {
@@ -293,14 +322,6 @@ fn confirm_remove(state: State, agent: Agent) -> NodeHandle {
                 }
             }
         }
-    }
-}
-
-/// A path, with the home folder as `~`.
-fn tilde(path: &std::path::Path) -> String {
-    match dirs::home_dir().and_then(|home| path.strip_prefix(home).ok().map(ToOwned::to_owned)) {
-        Some(rest) => format!("~/{}", rest.display()),
-        None => path.display().to_string(),
     }
 }
 

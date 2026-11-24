@@ -310,7 +310,7 @@ fn does_row(state: State, id: u32, what: &'static str) -> NodeHandle {
                 .map(|(id, name)| SelectOption::new(id, name))
                 .collect();
             let inner = if agents.is_empty() {
-                rsx! { span { class: "rule-hint", "Connect Claude Code in Settings \u{203a} Agents first." } }
+                rsx! { span { class: "rule-hint", "Connect Claude in Settings \u{203a} Agents first." } }
             } else {
                 rsx! {
                     div { class: "rule-agent",
