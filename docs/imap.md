@@ -103,7 +103,7 @@ From Settings › Accounts › Add account › Other mail account (the HTML mock
 5. **Manual settings**, reachable at any time: both servers' host, port, security and user name.
 6. The account is stored, its secret kept, and sync starts.
 
-**Import from Thunderbird** sits beside Other mail account when Thunderbird profiles are found on this computer. It lists every account in every profile (by profile when there are several) with its address, name, IMAP host and how it signs in; accounts already in Postrinch and POP accounts are shown but cannot be chosen. Passwords stay in Thunderbird: each chosen account is signed in to once, one at a time with Skip this account, through steps 3 to 6, and the dialog ends by saying which were added and which were skipped.
+**Import from Thunderbird** sits beside Other mail account when Thunderbird profiles are found on this computer. It lists every account in every profile (by profile when there are several) with its address, name, IMAP host and how it signs in; accounts already in Postrinch and POP accounts are shown but cannot be chosen. A Gmail or Google Workspace account found in Thunderbird is added as a Google account (Google's own sign-in, with labels and calendars), not over IMAP, and Microsoft accounts use the browser sign-in. Passwords stay in Thunderbird: each chosen account is signed in to once, one at a time with Skip this account (Change opens the servers panel and returns to that account; Stop importing ends the whole import, the rest shown as not added), through steps 3 to 6, and the dialog ends by saying which were added and which were skipped.
 
 ## The provider façade
 
