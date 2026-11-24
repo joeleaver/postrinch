@@ -6,4 +6,4 @@ mod ids;
 mod threading;
 
 pub use ids::{message_id, message_id_without_header, mint_folder_label_id};
-pub use threading::thread_for;
+pub use threading::{Own, thread_for};

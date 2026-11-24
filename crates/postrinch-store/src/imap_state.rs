@@ -234,9 +234,16 @@ impl Store {
     /// Forget where sync got to in each of the account's folders and every
     /// copy it knew, keeping the folders and their label ids, so the next
     /// sync reads every folder from the start ([`Store::clear_mail`]).
+    ///
+    /// Each folder's position goes before its copies: if this is
+    /// interrupted between the two, the folder is left with a UIDVALIDITY
+    /// of 0, which no server sends, so the next sync takes it as changed
+    /// and forgets the copies left behind. The other order could leave a
+    /// position past copies that are gone, and sync would never fetch them
+    /// again.
     pub(crate) fn reset_imap_folders(&self, account: &EmailAddress) -> StoreResult<()> {
         for folder in self.imap_folders(account)? {
-            self.clear_imap_folder(account, &folder.label_id)?;
+            let label_id = folder.label_id.clone();
             self.put_imap_folder(
                 account,
                 &ImapFolder {
@@ -246,6 +253,7 @@ impl Store {
                     ..folder
                 },
             )?;
+            self.clear_imap_folder(account, &label_id)?;
         }
         Ok(())
     }

@@ -5,8 +5,8 @@ mod common;
 
 use common::{address, message};
 use postrinch_model::{
-    Account, EmailAddress, FolderRole, FolderRoles, ImapFolder, ImapPlace, ImapSettings, Provider,
-    ProviderMessageId, Security, Server, SignInMethod, SystemLabel,
+    Account, EmailAddress, FolderRole, FolderRoles, ImapFolder, ImapPlace, ImapSettings, Label,
+    LabelKind, Provider, ProviderMessageId, Security, Server, SignInMethod, SystemLabel,
 };
 use postrinch_store::{Store, StoreError};
 
@@ -218,12 +218,46 @@ fn clearing_mail_starts_every_folder_again() {
     store
         .put_imap_place(&me, &place("INBOX", 7, 10, "m1"))
         .unwrap();
+    store
+        .put_imap_place(&me, &place("f0123456789ab", 3, 4, "m1"))
+        .unwrap();
 
     assert_eq!(store.clear_mail(&me).unwrap(), 1);
-    let inbox = store.imap_folder(&me, "INBOX").unwrap().unwrap();
-    assert_eq!((inbox.uidvalidity, inbox.uidnext), (0, 0));
-    assert_eq!(inbox.name, "INBOX", "the folder and its label id stay");
-    assert!(uids(&store, &me, "INBOX").is_empty());
+    for (label_id, name) in [("INBOX", "INBOX"), ("f0123456789ab", "Receipts")] {
+        let folder = store.imap_folder(&me, label_id).unwrap().unwrap();
+        assert_eq!(
+            (folder.uidvalidity, folder.uidnext, folder.highest_modseq),
+            (0, 0, 0)
+        );
+        assert_eq!(folder.name, name, "the folder and its label id stay");
+        assert!(uids(&store, &me, label_id).is_empty());
+    }
+}
+
+#[test]
+fn removing_a_folders_label_removes_the_folder_and_its_places() {
+    let (_dir, store, me) = setup();
+    store
+        .put_label(
+            &me,
+            &Label::new("f0123456789ab", "Receipts", LabelKind::User),
+        )
+        .unwrap();
+    store
+        .put_imap_place(&me, &place("f0123456789ab", 3, 1, "m1"))
+        .unwrap();
+    store
+        .put_imap_place(&me, &place("INBOX", 7, 10, "m1"))
+        .unwrap();
+
+    store.remove_label(&me, "f0123456789ab").unwrap();
+    assert!(store.imap_folder(&me, "f0123456789ab").unwrap().is_none());
+    let left = store
+        .imap_message_places(&me, &ProviderMessageId("m1".into()))
+        .unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].folder, "INBOX");
+    assert!(store.imap_folder(&me, "INBOX").unwrap().is_some());
 }
 
 #[test]

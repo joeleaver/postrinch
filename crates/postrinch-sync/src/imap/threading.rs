@@ -1,34 +1,64 @@
 //! Threading an IMAP account's mail, which Gmail does for itself and IMAP
 //! leaves to the client (docs/imap.md, "Threading").
 //!
-//! A thread is named by its root message. A new message joins the thread
-//! of its nearest ancestor already stored; failing that, its thread is
-//! named by the oldest ancestor its headers name, or by itself. Since the
-//! root's own id names the same thread, a reply that arrives before what it
-//! answers still lands in the right thread once the root arrives. There is
-//! no threading by subject: it joins unrelated "Invoice" mails.
+//! A thread is named by its root message. A message already stored keeps
+//! its thread when seen again (its second copy, in Sent and the inbox, or
+//! every copy after a folder's UIDVALIDITY changed). A new message joins
+//! the thread of its nearest ancestor already stored; failing that, its
+//! thread is named by the oldest ancestor its headers name, or by itself.
+//! Since the root's own id names the same thread, a reply that arrives
+//! before what it answers still lands in the right thread once the root
+//! arrives. Threads never merge: a message is threaded once, so a reply
+//! naming only its parent (`In-Reply-To`, no `References`) that arrives
+//! before the parent stays in a thread of its own. There is no threading
+//! by subject: it joins unrelated "Invoice" mails.
 
 use postrinch_model::{EmailAddress, ProviderMessageId, ProviderThreadId};
 
 use super::ids::{bare, message_id, short_hash};
 
+/// The message being threaded, as its own headers name it.
+#[derive(Debug, Clone, Copy)]
+pub enum Own<'a> {
+    /// Its `Message-ID` header, as written.
+    MessageId(&'a str),
+    /// A message without a `Message-ID`: the provider id it is stored
+    /// under ([`super::message_id_without_header`]).
+    Headerless(&'a ProviderMessageId),
+}
+
+impl Own<'_> {
+    /// The provider id the message is stored under in `account`.
+    fn provider_id(self, account: &EmailAddress) -> ProviderMessageId {
+        match self {
+            Own::MessageId(header) => message_id(account, header),
+            Own::Headerless(id) => id.clone(),
+        }
+    }
+}
+
 /// The thread of a message in `account`, from its headers: its
 /// `References` (oldest first, as [`postrinch_model::MessageHeaders`] keeps
-/// them), its `In-Reply-To`, and `own`, its own `Message-ID` (or, for a
-/// message without one, its provider id). `stored_thread_of` gives the
-/// thread of a message already stored, by its provider id.
+/// them), its `In-Reply-To`, and `own`, the message itself.
+/// `stored_thread_of` gives the thread of a message already stored, by its
+/// provider id.
 ///
-/// The nearest stored ancestor's thread wins: the `References` entries
-/// from the last back, then `In-Reply-To`. With none stored, the thread is
-/// `t` and a hash of the root: the first `References` entry, else
-/// `In-Reply-To`, else `own`.
+/// A message already stored keeps its thread, so seeing it again never
+/// moves it. Otherwise the nearest stored ancestor's thread wins: the
+/// `References` entries from the last back, then `In-Reply-To`. With none
+/// stored, the thread is `t` and a hash of the root: the first
+/// `References` entry, else `In-Reply-To`, else the message's own
+/// `Message-ID` (or, without one, its provider id).
 pub fn thread_for(
     account: &EmailAddress,
     references: &[String],
     in_reply_to: Option<&str>,
-    own: &str,
+    own: Own<'_>,
     stored_thread_of: impl Fn(&ProviderMessageId) -> Option<ProviderThreadId>,
 ) -> ProviderThreadId {
+    if let Some(thread) = stored_thread_of(&own.provider_id(account)) {
+        return thread;
+    }
     let ancestors = || {
         references
             .iter()
@@ -40,12 +70,16 @@ pub fn thread_for(
     if let Some(thread) = ancestors().find_map(|id| stored_thread_of(&message_id(account, id))) {
         return thread;
     }
+    let own_root = match own {
+        Own::MessageId(header) => header,
+        Own::Headerless(id) => id.0.as_str(),
+    };
     let root = references
         .iter()
         .map(String::as_str)
         .chain(in_reply_to)
         .find(|id| !bare(id).is_empty())
-        .unwrap_or(own);
+        .unwrap_or(own_root);
     root_thread(root)
 }
 
@@ -78,9 +112,13 @@ mod tests {
         /// Thread a message as it arrives and store it.
         fn arrive(&self, own: &str, references: &[&str], in_reply_to: Option<&str>) -> String {
             let references: Vec<String> = references.iter().map(|r| r.to_string()).collect();
-            let thread = thread_for(&self.account, &references, in_reply_to, own, |id| {
-                self.threads.borrow().get(id).cloned()
-            });
+            let thread = thread_for(
+                &self.account,
+                &references,
+                in_reply_to,
+                Own::MessageId(own),
+                |id| self.threads.borrow().get(id).cloned(),
+            );
             self.threads
                 .borrow_mut()
                 .insert(message_id(&self.account, own), thread.clone());
@@ -146,12 +184,61 @@ mod tests {
             (*id == message_id(&ada, "a@x")).then(|| ProviderThreadId("tada".into()))
         };
         let references = ["a@x".to_owned()];
-        assert_eq!(thread_for(&ada, &references, None, "b@x", stored).0, "tada");
+        assert_eq!(
+            thread_for(&ada, &references, None, Own::MessageId("b@x"), stored).0,
+            "tada"
+        );
         // Bob's reply to a@x does not find Ada's copy: a thread is an
         // account's, so his is rooted at a@x in his own account.
         assert_eq!(
-            thread_for(&bob, &references, None, "b@x", stored),
+            thread_for(&bob, &references, None, Own::MessageId("b@x"), stored),
             root_thread("a@x")
         );
+    }
+
+    #[test]
+    fn a_message_seen_again_keeps_its_thread() {
+        let mailbox = Mailbox::new();
+        let a = mailbox.arrive("a@x", &[], None);
+        // c names a and b; only a is stored, so c joins a's thread.
+        assert_eq!(mailbox.arrive("c@x", &["a@x", "b@x"], Some("b@x")), a);
+        // b arrives alone, its client having written no References.
+        let b = mailbox.arrive("b@x", &[], None);
+        assert_ne!(b, a);
+        // c seen again (its copy in another folder, or after a new
+        // UIDVALIDITY): b is now its nearest stored ancestor, but c stays.
+        assert_eq!(mailbox.arrive("c@x", &["a@x", "b@x"], Some("b@x")), a);
+    }
+
+    #[test]
+    fn threads_never_merge() {
+        let mailbox = Mailbox::new();
+        // A reply naming only its parent, before the parent arrives.
+        let reply = mailbox.arrive("b@x", &[], Some("a@x"));
+        let root = mailbox.arrive("a@x", &[], None);
+        assert_eq!(reply, root, "a's own id names the thread b was put in");
+        // But one whose parent is itself a reply is rooted at the parent,
+        // and the grandparent arriving later does not join it.
+        let late = mailbox.arrive("d@x", &[], Some("c@x"));
+        let grandparent = mailbox.arrive("z@x", &[], None);
+        assert_eq!(mailbox.arrive("c@x", &[], Some("z@x")), grandparent);
+        assert_ne!(late, grandparent);
+    }
+
+    #[test]
+    fn a_headerless_message_is_found_by_its_provider_id() {
+        let mailbox = Mailbox::new();
+        let id = ProviderMessageId("u0123456789abcdef01234567".into());
+        mailbox
+            .threads
+            .borrow_mut()
+            .insert(id.clone(), ProviderThreadId("tkept".into()));
+        let stored = |found: &ProviderMessageId| mailbox.threads.borrow().get(found).cloned();
+        let thread = thread_for(&mailbox.account, &[], None, Own::Headerless(&id), stored);
+        assert_eq!(thread.0, "tkept");
+        // Not stored, it is its own root, by its provider id.
+        let other = ProviderMessageId("u1".into());
+        let thread = thread_for(&mailbox.account, &[], None, Own::Headerless(&other), stored);
+        assert_eq!(thread, root_thread("u1"));
     }
 }

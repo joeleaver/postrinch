@@ -12,6 +12,7 @@ use postrinch_model::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::system_labels::system_label_in;
 use crate::{CommandError, CommandResult, Commands, app_of};
 
 /// Something to do to threads.
@@ -159,11 +160,9 @@ impl Commands {
 
     /// The provider's id for one of the account's system labels.
     fn system_label(&self, account: &EmailAddress, system: SystemLabel) -> CommandResult<String> {
-        self.store
-            .labels(account)?
-            .into_iter()
-            .find(|l| l.kind == LabelKind::System(system))
-            .map(|l| l.provider_id)
+        let labels = self.store.labels(account)?;
+        system_label_in(&labels, system)
+            .map(|l| l.provider_id.clone())
             .ok_or(CommandError::NoSystemLabel {
                 account: account.clone(),
                 label: system,
