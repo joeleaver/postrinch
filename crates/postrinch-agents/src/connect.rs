@@ -4,9 +4,10 @@
 //! Connecting Claude replaces whatever Postrinch entries its files hold
 //! already among the person's own servers (any launching `postrinch-mcp`,
 //! under any name), so each file ends with exactly one. A project's own
-//! servers in `~/.claude.json` are left: one there was put there on purpose. The agents those entries served, and every
-//! other agent set up for Claude, are replaced by the new one in the same
-//! save: their keys stop working, and rules that asked them ask it.
+//! servers in `~/.claude.json` are left: one there was put there on
+//! purpose. The agents those entries served, and every other agent set up
+//! for Claude, are replaced by the new one once its entry is written: their
+//! keys stop working, and rules that asked them ask it.
 //! Codex and Cursor each get one more entry, as many agents as the person
 //! makes.
 //!

@@ -164,8 +164,15 @@ impl State {
                 return;
             }
             Outcome::Trouble { error, changes } => Some(format!(
-                "{} could not be set up by itself: {error}. Paste this instead.{}",
+                "{} could not be set up by itself: {error}. Paste this instead{}.{}",
                 app.map_or("The app", App::name),
+                // Another file took the new entry: the one that did not may
+                // still hold an old one, whose key no longer works.
+                if changes.replaced.is_empty() {
+                    ""
+                } else {
+                    ", in place of Postrinch\u{2019}s old entry there"
+                },
                 changes_text(&changes),
             )),
         };
@@ -264,11 +271,16 @@ fn added_text(app: App, changes: &Changes) -> String {
 fn changes_text(changes: &Changes) -> String {
     let mut text = replaced_text(&changes.replaced);
     let left: Vec<String> = changes.left.iter().map(|a| a.name.clone()).collect();
-    if !left.is_empty() {
-        text.push_str(&format!(
+    match left.len() {
+        0 => {}
+        1 => text.push_str(&format!(
             " {}\u{2019}s entry came out of Claude\u{2019}s settings; it still works where it is set up.",
+            left[0]
+        )),
+        _ => text.push_str(&format!(
+            " The entries of {} came out of Claude\u{2019}s settings; they still work where they are set up.",
             and_list(&left)
-        ));
+        )),
     }
     text
 }

@@ -53,6 +53,11 @@ pub(crate) fn run(command: AgentCommand) -> Result<()> {
                         made.agent.name
                     );
                     say_changes(&changes);
+                    if !changes.replaced.is_empty() {
+                        println!(
+                            "Put the entry below in place of Postrinch's old entry in that file."
+                        );
+                    }
                     print_key(&made.key, &snippet);
                 }
                 Outcome::ByHand => {
@@ -132,8 +137,13 @@ fn say_changes(changes: &Changes) {
     }
     if !changes.left.is_empty() {
         println!(
-            "The entry of {} came out of Claude's settings; it still works where it is set up.",
-            names(&changes.left)
+            "Claude's settings no longer hold an entry for {}; {} where set up.",
+            names(&changes.left),
+            if changes.left.len() == 1 {
+                "it still works"
+            } else {
+                "they still work"
+            }
         );
     }
 }
