@@ -2,7 +2,7 @@
 //! each server's outcome its own.
 
 use postrinch_mailtest::{
-    ImapConfig, ImapServer, SmtpConfig, SmtpServer, SpecialUse as FakeSpecialUse,
+    ImapConfig, ImapFault, ImapServer, SmtpConfig, SmtpServer, SpecialUse as FakeSpecialUse,
 };
 use postrinch_model::{Security, Server, SignInMethod, SignInReason};
 use postrinch_sync::imap::{
@@ -108,6 +108,20 @@ async fn passes_with_smtp_over_tls_and_over_starttls() {
     // The check sends no mail.
     assert!(fakes.smtp.messages().is_empty());
     assert_eq!(fakes.smtp.command_count("MAIL"), 0);
+}
+
+#[tokio::test]
+async fn a_server_dropping_the_connection_at_logout_still_passes() {
+    let fakes = Fakes::with_passwords().await;
+    fakes
+        .imap
+        .fail_next("LOGOUT", 1, ImapFault::DisconnectBefore);
+    let check = fakes
+        .check_password(fakes.smtp_server(Security::Tls), &password())
+        .await;
+    assert!(check.is_ok(), "{check:?}");
+    assert_sent_folder(&check);
+    assert_eq!(fakes.imap.command_count("LOGOUT"), 1);
 }
 
 #[tokio::test]

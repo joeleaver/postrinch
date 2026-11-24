@@ -81,6 +81,7 @@ pub struct SmtpConfig {
     max_size: usize,
     mechanisms: BTreeSet<Mechanism>,
     users: Vec<SmtpUser>,
+    challenges_again: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,6 +100,7 @@ impl Default for SmtpConfig {
             max_size: 35 * 1024 * 1024,
             mechanisms: Mechanism::DEFAULT.into_iter().collect(),
             users: Vec::new(),
+            challenges_again: false,
         }
     }
 }
@@ -160,6 +162,16 @@ impl SmtpConfig {
     /// `PLAIN` and `LOGIN`).
     pub fn mechanisms(mut self, mechanisms: &[Mechanism]) -> Self {
         self.mechanisms = mechanisms.iter().copied().collect();
+        self
+    }
+
+    /// Whether a refused XOAUTH2 or OAUTHBEARER sign-in misbehaves: after
+    /// the client answers the error challenge, the server sends the same
+    /// challenge again instead of 535, until the client cancels with `*`
+    /// (then 501). Off by default. For testing that clients give up
+    /// rather than loop or misreport it.
+    pub fn challenges_again(mut self, on: bool) -> Self {
+        self.challenges_again = on;
         self
     }
 

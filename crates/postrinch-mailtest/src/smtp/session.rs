@@ -259,6 +259,11 @@ impl Session {
                     // then 535.
                     let challenge = sasl::encode(failure);
                     self.read_sasl(&challenge).await?;
+                    if self.shared.lock().config.challenges_again {
+                        while self.read_sasl(&challenge).await?.is_some() {}
+                        self.reply(501, "5.0.0 Authentication cancelled").await?;
+                        return Ok(Next::Continue);
+                    }
                 }
                 self.reply(535, "5.7.8 Authentication credentials invalid")
                     .await?;

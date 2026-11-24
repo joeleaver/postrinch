@@ -3,8 +3,9 @@
 //! OAuth access token, fetched afresh and tried once more when the first
 //! is refused.
 //!
-//! A refusal becomes the account's "needs to sign in" state with the
-//! server's own sentence (RFC 5530's codes say which kind it is).
+//! A refusal of the credential becomes the account's "needs to sign in"
+//! state with the server's own sentence; RFC 5530's response codes say
+//! whether it was the credential at all ([`RefusalKind::of`]).
 
 use postrinch_model::{EmailAddress, Server, SignInReason};
 
@@ -66,7 +67,15 @@ pub(crate) async fn sign_in(
             let mut client = client;
             let mut refused_once = false;
             loop {
-                let token = tokens.access_token(account).await?;
+                // Within the command timeout, as SMTP's whole sign-in is:
+                // a provider that never answers must not hang the account.
+                let token = connector
+                    .exchange(
+                        server,
+                        "getting an access token",
+                        tokens.access_token(account),
+                    )
+                    .await?;
                 let message = sasl::oauth_message(
                     mechanism,
                     &server.username,
@@ -87,6 +96,42 @@ pub(crate) async fn sign_in(
                     Err((refused, _)) => return Err(refused.into_error()),
                 }
             }
+        }
+    }
+}
+
+/// What a tagged NO to a sign-in means, by its RFC 5530 response code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RefusalKind {
+    /// The credential was refused: the account needs to sign in (and an
+    /// OAuth token is fetched afresh once first).
+    Credential,
+    /// An administrator's policy refuses it: signing in again will not
+    /// help, nor will a fresh token.
+    Admin,
+    /// The server could not, or would not, sign anyone in now: a server
+    /// failure to try again later, not the account's to fix.
+    Server,
+}
+
+impl RefusalKind {
+    /// Only `AUTHENTICATIONFAILED`, `AUTHORIZATIONFAILED` (the credential
+    /// is good but not for this user), `EXPIRED` (the password or token
+    /// has expired) and a NO with no code say the credential was refused.
+    /// `ALERT` (RFC 9051 7.1) only asks for the text to be shown, so it
+    /// counts as no code: Gmail's "[ALERT] Application-specific password
+    /// required" is a refused password. `CONTACTADMIN` is the admin's.
+    /// Every other code, RFC 5530's temporary ones (`UNAVAILABLE`,
+    /// `INUSE`, `LIMIT`, `SERVERBUG`, `CORRUPTION`), `PRIVACYREQUIRED`
+    /// (Postrinch signs in only over TLS, so the server is at fault), the
+    /// rest and any unknown code, is the server's.
+    fn of(code: Option<&str>) -> Self {
+        match code {
+            None | Some("ALERT" | "AUTHENTICATIONFAILED" | "AUTHORIZATIONFAILED" | "EXPIRED") => {
+                Self::Credential
+            }
+            Some("CONTACTADMIN") => Self::Admin,
+            Some(_) => Self::Server,
         }
     }
 }
@@ -172,16 +217,15 @@ impl Attempt<'_> {
                 } else {
                     answer.text.clone()
                 };
-                match answer.code.as_deref() {
-                    // RFC 5530: the server cannot check now; try later.
-                    Some("UNAVAILABLE") => Refused::Other(self.error(detail)),
-                    Some("CONTACTADMIN") => {
-                        // A fresh token would not change the admin's mind.
-                        Refused::Other(SyncError::NeedsSignIn(SignInReason::AdminPolicy { detail }))
-                    }
-                    _ => Refused::Credential(SyncError::NeedsSignIn(
+                match RefusalKind::of(answer.code.as_deref()) {
+                    RefusalKind::Credential => Refused::Credential(SyncError::NeedsSignIn(
                         SignInReason::CredentialRejected { detail },
                     )),
+                    // A fresh token would not change the admin's mind.
+                    RefusalKind::Admin => {
+                        Refused::Other(SyncError::NeedsSignIn(SignInReason::AdminPolicy { detail }))
+                    }
+                    RefusalKind::Server => Refused::Other(self.error(detail)),
                 }
             }
             (Error::No(_) | Error::Bad(_), answer) => Refused::Other(
@@ -192,6 +236,34 @@ impl Attempt<'_> {
                 Refused::Other(self.error("the server closed the connection"))
             }
             (other, _) => Refused::Other(self.error(other.to_string())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RefusalKind::{self, Admin, Credential, Server};
+
+    #[test]
+    fn only_credential_codes_and_no_code_refuse_the_credential() {
+        let cases = [
+            (None, Credential),
+            (Some("AUTHENTICATIONFAILED"), Credential),
+            (Some("AUTHORIZATIONFAILED"), Credential),
+            (Some("EXPIRED"), Credential),
+            (Some("ALERT"), Credential),
+            (Some("CONTACTADMIN"), Admin),
+            (Some("UNAVAILABLE"), Server),
+            (Some("INUSE"), Server),
+            (Some("LIMIT"), Server),
+            (Some("SERVERBUG"), Server),
+            (Some("CORRUPTION"), Server),
+            (Some("PRIVACYREQUIRED"), Server),
+            (Some("CANNOT"), Server),
+            (Some("SOMETHINGNEW"), Server),
+        ];
+        for (code, kind) in cases {
+            assert_eq!(RefusalKind::of(code), kind, "{code:?}");
         }
     }
 }

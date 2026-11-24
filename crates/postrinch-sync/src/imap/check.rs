@@ -73,7 +73,11 @@ pub async fn check_account(
     let imap = async {
         let mut session = ImapSession::open(connector, account, settings, secret, tokens).await?;
         let folders = session.list_folders().await?;
-        session.logout().await?;
+        // The settings are proven once the folders are listed: a server
+        // that drops the connection at LOGOUT has not failed the check.
+        if let Err(e) = session.logout().await {
+            tracing::debug!("IMAP check: signing out after listing the folders failed: {e}");
+        }
         Ok::<_, SyncError>(folders)
     };
     let smtp = async {

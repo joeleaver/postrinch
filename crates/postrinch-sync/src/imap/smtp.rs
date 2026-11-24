@@ -199,11 +199,23 @@ async fn authenticate(
         .await
         .map_err(|e| refusal(server, &e))?;
     if response.has_code(334) {
+        // The error challenge: why the token was refused (RFC 7628 3.2.2).
+        let challenge = decoded_challenge(&response);
         let answer = format!("{}\r\n", STANDARD.encode(mechanism.error_answer()));
         response = connection
             .command(answer)
             .await
             .map_err(|e| refusal(server, &e))?;
+        if response.has_code(334) {
+            // The answer to an error challenge must end the exchange; a
+            // server asking again has refused the sign-in all the same.
+            // Cancel (RFC 4954 4: `*`, answered 501, which is expected
+            // and says nothing more) so the connection can try again.
+            let _cancelled = connection.command("*\r\n").await;
+            return Err(SyncError::NeedsSignIn(SignInReason::CredentialRejected {
+                detail: challenge.unwrap_or_else(|| "the server refused the sign-in".into()),
+            }));
+        }
     }
     if response.has_code(235) {
         Ok(())
@@ -214,6 +226,14 @@ async fn authenticate(
             message: response.message().collect::<Vec<_>>().join(" "),
         })
     }
+}
+
+/// The text of a 334 challenge, base64-decoded, when it is text.
+fn decoded_challenge(response: &Response) -> Option<String> {
+    let encoded = response.message().next()?.trim();
+    let text = String::from_utf8(STANDARD.decode(encoded).ok()?).ok()?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
 }
 
 /// The SASL mechanisms an EHLO answer offers, upper-cased.

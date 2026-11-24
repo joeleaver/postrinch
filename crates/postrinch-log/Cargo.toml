@@ -1,0 +1,11 @@
+[package]
+name = "postrinch-log"
+description = "How Postrinch's programs filter their logs: RUST_LOG or each program's default, with the libraries that log credentials or mail kept quiet whatever RUST_LOG says."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

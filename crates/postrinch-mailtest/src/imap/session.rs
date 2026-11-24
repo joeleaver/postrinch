@@ -75,6 +75,11 @@ pub(crate) struct Session {
 /// sequence numbers would shift under it (RFC 9051 7.5.1).
 const NO_EXPUNGE_DURING: [&str; 3] = ["FETCH", "STORE", "SEARCH"];
 
+/// What [`ImapConfig::injects_after_starttls`] sends after STARTTLS's OK.
+///
+/// [`ImapConfig::injects_after_starttls`]: super::ImapConfig::injects_after_starttls
+const INJECTED: &[u8] = b"* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] injected\r\n";
+
 impl Session {
     pub(crate) fn new(shared: Arc<Shared>, conn: Conn) -> Self {
         let changes = shared.subscribe();
@@ -101,6 +106,11 @@ impl Session {
     }
 
     async fn serve(&mut self) -> io::Result<()> {
+        if !self.shared.lock().config.greets {
+            // A hung server: read whatever comes, answer nothing.
+            while self.conn.fill().await? {}
+            return Ok(());
+        }
         let greeting = format!(
             "* OK [CAPABILITY {}] Fake IMAP ready\r\n",
             self.capabilities()
@@ -181,7 +191,16 @@ impl Session {
                 Ok(false)
             }
             Next::StartTls => {
-                self.flush(&command, reply).await?;
+                if self.shared.lock().config.injects_after_starttls {
+                    // Sent with the OK, in one write, so the client has
+                    // both in hand before its TLS handshake.
+                    let mut out = std::mem::take(&mut self.out);
+                    out.extend_from_slice(reply.line(&command.tag).as_bytes());
+                    out.extend_from_slice(INJECTED);
+                    self.conn.write_all(&out).await?;
+                } else {
+                    self.flush(&command, reply).await?;
+                }
                 let acceptor = self.shared.acceptor.clone();
                 self.conn.start_tls(&acceptor).await?;
                 Ok(true)

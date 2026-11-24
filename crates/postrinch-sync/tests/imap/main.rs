@@ -4,6 +4,8 @@
 
 mod check;
 mod connect;
+mod misbehaving;
 mod oauth;
 mod secrets;
+mod smtp;
 mod support;

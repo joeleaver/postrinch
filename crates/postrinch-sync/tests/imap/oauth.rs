@@ -112,3 +112,61 @@ async fn a_server_that_cannot_check_now_is_not_a_sign_in_problem() {
     }
     assert_eq!(tokens.invalidated(), 0);
 }
+
+/// Answers the first AUTHENTICATE with `NO <text>` and signs in with what
+/// comes of it, a good token being on offer every time.
+async fn refused_with(text: &str) -> (SyncResult<ImapSession>, Tokens, ImapServer) {
+    let fake = ImapServer::start(fake_taking("good")).await.unwrap();
+    fake.fail_next("AUTHENTICATE", 1, ImapFault::No(text.into()));
+    let tokens = Tokens::new(&["good", "good"]);
+    let result = open(&fake, &tokens).await;
+    (result, tokens, fake)
+}
+
+#[tokio::test]
+async fn temporary_refusals_are_the_servers_and_not_retried() {
+    for code in [
+        "UNAVAILABLE",
+        "INUSE",
+        "LIMIT",
+        "SERVERBUG",
+        "CORRUPTION",
+        "PRIVACYREQUIRED",
+        "NEWFANGLED",
+    ] {
+        let (result, tokens, fake) = refused_with(&format!("[{code}] Try later")).await;
+        match result {
+            Err(SyncError::Server { message, .. }) => assert_eq!(message, "Try later", "{code}"),
+            other => panic!("{code}: expected a server failure, got {other:?}"),
+        }
+        assert_eq!(fake.command_count("AUTHENTICATE"), 1, "{code}");
+        assert_eq!((tokens.fetched(), tokens.invalidated()), (1, 0), "{code}");
+    }
+}
+
+#[tokio::test]
+async fn credential_refusals_get_one_fresh_token() {
+    // The fake signs in the retry, so each of these is retried once.
+    for text in [
+        "[AUTHENTICATIONFAILED] Invalid credentials",
+        "[AUTHORIZATIONFAILED] Not for this user",
+        "[EXPIRED] Token expired",
+        "[ALERT] Application-specific password required",
+        "Invalid credentials",
+    ] {
+        let (result, tokens, fake) = refused_with(text).await;
+        result.unwrap_or_else(|e| panic!("{text}: {e:?}"));
+        assert_eq!(fake.command_count("AUTHENTICATE"), 2, "{text}");
+        assert_eq!((tokens.fetched(), tokens.invalidated()), (2, 1), "{text}");
+    }
+}
+
+#[tokio::test]
+async fn a_credential_refused_twice_keeps_the_servers_words() {
+    let fake = ImapServer::start(fake_taking("good")).await.unwrap();
+    let text = "[EXPIRED] Token expired";
+    fake.fail_next("AUTHENTICATE", 2, ImapFault::No(text.into()));
+    let tokens = Tokens::new(&["good", "good"]);
+    assert_eq!(rejected_detail(open(&fake, &tokens).await), "Token expired");
+    assert_eq!(fake.command_count("AUTHENTICATE"), 2);
+}

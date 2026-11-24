@@ -70,6 +70,8 @@ pub struct ImapConfig {
     pub(crate) extensions: BTreeSet<Extension>,
     pub(crate) mechanisms: BTreeSet<Mechanism>,
     pub(crate) users: Vec<UserConfig>,
+    pub(crate) greets: bool,
+    pub(crate) injects_after_starttls: bool,
 }
 
 impl Default for ImapConfig {
@@ -81,6 +83,8 @@ impl Default for ImapConfig {
             extensions: Extension::ALL.into_iter().collect(),
             mechanisms: Mechanism::DEFAULT.into_iter().collect(),
             users: Vec::new(),
+            greets: true,
+            injects_after_starttls: false,
         }
     }
 }
@@ -138,6 +142,25 @@ impl ImapConfig {
     /// users in over plain text. For testing that clients refuse it.
     pub fn offer_starttls(mut self, on: bool) -> Self {
         self.offer_starttls = on;
+        self
+    }
+
+    /// Whether the server greets a new connection. On by default. Off, it
+    /// accepts the connection (and the TLS handshake on the TLS port) and
+    /// then says nothing at all, as a hung server does, until the client
+    /// leaves. For testing that clients time out rather than wait.
+    pub fn greets(mut self, on: bool) -> Self {
+        self.greets = on;
+        self
+    }
+
+    /// Whether the plain-text port misbehaves at STARTTLS by sending a
+    /// response of its own straight after its OK, still in plain text
+    /// (`* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] injected`), as an attacker
+    /// on the path would (RFC 8314's STARTTLS injection). Off by default.
+    /// For testing that clients refuse whatever came before TLS.
+    pub fn injects_after_starttls(mut self, on: bool) -> Self {
+        self.injects_after_starttls = on;
         self
     }
 

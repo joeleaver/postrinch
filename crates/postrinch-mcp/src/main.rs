@@ -20,15 +20,18 @@ use std::sync::Arc;
 use postrinch_agents::client::Client;
 use postrinch_agents::wire;
 use rmcp::ServiceExt;
+use tracing_subscriber::prelude::*;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_ansi(false)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+    // RUST_LOG or info, never the mail protocols' raw lines
+    // (postrinch-log says why).
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_ansi(false)
+                .with_filter(postrinch_log::filter("info")),
         )
         .init();
 
