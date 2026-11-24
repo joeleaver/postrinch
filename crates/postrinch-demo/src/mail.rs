@@ -159,17 +159,26 @@ fn mailbox(person: &Person) -> String {
     } else {
         encoded(person.name)
     };
-    format!("{name} <{}>", person.address)
+    // An encoded name ends its own line, so the address after it never
+    // takes that line past RFC 2047's 76 characters.
+    let gap = if person.name.is_ascii() { " " } else { "\r\n " };
+    format!("{name}{gap}<{}>", person.address)
 }
 
+/// One mailbox to a line, so no encoded name shares one with another.
 fn mailboxes(people: &[Person]) -> String {
-    people.iter().map(mailbox).collect::<Vec<_>>().join(", ")
+    people
+        .iter()
+        .map(mailbox)
+        .collect::<Vec<_>>()
+        .join(",\r\n ")
 }
 
-/// The most bytes of text one encoded word carries: 45 bytes are 60 of
-/// base64, and with `=?utf-8?B?` and `?=` the word is 72 characters,
-/// inside RFC 2047's 75.
-const WORD_BYTES: usize = 45;
+/// The most bytes of text one encoded word carries: 39 bytes are 52 of
+/// base64, and with `=?utf-8?B?` and `?=` the word is 64 characters. After
+/// the longest header name the demo writes ("Subject: "), the line is 73,
+/// inside RFC 2047's 76.
+const WORD_BYTES: usize = 39;
 
 /// `text` as it may stand in a header: as it is when it is ASCII, else
 /// RFC 2047 encoded words, each whole characters, on folded lines.
@@ -208,18 +217,26 @@ fn base64_lines(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::clock::ago;
-    use crate::people::{PRIYA, SAM_WORK, THEO};
+    use crate::people::{INES, PRIYA, SAM_WORK, THEO};
     use crate::threads::{Attachment, msg};
 
     fn parsed(spec: &MessageSpec, earlier: &[String]) -> postrinch_model::Message {
+        parse(&raw(spec, "Café menu — round 2", earlier))
+    }
+
+    fn raw(spec: &MessageSpec, subject: &str, earlier: &[String]) -> Vec<u8> {
         let date: Zoned = "2026-11-24T10:00[Europe/Lisbon]".parse().unwrap();
-        let raw = render(&Outgoing {
+        render(&Outgoing {
             spec,
-            subject: "Café menu — round 2",
+            subject,
             date: &date,
             message_id: "m2@harborcoffee.example",
             earlier,
-        });
+        })
+    }
+
+    fn parse(raw: &[u8]) -> postrinch_model::Message {
+        let date: Zoned = "2026-11-24T10:00[Europe/Lisbon]".parse().unwrap();
         let envelope = postrinch_sync::Envelope {
             account: SAM_WORK.email(),
             id: postrinch_model::ProviderMessageId("m2".into()),
@@ -229,7 +246,7 @@ mod tests {
             flags: Default::default(),
             snippet: None,
         };
-        postrinch_sync::parse_message(envelope, &raw).unwrap()
+        postrinch_sync::parse_message(envelope, raw).unwrap()
     }
 
     #[test]
@@ -260,20 +277,20 @@ mod tests {
     }
 
     #[test]
-    fn a_long_subject_is_several_short_words() {
+    fn long_encoded_headers_keep_their_lines_short() {
         let subject = "Inês Duarte — notas da revisão do logótipo e das embalagens, ronda 2";
-        let header = encoded(subject);
-        for line in header.split("\r\n") {
-            assert!(line.trim_start().len() <= 75, "{line}");
+        let spec = msg(INES, &[SAM_WORK, INES, THEO], ago(5), "Olá.");
+        let raw = raw(&spec, subject, &[]);
+        let text = String::from_utf8(raw.clone()).unwrap();
+        let head = &text[..text.find("\r\n\r\n").unwrap()];
+        for line in head.split("\r\n").filter(|l| l.contains("=?")) {
+            assert!(line.len() <= 76, "{} long: {line}", line.len());
         }
-        let decoded: String = header
-            .split("\r\n ")
-            .map(|w| {
-                let b64 = w.trim_start_matches("=?utf-8?B?").trim_end_matches("?=");
-                String::from_utf8(STANDARD.decode(b64).unwrap()).unwrap()
-            })
-            .collect();
-        assert_eq!(decoded, subject);
+        let message = parse(&raw);
+        assert_eq!(message.headers.subject.as_deref(), Some(subject));
+        assert_eq!(message.headers.from[0].name.as_deref(), Some(INES.name));
+        assert_eq!(message.headers.to.len(), 3);
+        assert_eq!(message.headers.to[1].address, INES.email());
     }
 
     #[test]

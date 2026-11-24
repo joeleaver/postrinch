@@ -57,10 +57,12 @@ if [[ -e "$scratch" && ! -d "$scratch" ]]; then
   echo "demo-window: $scratch is not a folder" >&2
   exit 2
 fi
-if [[ -d "$scratch" && ! -e "$scratch/$marker" ]] &&
-  [[ -n "$(ls -A -- "$scratch")" ]]; then
-  echo "demo-window: $scratch is not empty and is not a demo scratch folder; give a new or empty one" >&2
-  exit 2
+if [[ -d "$scratch" && ! -e "$scratch/$marker" ]]; then
+  # A folder that cannot be listed is refused too: it may hold anything.
+  if ! listing=$(ls -A -- "$scratch") || [[ -n "$listing" ]]; then
+    echo "demo-window: $scratch is not empty and is not a demo scratch folder; give a new or empty one" >&2
+    exit 2
+  fi
 fi
 mkdir -p "$scratch"
 scratch=$(cd "$scratch" && pwd -P)
