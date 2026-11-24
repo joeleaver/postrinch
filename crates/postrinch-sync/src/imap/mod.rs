@@ -1,7 +1,9 @@
 //! IMAP and SMTP accounts (docs/imap.md). So far: how a message, a thread
 //! and a user folder are named; the account's secret; and connecting and
 //! signing in to both servers ([`ImapSession`], [`SmtpConnection`]), which
-//! the add-account dialog's check uses ([`check_account`]).
+//! the add-account dialog's check uses ([`check_account`]); and OAuth
+//! sign-in with Google and Microsoft, and its access tokens
+//! ([`ImapOAuth`]).
 
 mod auth;
 mod capabilities;
@@ -9,6 +11,7 @@ mod check;
 mod connect;
 mod folders;
 mod ids;
+mod oauth;
 mod preauth;
 mod reply;
 mod sasl;
@@ -24,6 +27,7 @@ pub use check::{AccountCheck, CheckFailure, check_account};
 pub use connect::Connector;
 pub use folders::{ListedFolder, SpecialUse};
 pub use ids::{message_id, message_id_without_header, mint_folder_label_id};
+pub use oauth::{ImapOAuth, MicrosoftClient, OAuthClients, OAuthProvider, OAuthSignIn};
 pub use reply::ImapStream;
 pub use secret::{ImapSecret, ImapSecrets};
 pub use session::ImapSession;

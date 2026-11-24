@@ -8,14 +8,11 @@ use postrinch_model::{Account, EmailAddress, Provider, SignInReason};
 use tokio::sync::Mutex;
 
 use super::ClientConfig;
-use super::loopback::Loopback;
-use super::oauth::{Endpoints, OAuth, check_scopes};
-use super::pkce::Pkce;
+use super::oauth::{Endpoints, api_spec, check_scopes};
+use crate::oauth::{Granted, OAuthFlow, browser_sign_in};
 use crate::secrets::SecretStore;
 use crate::{SyncError, SyncResult};
 
-/// How long the person has to finish signing in in the browser.
-const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Refresh an access token this long before Google says it expires.
 const EXPIRY_MARGIN: Duration = Duration::from_secs(60);
 
@@ -28,7 +25,7 @@ struct AccessToken {
 /// [`SecretStore`]; access tokens are cached in memory until shortly before
 /// they expire. Cheap to share: wrap in an `Arc`.
 pub struct GoogleAuth {
-    oauth: OAuth,
+    oauth: OAuthFlow,
     secrets: Arc<dyn SecretStore>,
     /// Held across a refresh, so concurrent callers wait for one refresh
     /// instead of each starting their own.
@@ -50,11 +47,7 @@ impl GoogleAuth {
         secrets: Arc<dyn SecretStore>,
     ) -> Self {
         Self {
-            oauth: OAuth {
-                config,
-                endpoints,
-                http: reqwest::Client::new(),
-            },
+            oauth: OAuthFlow::new(api_spec(&config, endpoints), reqwest::Client::new()),
             secrets,
             cache: Mutex::new(HashMap::new()),
             scopes: std::sync::Mutex::new(HashMap::new()),
@@ -74,23 +67,10 @@ impl GoogleAuth {
         login_hint: Option<&EmailAddress>,
         open_browser: impl FnOnce(&str) -> std::io::Result<()>,
     ) -> SyncResult<Account> {
-        let pkce = Pkce::new();
-        let loopback = Loopback::bind().await?;
-        let redirect_uri = loopback.redirect_uri().to_owned();
-        let url =
-            self.oauth
-                .authorize_url(&redirect_uri, &pkce.challenge, &pkce.state, login_hint)?;
-        open_browser(url.as_str())?;
-
-        let code = loopback.wait_for_code(&pkce.state, SIGN_IN_TIMEOUT).await?;
-        let tokens = self
-            .oauth
-            .exchange_code(&code, &pkce.verifier, &redirect_uri)
-            .await?;
-        let refresh_token = tokens
-            .refresh_token
-            .clone()
-            .ok_or_else(|| SyncError::SignIn("Google sent no refresh token".into()))?;
+        let Granted {
+            tokens,
+            refresh_token,
+        } = browser_sign_in(&self.oauth, login_hint, open_browser).await?;
 
         let user = self.oauth.userinfo(&tokens.access_token).await?;
         let address =

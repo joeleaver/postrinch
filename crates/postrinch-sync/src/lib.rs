@@ -13,6 +13,7 @@ mod error;
 pub mod google;
 pub mod imap;
 mod mime;
+mod oauth;
 mod reparse;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod secret_service;

@@ -1,17 +1,15 @@
-//! Google's OAuth endpoints: the authorization URL, the token endpoint
-//! (code exchange and refresh), userinfo and revocation.
+//! Google's OAuth: its endpoints, the scopes Postrinch asks for, and what
+//! its token errors mean. The flow itself is `crate::oauth`'s. Two specs
+//! share the client: Google accounts (the Gmail and Calendar APIs) and
+//! Google over IMAP, whose grant is for mail alone.
 
 use postrinch_model::{EmailAddress, SignInReason};
-use std::time::Duration;
-
-use serde::Deserialize;
-use url::Url;
 
 use super::ClientConfig;
+use crate::oauth::{
+    AuthorizeParams, Identity, Names, OAuthEndpoints, OAuthSpec, RedirectHost, TokenError,
+};
 use crate::{SyncError, SyncResult};
-
-/// Tries at reaching the token endpoint, 2, 4 and 8 seconds apart.
-const CONNECT_ATTEMPTS: u32 = 4;
 
 /// Every scope Postrinch asks for, together, at sign-in.
 pub const SCOPES: &[&str] = &[
@@ -32,6 +30,17 @@ const REQUIRED_SCOPES: &[&str] = &[
     "https://mail.google.com/",
     "https://www.googleapis.com/auth/calendar",
 ];
+
+/// Google over IMAP: `https://mail.google.com/` covers IMAP and SMTP.
+const IMAP_SCOPES: &[&str] = &["https://mail.google.com/", "openid", "email"];
+const IMAP_REQUIRED_SCOPES: &[&str] = &["https://mail.google.com/"];
+
+const NAMES: Names = Names {
+    provider: "Google",
+    token: "Google OAuth",
+    userinfo: "Google userinfo",
+    revoke: "Google revoke",
+};
 
 /// Where the OAuth requests go. Production values come from the client
 /// file and Google's documentation; tests point them at a mock server.
@@ -54,177 +63,87 @@ impl Endpoints {
     }
 }
 
-/// A successful token response.
-#[derive(Debug, Deserialize)]
-pub(crate) struct Tokens {
-    pub access_token: String,
-    pub expires_in: u64,
-    pub refresh_token: Option<String>,
-    #[serde(default)]
-    pub scope: String,
-}
-
-#[derive(Deserialize)]
-struct TokenError {
-    error: String,
-    #[serde(default)]
-    error_description: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct UserInfo {
-    pub email: String,
-    #[serde(default)]
-    pub email_verified: bool,
-    pub name: Option<String>,
-}
-
-pub(crate) struct OAuth {
-    pub config: ClientConfig,
-    pub endpoints: Endpoints,
-    pub http: reqwest::Client,
-}
-
-impl OAuth {
-    /// The URL that starts sign-in in the browser. `login_hint` picks the
-    /// account when one is signing in again; without it Google asks which.
-    pub(crate) fn authorize_url(
-        &self,
-        redirect_uri: &str,
-        challenge: &str,
-        state: &str,
-        login_hint: Option<&EmailAddress>,
-    ) -> SyncResult<Url> {
-        let mut url = Url::parse(&self.endpoints.auth)
-            .map_err(|e| SyncError::Config(format!("auth_uri: {e}")))?;
-        {
-            let mut q = url.query_pairs_mut();
-            q.append_pair("client_id", &self.config.client_id)
-                .append_pair("redirect_uri", redirect_uri)
-                .append_pair("response_type", "code")
-                .append_pair("scope", &SCOPES.join(" "))
-                .append_pair("code_challenge", challenge)
-                .append_pair("code_challenge_method", "S256")
-                .append_pair("state", state)
-                // offline: a refresh token. consent: Google only sends a
-                // refresh token with a consent, so ask for it every time.
-                .append_pair("access_type", "offline")
-                .append_pair("include_granted_scopes", "true");
-            match login_hint {
-                Some(hint) => q
-                    .append_pair("login_hint", &hint.to_string())
-                    .append_pair("prompt", "consent"),
-                None => q.append_pair("prompt", "consent select_account"),
-            };
+impl From<Endpoints> for OAuthEndpoints {
+    fn from(e: Endpoints) -> Self {
+        Self {
+            authorize: e.auth,
+            token: e.token,
+            userinfo: Some(e.userinfo),
+            revoke: Some(e.revoke),
         }
-        Ok(url)
-    }
-
-    pub(crate) async fn exchange_code(
-        &self,
-        code: &str,
-        verifier: &str,
-        redirect_uri: &str,
-    ) -> SyncResult<Tokens> {
-        self.token_request(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("code_verifier", verifier),
-            ("redirect_uri", redirect_uri),
-        ])
-        .await
-    }
-
-    /// A new access token. A refresh response that lists its scopes is
-    /// checked like a sign-in; one that leaves them out is taken to keep
-    /// the original grant's.
-    pub(crate) async fn refresh(&self, refresh_token: &str) -> SyncResult<Tokens> {
-        let tokens = self
-            .token_request(&[
-                ("grant_type", "refresh_token"),
-                ("refresh_token", refresh_token),
-            ])
-            .await?;
-        if !tokens.scope.is_empty() {
-            check_scopes(&tokens.scope)?;
-        }
-        Ok(tokens)
-    }
-
-    async fn token_request(&self, params: &[(&str, &str)]) -> SyncResult<Tokens> {
-        let mut form: Vec<(&str, &str)> = params.to_vec();
-        form.push(("client_id", &self.config.client_id));
-        form.push(("client_secret", &self.config.client_secret));
-        // Retry only a request that could not connect: it never reached
-        // Google, so a one-time authorization code is still unspent.
-        let mut attempt = 0;
-        let response = loop {
-            attempt += 1;
-            match self
-                .http
-                .post(&self.endpoints.token)
-                .form(&form)
-                .send()
-                .await
-            {
-                Ok(response) => break response,
-                Err(e) if e.is_connect() && attempt < CONNECT_ATTEMPTS => {
-                    tracing::debug!("token endpoint unreachable, retrying: {e}");
-                    tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
-                }
-                Err(e) => return Err(e.into()),
-            }
-        };
-        let status = response.status();
-        let body = response.text().await?;
-        if status.is_success() {
-            return serde_json::from_str(&body)
-                .map_err(|e| SyncError::api("Google OAuth", status.as_u16(), e.to_string()));
-        }
-        Err(token_error(status.as_u16(), &body))
-    }
-
-    pub(crate) async fn userinfo(&self, access_token: &str) -> SyncResult<UserInfo> {
-        let response = self
-            .http
-            .get(&self.endpoints.userinfo)
-            .bearer_auth(access_token)
-            .send()
-            .await?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(SyncError::api("Google userinfo", status.as_u16(), body));
-        }
-        Ok(response.json().await?)
-    }
-
-    /// Revoke a refresh token Postrinch no longer uses, so it does not count
-    /// against Google's 100 tokens per account and client.
-    pub(crate) async fn revoke(&self, token: &str) -> SyncResult<()> {
-        let response = self
-            .http
-            .post(&self.endpoints.revoke)
-            .form(&[("token", token)])
-            .send()
-            .await?;
-        let status = response.status();
-        if status.is_success() {
-            return Ok(());
-        }
-        let body = response.text().await.unwrap_or_default();
-        Err(SyncError::api("Google revoke", status.as_u16(), body))
     }
 }
 
-/// Refuse a grant that left out a scope Postrinch needs.
+/// Google accounts: mail, calendars and filters over Google's APIs.
+pub(crate) fn api_spec(config: &ClientConfig, endpoints: Endpoints) -> OAuthSpec {
+    spec(
+        config,
+        endpoints,
+        SCOPES,
+        REQUIRED_SCOPES,
+        api_authorize_params,
+    )
+}
+
+/// Google over IMAP and SMTP. Its grant asks for mail only, and does not
+/// take in the scopes a Google account with the address has granted.
+pub(crate) fn imap_spec(config: &ClientConfig, endpoints: Endpoints) -> OAuthSpec {
+    spec(
+        config,
+        endpoints,
+        IMAP_SCOPES,
+        IMAP_REQUIRED_SCOPES,
+        imap_authorize_params,
+    )
+}
+
+fn spec(
+    config: &ClientConfig,
+    endpoints: Endpoints,
+    scopes: &'static [&'static str],
+    required_scopes: &'static [&'static str],
+    authorize_params: AuthorizeParams,
+) -> OAuthSpec {
+    OAuthSpec {
+        names: NAMES,
+        endpoints: endpoints.into(),
+        client_id: config.client_id.clone(),
+        client_secret: Some(config.client_secret.clone()),
+        scopes,
+        required_scopes,
+        redirect: RedirectHost::Ip,
+        identity: Identity::Userinfo,
+        scope_in_token_requests: false,
+        authorize_params,
+        classify_error: classify,
+    }
+}
+
+/// offline: a refresh token. consent: Google only sends a refresh token
+/// with a consent, so ask for it every time.
+fn api_authorize_params(login_hint: Option<&EmailAddress>) -> Vec<(&'static str, String)> {
+    let mut params = vec![
+        ("access_type", "offline".to_owned()),
+        ("include_granted_scopes", "true".to_owned()),
+    ];
+    params.push(prompt(login_hint));
+    params
+}
+
+fn imap_authorize_params(login_hint: Option<&EmailAddress>) -> Vec<(&'static str, String)> {
+    vec![("access_type", "offline".to_owned()), prompt(login_hint)]
+}
+
+fn prompt(login_hint: Option<&EmailAddress>) -> (&'static str, String) {
+    match login_hint {
+        Some(_) => ("prompt", "consent".to_owned()),
+        None => ("prompt", "consent select_account".to_owned()),
+    }
+}
+
+/// Refuse a Google account's grant that left out a scope Postrinch needs.
 pub(crate) fn check_scopes(granted: &str) -> SyncResult<()> {
-    let granted: Vec<&str> = granted.split_whitespace().collect();
-    let missing: Vec<String> = REQUIRED_SCOPES
-        .iter()
-        .filter(|s| !granted.contains(s))
-        .map(|s| s.to_string())
-        .collect();
+    let missing = crate::oauth::missing_scopes(REQUIRED_SCOPES, granted);
     if missing.is_empty() {
         Ok(())
     } else {
@@ -234,27 +153,32 @@ pub(crate) fn check_scopes(granted: &str) -> SyncResult<()> {
     }
 }
 
-/// What a failed token request means. `invalid_grant` is every way a
-/// refresh token stops working; Google does not say which.
-fn token_error(status: u16, body: &str) -> SyncError {
-    let Ok(e) = serde_json::from_str::<TokenError>(body) else {
-        return SyncError::api("Google OAuth", status, body.to_owned());
-    };
-    let detail = if e.error_description.is_empty() {
-        e.error.clone()
-    } else {
-        e.error_description
-    };
+/// What a token error means. `invalid_grant` is every way a refresh token
+/// stops working; Google does not say which.
+fn classify(status: u16, e: TokenError) -> SyncError {
+    let detail = e.detail();
     match e.error.as_str() {
         "invalid_grant" => SyncError::NeedsSignIn(SignInReason::CredentialRejected { detail }),
         "admin_policy_enforced" => SyncError::NeedsSignIn(SignInReason::AdminPolicy { detail }),
-        _ => SyncError::api("Google OAuth", status, format!("{}: {detail}", e.error)),
+        _ => SyncError::api(NAMES.token, status, format!("{}: {detail}", e.error)),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oauth::OAuthFlow;
+
+    fn flow() -> OAuthFlow {
+        let config = ClientConfig {
+            client_id: "id".into(),
+            client_secret: "secret".into(),
+            auth_uri: "https://accounts.google.com/o/oauth2/auth".into(),
+            token_uri: "https://oauth2.googleapis.com/token".into(),
+        };
+        let endpoints = Endpoints::google(&config);
+        OAuthFlow::new(api_spec(&config, endpoints), reqwest::Client::new())
+    }
 
     #[test]
     fn missing_scopes_need_sign_in() {
@@ -269,7 +193,8 @@ mod tests {
 
     #[test]
     fn classifies_token_errors() {
-        let revoked = token_error(
+        let flow = flow();
+        let revoked = flow.token_error(
             400,
             r#"{"error":"invalid_grant","error_description":"Token has been expired or revoked."}"#,
         );
@@ -277,14 +202,28 @@ mod tests {
             revoked,
             SyncError::NeedsSignIn(SignInReason::CredentialRejected { .. })
         ));
-        let policy = token_error(400, r#"{"error":"admin_policy_enforced"}"#);
+        let policy = flow.token_error(400, r#"{"error":"admin_policy_enforced"}"#);
         assert!(matches!(
             policy,
             SyncError::NeedsSignIn(SignInReason::AdminPolicy { .. })
         ));
         assert!(matches!(
-            token_error(500, "oops"),
+            flow.token_error(500, "oops"),
             SyncError::Api { status: 500, .. }
         ));
+    }
+
+    #[test]
+    fn the_imap_grant_is_for_mail_alone() {
+        let config = ClientConfig {
+            client_id: "id".into(),
+            client_secret: "secret".into(),
+            auth_uri: "https://accounts.google.com/o/oauth2/auth".into(),
+            token_uri: "https://oauth2.googleapis.com/token".into(),
+        };
+        let spec = imap_spec(&config, Endpoints::google(&config));
+        assert_eq!(spec.scope(), "https://mail.google.com/ openid email");
+        let params = (spec.authorize_params)(None);
+        assert!(!params.iter().any(|(k, _)| *k == "include_granted_scopes"));
     }
 }

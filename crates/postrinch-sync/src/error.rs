@@ -1,4 +1,4 @@
-use postrinch_model::SignInReason;
+use postrinch_model::{EmailAddress, SignInReason};
 use postrinch_store::StoreError;
 
 pub type SyncResult<T> = Result<T, SyncError>;
@@ -14,6 +14,24 @@ pub enum SyncError {
     Config(String),
     #[error("sign-in failed: {0}")]
     SignIn(String),
+    /// This copy of Postrinch has no OAuth client for the provider: its
+    /// client file is missing (`detail` is `None`) or does not read. The
+    /// provider's accounts cannot sign in; others are unaffected.
+    #[error(
+        "{provider} sign-in isn't set up in this copy of Postrinch{}",
+        .detail.as_deref().map(|d| format!(" ({d})")).unwrap_or_default()
+    )]
+    OAuthNotSetUp {
+        provider: String,
+        detail: Option<String>,
+    },
+    /// The browser sign-in was finished by another account than the one
+    /// asked for. Nothing was kept.
+    #[error("signed in as {signed_in}, not {asked}")]
+    OtherAccount {
+        asked: EmailAddress,
+        signed_in: EmailAddress,
+    },
     #[error("the keychain: {0}")]
     Keychain(String),
     #[error("network: {}", crate::google::error_chain(.0))]

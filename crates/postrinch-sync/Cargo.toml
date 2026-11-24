@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+postrinch-discover = { workspace = true }
 postrinch-model = { workspace = true }
 postrinch-rules = { workspace = true }
 postrinch-store = { workspace = true }
