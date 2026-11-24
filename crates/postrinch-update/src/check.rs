@@ -173,13 +173,16 @@ impl Http {
 fn refusal(url: &str, status: StatusCode, headers: &HeaderMap) -> String {
     let api = url.starts_with("https://api.github.com/");
     // Unauthenticated API calls are limited per network (60 an hour): GitHub
-    // answers 429, or 403 with no requests remaining.
+    // answers 429, or 403 with no requests remaining. Its short-term
+    // ("secondary") limit answers 403 with `retry-after` while requests remain.
     let exhausted = headers
         .get("x-ratelimit-remaining")
         .is_some_and(|left| left.as_bytes() == b"0");
-    if status == StatusCode::TOO_MANY_REQUESTS || (status == StatusCode::FORBIDDEN && exhausted) {
-        return "GitHub is limiting requests from this network; Postrinch will try again tomorrow"
-            .into();
+    let wait = headers.contains_key("retry-after");
+    if status == StatusCode::TOO_MANY_REQUESTS
+        || (status == StatusCode::FORBIDDEN && (exhausted || wait))
+    {
+        return "GitHub is limiting requests from this network; try again later".into();
     }
     if status == StatusCode::NOT_FOUND && api {
         return "GitHub shows no release of Postrinch yet".into();
@@ -274,13 +277,16 @@ mod tests {
 
     #[test]
     fn a_rate_limit_says_github_is_limiting_this_network() {
-        let limited =
-            "GitHub is limiting requests from this network; Postrinch will try again tomorrow";
+        let limited = "GitHub is limiting requests from this network; try again later";
         let mut exhausted = HeaderMap::new();
         exhausted.insert("x-ratelimit-remaining", "0".parse().unwrap());
         let none = HeaderMap::new();
         assert_eq!(refusal(FEED, StatusCode::FORBIDDEN, &exhausted), limited);
         assert_eq!(refusal(FEED, StatusCode::TOO_MANY_REQUESTS, &none), limited);
+        let mut secondary = HeaderMap::new();
+        secondary.insert("x-ratelimit-remaining", "41".parse().unwrap());
+        secondary.insert("retry-after", "60".parse().unwrap());
+        assert_eq!(refusal(FEED, StatusCode::FORBIDDEN, &secondary), limited);
         let forbidden = refusal(FEED, StatusCode::FORBIDDEN, &none);
         assert!(forbidden.ends_with("403 Forbidden"), "{forbidden}");
     }
