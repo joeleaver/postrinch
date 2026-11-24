@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # GTK and libxdo for rinch's desktop shell. The GPU renderer (wgpu)
-      # needs nothing here: it loads Vulkan and EGL at run time.
+      # needs nothing here: it loads Vulkan at run time.
       - name: Install system libraries
         run: |
           sudo apt-get update -qq
