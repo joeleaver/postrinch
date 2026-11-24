@@ -141,7 +141,7 @@
   <section class="band" id="rinch">
     <div class="wrap narrow">
       <h2>Written in Rust, drawn by Rinch</h2>
-      <p>Postrinch is built with <a href="https://github.com/joeleaver/rinch">Rinch</a>, a GUI framework for Rust. Rinch lays a window out with HTML and CSS and draws every pixel itself, in Rust, with no Electron and no web view: one small program that starts in a moment. When something changes, such as an unread count or a new message, Rinch updates just that part of the window.</p>
+      <p>Postrinch is built with <a href="https://github.com/joeleaver/rinch">Rinch</a>, a GUI framework for Rust. Rinch lays a window out with HTML and CSS and draws every pixel itself, in Rust, on your graphics card, with no Electron and no web view: one program that starts in a moment. When something changes, such as an unread count or a new message, Rinch redraws just that part of the window. On a computer without a graphics card it can use, such as a virtual machine or a remote desktop, Rinch draws with the processor instead, and the window works just the same.</p>
       <p>The same engine draws your HTML mail. Each message is cleaned first, then laid out by Rinch, so reading mail never means running a web browser inside your mail app.</p>
     </div>
   </section>
