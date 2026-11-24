@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Written by hand after the ISPDB's entry for yahoo.com. -->
+<clientConfig version="1.1">
+  <emailProvider id="yahoo.com">
+    <domain>yahoo.com</domain>
+    <domain>yahoo.co.uk</domain>
+    <domain>ymail.com</domain>
+    <domain>rocketmail.com</domain>
+    <displayName>Yahoo! Mail</displayName>
+    <displayShortName>Yahoo</displayShortName>
+    <incomingServer type="imap">
+      <hostname>imap.mail.yahoo.com</hostname>
+      <port>993</port>
+      <socketType>SSL</socketType>
+      <username>%EMAILADDRESS%</username>
+      <authentication>OAuth2</authentication>
+      <authentication>password-cleartext</authentication>
+    </incomingServer>
+    <incomingServer type="pop3">
+      <hostname>pop.mail.yahoo.com</hostname>
+      <port>995</port>
+      <socketType>SSL</socketType>
+      <username>%EMAILADDRESS%</username>
+      <authentication>OAuth2</authentication>
+      <authentication>password-cleartext</authentication>
+    </incomingServer>
+    <outgoingServer type="smtp">
+      <hostname>smtp.mail.yahoo.com</hostname>
+      <port>465</port>
+      <socketType>SSL</socketType>
+      <username>%EMAILADDRESS%</username>
+      <authentication>OAuth2</authentication>
+      <authentication>password-cleartext</authentication>
+    </outgoingServer>
+    <documentation url="https://help.yahoo.com/kb/SLN4075.html">
+      <descr lang="en">Yahoo Mail settings for other email apps</descr>
+    </documentation>
+  </emailProvider>
+  <oAuth2>
+    <issuer>login.yahoo.com</issuer>
+    <scope>mail-w</scope>
+    <authURL>https://api.login.yahoo.com/oauth2/request_auth</authURL>
+    <tokenURL>https://api.login.yahoo.com/oauth2/get_token</tokenURL>
+  </oAuth2>
+</clientConfig>
