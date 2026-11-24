@@ -47,7 +47,9 @@ The project was made once with `jkbase project create postrinch`, which gives
 ## Screenshots
 
 `public/assets/shots/*.png` are taken from a made-up demo store, never from real mail: see
-`tools/demo-window.sh`. Each is 1440×900, the size the pages' `<img>` tags declare. Retake them
+`tools/demo-window.sh`. Each is 1440×900, the size the pages' `<img>` tags declare, and comes in
+two: `<name>.png` in the light theme and `<name>-dark.png` in the dark one. Each `<picture>`
+shows the one that matches the visitor's theme, so add and retake them in pairs. Retake them
 when the window changes enough that they mislead.
 
 ## The release key
