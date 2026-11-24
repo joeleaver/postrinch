@@ -5,6 +5,8 @@
 use std::path::Path;
 use std::time::Duration;
 
+use reqwest::StatusCode;
+use reqwest::header::HeaderMap;
 use serde::Deserialize;
 
 use crate::{CURRENT, PROGRAMS, STAGE, exe, newer_than_current};
@@ -13,8 +15,6 @@ use crate::{CURRENT, PROGRAMS, STAGE, exe, newer_than_current};
 const FEED: &str = "https://api.github.com/repos/joeleaver/postrinch/releases/latest";
 /// Points the check at another feed of the same shape (for tests).
 const FEED_ENV: &str = "POSTRINCH_UPDATE_FEED";
-/// A GitHub token to read releases with; without it, `gh auth token`.
-const TOKEN_ENV: &str = "POSTRINCH_GITHUB_TOKEN";
 /// The Ed25519 key packages are signed with, the raw 32 bytes in base64
 /// (`tools/update-key.sh` writes it).
 const PUBLIC_KEY: &str = include_str!("../update-key.pub");
@@ -28,10 +28,8 @@ struct Release {
 #[derive(Deserialize, Clone)]
 struct Asset {
     name: String,
-    /// The API's address for the asset: with a token and
-    /// `Accept: application/octet-stream`, its bytes, from a private
-    /// repository too.
-    url: String,
+    /// The asset's public address; the repository is public, so it needs no
+    /// sign-in.
     browser_download_url: String,
 }
 
@@ -132,9 +130,10 @@ fn verify(public_key: &str, package: &[u8], signature: &[u8]) -> Result<(), Stri
         .map_err(|_| "the package's signature does not verify".to_owned())
 }
 
+/// Plain HTTPS to GitHub, signed in to nothing: the repository and its
+/// release assets are public, so the check carries no identity.
 struct Http {
     client: reqwest::blocking::Client,
-    token: Option<String>,
 }
 
 impl Http {
@@ -144,31 +143,19 @@ impl Http {
             .timeout(Duration::from_secs(600))
             .build()
             .map_err(|e| e.to_string())?;
-        Ok(Self {
-            client,
-            token: token(),
-        })
+        Ok(Self { client })
     }
 
-    /// GET `url`. The token goes only to GitHub's API; GitHub's redirect
-    /// to its file storage drops it.
     fn get(&self, url: &str, accept: &str) -> Result<Vec<u8>, String> {
-        let api = url.starts_with("https://api.github.com/");
-        let mut request = self.client.get(url).header("Accept", accept);
-        if let Some(token) = self.token.as_ref().filter(|_| api) {
-            request = request.bearer_auth(token);
-        }
-        let response = request.send().map_err(|e| format!("{url}: {e}"))?;
+        let response = self
+            .client
+            .get(url)
+            .header("Accept", accept)
+            .send()
+            .map_err(|e| format!("{url}: {e}"))?;
         let status = response.status();
-        if status == reqwest::StatusCode::NOT_FOUND && api {
-            return Err(if self.token.is_some() {
-                "GitHub shows no release of Postrinch: none is published yet, or this GitHub sign-in cannot see it".into()
-            } else {
-                "GitHub shows no release of Postrinch without signing in: sign in with `gh auth login`, or set POSTRINCH_GITHUB_TOKEN".into()
-            });
-        }
         if !status.is_success() {
-            return Err(format!("{url}: {status}"));
+            return Err(refusal(url, status, response.headers()));
         }
         response
             .bytes()
@@ -177,27 +164,27 @@ impl Http {
     }
 
     fn download(&self, asset: &Asset) -> Result<Vec<u8>, String> {
-        if self.token.is_some() {
-            self.get(&asset.url, "application/octet-stream")
-        } else {
-            self.get(&asset.browser_download_url, "application/octet-stream")
-        }
+        self.get(&asset.browser_download_url, "application/octet-stream")
     }
 }
 
-/// A token to read releases with: `POSTRINCH_GITHUB_TOKEN`, else the GitHub
-/// CLI's sign-in. The repository is private for now; without either, a
-/// public one still works.
-fn token() -> Option<String> {
-    if let Ok(token) = std::env::var(TOKEN_ENV) {
-        return Some(token.trim().to_owned()).filter(|t| !t.is_empty());
+/// Why GitHub's answer `status` to `url` is not what was asked for, in words
+/// for Settings › About.
+fn refusal(url: &str, status: StatusCode, headers: &HeaderMap) -> String {
+    let api = url.starts_with("https://api.github.com/");
+    // Unauthenticated API calls are limited per network (60 an hour): GitHub
+    // answers 429, or 403 with no requests remaining.
+    let exhausted = headers
+        .get("x-ratelimit-remaining")
+        .is_some_and(|left| left.as_bytes() == b"0");
+    if status == StatusCode::TOO_MANY_REQUESTS || (status == StatusCode::FORBIDDEN && exhausted) {
+        return "GitHub is limiting requests from this network; Postrinch will try again tomorrow"
+            .into();
     }
-    let out = std::process::Command::new("gh")
-        .args(["auth", "token"])
-        .output()
-        .ok()?;
-    let token = String::from_utf8(out.stdout).ok()?.trim().to_owned();
-    (out.status.success() && !token.is_empty()).then_some(token)
+    if status == StatusCode::NOT_FOUND && api {
+        return "GitHub shows no release of Postrinch yet".into();
+    }
+    format!("{url}: {status}")
 }
 
 #[cfg(test)]
@@ -246,7 +233,6 @@ mod tests {
     fn this_systems_package_is_picked_with_its_signature() {
         let asset = |name: &str| Asset {
             name: name.into(),
-            url: format!("api/{name}"),
             browser_download_url: format!("dl/{name}"),
         };
         let suffix = package_suffix();
@@ -260,7 +246,13 @@ mod tests {
         }))
         .unwrap();
         let (package, signature) = pick(&release.assets).unwrap();
-        assert_eq!((package.url.as_str(), signature.url.as_str()), ("c", "e"));
+        assert_eq!(
+            (
+                package.browser_download_url.as_str(),
+                signature.browser_download_url.as_str()
+            ),
+            ("d", "f")
+        );
         assert!(
             pick(&[asset(&format!("x{suffix}"))]).is_none(),
             "no signature, no package"
@@ -278,5 +270,32 @@ mod tests {
         assert_eq!(staged_version(dir.path()), None);
         std::fs::write(stage.join(exe("postrinch-cli")), "").unwrap();
         assert_eq!(staged_version(dir.path()).as_deref(), Some("9.0.0"));
+    }
+
+    #[test]
+    fn a_rate_limit_says_github_is_limiting_this_network() {
+        let limited =
+            "GitHub is limiting requests from this network; Postrinch will try again tomorrow";
+        let mut exhausted = HeaderMap::new();
+        exhausted.insert("x-ratelimit-remaining", "0".parse().unwrap());
+        let none = HeaderMap::new();
+        assert_eq!(refusal(FEED, StatusCode::FORBIDDEN, &exhausted), limited);
+        assert_eq!(refusal(FEED, StatusCode::TOO_MANY_REQUESTS, &none), limited);
+        let forbidden = refusal(FEED, StatusCode::FORBIDDEN, &none);
+        assert!(forbidden.ends_with("403 Forbidden"), "{forbidden}");
+    }
+
+    #[test]
+    fn a_missing_release_says_none_is_published_yet() {
+        let none = HeaderMap::new();
+        assert_eq!(
+            refusal(FEED, StatusCode::NOT_FOUND, &none),
+            "GitHub shows no release of Postrinch yet"
+        );
+        let asset = "https://github.com/joeleaver/postrinch/releases/download/v9/x.sig";
+        assert_eq!(
+            refusal(asset, StatusCode::NOT_FOUND, &none),
+            format!("{asset}: 404 Not Found")
+        );
     }
 }
