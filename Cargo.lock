@@ -1015,6 +1015,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 
 [[package]]
+name = "cobs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "codespan-reporting"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1728,6 +1737,18 @@ name = "email_address"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ab6bbd053d3cdc62ba3de82aae11530a97bbd5b3a572fbdbcd0f0e545e3ff21"
+
+[[package]]
+name = "embedded-io"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "encodify"
@@ -4576,6 +4597,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "postcard"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5431b3dcfdf6d1985c87d11f267a171c0dec0a8cd544c6727b747d36365f1fca"
+dependencies = [
+ "cobs",
+ "embedded-io 0.4.0",
+ "embedded-io 0.6.1",
+ "serde",
+]
+
+[[package]]
 name = "postrinch"
 version = "0.1.34"
 dependencies = [
@@ -5530,8 +5563,10 @@ dependencies = [
  "block2 0.6.2",
  "bytemuck",
  "futures-lite",
+ "futures-util",
  "js-sys",
  "keyboard-types 0.7.0",
+ "libc",
  "libloading 0.8.9",
  "log",
  "muda",
@@ -5540,6 +5575,7 @@ dependencies = [
  "parley",
  "peniko",
  "png 0.17.16",
+ "pollster",
  "rfd",
  "rinch-clipboard",
  "rinch-components",
@@ -5553,6 +5589,7 @@ dependencies = [
  "rinch-http",
  "rinch-macros",
  "rinch-platform",
+ "rinch-renderer",
  "rinch-theme",
  "rinch-words",
  "rustix",
@@ -5562,8 +5599,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "vello",
  "wasm-bindgen",
  "web-sys",
+ "wgpu",
  "windows",
  "windows-sys 0.59.0",
  "winit",
@@ -5752,6 +5791,18 @@ dependencies = [
  "peniko",
  "vello",
  "web-time",
+]
+
+[[package]]
+name = "rinch-renderer"
+version = "0.1.0"
+source = "git+https://github.com/joeleaver/rinch.git#55b79a46631175d0754d73b631a2f548d60e5995"
+dependencies = [
+ "rinch-core",
+ "thiserror 1.0.69",
+ "tracing",
+ "vello",
+ "wgpu",
 ]
 
 [[package]]
@@ -7594,8 +7645,10 @@ dependencies = [
  "bytemuck",
  "futures-intrusive",
  "log",
+ "naga",
  "peniko",
  "png 0.18.1",
+ "postcard",
  "skrifa",
  "static_assertions",
  "thiserror 2.0.21",
@@ -7624,6 +7677,7 @@ dependencies = [
  "bytemuck",
  "log",
  "naga",
+ "postcard",
  "thiserror 2.0.21",
  "vello_encoding",
 ]
