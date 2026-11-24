@@ -29,7 +29,7 @@ fn seeded() -> (tempfile::TempDir, Commands) {
         seeded.threads
     );
     assert!(seeded.messages > seeded.threads);
-    assert_eq!((seeded.views, seeded.rules), (3, 3));
+    assert_eq!((seeded.views, seeded.rules), (9, 3));
     (dir, Commands::new(Store::open(&root).unwrap()))
 }
 
@@ -90,6 +90,21 @@ fn views_and_search_find_the_demo_mail() {
     let harbor = subjects(&commands, &view(&commands, "Harbor Coffee"));
     assert!(harbor.contains(&"Kickoff notes".to_owned()));
     assert!(harbor.iter().all(|s| !s.contains("Fernhill")));
+    // Every view of the person's own shows some of the demo's mail.
+    let own: Vec<_> = commands
+        .views()
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.original.is_none())
+        .collect();
+    assert_eq!(own.len(), 9);
+    for entry in own {
+        let name = &entry.view.name;
+        assert!(
+            !subjects(&commands, &entry.view).is_empty(),
+            "{name} is empty"
+        );
+    }
     let found = commands.search("from:priya has:attachment", 50).unwrap();
     let found: Vec<_> = found
         .threads

@@ -92,11 +92,14 @@ struct Part {
 }
 
 impl Part {
+    /// A text part, its line breaks made CRLF first as MIME's canonical
+    /// form for text is (RFC 2045 §6.8).
     fn text(subtype: &str, text: &str) -> Self {
+        let canonical = text.replace("\r\n", "\n").replace('\n', "\r\n");
         Self::leaf(
             &format!("text/{subtype}; charset=\"utf-8\""),
             None,
-            text.as_bytes(),
+            canonical.as_bytes(),
         )
     }
 
@@ -163,14 +166,31 @@ fn mailboxes(people: &[Person]) -> String {
     people.iter().map(mailbox).collect::<Vec<_>>().join(", ")
 }
 
-/// `text` as it may stand in a header: as it is when it is ASCII, else an
-/// RFC 2047 encoded word.
+/// The most bytes of text one encoded word carries: 45 bytes are 60 of
+/// base64, and with `=?utf-8?B?` and `?=` the word is 72 characters,
+/// inside RFC 2047's 75.
+const WORD_BYTES: usize = 45;
+
+/// `text` as it may stand in a header: as it is when it is ASCII, else
+/// RFC 2047 encoded words, each whole characters, on folded lines.
 fn encoded(text: &str) -> String {
     if text.is_ascii() {
-        text.to_owned()
-    } else {
-        format!("=?utf-8?B?{}?=", STANDARD.encode(text))
+        return text.to_owned();
     }
+    let mut words = Vec::new();
+    let mut chunk = String::new();
+    for c in text.chars() {
+        if chunk.len() + c.len_utf8() > WORD_BYTES {
+            words.push(std::mem::take(&mut chunk));
+        }
+        chunk.push(c);
+    }
+    words.push(chunk);
+    words
+        .iter()
+        .map(|w| format!("=?utf-8?B?{}?=", STANDARD.encode(w)))
+        .collect::<Vec<_>>()
+        .join("\r\n ")
 }
 
 /// Base64 in lines of 76, each ending in CRLF.
@@ -237,6 +257,23 @@ mod tests {
         assert_eq!(message.attachments.len(), 1);
         assert_eq!(message.attachments[0].filename.as_deref(), Some("menu.csv"));
         assert_eq!(message.attachments[0].size, 24);
+    }
+
+    #[test]
+    fn a_long_subject_is_several_short_words() {
+        let subject = "Inês Duarte — notas da revisão do logótipo e das embalagens, ronda 2";
+        let header = encoded(subject);
+        for line in header.split("\r\n") {
+            assert!(line.trim_start().len() <= 75, "{line}");
+        }
+        let decoded: String = header
+            .split("\r\n ")
+            .map(|w| {
+                let b64 = w.trim_start_matches("=?utf-8?B?").trim_end_matches("?=");
+                String::from_utf8(STANDARD.decode(b64).unwrap()).unwrap()
+            })
+            .collect();
+        assert_eq!(decoded, subject);
     }
 
     #[test]

@@ -10,7 +10,9 @@ use crate::accounts::{HARBOR, INVOICES, RECEIPTS};
 use crate::people::{LEDGERLY, PAPER_CRANE, PRIYA, SAM_HOME, SAM_WORK};
 
 /// Name, search, the account it is of (none for every account), count.
-const VIEWS: [(&str, &str, Option<&str>, ViewCount); 3] = [
+/// As many as a person who files by views keeps: enough that the sidebar
+/// is full, as it is in the website's screenshots.
+const VIEWS: [(&str, &str, Option<&str>, ViewCount); 9] = [
     (
         "Harbor Coffee",
         "label:clients/harbor-coffee",
@@ -27,6 +29,37 @@ const VIEWS: [(&str, &str, Option<&str>, ViewCount); 3] = [
         "Receipts",
         "label:receipts newer_than:30d",
         Some(SAM_HOME.address),
+        ViewCount::None,
+    ),
+    ("Starred", "is:starred", None, ViewCount::All),
+    (
+        "Invoices",
+        "label:invoices",
+        Some(SAM_WORK.address),
+        ViewCount::None,
+    ),
+    (
+        "Hiring",
+        "label:studio/hiring",
+        Some(SAM_WORK.address),
+        ViewCount::All,
+    ),
+    (
+        "Travel",
+        "label:travel",
+        Some(SAM_HOME.address),
+        ViewCount::None,
+    ),
+    (
+        "Newsletters",
+        "category:updates",
+        Some(SAM_HOME.address),
+        ViewCount::Unread,
+    ),
+    (
+        "Files this month",
+        "has:attachment newer_than:30d",
+        None,
         ViewCount::None,
     ),
 ];

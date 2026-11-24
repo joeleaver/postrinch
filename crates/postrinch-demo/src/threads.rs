@@ -204,9 +204,12 @@ fn put_thread(store: &Store, clock: &Clock, spec: &ThreadSpec, seq: usize) -> De
     Ok(dated.len())
 }
 
-/// A reply's subject: the thread's, after `Re: `.
+/// A reply's subject: the thread's, after `Re: ` unless it has one.
 fn reply_subject(subject: &str, n: usize) -> String {
-    if n == 0 {
+    let replied = subject
+        .get(..3)
+        .is_some_and(|start| start.eq_ignore_ascii_case("re:"));
+    if n == 0 || replied {
         subject.to_owned()
     } else {
         format!("Re: {subject}")
@@ -247,5 +250,6 @@ mod tests {
     fn replies_say_so() {
         assert_eq!(reply_subject("Lunch?", 0), "Lunch?");
         assert_eq!(reply_subject("Lunch?", 2), "Re: Lunch?");
+        assert_eq!(reply_subject("Re: Offsite", 1), "Re: Offsite");
     }
 }

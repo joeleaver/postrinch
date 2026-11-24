@@ -70,7 +70,25 @@ pub fn workshop_invitation(clock: &Clock) -> DemoResult<String> {
         "END:VEVENT".to_owned(),
         "END:VCALENDAR".to_owned(),
     ];
-    Ok(lines.join("\r\n") + "\r\n")
+    Ok(lines.iter().map(|l| fold(l)).collect())
+}
+
+/// One content line, folded as RFC 5545 §3.1 asks: no line over 75
+/// octets, each continuation starting with a space, never inside a
+/// character.
+fn fold(line: &str) -> String {
+    let mut out = String::with_capacity(line.len() + 8);
+    let mut width = 0;
+    for c in line.chars() {
+        if width + c.len_utf8() > 75 {
+            out.push_str("\r\n ");
+            width = 1;
+        }
+        out.push(c);
+        width += c.len_utf8();
+    }
+    out.push_str("\r\n");
+    out
 }
 
 fn calendar(
@@ -433,4 +451,24 @@ pub fn put(store: &Store, clock: &Clock) -> DemoResult<usize> {
         }
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fold;
+
+    #[test]
+    fn long_lines_fold_and_unfold_whole() {
+        let line = format!(
+            "ATTENDEE;CN=Inês Duarte;PARTSTAT=NEEDS-ACTION:mailto:{}",
+            "a".repeat(80)
+        );
+        let folded = fold(&line);
+        assert!(folded.ends_with("\r\n"));
+        for part in folded.trim_end_matches("\r\n").split("\r\n") {
+            assert!(part.len() <= 75, "{part}");
+        }
+        assert_eq!(folded.trim_end_matches("\r\n").replace("\r\n ", ""), line);
+        assert_eq!(fold("VERSION:2.0"), "VERSION:2.0\r\n");
+    }
 }

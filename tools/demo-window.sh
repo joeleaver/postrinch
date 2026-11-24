@@ -12,6 +12,8 @@
 #                                        and nothing reaches Google
 #   * HOME           → <scratch>/home   so Settings › Agents reads and writes
 #                                        no real agent configuration
+#   * XDG_CACHE_HOME, XDG_STATE_HOME → <scratch>/cache, <scratch>/state, so
+#                                        opened attachments and logs stay there
 #   * POSTRINCH_APP_ADDR → 127.0.0.1:7466, off the installed window's port
 #
 # With sync off the window says so in the sidebar's Sync section ("Sync is
@@ -24,8 +26,9 @@
 #          copy the window's discovery file into ~/.rinch/debug so the rinch
 #          tools can connect; the copy is removed when the window closes.
 #
-# The scratch folder (default: a new one under ${TMPDIR:-/tmp}) is emptied
-# and seeded again on every run, so times are relative to now.
+# The scratch folder (default: a new one under ${TMPDIR:-/tmp}) must be new,
+# empty, or one this script made before; it is emptied and seeded again on
+# every run, so times are relative to now.
 set -euo pipefail
 
 appearance=Light
@@ -35,7 +38,7 @@ for arg in "$@"; do
   case "$arg" in
     --dark) appearance=Dark ;;
     --debug) debug=1 ;;
-    -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
     -*) echo "demo-window: unknown option $arg" >&2; exit 2 ;;
     *) scratch="$arg" ;;
   esac
@@ -45,17 +48,23 @@ repo=$(cd "$(dirname "$0")/.." && pwd -P)
 if [[ -z "$scratch" ]]; then
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/postrinch-demo.XXXXXX")
 fi
+
+# The folder is emptied of data/, config/, home/, cache/ and state/ below,
+# so only take one that is new, empty, or marked as this script's by an
+# earlier run: never a folder that holds anything else.
+marker=.postrinch-demo-scratch
+if [[ -e "$scratch" && ! -d "$scratch" ]]; then
+  echo "demo-window: $scratch is not a folder" >&2
+  exit 2
+fi
+if [[ -d "$scratch" && ! -e "$scratch/$marker" ]] &&
+  [[ -n "$(ls -A -- "$scratch")" ]]; then
+  echo "demo-window: $scratch is not empty and is not a demo scratch folder; give a new or empty one" >&2
+  exit 2
+fi
 mkdir -p "$scratch"
 scratch=$(cd "$scratch" && pwd -P)
-
-# Never let the scratch folder be (or hold) this machine's own data.
-for own in "$HOME" "${XDG_DATA_HOME:-$HOME/.local/share}" "${XDG_CONFIG_HOME:-$HOME/.config}"; do
-  own=$(cd "$own" 2>/dev/null && pwd -P || echo "$own")
-  if [[ "$scratch" == "$own" ]]; then
-    echo "demo-window: $scratch is your own folder; give a scratch folder" >&2
-    exit 2
-  fi
-done
+touch -- "$scratch/$marker"
 
 features=()
 [[ $debug == 1 ]] && features=(--features debug)
@@ -64,8 +73,8 @@ cargo build --release --manifest-path "$repo/Cargo.toml" -p postrinch "${feature
 target=$(cargo metadata --manifest-path "$repo/Cargo.toml" --format-version 1 --no-deps |
   sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
 
-rm -rf -- "$scratch/data" "$scratch/config" "$scratch/home"
-mkdir -p "$scratch/data" "$scratch/config/postrinch" "$scratch/home"
+rm -rf -- "$scratch/data" "$scratch/config" "$scratch/home" "$scratch/cache" "$scratch/state"
+mkdir -p "$scratch/data" "$scratch/config/postrinch" "$scratch/home" "$scratch/cache" "$scratch/state"
 "$target/release/postrinch-demo" "$scratch/data/postrinch"
 cat > "$scratch/config/postrinch/settings.json" <<EOF
 {
@@ -82,6 +91,8 @@ env_vars=(
   XDG_DATA_HOME="$scratch/data"
   XDG_CONFIG_HOME="$scratch/config"
   HOME="$scratch/home"
+  XDG_CACHE_HOME="$scratch/cache"
+  XDG_STATE_HOME="$scratch/state"
   POSTRINCH_APP_ADDR=127.0.0.1:7466
 )
 [[ $debug == 1 ]] && env_vars+=(RINCH_DEBUG=1)
