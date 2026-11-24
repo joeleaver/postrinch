@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add Mail Account</title>
+<!--
+  Mockup: adding an IMAP/SMTP account to Postrinch, and its settings once
+  added. The design for docs/imap.md "Adding an account". Colours are the
+  window's own (crates/postrinch/src/ui/palette.rs). Each step of the flow
+  is a state; the strip at the top switches between them.
+-->
+<style>
+:root {
+  --surface:#fff; --panel:#f4f5f7; --ink:#16181d; --ink-2:#3a3f4a; --muted:#5b6170; --faint:#8a909c;
+  --line:#dfe2e7; --line-soft:#eceef1; --field:#d4d8de; --hover:#eaecef; --accent:#2456b8;
+  --accent-tint:#e6eefb; --accent-ink:#173d84; --danger:#a3271d; --trouble:#7a3f06;
+  --warn-bg:#fdf4e3; --warn-line:#f0cf96; --green-tint:#d7f0e0; --green-ink:#1d5b36;
+  --scrim: rgba(22,24,29,.35);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface:#16181d; --panel:#1d2026; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6; --faint:#6b717d;
+  --line:#2d3139; --line-soft:#262a31; --field:#3a3f49; --hover:#2a2e36; --accent:#6f9cf0;
+  --accent-tint:#1f2d48; --accent-ink:#b6cdf7; --danger:#f0897c; --trouble:#f0b46a;
+  --warn-bg:#3a2c12; --warn-line:#6b5120; --green-tint:#183526; --green-ink:#9fd9b4; --scrim: rgba(0,0,0,.5);
+}}
+:root[data-theme="dark"] {
+  --surface:#16181d; --panel:#1d2026; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6; --faint:#6b717d;
+  --line:#2d3139; --line-soft:#262a31; --field:#3a3f49; --hover:#2a2e36; --accent:#6f9cf0;
+  --accent-tint:#1f2d48; --accent-ink:#b6cdf7; --danger:#f0897c; --trouble:#f0b46a;
+  --warn-bg:#3a2c12; --warn-line:#6b5120; --green-tint:#183526; --green-ink:#9fd9b4; --scrim: rgba(0,0,0,.5);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--panel); color: var(--ink); font: 14px/1.45 "Inter", system-ui, sans-serif; }
+.states { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.states button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--field); background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.states button.on { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.note { max-width: 860px; margin: 10px auto 0; padding: 0 16px; color: var(--muted); font-size: 12.5px; }
+/* The settings window behind the dialog */
+.settings { max-width: 860px; margin: 14px auto 40px; display: grid; grid-template-columns: 170px 1fr; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; min-height: 560px; position: relative; }
+.settings nav { background: var(--panel); border-right: 1px solid var(--line); padding: 12px 8px; }
+.settings nav div { padding: 6px 10px; border-radius: 6px; color: var(--ink-2); }
+.settings nav div.on { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
+.page { padding: 18px 22px; display: grid; grid-template-columns: 240px 1fr; gap: 18px; }
+.page h1 { grid-column: 1 / -1; margin: 0; font-size: 18px; }
+.list { display: flex; flex-direction: column; gap: 4px; }
+.acct { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 8px; cursor: default; }
+.acct.on { background: var(--accent-tint); }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.acct .a { display: block; font-weight: 600; font-size: 13px; }
+.acct .s { display: block; font-size: 12px; color: var(--muted); }
+.add { margin-top: 6px; }
+.detail h2 { margin: 0 0 2px; font-size: 16px; }
+.facts { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; margin: 14px 0; font-size: 13px; }
+.facts .k { color: var(--muted); }
+.hint { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+.trouble { color: var(--trouble); }
+.ok { color: var(--green-ink); }
+.row { display: flex; gap: 8px; align-items: center; }
+.spacer { flex: 1; }
+.section { border-top: 1px solid var(--line-soft); padding-top: 12px; margin-top: 14px; }
+.section h3 { margin: 0 0 8px; font-size: 13px; }
+/* Buttons as the window draws them */
+.btn { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--field); background: var(--surface); color: var(--ink); cursor: pointer; }
+.btn.filled { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.red { color: var(--danger); border-color: var(--danger); background: transparent; }
+.btn.link { border: 0; background: none; color: var(--accent); padding: 0; }
+.btn[disabled] { opacity: .5; cursor: default; }
+/* The dialog */
+.scrim { position: absolute; inset: 0; background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding-top: 48px; }
+.dialog { width: min(480px, calc(100% - 32px)); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: 0 12px 32px rgba(0,0,0,.18); }
+.dialog h2 { margin: 0 0 4px; font-size: 16px; }
+.dialog .sub { color: var(--muted); margin: 0 0 14px; font-size: 13px; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.field label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.field input, .field select { font: inherit; padding: 6px 9px; border: 1px solid var(--field); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.field input:focus { outline: none; border-color: var(--accent); }
+.actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; align-items: center; }
+.choice { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+.choice:hover { background: var(--hover); }
+.choice b { display: block; }
+.choice span { color: var(--muted); font-size: 12.5px; }
+.found { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
+.found .who { font-weight: 600; }
+.found .srv { color: var(--ink-2); font-family: ui-monospace, monospace; font-size: 12px; }
+.steps { list-style: none; padding: 0; margin: 6px 0 0; font-size: 13px; }
+.steps li { padding: 3px 0; display: flex; gap: 8px; }
+.steps .i { width: 16px; text-align: center; }
+.warn { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px; padding: 9px 11px; font-size: 13px; margin-bottom: 12px; }
+.err { color: var(--danger); font-size: 13px; margin: 4px 0 10px; }
+.servers { display: grid; grid-template-columns: 1fr 72px 120px; gap: 6px 8px; align-items: end; }
+.servers h4 { grid-column: 1 / -1; margin: 8px 0 0; font-size: 12.5px; }
+.servers .field { margin: 0; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s .8s linear infinite; }
+@keyframes s { to { transform: rotate(360deg); } }
+@media (max-width: 720px) {
+  .settings { grid-template-columns: 1fr; margin: 12px 16px; }
+  .settings nav { display: none; }
+  .page { grid-template-columns: 1fr; }
+  .servers { grid-template-columns: 1fr 64px; }
+  .servers .sec { grid-column: 1 / -1; }
+}
+</style>
+</head>
+<body>
+<div class="states" id="states"></div>
+<p class="note" id="note"></p>
+
+<div class="settings">
+  <nav><div>Appearance</div><div>Reading</div><div class="on">Accounts</div><div>Rules</div><div>Agents</div><div>Notices</div></nav>
+  <div class="page">
+    <h1>Accounts</h1>
+    <div class="list">
+      <div class="acct"><span class="dot" style="background:#2456b8"></span><span><span class="a">joe@joeleaver.com</span><span class="s">Signed in</span></span></div>
+      <div class="acct" id="newAcct" hidden><span class="dot" style="background:#1d7a4a"></span><span><span class="a">ada@fastmail.com</span><span class="s" id="newAcctState">Signed in</span></span></div>
+      <div class="add"><button class="btn" data-go="choose">Add account…</button></div>
+    </div>
+    <div class="detail" id="detail"></div>
+  </div>
+  <div class="scrim" id="scrim" hidden><div class="dialog" id="dialog"></div></div>
+</div>
+
+<script>
+// Each state: what the dialog holds (or null), and the account detail.
+const gmailDetail = `
+  <h2>joe@joeleaver.com</h2><span class="s" style="color:var(--muted)">Google · Signed in</span>
+  <div class="facts"><span class="k">Sync</span><span>Up to date</span><span class="k">On this computer</span><span>60,112 messages · 60,112 downloaded whole</span></div>`;
+
+const imapDetail = (state) => `
+  <h2>ada@fastmail.com</h2>
+  <span class="${state === 'trouble' ? 'trouble' : 's'}" style="${state === 'trouble' ? '' : 'color:var(--muted)'}">
+    ${state === 'trouble' ? 'IMAP · Needs to sign in: imap.fastmail.com refused the password ([AUTHENTICATIONFAILED] Authentication failed)' : 'IMAP · Signed in'}</span>
+  <div class="facts">
+    <span class="k">Sync</span><span>${state === 'trouble' ? 'Waiting for the password' : 'Up to date · watching the inbox'}</span>
+    <span class="k">On this computer</span><span>4,210 messages · 4,210 downloaded whole</span>
+    <span class="k">Incoming</span><span>imap.fastmail.com · 993 · TLS</span>
+    <span class="k">Outgoing</span><span>smtp.fastmail.com · 465 · TLS</span>
+    <span class="k">Signs in with</span><span>An app password, kept in the system keyring</span>
+  </div>
+  <div class="row">
+    <button class="btn" data-go="${state === 'trouble' ? 'password-again' : 'servers'}">${state === 'trouble' ? 'Sign in again…' : 'Server settings…'}</button>
+    <button class="btn">Sync now</button><span class="spacer"></span>
+    <button class="btn red">Remove from Postrinch</button>
+  </div>
+  <div class="section">
+    <h3>Folders</h3>
+    <div class="facts" style="margin:0">
+      <span class="k">Sent</span><span><select class="btn"><option>Sent (the server says)</option><option>Sent Items</option></select></span>
+      <span class="k">Drafts</span><span><select class="btn"><option>Drafts (the server says)</option></select></span>
+      <span class="k">Archive</span><span><select class="btn"><option>Archive (the server says)</option></select></span>
+      <span class="k">Trash</span><span><select class="btn"><option>Trash (the server says)</option></select></span>
+      <span class="k">Junk</span><span><select class="btn"><option>Spam (the server says)</option></select></span>
+    </div>
+    <label class="row" style="margin-top:10px;font-size:13px"><input type="checkbox"> The server files sent mail in Sent itself</label>
+    <p class="hint">Postrinch puts a copy of what it sends in Sent unless the server does. It noticed Fastmail doesn't.</p>
+  </div>
+  <p class="hint">Removing an account deletes its mail from this computer and forgets its password. Nothing is deleted from the server.</p>`;
+
+const states = {
+  choose: {
+    label: '1 · Which kind',
+    note: 'Add account… asks which kind first. Google keeps its own sign-in; everything else is IMAP and SMTP.',
+    dialog: `
+      <h2>Add an account</h2><p class="sub">Which kind of account is it?</p>
+      <div class="choice"><span>🅖</span><div><b>Google</b><span>Gmail and Google Workspace. Signs in in your browser; mail, labels and calendars.</span></div></div>
+      <div class="choice" data-go="address"><span>✉</span><div><b>Other mail account</b><span>Fastmail, iCloud, Yahoo, your work's server: any IMAP and SMTP account. Mail only.</span></div></div>
+      <div class="actions"><button class="btn">Cancel</button></div>`,
+  },
+  address: {
+    label: '2 · Address',
+    note: 'The address alone starts discovery. The name is what people see as the sender.',
+    dialog: `
+      <h2>Other mail account</h2><p class="sub">Postrinch looks up the servers from the address.</p>
+      <div class="field"><label>Email address</label><input value="ada@fastmail.com"></div>
+      <div class="field"><label>Your name</label><input value="Ada Lovelace"></div>
+      <div class="actions"><button class="btn link" data-go="manual">Set up servers by hand</button><span class="spacer"></span><button class="btn">Cancel</button><button class="btn filled" data-go="looking">Continue</button></div>`,
+  },
+  looking: {
+    label: '3 · Looking up',
+    note: 'Discovery runs in order and the first answer wins. The steps show while it runs (most finish in under a second).',
+    dialog: `
+      <h2>Other mail account</h2><p class="sub">ada@fastmail.com</p>
+      <ul class="steps">
+        <li><span class="i ok">✓</span>fastmail.com's own settings: none published</li>
+        <li><span class="i"><span class="spin"></span></span>Thunderbird's list of providers…</li>
+        <li><span class="i" style="color:var(--faint)">·</span><span style="color:var(--faint)">The domain's DNS records</span></li>
+        <li><span class="i" style="color:var(--faint)">·</span><span style="color:var(--faint)">Common server names</span></li>
+      </ul>
+      <div class="actions"><button class="btn link" data-go="manual">Set up servers by hand</button><span class="spacer"></span><button class="btn" data-go="address">Back</button></div>`,
+  },
+  password: {
+    label: '4 · Found, password',
+    note: 'What was found is shown, with where it came from. When the provider needs an app password, the dialog says so and links to the page that makes one.',
+    dialog: `
+      <h2>Other mail account</h2><p class="sub">ada@fastmail.com</p>
+      <div class="found"><div class="row"><span class="who">Fastmail</span><span class="spacer"></span><button class="btn link" data-go="manual">Change</button></div>
+        <div class="srv">Incoming  imap.fastmail.com · 993 · TLS</div><div class="srv">Outgoing  smtp.fastmail.com · 465 · TLS</div>
+        <div class="hint" style="margin-top:4px">From Thunderbird's list of providers</div></div>
+      <div class="warn">Fastmail needs an <b>app password</b> for mail apps, not your usual one. <button class="btn link">Make one at Fastmail ↗</button></div>
+      <div class="field"><label>App password</label><input type="password" value="xxxxxxxxxxxxxxxx"></div>
+      <p class="hint">Kept in the system keyring, never in Postrinch's files.</p>
+      <div class="actions"><button class="btn" data-go="address">Back</button><button class="btn filled" data-go="checking">Add account</button></div>`,
+  },
+  checking: {
+    label: '5 · Checking',
+    note: 'Postrinch signs in to both servers before anything is saved. No mail is sent: SMTP is checked with EHLO and AUTH only.',
+    dialog: `
+      <h2>Other mail account</h2><p class="sub">ada@fastmail.com</p>
+      <ul class="steps">
+        <li><span class="i ok">✓</span>Signed in to imap.fastmail.com</li>
+        <li><span class="i ok">✓</span>Found 14 folders: Inbox, Archive, Sent, Drafts, Spam, Trash and 8 of yours</li>
+        <li><span class="i"><span class="spin"></span></span>Signing in to smtp.fastmail.com…</li>
+      </ul>
+      <div class="actions"><button class="btn" disabled>Back</button><button class="btn filled" disabled>Add account</button></div>`,
+  },
+  refused: {
+    label: '5b · Refused',
+    note: 'A failure says which server and what it said, in its words, and keeps everything entered. Here the person typed their usual password.',
+    dialog: `
+      <h2>Other mail account</h2><p class="sub">ada@fastmail.com</p>
+      <div class="found"><div class="row"><span class="who">Fastmail</span><span class="spacer"></span><button class="btn link" data-go="manual">Change</button></div>
+        <div class="srv">Incoming  imap.fastmail.com · 993 · TLS</div><div class="srv">Outgoing  smtp.fastmail.com · 465 · TLS</div></div>
+      <div class="field"><label>App password</label><input type="password" value="hunter2hunter2"></div>
+      <p class="err">imap.fastmail.com refused the password: “[AUTHENTICATIONFAILED] Authentication failed”. Fastmail needs an app password. <button class="btn link">Make one at Fastmail ↗</button></p>
+      <div class="actions"><button class="btn" data-go="address">Back</button><button class="btn filled" data-go="checking">Try again</button></div>`,
+  },
+  workspace: {
+    label: '4b · Google underneath',
+    note: 'When the domain\'s mail is hosted by Google (from its MX records), the dialog says Google sign-in is better, and still allows IMAP.',
+    dialog: `
+      <h2>Other mail account</h2><p class="sub">sam@acme.co</p>
+      <div class="warn">acme.co's mail is hosted by <b>Google Workspace</b>. Added as a Google account it keeps Gmail's labels, categories and calendars.</div>
+      <div class="actions"><button class="btn" data-go="manual">Use IMAP anyway</button><button class="btn filled">Add as a Google account</button></div>`,
+  },
+  manual: {
+    label: '6 · By hand',
+    note: 'The same panel opens from Change, from a failed check, and from Server settings… on an account. Plain-text connections are not offered.',
+    dialog: `
+      <h2>Servers</h2><p class="sub">ada@example.org · nothing found, so these are guesses</p>
+      <div class="servers">
+        <h4>Incoming (IMAP)</h4>
+        <div class="field"><label>Server</label><input value="mail.example.org"></div>
+        <div class="field"><label>Port</label><input value="993"></div>
+        <div class="field sec"><label>Security</label><select><option>TLS</option><option>STARTTLS</option></select></div>
+        <div class="field" style="grid-column:1/-1"><label>User name</label><input value="ada@example.org"></div>
+        <h4>Outgoing (SMTP)</h4>
+        <div class="field"><label>Server</label><input value="mail.example.org"></div>
+        <div class="field"><label>Port</label><input value="587"></div>
+        <div class="field sec"><label>Security</label><select><option>STARTTLS</option><option>TLS</option></select></div>
+        <div class="field" style="grid-column:1/-1"><label>User name</label><input value="ada@example.org"></div>
+      </div>
+      <div class="field" style="margin-top:10px"><label>Password</label><input type="password" value="xxxxxxxx"></div>
+      <label class="row" style="font-size:13px"><input type="checkbox"> The outgoing server has its own password</label>
+      <div class="actions"><button class="btn" data-go="address">Back</button><button class="btn filled" data-go="checking">Check and add</button></div>`,
+  },
+  added: {
+    label: '7 · Added',
+    note: 'Once checked, the account is saved, the dialog closes and its detail shows. First sync lists headers first, then downloads bodies, as for Google.',
+    dialog: null, detail: () => imapDetail('ok'), added: 'Syncing: 1,200 of 4,210',
+  },
+  servers: {
+    label: '8 · Server settings',
+    note: 'Server settings… on an IMAP account opens the same servers panel, filled in. Saving checks again before it changes anything.',
+    dialog: null, detail: () => imapDetail('ok'), added: 'Signed in', reuse: 'manual',
+  },
+  trouble: {
+    label: '9 · Needs to sign in',
+    note: 'A refused login is the account\'s state, not an error box: shown on the account and in the sidebar, with Sign in again.',
+    dialog: null, detail: () => imapDetail('trouble'), added: 'Needs to sign in',
+  },
+  'password-again': {
+    label: '9b · Sign in again',
+    note: 'Sign in again asks only for the password; the servers stay.',
+    dialog: `
+      <h2>Sign in again</h2><p class="sub">ada@fastmail.com · imap.fastmail.com refused the password</p>
+      <div class="field"><label>App password</label><input type="password" value=""></div>
+      <div class="actions"><button class="btn link" data-go="manual">Server settings</button><span class="spacer"></span><button class="btn" data-go="trouble">Cancel</button><button class="btn filled" data-go="added">Sign in</button></div>`,
+    detail: () => imapDetail('trouble'), added: 'Needs to sign in',
+  },
+};
+
+const order = Object.keys(states);
+function show(name) {
+  const st = states[name];
+  const dialog = st.reuse ? states[st.reuse].dialog : st.dialog;
+  document.getElementById('note').textContent = st.note;
+  document.getElementById('detail').innerHTML = st.detail ? st.detail() : gmailDetail;
+  const newAcct = document.getElementById('newAcct');
+  newAcct.hidden = !st.added;
+  newAcct.classList.toggle('on', !!st.added);
+  document.querySelector('.acct').classList.toggle('on', !st.added);
+  if (st.added) document.getElementById('newAcctState').textContent = st.added;
+  const scrim = document.getElementById('scrim');
+  scrim.hidden = !dialog;
+  if (dialog) document.getElementById('dialog').innerHTML = dialog;
+  document.querySelectorAll('#states button').forEach(b => b.classList.toggle('on', b.dataset.name === name));
+}
+const strip = document.getElementById('states');
+order.forEach(name => {
+  const b = document.createElement('button');
+  b.textContent = states[name].label; b.dataset.name = name;
+  b.onclick = () => show(name);
+  strip.appendChild(b);
+});
+document.addEventListener('click', e => {
+  const go = e.target.closest('[data-go]');
+  if (go) show(go.dataset.go);
+});
+show('choose');
+</script>
+</body>
+</html>
