@@ -189,8 +189,8 @@ const states = {
       <div class="actions"><button class="btn link" data-go="manual">Set up servers by hand</button><span class="spacer"></span><button class="btn" data-go="address">Back</button></div>`,
   },
   password: {
-    label: '4 · Found, password',
-    note: 'What was found is shown, with where it came from. When the provider needs an app password, the dialog says so and links to the page that makes one.',
+    label: '4 · Found, app password',
+    note: 'For a provider that offers no OAuth to apps like Postrinch (Fastmail, iCloud, most work servers), the password is the way in. What was found is shown, with where it came from; when the provider needs an app password, the dialog says so and links to the page that makes one.',
     dialog: `
       <h2>Other mail account</h2><p class="sub">ada@fastmail.com</p>
       <div class="found"><div class="row"><span class="who">Fastmail</span><span class="spacer"></span><button class="btn link" data-go="manual">Change</button></div>
@@ -200,6 +200,25 @@ const states = {
       <div class="field"><label>App password</label><input type="password" value="xxxxxxxxxxxxxxxx"></div>
       <p class="hint">Kept in the system keyring, never in Postrinch's files.</p>
       <div class="actions"><button class="btn" data-go="address">Back</button><button class="btn filled" data-go="checking">Add account</button></div>`,
+  },
+  oauth: {
+    label: '4a · Sign in with Microsoft',
+    note: 'OAuth comes first wherever Postrinch has a client for the provider (Microsoft, Google over IMAP): the browser signs in, no password is typed here. Microsoft takes no passwords at all, so there is no other way in here; for a provider that still takes app passwords (Google), "Use an app password instead" sits left of Back.',
+    dialog: `
+      <h2>Other mail account</h2><p class="sub">ada@outlook.com</p>
+      <div class="found"><div class="row"><span class="who">Outlook.com</span><span class="spacer"></span><button class="btn link" data-go="manual">Change</button></div>
+        <div class="srv">Incoming  outlook.office365.com · 993 · TLS</div><div class="srv">Outgoing  smtp-mail.outlook.com · 587 · STARTTLS</div>
+        <div class="hint" style="margin-top:4px">From Thunderbird's list of providers</div></div>
+      <p class="hint" style="margin:0 0 4px">Microsoft signs you in in your browser. Postrinch keeps only a token, in the system keyring, and never sees your password.</p>
+      <div class="actions"><button class="btn" data-go="address">Back</button><button class="btn filled" data-go="oauth-wait">Sign in with Microsoft</button></div>`,
+  },
+  'oauth-wait': {
+    label: '4b · In the browser',
+    note: 'While the browser is open the dialog waits, and says so. Closing the browser tab or refusing comes back here with what Microsoft said.',
+    dialog: `
+      <h2>Other mail account</h2><p class="sub">ada@outlook.com</p>
+      <ul class="steps"><li><span class="i"><span class="spin"></span></span>Finish signing in in your browser…</li></ul>
+      <div class="actions"><button class="btn link">Open the page again</button><span class="spacer"></span><button class="btn" data-go="oauth">Cancel</button></div>`,
   },
   checking: {
     label: '5 · Checking',
@@ -225,7 +244,7 @@ const states = {
       <div class="actions"><button class="btn" data-go="address">Back</button><button class="btn filled" data-go="checking">Try again</button></div>`,
   },
   workspace: {
-    label: '4b · Google underneath',
+    label: '4c · Google underneath',
     note: 'When the domain\'s mail is hosted by Google (from its MX records), the dialog says Google sign-in is better, and still allows IMAP.',
     dialog: `
       <h2>Other mail account</h2><p class="sub">sam@acme.co</p>
