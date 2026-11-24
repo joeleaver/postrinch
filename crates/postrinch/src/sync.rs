@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 
 use postrinch_model::EmailAddress;
 use postrinch_store::Store;
+use postrinch_sync::Keychain;
 use postrinch_sync::google::{
-    ClientConfig, GmailApi, GmailSync, GoogleAuth, KeepOptions, Keychain, Phase, Progress,
-    SyncEvent,
+    ClientConfig, GmailApi, GmailSync, GoogleAuth, KeepOptions, Phase, Progress, SyncEvent,
 };
 use rinch::prelude::*;
 use tokio::runtime::Handle;
@@ -86,7 +86,7 @@ pub fn start(
         };
         SyncOff::new(said, format!("{}: {e}", path.display()))
     })?;
-    let auth = Arc::new(GoogleAuth::new(config, Arc::new(Keychain)));
+    let auth = Arc::new(GoogleAuth::new(config, Arc::new(Keychain::GOOGLE)));
     let sync = GmailSync::new(Arc::new(GmailApi::new(auth.clone())), store.clone());
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

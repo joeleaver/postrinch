@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use postrinch_model::{EmailAddress, SignInReason};
-use postrinch_sync::SyncError;
-use postrinch_sync::google::{ClientConfig, Endpoints, GoogleAuth, MemorySecrets, SecretStore};
+use postrinch_sync::google::{ClientConfig, Endpoints, GoogleAuth};
+use postrinch_sync::{MemorySecrets, SecretStore, SyncError};
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

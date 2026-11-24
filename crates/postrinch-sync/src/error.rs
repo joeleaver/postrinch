@@ -27,6 +27,26 @@ pub enum SyncError {
     },
     #[error("a message the provider sent does not parse: {0}")]
     Mime(String),
+    /// A mail server could not be reached: the name did not resolve, the
+    /// connection was refused, or it did not answer in time.
+    #[error("could not reach {server}: {detail}")]
+    Unreachable { server: String, detail: String },
+    /// The TLS handshake failed: most often a certificate the platform
+    /// does not trust for the server's name.
+    #[error("the secure connection to {server} failed: {detail}")]
+    Tls { server: String, detail: String },
+    /// A server offers no encryption (no STARTTLS on a STARTTLS port), so
+    /// Postrinch went no further and sent no credentials.
+    #[error("{server} offers no secure connection, so Postrinch did not sign in")]
+    Insecure { server: String },
+    /// A mail server answered with a refusal or spoke out of turn; the
+    /// message is the server's own where it gave one.
+    #[error("{service} server {server}: {message}")]
+    Server {
+        service: &'static str,
+        server: String,
+        message: String,
+    },
     #[error("store: {0}")]
     Store(#[from] StoreError),
     #[error("{0}")]

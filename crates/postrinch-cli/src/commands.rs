@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use postrinch_model::{AccountState, EmailAddress, Provider, ProviderMessageId};
 use postrinch_store::Store;
+use postrinch_sync::Keychain;
 use postrinch_sync::google::{
-    ClientConfig, GmailApi, GmailSync, GoogleAuth, Keychain, Phase, Progress, ProgressFn,
+    ClientConfig, GmailApi, GmailSync, GoogleAuth, Phase, Progress, ProgressFn,
     remove_google_account, sign_in_google,
 };
 
@@ -25,7 +26,10 @@ impl Context {
             None => ClientConfig::default_path().ok_or("no config directory; pass --client")?,
         };
         let config = ClientConfig::load(&path)?;
-        Ok(Arc::new(GoogleAuth::new(config, Arc::new(Keychain))))
+        Ok(Arc::new(GoogleAuth::new(
+            config,
+            Arc::new(Keychain::GOOGLE),
+        )))
     }
 }
 

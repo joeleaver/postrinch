@@ -1,27 +1,45 @@
-//! CAPABILITY, LOGIN, AUTHENTICATE (PLAIN, XOAUTH2) and ENABLE.
+//! CAPABILITY, LOGIN, AUTHENTICATE (PLAIN, XOAUTH2, OAUTHBEARER) and
+//! ENABLE.
 //!
 //! On the plain-text STARTTLS port the server advertises LOGINDISABLED
-//! and refuses to sign anyone in until the connection is encrypted.
+//! and refuses to sign anyone in until the connection is encrypted,
+//! unless the test made it a server that offers no STARTTLS at all.
 
 use std::io;
 
 use super::config::Extension;
 use super::response::Args;
 use super::session::{Reply, Session};
-use crate::sasl::{self, Claim};
+use crate::sasl::{self, Claim, Mechanism};
 
 const PRIVACY: &str = "[PRIVACYREQUIRED] Use STARTTLS first";
 const FAILED: &str = "[AUTHENTICATIONFAILED] Invalid credentials";
 
+/// The capability advertising a mechanism.
+fn auth_capability(mechanism: Mechanism) -> &'static str {
+    match mechanism {
+        Mechanism::Plain => "AUTH=PLAIN",
+        Mechanism::XOAuth2 => "AUTH=XOAUTH2",
+        Mechanism::OAuthBearer => "AUTH=OAUTHBEARER",
+    }
+}
+
 impl Session {
+    /// Whether this port offers STARTTLS: the plain-text port does unless
+    /// the test said otherwise.
+    pub(crate) fn offers_starttls(&self) -> bool {
+        !self.conn.is_tls() && self.shared.lock().config.offer_starttls
+    }
+
     /// The capability list for the connection's current state.
     pub(crate) fn capabilities(&self) -> String {
+        let offers_starttls = self.offers_starttls();
         let state = self.shared.lock();
         let mut caps = vec!["IMAP4rev1", "LITERAL+", "SASL-IR", "UNSELECT"];
-        if self.conn.is_tls() {
-            caps.extend(["AUTH=PLAIN", "AUTH=XOAUTH2"]);
-        } else {
+        if offers_starttls {
             caps.extend(["STARTTLS", "LOGINDISABLED"]);
+        } else {
+            caps.extend(state.config.mechanisms.iter().copied().map(auth_capability));
         }
         if state.has(Extension::Condstore) || state.has(Extension::Qresync) {
             caps.push("ENABLE");
@@ -85,7 +103,7 @@ impl Session {
             Ok(c) => c,
             Err(e) => return Reply::Bad(e),
         };
-        if !self.conn.is_tls() {
+        if self.offers_starttls() {
             return Reply::No(PRIVACY.into());
         }
         if self.sign_in(&claim) {
@@ -95,8 +113,8 @@ impl Session {
         }
     }
 
-    /// AUTHENTICATE PLAIN / XOAUTH2, with or without an initial response
-    /// (SASL-IR).
+    /// AUTHENTICATE with an offered mechanism, with or without an initial
+    /// response (SASL-IR).
     pub(crate) async fn authenticate(&mut self, mut args: Args) -> io::Result<Reply> {
         if self.user.is_some() {
             return Ok(Reply::Bad("Already logged in".into()));
@@ -115,12 +133,13 @@ impl Session {
             Ok(p) => p,
             Err(e) => return Ok(Reply::Bad(e)),
         };
-        if !self.conn.is_tls() {
+        if self.offers_starttls() {
             return Ok(Reply::No(PRIVACY.into()));
         }
-        if mechanism != "PLAIN" && mechanism != "XOAUTH2" {
+        let offered = self.shared.lock().config.mechanisms.clone();
+        let Some(mechanism) = Mechanism::named(&mechanism).filter(|m| offered.contains(m)) else {
             return Ok(Reply::No(format!("Unsupported mechanism {mechanism}")));
-        }
+        };
         let response = match initial {
             Some(text) => text.into_bytes(),
             None => {
@@ -134,17 +153,14 @@ impl Session {
         let Some(message) = sasl::decode(&response) else {
             return Ok(Reply::Bad("Response is not base64".into()));
         };
-        let claim = if mechanism == "PLAIN" {
-            sasl::parse_plain(&message)
-        } else {
-            sasl::parse_xoauth2(&message)
-        };
+        let claim = mechanism.parse(&message);
         if claim.as_ref().is_some_and(|c| self.sign_in(c)) {
             return Ok(self.signed_in());
         }
-        if mechanism == "XOAUTH2" {
-            // As Google does: an error challenge, an empty answer, then NO.
-            let challenge = format!("+ {}\r\n", sasl::encode(sasl::XOAUTH2_FAILURE));
+        if let Some(failure) = mechanism.failure_challenge() {
+            // As Google does for XOAUTH2, and RFC 7628 3.2.2 for
+            // OAUTHBEARER: an error challenge, the client's answer, then NO.
+            let challenge = format!("+ {}\r\n", sasl::encode(failure));
             self.conn.write_all(challenge.as_bytes()).await?;
             self.read_sasl_line().await?;
         }

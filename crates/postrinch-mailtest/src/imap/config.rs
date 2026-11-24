@@ -2,6 +2,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::sasl::Mechanism;
+
 /// An IMAP extension the fake can offer or withhold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Extension {
@@ -58,12 +60,15 @@ pub(crate) struct UserConfig {
 }
 
 /// The fake IMAP server's setup. By default it listens with implicit TLS
-/// only, offers every extension, and has no users.
+/// only, offers every extension and the PLAIN and XOAUTH2 mechanisms, and
+/// has no users.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImapConfig {
     pub(crate) implicit_tls: bool,
     pub(crate) starttls: bool,
+    pub(crate) offer_starttls: bool,
     pub(crate) extensions: BTreeSet<Extension>,
+    pub(crate) mechanisms: BTreeSet<Mechanism>,
     pub(crate) users: Vec<UserConfig>,
 }
 
@@ -72,7 +77,9 @@ impl Default for ImapConfig {
         Self {
             implicit_tls: true,
             starttls: false,
+            offer_starttls: true,
             extensions: Extension::ALL.into_iter().collect(),
+            mechanisms: Mechanism::DEFAULT.into_iter().collect(),
             users: Vec::new(),
         }
     }
@@ -122,6 +129,22 @@ impl ImapConfig {
     /// port). Off by default. Before STARTTLS that port refuses to log in.
     pub fn starttls(mut self, on: bool) -> Self {
         self.starttls = on;
+        self
+    }
+
+    /// Whether the plain-text port offers STARTTLS. On by default. Off, it
+    /// is a server with no encryption at all, as misconfigured servers
+    /// are: it advertises neither STARTTLS nor LOGINDISABLED and signs
+    /// users in over plain text. For testing that clients refuse it.
+    pub fn offer_starttls(mut self, on: bool) -> Self {
+        self.offer_starttls = on;
+        self
+    }
+
+    /// Offers exactly these SASL mechanisms for AUTHENTICATE. LOGIN stays
+    /// available to users with a password whatever is offered.
+    pub fn mechanisms(mut self, mechanisms: &[Mechanism]) -> Self {
+        self.mechanisms = mechanisms.iter().copied().collect();
         self
     }
 

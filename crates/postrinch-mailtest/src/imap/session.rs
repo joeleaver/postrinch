@@ -231,6 +231,12 @@ impl Session {
             "STARTTLS" if self.conn.is_tls() => {
                 return Ok((Reply::Bad("Already encrypted".into()), Next::Continue));
             }
+            "STARTTLS" if !self.offers_starttls() => {
+                return Ok((
+                    Reply::Bad("Unknown command STARTTLS".into()),
+                    Next::Continue,
+                ));
+            }
             "STARTTLS" => {
                 return Ok(match args.end() {
                     Ok(()) => (

@@ -1,4 +1,7 @@
-//! Where refresh tokens are kept: the OS keychain, one entry per account.
+//! Where secrets are kept: the OS keychain, one entry per account and
+//! service. Google accounts keep their refresh token under
+//! `postrinch.google`; IMAP accounts keep their password or refresh token
+//! under `postrinch.imap` ([`crate::imap::ImapSecret`]).
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -18,18 +21,35 @@ pub trait SecretStore: Send + Sync + 'static {
 }
 
 /// The OS keychain: Keychain Services on macOS, Credential Manager on
-/// Windows, the Secret Service elsewhere. Entries are under the service
-/// name `postrinch.google`, keyed by the account's address.
+/// Windows, the Secret Service elsewhere. Entries are under a service name
+/// ([`Keychain::GOOGLE`], [`Keychain::IMAP`]), keyed by the account's
+/// address.
 ///
 /// On Windows the credential is kept on this machine only. Credential
 /// Manager's default would roam it to every machine the person signs in to
-/// on a domain, and Postrinch's tokens stay where its mail is.
-pub struct Keychain;
-
-const SERVICE: &str = "postrinch.google";
+/// on a domain, and Postrinch's secrets stay where its mail is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Keychain {
+    service: &'static str,
+}
 
 impl Keychain {
-    fn entry(account: &EmailAddress) -> SyncResult<keyring_core::Entry> {
+    /// Google accounts' refresh tokens.
+    pub const GOOGLE: Keychain = Keychain {
+        service: "postrinch.google",
+    };
+
+    /// IMAP accounts' passwords and refresh tokens, as JSON.
+    pub const IMAP: Keychain = Keychain {
+        service: "postrinch.imap",
+    };
+
+    /// The service name the entries are kept under.
+    pub fn service(&self) -> &'static str {
+        self.service
+    }
+
+    fn entry(&self, account: &EmailAddress) -> SyncResult<keyring_core::Entry> {
         // `keyring` chooses and installs the platform's store on first use.
         if let Err(e) = keyring::Entry::store_status() {
             return Err(SyncError::Keychain(e.to_string()));
@@ -39,14 +59,14 @@ impl Keychain {
         } else {
             HashMap::new()
         };
-        keyring_core::Entry::new_with_modifiers(SERVICE, &account.key(), &modifiers)
+        keyring_core::Entry::new_with_modifiers(self.service, &account.key(), &modifiers)
             .map_err(|e| SyncError::Keychain(e.to_string()))
     }
 }
 
 impl SecretStore for Keychain {
     fn get(&self, account: &EmailAddress) -> SyncResult<Option<String>> {
-        match Self::entry(account)?.get_password() {
+        match self.entry(account)?.get_password() {
             Ok(secret) => Ok(Some(secret)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(SyncError::Keychain(e.to_string())),
@@ -55,14 +75,14 @@ impl SecretStore for Keychain {
 
     fn set(&self, account: &EmailAddress, secret: &str) -> SyncResult<()> {
         #[cfg(all(unix, not(target_os = "macos")))]
-        super::secret_service::ensure_default_collection()?;
-        Self::entry(account)?
+        crate::secret_service::ensure_default_collection()?;
+        self.entry(account)?
             .set_password(secret)
             .map_err(|e| SyncError::Keychain(e.to_string()))
     }
 
     fn delete(&self, account: &EmailAddress) -> SyncResult<()> {
-        match Self::entry(account)?.delete_credential() {
+        match self.entry(account)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(SyncError::Keychain(e.to_string())),
         }

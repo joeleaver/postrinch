@@ -7,9 +7,8 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use postrinch_model::{Account, EmailAddress, Provider};
 use postrinch_store::Store;
-use postrinch_sync::google::{
-    ClientConfig, Endpoints, GmailApi, GmailSync, GoogleAuth, MemorySecrets, SecretStore,
-};
+use postrinch_sync::google::{ClientConfig, Endpoints, GmailApi, GmailSync, GoogleAuth};
+use postrinch_sync::{MemorySecrets, SecretStore};
 use serde_json::json;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};

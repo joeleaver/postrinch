@@ -11,7 +11,7 @@ use super::ClientConfig;
 use super::loopback::Loopback;
 use super::oauth::{Endpoints, OAuth, check_scopes};
 use super::pkce::Pkce;
-use super::secrets::SecretStore;
+use crate::secrets::SecretStore;
 use crate::{SyncError, SyncResult};
 
 /// How long the person has to finish signing in in the browser.
