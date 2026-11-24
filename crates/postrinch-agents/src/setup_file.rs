@@ -50,7 +50,8 @@ pub struct Server {
 /// A settings file as read, to change and write back.
 pub(crate) struct SettingsFile {
     place: Place,
-    existed: bool,
+    /// The file as read; none when it was not there.
+    original: Option<String>,
     changed: bool,
     doc: Doc,
 }
@@ -101,7 +102,7 @@ impl SettingsFile {
         };
         Ok(Self {
             place: place.clone(),
-            existed: text.is_some(),
+            original: text,
             changed: false,
             doc,
         })
@@ -109,6 +110,11 @@ impl SettingsFile {
 
     pub fn path(&self) -> &Path {
         &self.place.path
+    }
+
+    /// The file as read, to put back with [`put_back`].
+    pub fn original(&self) -> Option<&str> {
+        self.original.as_deref()
     }
 
     /// Every server in the file, the project ones in `~/.claude.json` too.
@@ -219,7 +225,7 @@ impl SettingsFile {
             }
             Doc::Toml(doc) => doc.to_string(),
         };
-        write(&self.place.path, self.existed, &text)?;
+        write(&self.place.path, self.original.is_some(), &text)?;
         Ok(true)
     }
 
@@ -286,6 +292,24 @@ fn write(path: &Path, existed: bool, text: &str) -> Result<(), SetupError> {
         std::fs::set_permissions(&tmp, permissions).map_err(io)?;
     }
     std::fs::rename(&tmp, path).map_err(io)
+}
+
+/// Undo a write: the file as it was read, or gone if it was not there.
+pub(crate) fn put_back(path: &Path, original: Option<&str>) -> Result<(), SetupError> {
+    let io = |source| SetupError::Io {
+        path: path.to_owned(),
+        source,
+    };
+    match original {
+        Some(text) => {
+            let tmp = sibling(path, "postrinch-tmp");
+            std::fs::write(&tmp, text).map_err(io)?;
+            let permissions = std::fs::metadata(path).map_err(io)?.permissions();
+            std::fs::set_permissions(&tmp, permissions).map_err(io)?;
+            std::fs::rename(&tmp, path).map_err(io)
+        }
+        None => std::fs::remove_file(path).map_err(io),
+    }
 }
 
 fn sibling(path: &Path, suffix: &str) -> PathBuf {

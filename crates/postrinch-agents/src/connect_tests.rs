@@ -3,30 +3,30 @@ use serde_json::{Value, json};
 use super::*;
 use crate::wire::KEY_ENV;
 
-const BRIDGE: &str = "/opt/postrinch/postrinch-mcp";
+pub(super) const BRIDGE: &str = "/opt/postrinch/postrinch-mcp";
 
 /// A home with both Claudes, and Postrinch's agents file.
-struct Home {
-    dir: tempfile::TempDir,
-    agents: Agents,
+pub(super) struct Home {
+    pub(super) dir: tempfile::TempDir,
+    pub(super) agents: Agents,
 }
 
 impl Home {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let agents = Agents::load(&dir.path().join("agents.json")).unwrap();
+        let agents = Agents::load(&dir.path().join("postrinch/agents.json")).unwrap();
         Self { dir, agents }
     }
 
-    fn code(&self) -> Place {
+    pub(super) fn code(&self) -> Place {
         Place {
-            path: self.dir.path().join(".claude.json"),
+            path: self.dir.path().join("home/.claude.json"),
             kind: Kind::ClaudeCode,
             installed: true,
         }
     }
 
-    fn desktop(&self) -> Place {
+    pub(super) fn desktop(&self) -> Place {
         Place {
             path: self.dir.path().join("Claude/claude_desktop_config.json"),
             kind: Kind::ClaudeDesktop,
@@ -34,7 +34,7 @@ impl Home {
         }
     }
 
-    fn cursor(&self) -> Place {
+    pub(super) fn cursor(&self) -> Place {
         Place {
             path: self.dir.path().join(".cursor/mcp.json"),
             kind: Kind::Cursor,
@@ -42,14 +42,20 @@ impl Home {
         }
     }
 
-    fn claude(&self) -> Vec<Place> {
+    pub(super) fn claude(&self) -> Vec<Place> {
         vec![self.code(), self.desktop()]
     }
 
-    fn connect(&mut self, app: App, places: Vec<Place>, name: &str) -> Connected {
+    pub(super) fn everywhere(&self) -> Vec<Place> {
+        vec![self.code(), self.desktop(), self.cursor()]
+    }
+
+    pub(super) fn connect(&mut self, app: App, places: Vec<Place>, name: &str) -> Connected {
+        let everywhere = self.everywhere();
         connect_in(
             &mut self.agents,
             Some((app, Ok(places))),
+            &everywhere,
             name,
             Reach::Every,
             Path::new(BRIDGE),
@@ -57,28 +63,28 @@ impl Home {
         .unwrap()
     }
 
-    fn agent_names(&self) -> Vec<&str> {
+    pub(super) fn agent_names(&self) -> Vec<&str> {
         self.agents.list().iter().map(|a| a.name.as_str()).collect()
     }
 }
 
-fn servers(place: &Place) -> serde_json::Map<String, Value> {
+pub(super) fn servers(place: &Place) -> serde_json::Map<String, Value> {
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(&place.path).unwrap()).unwrap();
     doc["mcpServers"].as_object().cloned().unwrap_or_default()
 }
 
-fn write(place: &Place, doc: &Value) {
+pub(super) fn write(place: &Place, doc: &Value) {
     std::fs::create_dir_all(place.path.parent().unwrap()).unwrap();
     std::fs::write(&place.path, serde_json::to_string_pretty(doc).unwrap()).unwrap();
 }
 
-fn server(key: &str) -> Value {
+pub(super) fn server(key: &str) -> Value {
     json!({ "command": BRIDGE, "env": { KEY_ENV: key } })
 }
 
 /// An agent as the old split choices left it: set up for Claude (the
 /// desktop app or Claude Code, both read as Claude now).
-fn old_agent(home: &mut Home, name: &str) -> (Agent, String) {
+pub(super) fn old_agent(home: &mut Home, name: &str) -> (Agent, String) {
     let (agent, key) = home.agents.create(name, Reach::Every).unwrap();
     let setup = Setup {
         app: App::Claude,
@@ -96,11 +102,11 @@ fn claude_gets_one_entry_in_both_files() {
         &json!({ "mcpServers": { "other": { "command": "x" } } }),
     );
     let made = home.connect(App::Claude, home.claude(), "Claude");
-    let Outcome::Added { files, replaced } = &made.outcome else {
+    let Outcome::Added { files, changes } = &made.outcome else {
         panic!("{:?}", made.outcome);
     };
     assert_eq!(files, &[home.code().path, home.desktop().path]);
-    assert!(replaced.is_empty());
+    assert!(changes.replaced.is_empty() && changes.left.is_empty());
     assert_eq!(made.entry, "postrinch-claude");
     let (code, desktop) = (servers(&home.code()), servers(&home.desktop()));
     let (a, b) = (&code["postrinch-claude"], &desktop["postrinch-claude"]);
@@ -127,11 +133,11 @@ fn only_the_claude_that_is_here_is_written() {
     assert!(!home.code().path.exists());
 
     let none = home.connect(App::Claude, Vec::new(), "Claude");
-    let Outcome::Trouble { error, replaced } = none.outcome else {
+    let Outcome::Trouble { error, changes } = none.outcome else {
         panic!("no Claude here");
     };
     assert!(matches!(error, SetupError::NotHere("Claude")));
-    assert!(replaced.is_empty());
+    assert!(changes.replaced.is_empty());
     assert_eq!(none.agent.name, "Claude 2", "nothing replaced: a free name");
     assert!(none.agent.setup.is_none());
 }
@@ -184,9 +190,10 @@ fn connecting_again_replaces_and_never_piles_up() {
     );
 
     let second = home.connect(App::Claude, home.claude(), "Claude");
-    let Outcome::Added { replaced, .. } = &second.outcome else {
+    let Outcome::Added { changes, .. } = &second.outcome else {
         panic!("{:?}", second.outcome);
     };
+    let replaced = &changes.replaced;
     assert_eq!(replaced.len(), 1);
     assert_eq!(replaced[0].id, first.agent.id);
     assert_eq!(home.agent_names(), ["Claude"]);
@@ -240,6 +247,8 @@ fn the_old_split_entries_are_cleaned_up() {
             "postrinch-claude-desktop": server(&desktop_key),
             "postrinch-claude-desktop-2": server(&desktop2_key),
             "pimble": pimble,
+            // Cursor's key, pasted into Claude by hand.
+            "mail": server(&cursor_key),
         }}),
     );
     write(
@@ -255,10 +264,12 @@ fn the_old_split_entries_are_cleaned_up() {
     );
 
     let made = home.connect(App::Claude, home.claude(), "Claude");
-    let Outcome::Added { replaced, .. } = &made.outcome else {
+    let Outcome::Added { changes, .. } = &made.outcome else {
         panic!("{:?}", made.outcome);
     };
-    let mut gone: Vec<&str> = replaced.iter().map(|a| a.name.as_str()).collect();
+    let left: Vec<&str> = changes.left.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(left, ["Cursor"], "its Claude entry went, and it is said");
+    let mut gone: Vec<&str> = changes.replaced.iter().map(|a| a.name.as_str()).collect();
     gone.sort();
     assert_eq!(gone, ["Claude Code", "Claude Desktop", "Claude Desktop 2"]);
     assert_eq!(
@@ -287,9 +298,9 @@ fn the_old_split_entries_are_cleaned_up() {
     let doc: Value =
         serde_json::from_str(&std::fs::read_to_string(&home.code().path).unwrap()).unwrap();
     assert_eq!(
-        doc["projects"]["/work"]["mcpServers"],
-        json!({}),
-        "a project copy would load twice too"
+        doc["projects"]["/work"]["mcpServers"]["mail"]["env"][KEY_ENV],
+        cursor_key.as_str(),
+        "a project's own server is its own choice"
     );
 }
 
@@ -307,7 +318,7 @@ fn a_hand_fixed_machine_is_cleaned_up() {
     write(&home.code(), &entry);
     write(&home.desktop(), &entry);
     // Agents saved before the choices became one.
-    let file = home.dir.path().join("agents.json");
+    let file = home.dir.path().join("postrinch/agents.json");
     let text = std::fs::read_to_string(&file).unwrap();
     std::fs::write(
         &file,
@@ -342,12 +353,20 @@ fn an_agent_pasted_into_claude_by_hand_is_replaced_too() {
         &home.desktop(),
         &json!({ "mcpServers": { "mail": server(&key) } }),
     );
+    write(
+        &home.cursor(),
+        &json!({ "mcpServers": { "mail": server(&key) } }),
+    );
     let made = home.connect(App::Claude, home.claude(), "Claude");
-    let Outcome::Added { replaced, .. } = &made.outcome else {
+    let Outcome::Added { changes, .. } = &made.outcome else {
         panic!("{:?}", made.outcome);
     };
-    assert_eq!(replaced.len(), 1);
-    assert_eq!(replaced[0].id, by_hand.id);
+    assert_eq!(changes.replaced.len(), 1);
+    assert_eq!(changes.replaced[0].id, by_hand.id);
+    assert!(
+        !servers(&home.cursor()).contains_key("mail"),
+        "its copy in Cursor went with it"
+    );
     assert!(home.agents.list().iter().any(|a| a.id == kept.id));
 }
 
@@ -364,11 +383,11 @@ fn an_unreadable_claude_file_changes_nothing() {
     let before = std::fs::read_to_string(&home.code().path).unwrap();
 
     let made = home.connect(App::Claude, home.claude(), "Claude");
-    let Outcome::Trouble { error, replaced } = &made.outcome else {
+    let Outcome::Trouble { error, changes } = &made.outcome else {
         panic!("{:?}", made.outcome);
     };
     assert!(matches!(error, SetupError::Unreadable(_)));
-    assert!(replaced.is_empty());
+    assert!(changes.replaced.is_empty());
     assert!(
         home.agents.find_by_key(&old_key).is_some(),
         "old agent kept"
@@ -384,10 +403,10 @@ fn cursor_and_codex_add_an_entry_each_time() {
     let first = home.connect(App::Cursor, vec![home.cursor()], "Cursor");
     let second = home.connect(App::Cursor, vec![home.cursor()], "Cursor 2");
     for made in [&first, &second] {
-        let Outcome::Added { replaced, .. } = &made.outcome else {
+        let Outcome::Added { changes, .. } = &made.outcome else {
             panic!("{:?}", made.outcome);
         };
-        assert!(replaced.is_empty());
+        assert!(changes.replaced.is_empty());
     }
     let servers = servers(&home.cursor());
     assert_eq!(
@@ -422,6 +441,7 @@ fn by_hand_writes_nothing() {
     let made = connect_in(
         &mut home.agents,
         None,
+        &[],
         "Mine",
         Reach::Every,
         Path::new(BRIDGE),

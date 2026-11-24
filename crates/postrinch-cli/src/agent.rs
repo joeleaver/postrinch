@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use postrinch_agents::connect::{self, Outcome};
+use postrinch_agents::connect::{self, Changes, Outcome};
 use postrinch_agents::setup::{bridge_path, json_snippet};
 use postrinch_agents::{Agent, Agents, App, Reach};
 use postrinch_model::{EmailAddress, Timestamp};
@@ -37,22 +37,22 @@ pub(crate) fn run(command: AgentCommand) -> Result<()> {
             let made = connect::connect(&mut agents, app, &name, reach, &bridge)?;
             let snippet = json_snippet(&made.entry, &bridge, &made.key);
             match made.outcome {
-                Outcome::Added { files, replaced } => {
+                Outcome::Added { files, changes } => {
                     let app = app.expect("only an app is added to");
                     println!("Agent {:?} made, and added to:", made.agent.name);
                     for file in files {
                         println!("  {}", file.display());
                     }
-                    say_replaced(&replaced);
+                    say_changes(&changes);
                     println!("Restart {} to connect it.", app.name());
                 }
-                Outcome::Trouble { error, replaced } => {
+                Outcome::Trouble { error, changes } => {
                     let app = app.map_or("The app", App::name);
                     println!(
                         "Agent {:?} made, but {app} could not be set up by itself: {error}",
                         made.agent.name
                     );
-                    say_replaced(&replaced);
+                    say_changes(&changes);
                     print_key(&made.key, &snippet);
                 }
                 Outcome::ByHand => {
@@ -115,16 +115,27 @@ fn print_key(key: &str, snippet: &str) {
     println!("{snippet}\n");
 }
 
-fn say_replaced(replaced: &[Agent]) {
-    if replaced.is_empty() {
-        return;
+fn say_changes(changes: &Changes) {
+    let names = |agents: &[Agent]| {
+        agents
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if !changes.replaced.is_empty() {
+        println!(
+            "It replaces {}: their keys no longer work, and rules that asked them ask this one \
+             (once Postrinch next runs rules).",
+            names(&changes.replaced)
+        );
     }
-    let names: Vec<&str> = replaced.iter().map(|a| a.name.as_str()).collect();
-    println!(
-        "It replaces {}: their keys no longer work, and rules that asked them ask this one \
-         (once Postrinch next runs rules).",
-        names.join(", ")
-    );
+    if !changes.left.is_empty() {
+        println!(
+            "The entry of {} came out of Claude's settings; it still works where it is set up.",
+            names(&changes.left)
+        );
+    }
 }
 
 fn say_files(agent: &Agent, files: &[PathBuf]) {

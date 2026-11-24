@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use postrinch_agents::connect::{self, Outcome};
+use postrinch_agents::connect::{self, Changes, Outcome};
 use postrinch_agents::setup::{bridge_path, command_snippet, json_snippet, toml_snippet};
 use postrinch_agents::{Agent, Agents, App, Changed, Gmail, Reach, serve, wire};
 use postrinch_commands::Commands;
@@ -153,20 +153,20 @@ impl State {
         };
         let trouble = match made.outcome {
             Outcome::ByHand => None,
-            Outcome::Added { replaced, .. } => {
+            Outcome::Added { changes, .. } => {
                 let app = app.expect("only an app is added to");
                 self.agent_dialog.set(None);
                 self.notice.set(Some(Notice {
-                    text: added_text(app, &replaced),
+                    text: added_text(app, &changes),
                     trouble: false,
                 }));
                 self.load_agents();
                 return;
             }
-            Outcome::Trouble { error, replaced } => Some(format!(
+            Outcome::Trouble { error, changes } => Some(format!(
                 "{} could not be set up by itself: {error}. Paste this instead.{}",
                 app.map_or("The app", App::name),
-                replaced_text(&replaced),
+                changes_text(&changes),
             )),
         };
         let entry = made.entry;
@@ -247,7 +247,7 @@ pub fn reach_of(every: bool, chosen: &[EmailAddress]) -> Reach {
 }
 
 /// What the notice says once `app` is set up.
-fn added_text(app: App, replaced: &[Agent]) -> String {
+fn added_text(app: App, changes: &Changes) -> String {
     let what = match app {
         App::Claude => "Added to Claude, for its Chat and Code tabs and the terminal",
         App::Codex => "Added to Codex",
@@ -256,8 +256,21 @@ fn added_text(app: App, replaced: &[Agent]) -> String {
     format!(
         "{what}. Restart {} to connect it.{}",
         app.name(),
-        replaced_text(replaced)
+        changes_text(changes)
     )
+}
+
+/// What connecting did to other agents, after a space; or nothing.
+fn changes_text(changes: &Changes) -> String {
+    let mut text = replaced_text(&changes.replaced);
+    let left: Vec<String> = changes.left.iter().map(|a| a.name.clone()).collect();
+    if !left.is_empty() {
+        text.push_str(&format!(
+            " {}\u{2019}s entry came out of Claude\u{2019}s settings; it still works where it is set up.",
+            and_list(&left)
+        ));
+    }
+    text
 }
 
 /// " It replaces A and B: …", or nothing when nothing was replaced.
