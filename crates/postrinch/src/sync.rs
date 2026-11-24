@@ -191,6 +191,16 @@ fn report(
         SyncEvent::NeedsSignIn { account } => {
             (account, "Needs to sign in".to_owned(), None, true, true)
         }
+        // The server's limit, not the account's sign-in: say so in its
+        // words, and when it is tried again; the account is left signed in.
+        SyncEvent::Busy {
+            account,
+            message,
+            retry_in,
+        } => {
+            tracing::info!("{account}: server busy: {message}");
+            (account, busy_line(&message, retry_in), None, true, false)
+        }
         // Mail that went: show what is left to send, and fetch Gmail's
         // copy into Sent now rather than at the next check.
         SyncEvent::Sent { report, mail, .. } if report.refused.is_empty() && mail > 0 => {
@@ -285,6 +295,29 @@ fn describe(progress: Progress) -> (String, Option<(usize, usize)>) {
     }
 }
 
+/// The sidebar's line for a busy server: when it is tried again, then
+/// the server's own sentence.
+fn busy_line(message: &str, retry_in: Duration) -> String {
+    let message = message.trim();
+    let when = wait_in_words(retry_in);
+    if message.is_empty() {
+        format!("Server busy; trying again in {when}")
+    } else {
+        format!("Server busy; trying again in {when}: {message}")
+    }
+}
+
+/// A wait as the sidebar says it: seconds under two minutes, else whole
+/// minutes, rounded up so it never promises sooner than it is.
+fn wait_in_words(wait: Duration) -> String {
+    let secs = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
+    if secs < 120 {
+        format!("{} s", secs.max(1))
+    } else {
+        format!("{} min", secs.div_ceil(60))
+    }
+}
+
 /// 3718 as "3,718".
 pub fn thousands(n: usize) -> String {
     let digits = n.to_string();
@@ -300,7 +333,34 @@ pub fn thousands(n: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::thousands;
+    use std::time::Duration;
+
+    use super::{busy_line, thousands, wait_in_words};
+
+    #[test]
+    fn busy_says_when_and_the_servers_words() {
+        assert_eq!(
+            busy_line(
+                "Too many simultaneous connections. (Failure)",
+                Duration::from_secs(25)
+            ),
+            "Server busy; trying again in 25 s: Too many simultaneous connections. (Failure)"
+        );
+        assert_eq!(
+            busy_line("  ", Duration::from_secs(600)),
+            "Server busy; trying again in 10 min"
+        );
+    }
+
+    #[test]
+    fn waits_in_words() {
+        assert_eq!(wait_in_words(Duration::ZERO), "1 s");
+        assert_eq!(wait_in_words(Duration::from_millis(14_200)), "15 s");
+        assert_eq!(wait_in_words(Duration::from_secs(119)), "119 s");
+        assert_eq!(wait_in_words(Duration::from_secs(120)), "2 min");
+        assert_eq!(wait_in_words(Duration::from_secs(121)), "3 min");
+        assert_eq!(wait_in_words(Duration::from_secs(900)), "15 min");
+    }
 
     #[test]
     fn groups_thousands() {

@@ -38,8 +38,9 @@ impl std::fmt::Debug for SmtpConnection {
 
 impl SmtpConnection {
     /// Connects to the account's SMTP server and signs in with `secret`,
-    /// as the account's settings say. A refused sign-in (535) is
-    /// [`SyncError::NeedsSignIn`] with the server's words; a server
+    /// as the account's settings say. A refused sign-in (535, 534) is
+    /// [`SyncError::NeedsSignIn`] with the server's words; a 4xx ("try
+    /// again later") is [`SyncError::Busy`]; a server
     /// offering no encryption is [`SyncError::Insecure`], and gets no
     /// credentials.
     pub async fn open(
@@ -279,7 +280,8 @@ fn is_enhanced_code(word: &str) -> bool {
 
 /// A refused AUTH: 535 (credentials invalid) and 534 (this way of signing
 /// in is not allowed, as Google's "application-specific password
-/// required") are the account's to fix; anything else is the server's.
+/// required") are the account's to fix; a 4xx is the server busy
+/// ([`server_error`]); anything else is the server's.
 fn refusal(server: &Server, error: &lettre::transport::smtp::Error) -> SyncError {
     match error.status().map(u16::from) {
         Some(534 | 535) => SyncError::NeedsSignIn(SignInReason::CredentialRejected {
@@ -289,11 +291,27 @@ fn refusal(server: &Server, error: &lettre::transport::smtp::Error) -> SyncError
     }
 }
 
+/// An answer the server gave, or a TLS failure. A 4xx reply (RFC 5321
+/// 4.2.1: "the action may be requested again") is [`SyncError::Busy`]:
+/// Gmail's `421 4.7.0 Try again later, closing connection`, `454 4.7.0
+/// Too many sign-in attempts, try again later` and `454 4.7.0 Cannot
+/// sign in due to a temporary system problem` (Google Workspace, "Gmail
+/// SMTP errors and codes",
+/// <https://knowledge.workspace.google.com/admin/support/troubleshooting/gmail-smtp-errors-and-codes>),
+/// at the greeting, EHLO or AUTH alike. None of them is the credential's
+/// fault, so none is retried with a fresh token.
 fn server_error(server: &Server, error: &lettre::transport::smtp::Error) -> SyncError {
     if error.is_tls() {
         return SyncError::Tls {
             server: describe(server),
             detail: reply_text(error),
+        };
+    }
+    if error.is_transient() {
+        return SyncError::Busy {
+            service: "SMTP",
+            server: describe(server),
+            message: reply_text(error),
         };
     }
     SyncError::Server {

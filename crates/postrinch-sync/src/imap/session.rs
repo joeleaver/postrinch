@@ -33,7 +33,9 @@ impl std::fmt::Debug for ImapSession {
 impl ImapSession {
     /// Connects to the account's IMAP server and signs in with `secret`,
     /// as the account's settings say. A refused sign-in is
-    /// [`SyncError::NeedsSignIn`] with the server's words; a server
+    /// [`SyncError::NeedsSignIn`] with the server's words; a server too
+    /// busy for the account now (a connection or bandwidth limit, its
+    /// sign-in service down) is [`SyncError::Busy`]; a server
     /// offering no encryption is [`SyncError::Insecure`], and gets no
     /// credentials.
     pub async fn open(

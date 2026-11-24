@@ -13,6 +13,7 @@ mod folders;
 mod ids;
 mod oauth;
 mod preauth;
+mod refusal;
 mod reply;
 mod sasl;
 mod secret;

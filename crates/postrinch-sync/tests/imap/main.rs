@@ -4,6 +4,7 @@
 
 mod check;
 mod connect;
+mod limits;
 mod misbehaving;
 mod oauth;
 mod oauth_grant;

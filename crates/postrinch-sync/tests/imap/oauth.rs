@@ -105,10 +105,10 @@ async fn a_server_that_cannot_check_now_is_not_a_sign_in_problem() {
     fake.fail_next("AUTHENTICATE", 1, ImapFault::No(text.into()));
     let tokens = Tokens::new(&["good"]);
     match open(&fake, &tokens).await {
-        Err(SyncError::Server { message, .. }) => {
+        Err(SyncError::Busy { message, .. }) => {
             assert_eq!(message, "Authentication backend down");
         }
-        other => panic!("expected a server failure, got {other:?}"),
+        other => panic!("expected a busy server, got {other:?}"),
     }
     assert_eq!(tokens.invalidated(), 0);
 }
@@ -124,16 +124,21 @@ async fn refused_with(text: &str) -> (SyncResult<ImapSession>, Tokens, ImapServe
 }
 
 #[tokio::test]
-async fn temporary_refusals_are_the_servers_and_not_retried() {
-    for code in [
-        "UNAVAILABLE",
-        "INUSE",
-        "LIMIT",
-        "SERVERBUG",
-        "CORRUPTION",
-        "PRIVACYREQUIRED",
-        "NEWFANGLED",
-    ] {
+async fn try_later_codes_are_a_busy_server_and_not_retried() {
+    for code in ["UNAVAILABLE", "INUSE", "LIMIT"] {
+        let (result, tokens, fake) = refused_with(&format!("[{code}] Try later")).await;
+        match result {
+            Err(SyncError::Busy { message, .. }) => assert_eq!(message, "Try later", "{code}"),
+            other => panic!("{code}: expected a busy server, got {other:?}"),
+        }
+        assert_eq!(fake.command_count("AUTHENTICATE"), 1, "{code}");
+        assert_eq!((tokens.fetched(), tokens.invalidated()), (1, 0), "{code}");
+    }
+}
+
+#[tokio::test]
+async fn server_failures_are_the_servers_and_not_retried() {
+    for code in ["SERVERBUG", "CORRUPTION", "PRIVACYREQUIRED", "NEWFANGLED"] {
         let (result, tokens, fake) = refused_with(&format!("[{code}] Try later")).await;
         match result {
             Err(SyncError::Server { message, .. }) => assert_eq!(message, "Try later", "{code}"),

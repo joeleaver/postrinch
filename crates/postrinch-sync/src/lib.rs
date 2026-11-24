@@ -9,6 +9,7 @@
 //! keychain ([`Keychain`]).
 
 mod accounts;
+mod backoff;
 mod compose;
 mod error;
 pub mod google;
@@ -21,6 +22,7 @@ mod secret_service;
 mod secrets;
 
 pub use accounts::check_address_free;
+pub use backoff::Backoff;
 pub use compose::build_message;
 pub use error::{SyncError, SyncResult};
 pub use mime::{Envelope, parse_headers, parse_message};

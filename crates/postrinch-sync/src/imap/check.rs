@@ -43,6 +43,10 @@ pub enum CheckFailure {
     Insecure,
     /// It refused the sign-in, in its own words.
     SignIn(SignInReason),
+    /// It turned the account away for now (too many connections, a
+    /// limit, its sign-in service down), in its own words: the settings
+    /// may well be right, and trying again later may pass.
+    Busy(String),
     /// It answered something else, in its own words where it gave them.
     Server(String),
 }
@@ -54,6 +58,7 @@ impl From<SyncError> for CheckFailure {
             SyncError::Tls { detail, .. } => Self::Tls(detail),
             SyncError::Insecure { .. } => Self::Insecure,
             SyncError::NeedsSignIn(reason) => Self::SignIn(reason),
+            SyncError::Busy { message, .. } => Self::Busy(message),
             SyncError::Server { message, .. } => Self::Server(message),
             other => Self::Server(other.to_string()),
         }
