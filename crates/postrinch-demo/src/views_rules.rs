@@ -15,8 +15,8 @@ use crate::people::{LEDGERLY, PAPER_CRANE, PRIYA, SAM_HOME, SAM_WORK};
 const VIEWS: [(&str, &str, Option<&str>, ViewCount); 9] = [
     (
         "Harbor Coffee",
-        "label:clients/harbor-coffee",
-        None,
+        "from:harborcoffee.example label:clients/harbor-coffee newer_than:1m",
+        Some(SAM_WORK.address),
         ViewCount::Unread,
     ),
     (

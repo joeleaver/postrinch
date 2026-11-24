@@ -88,7 +88,18 @@ fn the_inbox_lists_the_expected_threads() {
 fn views_and_search_find_the_demo_mail() {
     let (_dir, commands) = seeded();
     let harbor = subjects(&commands, &view(&commands, "Harbor Coffee"));
-    assert!(harbor.contains(&"Kickoff notes".to_owned()));
+    // Mail from Harbor Coffee this month: not Sam's own kickoff notes.
+    for expected in [
+        "Harbor Coffee rebrand: round 2 feedback",
+        "Sleeve sizes from the supplier",
+        "Roastery photos for the case study",
+    ] {
+        assert!(
+            harbor.iter().any(|s| s == expected),
+            "{expected} not in {harbor:?}"
+        );
+    }
+    assert!(!harbor.contains(&"Kickoff notes".to_owned()));
     assert!(harbor.iter().all(|s| !s.contains("Fernhill")));
     // Every view of the person's own shows some of the demo's mail.
     let own: Vec<_> = commands

@@ -14,6 +14,11 @@
 #                                        no real agent configuration
 #   * XDG_CACHE_HOME, XDG_STATE_HOME → <scratch>/cache, <scratch>/state, so
 #                                        opened attachments and logs stay there
+#   * CODEX_HOME unset, so Codex is looked for in the scratch home only
+#
+# In that home the demo person has Claude and Cursor (empty .claude/,
+# Claude/ and .cursor/ folders), so Settings › Agents finds them and
+# connecting one writes its settings there.
 #   * POSTRINCH_APP_ADDR → 127.0.0.1:7466, off the installed window's port
 #
 # With sync off the window says so in the sidebar's Sync section ("Sync is
@@ -38,7 +43,7 @@ for arg in "$@"; do
   case "$arg" in
     --dark) appearance=Dark ;;
     --debug) debug=1 ;;
-    -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
     -*) echo "demo-window: unknown option $arg" >&2; exit 2 ;;
     *) scratch="$arg" ;;
   esac
@@ -77,6 +82,10 @@ target=$(cargo metadata --manifest-path "$repo/Cargo.toml" --format-version 1 --
 
 rm -rf -- "$scratch/data" "$scratch/config" "$scratch/home" "$scratch/cache" "$scratch/state"
 mkdir -p "$scratch/data" "$scratch/config/postrinch" "$scratch/home" "$scratch/cache" "$scratch/state"
+# The demo person has Claude (Claude Code and Claude Desktop) and Cursor:
+# Settings › Agents finds an app by its folder, so these empty folders are
+# all it takes. Connecting one there writes only inside this scratch home.
+mkdir -p "$scratch/home/.claude" "$scratch/config/Claude" "$scratch/home/.cursor"
 "$target/release/postrinch-demo" "$scratch/data/postrinch"
 cat > "$scratch/config/postrinch/settings.json" <<EOF
 {
@@ -99,7 +108,8 @@ env_vars=(
 )
 [[ $debug == 1 ]] && env_vars+=(RINCH_DEBUG=1)
 
-env "${env_vars[@]}" "$target/release/postrinch" > "$scratch/window.log" 2>&1 &
+# CODEX_HOME would point Settings › Agents at this machine's own Codex.
+env -u CODEX_HOME "${env_vars[@]}" "$target/release/postrinch" > "$scratch/window.log" 2>&1 &
 pid=$!
 echo "Demo window: pid $pid, scratch $scratch (log: $scratch/window.log)"
 

@@ -204,6 +204,25 @@ fn clients() -> Vec<ThreadSpec> {
             day(15, 11, 40),
             "Signed and attached. Looking forward to it!\n\nMarcus",
         )),
+        thread(
+            ME,
+            "Sleeve sizes from the supplier",
+            &[INBOX, PRIMARY, HARBOR, CLIENTS],
+        )
+        .msg(msg(
+            PRIYA,
+            &[ME],
+            day(3, 10, 40),
+            "Hi Sam,\n\nThe supplier sent the sleeve sizes: 8, 12 and 16 oz, all on the \
+                 same die line. Their template is on the review board.\n\nPriya",
+        )),
+        thread(ME, "Roastery photos for the case study", &[HARBOR, CLIENTS]).msg(msg(
+            OLLIE,
+            &[ME],
+            day(9, 14, 5),
+            "Hi Sam,\n\nWe took a few of the roaster and the bag wall this morning. \
+             Use whichever you like for the case study.\n\nOllie",
+        )),
         thread(ME, "Kickoff notes", &[HARBOR, CLIENTS]).msg(
             msg(
                 ME,
