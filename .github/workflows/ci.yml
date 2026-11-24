@@ -25,6 +25,8 @@ jobs:
       - uses: actions/checkout@v4
       # rinch's desktop shell builds against GTK (its native menus) and
       # libxdo on Linux; the same list rinch's own CI installs.
+      # The GPU renderer (wgpu) needs nothing here: it loads Vulkan and
+      # EGL when the window opens, not when it is built.
       - name: Install Linux system libraries
         if: runner.os == 'Linux'
         run: |

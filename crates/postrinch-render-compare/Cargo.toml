@@ -17,6 +17,6 @@ postrinch-render = { workspace = true }
 postrinch-store = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.13", features = ["blocking"] }
-rinch = { workspace = true, features = ["desktop", "components", "theme", "debug", "html"] }
+rinch = { workspace = true, features = ["desktop", "gpu", "components", "theme", "debug", "html"] }
 rinch-html = { workspace = true }
 rinch-visual-test = { workspace = true, features = ["html-compare"] }
