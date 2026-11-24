@@ -2,7 +2,7 @@
 //! rules in order, the filters made in Gmail itself, and what a rule would
 //! match among the mail already here.
 
-use postrinch_model::{EmailAddress, ProviderMessageId, ProviderThreadId, Timestamp};
+use postrinch_model::{EmailAddress, ProviderMessageId, ProviderThreadId, SystemLabel, Timestamp};
 use postrinch_rules::matching::{Verdict, matches};
 use postrinch_rules::{Action, Elsewhere, Rule, Test};
 use postrinch_store::Find;
@@ -305,7 +305,7 @@ fn narrow(find: &mut Find, rule: &Rule, account: &EmailAddress) {
         match &c.test {
             Test::HasLabel(l) => find.without.push(label(l)),
             Test::InCategory(cat) => find.without.push(label(cat.label_id())),
-            Test::InInbox => find.without.push(label("INBOX")),
+            Test::InInbox => find.without.push(label(SystemLabel::Inbox.provider_id())),
             _ => {}
         }
     }
@@ -313,7 +313,7 @@ fn narrow(find: &mut Find, rule: &Rule, account: &EmailAddress) {
         match &c.test {
             Test::HasLabel(l) => find.labels.push(label(l)),
             Test::InCategory(cat) => find.labels.push(label(cat.label_id())),
-            Test::InInbox => find.labels.push(label("INBOX")),
+            Test::InInbox => find.labels.push(label(SystemLabel::Inbox.provider_id())),
             Test::FromAddress(a) | Test::FromDomain(a) => {
                 find.from
                     .push(a.trim().trim_start_matches('@').to_lowercase());

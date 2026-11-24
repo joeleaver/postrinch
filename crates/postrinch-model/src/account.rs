@@ -2,7 +2,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::EmailAddress;
+use crate::{EmailAddress, ImapSettings};
 
 /// Where an account's mail comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -63,6 +63,10 @@ pub struct Account {
     pub display_name: Option<String>,
     pub provider: Provider,
     pub state: AccountState,
+    /// How an IMAP account reaches its servers; `None` for a Google
+    /// account. Holds no secret.
+    #[serde(default)]
+    pub imap: Option<ImapSettings>,
 }
 
 impl Account {
@@ -72,6 +76,7 @@ impl Account {
             display_name: None,
             provider,
             state: AccountState::Active,
+            imap: None,
         }
     }
 

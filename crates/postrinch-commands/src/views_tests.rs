@@ -385,3 +385,6 @@ fn an_agent_of_some_accounts_changes_only_views_of_those() {
     // The window changes any.
     commands.save_view(&every).unwrap();
 }
+
+#[path = "views_imap_tests.rs"]
+mod imap;

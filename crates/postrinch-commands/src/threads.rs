@@ -3,8 +3,7 @@
 use std::collections::HashMap;
 
 use postrinch_model::{
-    EmailAddress, LabelKind, Message, ProviderMessageId, ProviderThreadId, SystemLabel,
-    ThreadSummary,
+    EmailAddress, Message, ProviderMessageId, ProviderThreadId, SystemLabel, ThreadSummary,
 };
 use postrinch_render::{Options as RenderOptions, Rendered};
 use postrinch_store::ThreadEntry;
@@ -12,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::labels::Chip;
 use crate::search::Excerpt;
+use crate::system_labels::system_label_in;
 use crate::{CommandResult, Commands, Folder};
 
 pub use postrinch_model::ListOrder;
@@ -159,18 +159,16 @@ impl Commands {
         })
     }
 
-    /// The provider's id for one of an account's system labels.
+    /// The provider's id for one of an account's system labels, as
+    /// [`system_label_in`] finds it (Primary is the inbox of an account
+    /// without categories).
     pub(crate) fn system_label_id(
         &self,
         account: &EmailAddress,
         system: SystemLabel,
     ) -> CommandResult<Option<String>> {
-        Ok(self
-            .store
-            .labels(account)?
-            .into_iter()
-            .find(|l| l.kind == LabelKind::System(system))
-            .map(|l| l.provider_id))
+        let labels = self.store.labels(account)?;
+        Ok(system_label_in(&labels, system).map(|l| l.provider_id.clone()))
     }
 
     /// A thread and its messages. `None` for a thread the store does not

@@ -29,9 +29,12 @@ mod rules_proposed;
 mod rules_run;
 mod scope;
 mod search;
+mod search_find;
+mod system_labels;
 mod threads;
 mod views;
 mod views_accounts;
+mod views_labelled;
 mod writing;
 
 use postrinch_store::Store;

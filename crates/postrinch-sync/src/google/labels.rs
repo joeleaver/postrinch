@@ -13,31 +13,14 @@ use super::api::LabelResource;
 
 pub(crate) const UNREAD: &str = "UNREAD";
 pub(crate) const STARRED: &str = "STARRED";
-pub(crate) const TRASH: &str = "TRASH";
-
-fn system_label(id: &str) -> Option<SystemLabel> {
-    Some(match id {
-        "INBOX" => SystemLabel::Inbox,
-        "SENT" => SystemLabel::Sent,
-        "DRAFT" => SystemLabel::Drafts,
-        "SPAM" => SystemLabel::Spam,
-        TRASH => SystemLabel::Trash,
-        "IMPORTANT" => SystemLabel::Important,
-        "CATEGORY_PERSONAL" => SystemLabel::CategoryPersonal,
-        "CATEGORY_SOCIAL" => SystemLabel::CategorySocial,
-        "CATEGORY_PROMOTIONS" => SystemLabel::CategoryPromotions,
-        "CATEGORY_UPDATES" => SystemLabel::CategoryUpdates,
-        "CATEGORY_FORUMS" => SystemLabel::CategoryForums,
-        _ => return None,
-    })
-}
+pub(crate) const TRASH: &str = SystemLabel::Trash.provider_id();
 
 /// The model's label for a Gmail label, or `None` for one it does not keep.
 pub(crate) fn to_label(resource: &LabelResource) -> Option<Label> {
     let kind = if resource.kind == "user" {
         LabelKind::User
     } else {
-        LabelKind::System(system_label(&resource.id)?)
+        LabelKind::System(SystemLabel::from_provider_id(&resource.id)?)
     };
     let mut label = Label::new(resource.id.clone(), resource.name.clone(), kind);
     label.visibility = match resource.list_visibility.as_deref() {

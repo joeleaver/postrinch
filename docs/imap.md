@@ -21,7 +21,7 @@ Postrinch's model was written for labels, and Gmail's labels are a superset of f
 
 Gmail names a message once for its life. IMAP names a copy by `(folder, UIDVALIDITY, UID)`, which changes on every move. Postrinch's message id must not change on a move, or the outbox could not re-apply changes over sync, an open message would vanish from the reader when archived, and rules would see moved mail as new.
 
-- **The provider message id is derived from the `Message-ID` header**: `m` and the first 24 hex digits of SHA-256 of the account key and the header as written. Copies in several folders are one message with several labels, as in Gmail: a message sent to oneself is in Sent and the inbox.
+- **The provider message id is derived from the `Message-ID` header**: `m` and the first 24 hex digits of SHA-256 of the account key and the header as written, less its angle brackets and surrounding space (`imap::message_id`). The brackets go because `References` and `In-Reply-To` name the same message that way, and threading must find it by them; case stays, as a `Message-ID`'s left part is case-sensitive. Copies in several folders are one message with several labels, as in Gmail: a message sent to oneself is in Sent and the inbox.
 - **A message without a `Message-ID`** (rare: some automated mail) gets `u` and a hash of the folder's UIDVALIDITY, its id and the UID. It is the one case where a move looks like a delete and a new message; nothing is lost.
 - **Where each copy is** lives in the store as an `ImapPlace` (account, folder label id, UIDVALIDITY, UID, message id, the copy's flags and MODSEQ), so a change finds the copies to act on, and sync finds what a folder no longer has.
 
