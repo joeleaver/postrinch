@@ -30,7 +30,7 @@
 
     <p>Postrinch is a desktop mail and calendar app made by LBME Publishing ("we"). This page says what Postrinch does with your information, and what this website does.</p>
 
-    <p><strong>In short:</strong> Postrinch runs on your computer and keeps your mail there. There is no Postrinch server. We never receive your mail, your calendars, your contacts or your sign-ins, and we collect nothing about how you use the app.</p>
+    <p><strong>In short:</strong> we don't store any of your data, not on our servers and not in any cloud: we have no servers. Postrinch runs on your computer and keeps your mail there. We never receive your mail, your calendars, your contacts or your sign-ins, and we collect nothing about how you use the app.</p>
 
     <h2>What Postrinch reads, and where it keeps it</h2>
     <ul>
@@ -43,14 +43,14 @@
     <h2>Who Postrinch talks to</h2>
     <ul>
       <li><strong>Google</strong>, to sync your mail and calendars and to carry out what you do in the app: send a message, archive a thread, answer an invitation.</li>
-      <li><strong>GitHub</strong>, once a day, to check for a new version of Postrinch and download it. GitHub sees your computer's address and that it asked; nothing about your mail is sent. Postrinch 0.1.34 and earlier also send GitHub your own GitHub sign-in with that check, if you have one on the computer (the <code>POSTRINCH_GITHUB_TOKEN</code> setting, or the GitHub command line tool signed in), so GitHub can tell the check is yours. Later versions send none.</li>
+      <li><strong>GitHub</strong>, once a day, to check for a new version of Postrinch and download it. GitHub sees your computer's address and that it asked; nothing about your mail is sent. Postrinch 0.1.34 and earlier also send GitHub your own GitHub sign-in with that check, if you have one on the computer (the <code>POSTRINCH_GITHUB_TOKEN</code> setting, or the GitHub command line tool signed in), so GitHub can tell the check is yours. From the next release on, Postrinch sends none.</li>
       <li><strong>The senders of mail you open</strong>, only when you choose "Show pictures": your computer then fetches that message's pictures from where the sender put them, as any mail app does. Postrinch sends no cookies or referrer with those requests, and pictures stay off until you allow a sender.</li>
       <li><strong>Agents you connect.</strong> If you connect an AI app such as Claude, Cursor or Codex in Settings › Agents, that app can read and act on the mail and calendars of the accounts you give it, through Postrinch on your computer. What it reads then goes to that app and its provider, under their terms, including whether they may use it to train their models: check those terms before you connect one. You choose each agent and its accounts, and you can remove it at any time. An agent can't send mail or tell anyone about an event without you.</li>
     </ul>
     <p>Postrinch sends nothing to LBME Publishing, has no analytics, and reports no crashes or usage.</p>
 
     <h2>How long it's kept, and how it's protected</h2>
-    <p>Your mail and calendars stay on your computer for as long as the account is in Postrinch, kept up to date with Google, and are deleted when you remove the account. They are files in your home folder, readable by your user only, as your system protects your other files; Postrinch doesn't encrypt them itself, so use your system's disk encryption if your computer may be lost or shared. Sign-in tokens are in your system's keychain, which does encrypt them. Connections to Google and GitHub are encrypted (HTTPS).</p>
+    <p>Your mail and calendars stay on your computer for as long as the account is in Postrinch, kept up to date with Google, and are deleted when you remove the account. They are files in your home folder, with the same protection as the rest of it; Postrinch doesn't encrypt them itself, so use your system's disk encryption if your computer may be lost or shared. Sign-in tokens are in your system's keychain, which does encrypt them. Connections to Google and GitHub are encrypted (HTTPS).</p>
 
     <h2>Google user data</h2>
     <p>Postrinch's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements. Information from Google is used only to provide the features of Postrinch you see and use. It is transferred to others only to provide those features at your direction (such as to an agent you connect), to comply with the law, or as part of a merger or sale with notice to you. No person at LBME Publishing reads it, because it never reaches us.</p>
