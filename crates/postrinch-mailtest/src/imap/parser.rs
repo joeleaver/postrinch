@@ -1,12 +1,8 @@
-//! Reading IMAP commands off the wire and splitting them into values.
+//! Splitting IMAP commands into values.
 //!
-//! A command is one line, except that it may carry literals: a line ending
-//! in `{n}` (synchronizing: the server answers `+` before the client sends
-//! the bytes) or `{n+}` (LITERAL+, RFC 7888: the bytes follow at once) is
-//! followed by exactly `n` bytes of anything, CRLF included, and then the
-//! rest of the command on a new line. [`read_command`] gathers those pieces
-//! as [`Part`]s without ever looking inside a literal, and [`tokenize`]
-//! turns them into [`Value`]s:
+//! `reader` gathers a command off the wire as [`Part`]s (text, and the
+//! literals between, never looked inside), and [`tokenize`] turns them
+//! into [`Value`]s:
 //!
 //! - atoms (`FETCH`, `\Seen`, `1:*`, `BODY.PEEK[HEADER.FIELDS (From)]<0.10>`:
 //!   a `[` inside an atom runs to its matching `]`, spaces and parentheses
@@ -15,12 +11,6 @@
 //! - parenthesized lists of values.
 
 use std::fmt;
-use std::io;
-
-use crate::conn::Conn;
-
-/// The largest literal the fake accepts (a message to APPEND, say).
-pub(crate) const MAX_LITERAL: usize = 64 * 1024 * 1024;
 
 /// One value in a command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,18 +61,6 @@ pub(crate) struct Command {
     pub(crate) args: Vec<Value>,
 }
 
-/// What reading the next command gave.
-#[derive(Debug)]
-pub(crate) enum Read {
-    /// A command, with the text to log for it.
-    Command(Command, String),
-    /// A line that is not a valid command; answered with BAD. `tag` is the
-    /// line's tag when one could be found.
-    Invalid { tag: Option<String>, reason: String },
-    /// The client closed the connection.
-    Eof,
-}
-
 /// A syntax error in a command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SyntaxError(pub(crate) String);
@@ -93,90 +71,15 @@ impl fmt::Display for SyntaxError {
     }
 }
 
-/// The literal marker at the end of a line: `(size, synchronizing)`.
-fn literal_marker(line: &[u8]) -> Option<(usize, usize, bool)> {
-    let body = line.strip_suffix(b"}")?;
-    let open = body.iter().rposition(|&b| b == b'{')?;
-    let mut digits = &body[open + 1..];
-    let sync = match digits.strip_suffix(b"+") {
-        Some(d) => {
-            digits = d;
-            false
-        }
-        None => true,
-    };
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    let size = std::str::from_utf8(digits).ok()?.parse().ok()?;
-    Some((open, size, sync))
-}
-
-/// Reads one whole command, literals and all, answering `+` for each
-/// synchronizing literal.
-pub(crate) async fn read_command(conn: &mut Conn) -> io::Result<Read> {
-    let mut parts = Vec::new();
-    loop {
-        let Some(mut line) = conn.read_line().await? else {
-            return Ok(Read::Eof);
-        };
-        match literal_marker(&line) {
-            Some((open, size, sync)) => {
-                line.truncate(open);
-                parts.push(Part::Text(line));
-                if size > MAX_LITERAL {
-                    let tag = first_word(&parts);
-                    return Ok(Read::Invalid {
-                        tag,
-                        reason: "Literal too large".into(),
-                    });
-                }
-                if sync {
-                    conn.write_all(b"+ Ready for literal data\r\n").await?;
-                }
-                let Some(bytes) = conn.read_exact(size).await? else {
-                    return Ok(Read::Eof);
-                };
-                parts.push(Part::Literal(bytes));
-            }
-            None => {
-                parts.push(Part::Text(line));
-                break;
-            }
-        }
-    }
-    let log = log_text(&parts);
-    Ok(match parse_command(parts) {
-        Ok(command) => Read::Command(command, log),
-        Err((tag, SyntaxError(reason))) => Read::Invalid { tag, reason },
-    })
-}
-
 /// The first space-separated word of the command, used as the tag of a
 /// BAD answer to a line that does not parse.
-fn first_word(parts: &[Part]) -> Option<String> {
+pub(crate) fn first_word(parts: &[Part]) -> Option<String> {
     let Some(Part::Text(text)) = parts.first() else {
         return None;
     };
     let word = text.split(|&b| b == b' ').next()?;
     let word = std::str::from_utf8(word).ok()?;
     (!word.is_empty() && word.bytes().all(is_tag_char)).then(|| word.to_string())
-}
-
-/// The command as logged: its text with each literal shown as `{n}`, and
-/// without its tag.
-fn log_text(parts: &[Part]) -> String {
-    let mut log = String::new();
-    for part in parts {
-        match part {
-            Part::Text(t) => log.push_str(&String::from_utf8_lossy(t)),
-            Part::Literal(l) => log.push_str(&format!("{{{}}}", l.len())),
-        }
-    }
-    match log.split_once(' ') {
-        Some((_, rest)) => rest.to_string(),
-        None => String::new(),
-    }
 }
 
 fn is_tag_char(b: u8) -> bool {
@@ -352,15 +255,6 @@ mod tests {
     }
 
     #[test]
-    fn markers() {
-        assert_eq!(literal_marker(b"A APPEND x {12}"), Some((11, 12, true)));
-        assert_eq!(literal_marker(b"A APPEND x {12+}"), Some((11, 12, false)));
-        assert_eq!(literal_marker(b"A LOGIN {x}"), None);
-        assert_eq!(literal_marker(b"A LOGIN {}"), None);
-        assert_eq!(literal_marker(b"A NOOP"), None);
-    }
-
-    #[test]
     fn atoms_strings_and_lists() {
         let cmd = parse_command(vec![text(
             r#"a1 uid fetch 1:* (FLAGS BODY.PEEK[HEADER.FIELDS (From To)]<0.10>) "q \"x\" \\""#,
@@ -422,15 +316,5 @@ mod tests {
         let (tag, _) = parse_command(vec![text("A7 X \"open")]).unwrap_err();
         assert_eq!(tag.as_deref(), Some("A7"));
         assert!(parse_command(vec![text("")]).is_err());
-    }
-
-    #[test]
-    fn log_hides_literals_and_tag() {
-        let parts = vec![
-            text("A1 LOGIN "),
-            Part::Literal(b"bob".to_vec()),
-            text(" x"),
-        ];
-        assert_eq!(log_text(&parts), "LOGIN {3} x");
     }
 }

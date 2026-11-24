@@ -2,6 +2,8 @@
 //! and by a line-level client for exact responses.
 
 mod client;
+mod condstore;
 mod helpers;
 mod protocol;
+mod strict;
 mod sync;

@@ -106,7 +106,7 @@ The app now holds one `GmailSync`; it will hold a `MailSync` (in `postrinch-sync
 
 ## Testing
 
-A pure-Rust fake IMAP and SMTP server (`crates/postrinch-mailtest`, a dev-dependency only) runs in each test on a loopback port, with in-memory folders, UIDs, MODSEQs and the extensions under test switchable (CONDSTORE, QRESYNC, MOVE, UIDPLUS, SPECIAL-USE, IDLE), plus TLS with a test certificate. No test touches a real mailbox. A real-server smoke test against GreenMail in Docker runs by hand (`tools/imap-greenmail.sh`), not in CI.
+A pure-Rust fake IMAP and SMTP server (`crates/postrinch-mailtest`, a dev-dependency only) runs in each test on a loopback port, with in-memory folders, UIDs, MODSEQs and the extensions under test switchable (CONDSTORE, QRESYNC, MOVE, UIDPLUS, SPECIAL-USE, LIST-EXTENDED, IDLE), plus TLS with a test certificate. No test touches a real mailbox. A real-server smoke test against GreenMail in Docker runs by hand (`tools/imap-greenmail.sh`), not in CI.
 
 ## Crates
 

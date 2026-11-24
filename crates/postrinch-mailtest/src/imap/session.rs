@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
-use super::parser::{self, Command, Read};
+use super::parser::Command;
+use super::reader::{self, Read};
 use super::response::Args;
 use super::select::Selected;
 use super::state::{ImapFault, LoggedCommand, Shared};
@@ -109,7 +110,7 @@ impl Session {
             if !self.wait_for_input().await? {
                 return Ok(());
             }
-            let (command, log) = match parser::read_command(&mut self.conn).await? {
+            let (command, log) = match reader::read_command(&mut self.conn).await? {
                 Read::Eof => return Ok(()),
                 Read::Invalid { tag, reason } => {
                     let tag = tag.unwrap_or_else(|| "*".to_string());

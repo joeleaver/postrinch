@@ -96,6 +96,11 @@ pub(crate) struct Folder {
     pub(crate) messages: Vec<Message>,
     /// Expunged UIDs with the MODSEQ of their expunge.
     pub(crate) vanished: Vec<(u32, u64)>,
+    /// Every keyword set in this folder, spelled as it was first seen.
+    /// Keywords compare case-insensitively (RFC 9051 2.3.2), so a later
+    /// `$label` is the same keyword as an earlier `$Label` and is stored
+    /// and reported as `$Label`.
+    keywords: Vec<String>,
 }
 
 impl Folder {
@@ -111,7 +116,34 @@ impl Folder {
             highest_modseq: 1,
             messages: Vec::new(),
             vanished: Vec::new(),
+            keywords: Vec::new(),
         }
+    }
+
+    /// Spells each flag as this folder knows it: system flags are already
+    /// canonical, and a keyword takes the spelling first seen here. With
+    /// `remember`, a keyword not seen before is remembered as given;
+    /// without (when flags are only being removed), it is left as is.
+    fn spell(&mut self, flags: &BTreeSet<String>, remember: bool) -> BTreeSet<String> {
+        let mut spelled = BTreeSet::new();
+        for flag in flags {
+            if flag.starts_with('\\') {
+                spelled.insert(flag.clone());
+                continue;
+            }
+            match self.keywords.iter().find(|k| k.eq_ignore_ascii_case(flag)) {
+                Some(known) => {
+                    spelled.insert(known.clone());
+                }
+                None => {
+                    if remember {
+                        self.keywords.push(flag.clone());
+                    }
+                    spelled.insert(flag.clone());
+                }
+            }
+        }
+        spelled
     }
 
     /// Takes the next MODSEQ.
@@ -139,6 +171,7 @@ impl Folder {
         flags: BTreeSet<String>,
         internal_date: DateTime<FixedOffset>,
     ) -> u32 {
+        let flags = self.spell(&flags, true);
         let uid = self.uid_next;
         self.uid_next += 1;
         let modseq = self.bump();
@@ -161,6 +194,7 @@ impl Folder {
         flags: &BTreeSet<String>,
     ) -> Option<bool> {
         let i = self.messages.binary_search_by_key(&uid, |m| m.uid).ok()?;
+        let flags = &self.spell(flags, op != FlagOp::Remove);
         let current = &self.messages[i].flags;
         let next: BTreeSet<String> = match op {
             FlagOp::Add => current.union(flags).cloned().collect(),
@@ -414,6 +448,32 @@ mod tests {
         assert_eq!(f.vanished, vec![(b, f.highest_modseq)]);
         f.renumber(77);
         assert_eq!((f.uid_validity, f.uid_next, f.messages[0].uid), (77, 2, 1));
+    }
+
+    #[test]
+    fn keywords_compare_case_insensitively() {
+        let mut f = Folder::new(1, "X".into());
+        let date = DateTime::parse_from_rfc3339("2026-11-24T10:00:00+00:00").unwrap();
+        let set =
+            |names: &[&str]| -> BTreeSet<String> { names.iter().map(|n| n.to_string()).collect() };
+        let a = f.append(Arc::new(b"a".to_vec()), set(&["$Label"]), date);
+        let b = f.append(Arc::new(b"b".to_vec()), set(&["$LABEL", "Work"]), date);
+        // The second message's keyword takes the first spelling.
+        assert_eq!(f.find(b).unwrap().flags, set(&["$Label", "Work"]));
+        assert_eq!(
+            f.change_flags(a, FlagOp::Add, &set(&["$label"])),
+            Some(false)
+        );
+        assert_eq!(
+            f.change_flags(b, FlagOp::Remove, &set(&["work"])),
+            Some(true)
+        );
+        assert_eq!(f.find(b).unwrap().flags, set(&["$Label"]));
+        assert_eq!(
+            f.change_flags(a, FlagOp::Replace, &set(&["WORK"])),
+            Some(true)
+        );
+        assert_eq!(f.find(a).unwrap().flags, set(&["Work"]));
     }
 
     #[test]

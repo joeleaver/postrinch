@@ -70,6 +70,7 @@ impl Session {
             return Reply::No("[READ-ONLY] Mailbox is read-only".into());
         }
         self.sync_selected(false);
+        let with_uid = self.fetch_carries_uid(uid_mode);
         let shared = self.shared.clone();
         let mut state = shared.lock();
         let user = self.user.clone().unwrap_or_default();
@@ -99,24 +100,26 @@ impl Session {
             any_change |= changed;
             let message = folder.find(uid).expect("resolved from this folder");
             selected.known.insert(uid, message.modseq);
+            // RFC 7162 3.1.3: a STORE with UNCHANGEDSINCE that succeeds
+            // answers with MODSEQ even when .SILENT; once CONDSTORE is on,
+            // a .SILENT STORE that changed flags reports the new MODSEQ.
+            let says_something =
+                !store.silent || store.unchanged_since.is_some() || (self.condstore && changed);
+            if !says_something {
+                continue;
+            }
             let mut parts = Vec::new();
-            if uid_mode {
+            if with_uid {
                 parts.push(format!("UID {uid}"));
             }
             if !store.silent {
                 parts.push(format!("FLAGS {}", flag_list(&message.flags)));
             }
-            // With CONDSTORE on, the new MODSEQ is reported even for
-            // .SILENT (RFC 7162 3.1.3).
-            if self.condstore && (changed || !store.silent) {
+            if self.condstore {
                 parts.push(format!("MODSEQ ({})", message.modseq));
             }
-            let says_something = !store.silent || (self.condstore && changed);
-            if says_something {
-                self.out.extend_from_slice(
-                    format!("* {seq} FETCH ({})\r\n", parts.join(" ")).as_bytes(),
-                );
-            }
+            self.out
+                .extend_from_slice(format!("* {seq} FETCH ({})\r\n", parts.join(" ")).as_bytes());
         }
         drop(state);
         if any_change {
@@ -240,7 +243,7 @@ impl Session {
         let largest = selected.uids.last().copied().unwrap_or(0);
         let folder_id = selected.folder_id;
         let user = self.user.clone().unwrap_or_default();
-        let gone = {
+        let (gone, modseq) = {
             let mut state = self.shared.lock();
             let Some(folder) = state
                 .accounts
@@ -249,17 +252,26 @@ impl Session {
             else {
                 return Reply::No("[NONEXISTENT] The mailbox is gone".into());
             };
-            folder.expunge(|m| {
+            let gone = folder.expunge(|m| {
                 m.flags.contains("\\Deleted")
                     && set.as_ref().is_none_or(|s| s.contains(m.uid, largest))
-            })
+            });
+            (gone, folder.highest_modseq)
         };
-        if !gone.is_empty() {
-            self.shared.notify();
+        if gone.is_empty() {
+            return Reply::Ok("EXPUNGE completed".into());
         }
+        self.shared.notify();
         // The EXPUNGE (or VANISHED) responses come from the report that
-        // follows every command.
-        Reply::Ok("EXPUNGE completed".into())
+        // follows every command. With QRESYNC on, the tagged OK carries
+        // the MODSEQ this expunge took (RFC 7162 3.2.7 and 3.2.9). Changes
+        // by others after it have
+        // higher MODSEQs and reach the client as FETCH or VANISHED.
+        if self.qresync {
+            Reply::Ok(format!("[HIGHESTMODSEQ {modseq}] EXPUNGE completed"))
+        } else {
+            Reply::Ok("EXPUNGE completed".into())
+        }
     }
 
     /// CLOSE (removing `\Deleted` messages silently) and UNSELECT.

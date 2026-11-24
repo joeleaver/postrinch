@@ -1,141 +1,18 @@
-//! Commands on folders as a whole: LIST, LSUB, CREATE, DELETE, RENAME,
-//! SUBSCRIBE, UNSUBSCRIBE, STATUS and APPEND.
+//! Commands on folders as a whole: CREATE, DELETE, RENAME, SUBSCRIBE,
+//! UNSUBSCRIBE, STATUS and APPEND. LIST and LSUB are in `list`.
 
 use std::sync::Arc;
 
 use chrono::Utc;
 
 use super::config::Extension;
-use super::mailbox::{DELIMITER, Folder};
+use super::mailbox::DELIMITER;
 use super::parser::Value;
 use super::response::{Args, parse_datetime, parse_flags, push_string};
 use super::session::{Reply, Session};
 use super::state::State;
 
-/// Whether `name` matches a LIST pattern: `*` matches anything, `%`
-/// anything but the hierarchy delimiter.
-fn wildcard(pattern: &[u8], name: &[u8]) -> bool {
-    match pattern.split_first() {
-        None => name.is_empty(),
-        Some((b'*', rest)) => (0..=name.len()).any(|i| wildcard(rest, &name[i..])),
-        Some((b'%', rest)) => (0..=name.len())
-            .take_while(|&i| i == 0 || name[i - 1] != DELIMITER as u8)
-            .any(|i| wildcard(rest, &name[i..])),
-        Some((&c, rest)) => name.first() == Some(&c) && wildcard(rest, &name[1..]),
-    }
-}
-
-/// Matches a pattern against a folder name, INBOX case-insensitively.
-fn pattern_matches(pattern: &str, name: &str) -> bool {
-    if name == "INBOX" {
-        return wildcard(pattern.to_ascii_uppercase().as_bytes(), b"INBOX");
-    }
-    wildcard(pattern.as_bytes(), name.as_bytes())
-}
-
-#[derive(Default)]
-struct ListOptions {
-    only_subscribed: bool,
-    only_special: bool,
-    show_subscribed: bool,
-}
-
 impl Session {
-    /// LIST (with LIST-EXTENDED's selection and RETURN options as far as
-    /// SPECIAL-USE and SUBSCRIBED go) and LSUB.
-    pub(crate) fn list(&mut self, mut args: Args, lsub: bool) -> Reply {
-        let special_use = self.shared.lock().has(Extension::SpecialUse);
-        let parsed = (|| -> Result<_, String> {
-            let mut options = ListOptions::default();
-            if !lsub && let Some(selection) = args.optional_list() {
-                for option in selection {
-                    match option.as_atom().map(str::to_ascii_uppercase).as_deref() {
-                        Some("SUBSCRIBED") => {
-                            options.only_subscribed = true;
-                            options.show_subscribed = true;
-                        }
-                        Some("SPECIAL-USE") if special_use => options.only_special = true,
-                        Some("RECURSIVEMATCH") => {}
-                        _ => return Err(format!("Unsupported LIST option {option:?}")),
-                    }
-                }
-            }
-            let reference = args.text()?;
-            let patterns = match args.next()? {
-                Value::List(list) => list
-                    .iter()
-                    .map(|v| {
-                        v.as_astring()
-                            .and_then(|b| String::from_utf8(b.to_vec()).ok())
-                            .ok_or_else(|| "Bad pattern".to_string())
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-                value => vec![
-                    String::from_utf8(value.as_astring().ok_or("Bad pattern")?.to_vec())
-                        .map_err(|_| "Bad pattern")?,
-                ],
-            };
-            if !lsub && args.peek().is_some() {
-                if !args.atom()?.eq_ignore_ascii_case("RETURN") {
-                    return Err("Expected RETURN".into());
-                }
-                for option in args.list()? {
-                    match option.as_atom().map(str::to_ascii_uppercase).as_deref() {
-                        Some("SPECIAL-USE") if special_use => {}
-                        Some("SUBSCRIBED") => options.show_subscribed = true,
-                        Some("CHILDREN") => {}
-                        _ => return Err(format!("Unsupported RETURN option {option:?}")),
-                    }
-                }
-            }
-            args.end()?;
-            Ok((options, reference, patterns))
-        })();
-        let (options, reference, patterns) = match parsed {
-            Ok(p) => p,
-            Err(e) => return Reply::Bad(e),
-        };
-        let word = if lsub { "LSUB" } else { "LIST" };
-        if patterns.iter().all(String::is_empty) {
-            self.out.extend_from_slice(
-                format!("* {word} (\\Noselect) \"{DELIMITER}\" \"\"\r\n").as_bytes(),
-            );
-            return Reply::Ok(format!("{word} completed"));
-        }
-        let user = self.user.clone().unwrap_or_default();
-        let state = self.shared.lock();
-        let Some(account) = state.accounts.get(&user) else {
-            return Reply::No("No such user".into());
-        };
-        for folder in account.folders.values() {
-            let full_matches = patterns
-                .iter()
-                .any(|p| pattern_matches(&format!("{reference}{p}"), &folder.name));
-            let wanted = full_matches
-                && (!(lsub || options.only_subscribed) || folder.subscribed)
-                && (!options.only_special || folder.special_use.is_some());
-            if !wanted {
-                continue;
-            }
-            let has_children = account
-                .folders
-                .keys()
-                .any(|k| k.starts_with(&format!("{}{DELIMITER}", folder.name)));
-            let attributes = attributes(
-                folder,
-                has_children,
-                special_use && !lsub,
-                options.show_subscribed,
-            );
-            let mut line =
-                format!("* {word} ({}) \"{DELIMITER}\" ", attributes.join(" ")).into_bytes();
-            push_string(&mut line, folder.name.as_bytes());
-            line.extend_from_slice(b"\r\n");
-            self.out.extend_from_slice(&line);
-        }
-        Reply::Ok(format!("{word} completed"))
-    }
-
     pub(crate) fn create(&mut self, mut args: Args) -> Reply {
         let name = match args.text().and_then(|n| args.end().map(|()| n)) {
             Ok(n) => n,
@@ -326,48 +203,5 @@ impl Session {
         };
         self.shared.notify();
         reply
-    }
-}
-
-fn attributes(
-    folder: &Folder,
-    has_children: bool,
-    special_use: bool,
-    subscribed: bool,
-) -> Vec<&'static str> {
-    let mut attributes = Vec::new();
-    if !folder.selectable {
-        attributes.push("\\Noselect");
-    }
-    attributes.push(if has_children {
-        "\\HasChildren"
-    } else {
-        "\\HasNoChildren"
-    });
-    if special_use && let Some(role) = folder.special_use {
-        attributes.push(role.attribute());
-    }
-    if subscribed && folder.subscribed {
-        attributes.push("\\Subscribed");
-    }
-    attributes
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wildcards() {
-        assert!(wildcard(b"*", b"a/b/c"));
-        assert!(wildcard(b"%", b"abc"));
-        assert!(!wildcard(b"%", b"a/b"));
-        assert!(wildcard(b"a/%", b"a/b"));
-        assert!(!wildcard(b"a/%", b"a/b/c"));
-        assert!(wildcard(b"a/*", b"a/b/c"));
-        assert!(wildcard(b"%/b", b"a/b"));
-        assert!(!wildcard(b"a", b"ab"));
-        assert!(pattern_matches("inbox", "INBOX"));
-        assert!(pattern_matches("%", "INBOX"));
     }
 }

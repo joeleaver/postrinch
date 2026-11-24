@@ -163,7 +163,7 @@ async fn programmed_replies() {
 }
 
 #[tokio::test]
-async fn drop_after_data_leaves_the_client_unsure() {
+async fn drop_after_data_before_storing_leaves_the_client_unsure() {
     let server = server().await;
     let t = transport(&server, Port::Implicit, "bob", "hunter2", Mechanism::Plain);
     server.fail_next(SmtpStage::Data, 1, SmtpFault::Disconnect);
@@ -171,4 +171,50 @@ async fn drop_after_data_leaves_the_client_unsure() {
     assert!(!error.is_permanent() && !error.is_transient(), "{error}");
     assert!(server.messages().is_empty());
     assert_eq!(server.command_count("DATA"), 1);
+    // A retry delivers it once.
+    send(&t).await.unwrap();
+    assert_eq!(server.messages().len(), 1);
+}
+
+#[tokio::test]
+async fn drop_after_storing_makes_a_retry_a_duplicate() {
+    let server = server().await;
+    let t = transport(&server, Port::Implicit, "bob", "hunter2", Mechanism::Plain);
+    server.fail_next(SmtpStage::Data, 1, SmtpFault::StoreThenDisconnect);
+    let error = send(&t).await.unwrap_err();
+    // The client sees exactly what it sees when nothing was stored.
+    assert!(!error.is_permanent() && !error.is_transient(), "{error}");
+    assert_eq!(server.messages().len(), 1);
+    assert_eq!(server.messages()[0].data, MAIL);
+    send(&t).await.unwrap();
+    assert_eq!(server.messages().len(), 2);
+}
+
+#[test]
+#[should_panic(expected = "StoreThenDisconnect only applies at SmtpStage::Data")]
+fn store_then_disconnect_needs_the_data_stage() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let server = runtime.block_on(server());
+    server.fail_next(SmtpStage::Rcpt, 1, SmtpFault::StoreThenDisconnect);
+}
+
+#[tokio::test]
+async fn data_is_kept_exactly_and_malformed_data_is_refused() {
+    let server = server().await;
+    let t = transport(&server, Port::Implicit, "bob", "hunter2", Mechanism::Plain);
+    // Trailing spaces, an empty last line, 8-bit bytes: all kept.
+    let exact: &[u8] = b"Subject: x  \r\n\r\nCaf\xc3\xa9 \t\r\n..two dots\r\n\r\n";
+    t.send_raw(&envelope(), exact).await.unwrap();
+    assert_eq!(server.messages()[0].data, exact);
+
+    // RFC 5321 4.5.3.1.6: at most 1000 octets a line, CRLF included.
+    let mut long = b"Subject: long\r\n\r\n".to_vec();
+    long.extend(std::iter::repeat_n(b'a', 999));
+    long.extend_from_slice(b"\r\n");
+    let error = t.send_raw(&envelope(), &long).await.unwrap_err();
+    assert!(error.is_permanent(), "{error}");
+    assert_eq!(server.messages().len(), 1);
 }

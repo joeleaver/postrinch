@@ -15,18 +15,23 @@ pub enum Extension {
     Uidplus,
     /// RFC 6154 SPECIAL-USE: `\Sent`, `\Drafts`... on LIST.
     SpecialUse,
+    /// RFC 5258 LIST-EXTENDED: selection options (`LIST (SUBSCRIBED) ...`),
+    /// several patterns at once, and `RETURN (...)`. Without it those forms
+    /// are BAD; RFC 6154's `SPECIAL-USE` options also need it.
+    ListExtended,
     /// RFC 2177 IDLE.
     Idle,
 }
 
 impl Extension {
     /// Every extension the fake knows.
-    pub const ALL: [Extension; 6] = [
+    pub const ALL: [Extension; 7] = [
         Extension::Condstore,
         Extension::Qresync,
         Extension::Move,
         Extension::Uidplus,
         Extension::SpecialUse,
+        Extension::ListExtended,
         Extension::Idle,
     ];
 
@@ -38,6 +43,7 @@ impl Extension {
             Extension::Move => "MOVE",
             Extension::Uidplus => "UIDPLUS",
             Extension::SpecialUse => "SPECIAL-USE",
+            Extension::ListExtended => "LIST-EXTENDED",
             Extension::Idle => "IDLE",
         }
     }

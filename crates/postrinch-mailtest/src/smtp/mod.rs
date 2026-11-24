@@ -5,8 +5,11 @@
 //! LOGIN or XOAUTH2, and records every message it accepts for the test to
 //! inspect. Failures can be programmed at each stage of a submission,
 //! including the uncertain one: the data received and the connection
-//! dropped without a reply.
+//! dropped without a reply, either before the message is stored or after
+//! it was delivered. Message data is read as strictly as real servers
+//! read it (see `data`).
 
+mod data;
 mod session;
 
 use std::net::SocketAddr;
@@ -28,7 +31,8 @@ pub enum SmtpStage {
     Mail,
     /// RCPT TO.
     Rcpt,
-    /// The reply after the message data has been received.
+    /// The reply after the message data has been received (and found
+    /// well-formed and within the size limit).
     Data,
 }
 
@@ -36,11 +40,18 @@ pub enum SmtpStage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SmtpFault {
     /// Reply with this code (4xx or 5xx) and text instead of going on.
+    /// At [`SmtpStage::Data`] the message is not stored.
     Reply { code: u16, text: String },
-    /// Close the connection without replying. At [`SmtpStage::Data`] this
-    /// is the case a client cannot resolve: the server has the whole
-    /// message but never said whether it took it.
+    /// Close the connection without replying and without doing what was
+    /// asked. At [`SmtpStage::Data`] the server has the whole message but
+    /// drops it: nothing is delivered, though the client cannot tell, so
+    /// a retry delivers it once.
     Disconnect,
+    /// Only at [`SmtpStage::Data`]: store the message (it shows in
+    /// [`SmtpServer::messages`]), then close the connection without
+    /// replying. The client cannot tell this from [`SmtpFault::Disconnect`],
+    /// and a retry delivers the message a second time.
+    StoreThenDisconnect,
 }
 
 /// A message the server accepted.
@@ -52,7 +63,8 @@ pub struct ReceivedMessage {
     pub mail_from: String,
     /// The envelope recipients (RCPT TO), without angle brackets.
     pub rcpt_to: Vec<String>,
-    /// The message as received, dot-unstuffed, lines ending in CRLF.
+    /// The message exactly as received, less the dot-stuffing; every line
+    /// ends in CRLF, since data with a bare CR or LF is refused.
     pub data: Vec<u8>,
 }
 
@@ -274,7 +286,16 @@ impl SmtpServer {
 
     /// Makes the next `times` submissions reaching `stage` fail as `fault`
     /// says.
+    ///
+    /// # Panics
+    ///
+    /// If `fault` is [`SmtpFault::StoreThenDisconnect`] and `stage` is not
+    /// [`SmtpStage::Data`]: only DATA has a message to store.
     pub fn fail_next(&self, stage: SmtpStage, times: usize, fault: SmtpFault) {
+        assert!(
+            stage == SmtpStage::Data || fault != SmtpFault::StoreThenDisconnect,
+            "StoreThenDisconnect only applies at SmtpStage::Data"
+        );
         self.shared.lock().faults.push(PendingFault {
             stage,
             remaining: times,

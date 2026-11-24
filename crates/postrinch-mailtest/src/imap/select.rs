@@ -133,6 +133,15 @@ fn parse_qresync(values: Vec<Value>) -> Result<Qresync, String> {
 }
 
 impl Session {
+    /// Whether the untagged FETCH responses of a command must carry the
+    /// UID: always for a UID command, and for every command once the
+    /// session is CONDSTORE-aware on a server that offers QRESYNC (RFC
+    /// 7162 3.2.4). A CONDSTORE-only server leaves it out of a plain
+    /// STORE's or FETCH's responses, as RFC 9051 does.
+    pub(crate) fn fetch_carries_uid(&self, uid_mode: bool) -> bool {
+        uid_mode || (self.condstore && self.shared.lock().has(Extension::Qresync))
+    }
+
     /// Reports what changed in the selected folder since the client last
     /// heard. `false` when the folder is gone (deleted, or its UIDVALIDITY
     /// changed), in which case the session must end.
@@ -229,14 +238,17 @@ impl Session {
         if let Err(e) = args.end() {
             return Reply::Bad(e);
         }
-        if self.selected.take().is_some() && self.qresync {
-            self.out
-                .extend_from_slice(b"* OK [CLOSED] Previous mailbox closed\r\n");
-        }
         let user = self.user.clone().unwrap_or_default();
         let shared = self.shared.clone();
         let state = shared.lock();
         let condstore_offered = state.has(Extension::Condstore);
+        // RFC 7162 3.2.11: a server offering CONDSTORE or QRESYNC marks
+        // every implicit close, whether or not the client enabled either.
+        // The old folder is closed even if the new one cannot be opened.
+        if self.selected.take().is_some() && (condstore_offered || state.has(Extension::Qresync)) {
+            self.out
+                .extend_from_slice(b"* OK [CLOSED] Previous mailbox closed\r\n");
+        }
         let Some(folder) = state.accounts.get(&user).and_then(|a| a.folder(&name)) else {
             return Reply::No("[NONEXISTENT] No such mailbox".into());
         };

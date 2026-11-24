@@ -153,7 +153,8 @@ fn matches(key: &Key, message: &Message, place: &Place) -> bool {
     let date = message.internal_date.date_naive();
     match key {
         Key::All => true,
-        Key::Flag(name, set) => message.flags.contains(name) == *set,
+        // Flags and keywords compare case-insensitively (RFC 9051 2.3.2).
+        Key::Flag(name, set) => message.flags.iter().any(|f| f.eq_ignore_ascii_case(name)) == *set,
         Key::Seq(s) => s.contains(place.seq, place.largest_seq),
         Key::Uid(s) => s.contains(message.uid, place.largest_uid),
         Key::Header(name, needle) => {

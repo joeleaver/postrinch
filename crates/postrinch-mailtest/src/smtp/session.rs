@@ -4,6 +4,7 @@
 use std::io;
 use std::sync::Arc;
 
+use super::data::{self, Data};
 use super::{ReceivedMessage, SmtpFault, SmtpShared, SmtpStage};
 use crate::conn::Conn;
 use crate::sasl::{self, Claim};
@@ -144,13 +145,13 @@ impl Session {
         self.conn.write_all(out.as_bytes()).await
     }
 
-    /// Applies a programmed failure, if any, for this stage. `Some` when
-    /// the command must stop here.
+    /// Applies a programmed failure, if any, for a stage other than DATA.
+    /// `Some` when the command must stop here.
     async fn fault(&mut self, stage: SmtpStage) -> io::Result<Option<Next>> {
         let fault = self.shared.lock().take_fault(stage);
         match fault {
             None => Ok(None),
-            Some(SmtpFault::Disconnect) => Ok(Some(Next::Close)),
+            Some(SmtpFault::Disconnect | SmtpFault::StoreThenDisconnect) => Ok(Some(Next::Close)),
             Some(SmtpFault::Reply { code, text }) => {
                 self.reply(code, &text).await?;
                 Ok(Some(Next::Continue))
@@ -319,38 +320,45 @@ impl Session {
         }
         self.reply(354, "End data with <CR><LF>.<CR><LF>").await?;
         let max = self.shared.lock().config.max_size;
-        let mut data = Vec::new();
-        let mut too_big = false;
-        loop {
-            let line = self.conn.read_line().await?.ok_or_else(|| {
-                io::Error::new(io::ErrorKind::UnexpectedEof, "client left mid-DATA")
-            })?;
-            if line == b"." {
-                break;
-            }
-            // RFC 5321 4.5.2: a leading dot was doubled by the client.
-            let line = line.strip_prefix(b".").unwrap_or(&line);
-            if data.len() + line.len() + 2 > max {
-                too_big = true;
-            } else {
-                data.extend_from_slice(line);
-                data.extend_from_slice(b"\r\n");
-            }
-        }
+        let read = data::read(&mut self.conn, max).await?;
         let transaction = std::mem::take(&mut self.transaction);
-        if too_big {
-            self.reply(552, "5.3.4 Message too big").await?;
-            return Ok(Next::Continue);
-        }
-        if let Some(next) = self.fault(SmtpStage::Data).await? {
-            return Ok(next);
-        }
-        self.shared.lock().messages.push(ReceivedMessage {
+        let data = match read {
+            Data::Message(data) => data,
+            Data::Refused(code, text) => {
+                self.reply(code, text).await?;
+                return Ok(Next::Continue);
+            }
+            Data::RefusedAndClosed(code, text) => {
+                self.reply(code, text).await?;
+                return Ok(Next::Close);
+            }
+            Data::Eof => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "client left mid-DATA",
+                ));
+            }
+        };
+        let message = ReceivedMessage {
             auth_user: self.user.clone(),
             mail_from: transaction.from.unwrap_or_default(),
             rcpt_to: transaction.to,
             data,
-        });
+        };
+        let fault = self.shared.lock().take_fault(SmtpStage::Data);
+        match fault {
+            Some(SmtpFault::Disconnect) => return Ok(Next::Close),
+            Some(SmtpFault::Reply { code, text }) => {
+                self.reply(code, &text).await?;
+                return Ok(Next::Continue);
+            }
+            Some(SmtpFault::StoreThenDisconnect) => {
+                self.shared.lock().messages.push(message);
+                return Ok(Next::Close);
+            }
+            None => {}
+        }
+        self.shared.lock().messages.push(message);
         self.reply(250, "2.0.0 OK queued").await?;
         Ok(Next::Continue)
     }

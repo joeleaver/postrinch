@@ -26,6 +26,19 @@ pub(crate) trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
 
+/// One line as [`Conn::read_raw_line`] read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RawLine {
+    /// The line's first bytes, its ending included if it fit.
+    pub(crate) bytes: Vec<u8>,
+    /// The whole line's length, its ending included.
+    pub(crate) len: usize,
+    /// Whether it ended in CRLF rather than a bare LF.
+    pub(crate) crlf: bool,
+    /// Whether it held a CR not followed by LF.
+    pub(crate) stray_cr: bool,
+}
+
 /// One client connection with its read buffer.
 pub(crate) struct Conn {
     stream: Option<Box<dyn Io>>,
@@ -69,8 +82,10 @@ impl Conn {
         self.buf.contains(&b'\n')
     }
 
-    /// Takes one buffered line, without its line ending, if a whole one
-    /// has arrived. A bare LF is accepted as a line ending as well as CRLF.
+    /// Takes one buffered command line, without its line ending, if a
+    /// whole one has arrived. A bare LF is accepted as a line ending as
+    /// well as CRLF; message data, where the difference matters, is read
+    /// with [`Conn::read_raw_line`] instead.
     pub(crate) fn take_line(&mut self) -> Option<Vec<u8>> {
         let end = self.buf.iter().position(|&b| b == b'\n')?;
         let mut line: Vec<u8> = self.buf.drain(..=end).collect();
@@ -108,6 +123,60 @@ impl Conn {
             }
         }
         Ok(Some(self.buf.drain(..n).collect()))
+    }
+
+    /// Reads and throws away exactly `n` bytes, a buffer at a time, so a
+    /// huge count costs no memory. `false` if the stream ended first.
+    pub(crate) async fn discard(&mut self, mut n: usize) -> io::Result<bool> {
+        loop {
+            let take = n.min(self.buf.len());
+            self.buf.drain(..take);
+            n -= take;
+            if n == 0 {
+                return Ok(true);
+            }
+            if !self.fill().await? {
+                return Ok(false);
+            }
+        }
+    }
+
+    /// Reads one line exactly as sent, through its LF, keeping at most
+    /// `keep` bytes of it and reading past the rest, and says how it ended
+    /// (see [`RawLine`]). `None` if the stream ended before an LF.
+    pub(crate) async fn read_raw_line(&mut self, keep: usize) -> io::Result<Option<RawLine>> {
+        let mut line = RawLine {
+            bytes: Vec::new(),
+            len: 0,
+            crlf: false,
+            stray_cr: false,
+        };
+        let mut previous = None;
+        loop {
+            let mut end = None;
+            for (i, &b) in self.buf.iter().enumerate() {
+                if previous == Some(b'\r') && b != b'\n' {
+                    line.stray_cr = true;
+                }
+                if b == b'\n' {
+                    line.crlf = previous == Some(b'\r');
+                    end = Some(i + 1);
+                    break;
+                }
+                previous = Some(b);
+            }
+            let take = end.unwrap_or(self.buf.len());
+            let room = keep.saturating_sub(line.bytes.len());
+            line.bytes.extend_from_slice(&self.buf[..take.min(room)]);
+            line.len += take;
+            self.buf.drain(..take);
+            if end.is_some() {
+                return Ok(Some(line));
+            }
+            if !self.fill().await? {
+                return Ok(None);
+            }
+        }
     }
 
     /// Writes and flushes `bytes`.

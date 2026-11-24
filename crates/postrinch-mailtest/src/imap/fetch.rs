@@ -201,8 +201,14 @@ impl Session {
         if wants_modseq && !items.contains(&Item::ModSeq) {
             items.push(Item::ModSeq);
         }
+        // RFC 7162 3.2.4: on a QRESYNC server, a CONDSTORE-aware FETCH
+        // that reports MODSEQ reports the UID with it.
+        let with_uid = self.fetch_carries_uid(uid_mode);
+        if with_uid && items.contains(&Item::ModSeq) && !items.contains(&Item::Uid) {
+            items.insert(0, Item::Uid);
+        }
         self.sync_selected(false);
-        let changed = self.run_fetch(&set, &items, &modifiers, uid_mode);
+        let changed = self.run_fetch(&set, &items, &modifiers, uid_mode, with_uid);
         if changed {
             self.shared.notify();
         }
@@ -210,12 +216,15 @@ impl Session {
     }
 
     /// Writes the FETCH responses; returns whether it set `\Seen` anywhere.
+    /// `with_uid` says whether a response that sets `\Seen` must carry the
+    /// UID (see [`Session::fetch_carries_uid`]).
     fn run_fetch(
         &mut self,
         set: &SeqSet,
         items: &[Item],
         modifiers: &Modifiers,
         uid_mode: bool,
+        with_uid: bool,
     ) -> bool {
         let shared = self.shared.clone();
         let mut state = shared.lock();
@@ -262,9 +271,18 @@ impl Session {
                 && !selected.read_only
                 && folder.change_flags(uid, FlagOp::Add, &seen) == Some(true)
             {
+                // Setting \Seen took a new MODSEQ: the response tells the
+                // new flags and, once CONDSTORE is on, that MODSEQ (and
+                // the UID where RFC 7162 3.2.4 asks for it).
                 changed = true;
                 if !items.contains(&Item::Flags) {
                     items.push(Item::Flags);
+                }
+                if self.condstore && !items.contains(&Item::ModSeq) {
+                    items.push(Item::ModSeq);
+                }
+                if with_uid && !items.contains(&Item::Uid) {
+                    items.insert(0, Item::Uid);
                 }
             }
             let message = folder.find(uid).expect("resolved from this folder");
