@@ -242,11 +242,13 @@ carried a nonsense word, all removed afterwards (messages to the trash).
 - **Import** turns a Gmail filter into a rule, with parts outside the
   vocabulary as a "Gmail search" condition (Gmail only; here it matches
   nothing), and deletes the old filter once the rule's are made.
-- **Ask an agent** starts an agent connected to Claude Code from
-  Postrinch, unattended (`claude -p`, allowed only its Postrinch tools),
+- **Ask an agent** starts an agent connected to Claude from Postrinch
+  whose entry is in `~/.claude.json`, unattended (`claude -p`, allowed
+  only its Postrinch tools),
   one at a time, ten minutes at most. Its answer goes to the log: what it
   can do is label, archive, star or propose a reply. Other apps cannot be
-  started without a window.
+  started without a window. Connecting Claude again replaces its agent;
+  rules that asked the old one ask the new one.
 - **Agents' tools** (`postrinch-mcp`): `list_rules`, `save_rule`,
   `set_rule_on`, `move_rule` and `delete_rule` do what the Rules page does,
   in the accounts the agent may see. Rules travel in a plain shape

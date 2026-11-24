@@ -4,7 +4,7 @@
 
 use postrinch_model::{EmailAddress, ProviderMessageId, ProviderThreadId, Timestamp};
 use postrinch_rules::matching::{Verdict, matches};
-use postrinch_rules::{Elsewhere, Rule, Test};
+use postrinch_rules::{Action, Elsewhere, Rule, Test};
 use postrinch_store::Find;
 use serde::{Deserialize, Serialize};
 
@@ -108,6 +108,46 @@ impl Commands {
             local.elsewhere.retain(|e| e.id != filter);
             local.dirty = true;
             id
+        })?)
+    }
+
+    /// Point the rules that ask an agent which has been replaced at the
+    /// agent that replaced it: `moved` gives the new id for an old one.
+    /// Returns how many rules changed; with none, nothing is written.
+    pub fn move_agent_asks(
+        &self,
+        account: &EmailAddress,
+        moved: impl Fn(&str) -> Option<String>,
+    ) -> CommandResult<usize> {
+        self.check(account)?;
+        let asks_moved = |rule: &Rule| {
+            rule.actions
+                .iter()
+                .any(|a| matches!(a, Action::AskAgent { agent, .. } if moved(agent).is_some()))
+        };
+        let (settings, _) = self.store.rules(account)?;
+        if !settings.rules.rules.iter().any(asks_moved) {
+            return Ok(0);
+        }
+        Ok(self.store.update_rules(account, |settings, local| {
+            let mut changed = 0;
+            for rule in &mut settings.rules.rules {
+                if !asks_moved(rule) {
+                    continue;
+                }
+                for action in &mut rule.actions {
+                    if let Action::AskAgent { agent, .. } = action
+                        && let Some(new) = moved(agent)
+                    {
+                        *agent = new;
+                    }
+                }
+                changed += 1;
+            }
+            if changed > 0 {
+                local.dirty = true;
+            }
+            changed
         })?)
     }
 

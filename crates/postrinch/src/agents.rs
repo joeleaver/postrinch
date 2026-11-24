@@ -5,10 +5,9 @@
 
 use std::sync::Arc;
 
-use postrinch_agents::setup::{
-    bridge_path, command_snippet, entry_name, json_snippet, toml_snippet,
-};
-use postrinch_agents::{Agent, Agents, App, Changed, Gmail, Reach, Setup, serve, wire};
+use postrinch_agents::connect::{self, Changes, Outcome};
+use postrinch_agents::setup::{bridge_path, command_snippet, json_snippet, toml_snippet};
+use postrinch_agents::{Agent, Agents, App, Changed, Gmail, Reach, serve, wire};
 use postrinch_commands::Commands;
 use postrinch_model::EmailAddress;
 
@@ -109,10 +108,35 @@ impl State {
         }
     }
 
-    /// The name the Connect dialog starts with.
+    /// The name the Connect dialog starts with: the app's, unless an agent
+    /// connecting it would not replace has that name already.
     pub fn agent_name_for(self, app: Option<App>) -> String {
         let base = app.map_or("My agent", App::name);
-        open().map_or_else(|_| base.to_owned(), |a| a.free_name(base))
+        open().map_or_else(
+            |_| base.to_owned(),
+            |agents| {
+                let replaced: Vec<String> = app
+                    .map(|app| connect::would_replace(&agents, app))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|a| a.id)
+                    .collect();
+                agents.free_name_ignoring(base, &replaced)
+            },
+        )
+    }
+
+    /// The names of the agents connecting `app` would replace.
+    pub fn agents_replaced_by(self, app: App) -> Vec<String> {
+        open().map_or_else(
+            |_| Vec::new(),
+            |agents| {
+                connect::would_replace(&agents, app)
+                    .into_iter()
+                    .map(|a| a.name)
+                    .collect()
+            },
+        )
     }
 
     /// Make an agent; connect its app, or show its key to paste.
@@ -122,48 +146,44 @@ impl State {
             Err(e) => return self.agent_trouble(e),
         };
         let reach_text = reach_line(&reach);
-        let (agent, key) = match agents.create(name, reach) {
+        let bridge = bridge_path();
+        let made = match connect::connect(&mut agents, app, name, reach, &bridge) {
             Ok(made) => made,
             Err(e) => return self.agent_trouble(e.to_string()),
         };
-        let entry = entry_name(&agent.name);
-        let bridge = bridge_path();
-        let trouble = match app {
-            None => None,
-            Some(app) => match app.add(&entry, &bridge, &key) {
-                Ok(_) => {
-                    let setup = Setup {
-                        app,
-                        entry: entry.clone(),
-                    };
-                    if let Err(e) = agents.set_setup(&agent.id, Some(setup)) {
-                        tracing::warn!("{e}");
-                    }
-                    self.agent_dialog.set(None);
-                    self.notice.set(Some(Notice {
-                        text: format!(
-                            "Added to {}. Restart {} to connect it.",
-                            app.name(),
-                            app.name()
-                        ),
-                        trouble: false,
-                    }));
-                    self.load_agents();
-                    return;
-                }
-                Err(e) => Some(format!(
-                    "{} could not be set up by itself: {e}. Paste this instead.",
-                    app.name()
-                )),
-            },
+        let trouble = match made.outcome {
+            Outcome::ByHand => None,
+            Outcome::Added { changes, .. } => {
+                let app = app.expect("only an app is added to");
+                self.agent_dialog.set(None);
+                self.notice.set(Some(Notice {
+                    text: added_text(app, &changes),
+                    trouble: false,
+                }));
+                self.load_agents();
+                return;
+            }
+            Outcome::Trouble { error, changes } => Some(format!(
+                "{} could not be set up by itself: {error}. Paste this instead{}.{}",
+                app.map_or("The app", App::name),
+                // Another file took the new entry: the one that did not may
+                // still hold an old one, whose key no longer works.
+                if changes.replaced.is_empty() {
+                    ""
+                } else {
+                    ", in place of Postrinch\u{2019}s old entry there"
+                },
+                changes_text(&changes),
+            )),
         };
+        let entry = made.entry;
         self.agent_dialog.set(Some(AgentDialog::Ready(Ready {
-            name: agent.name.clone(),
+            name: made.agent.name.clone(),
             reach: reach_text,
-            json: json_snippet(&entry, &bridge, &key),
-            toml: toml_snippet(&entry, &bridge, &key),
-            command: command_snippet(&bridge, &key),
-            key,
+            json: json_snippet(&entry, &bridge, &made.key),
+            toml: toml_snippet(&entry, &bridge, &made.key),
+            command: command_snippet(&bridge, &made.key),
+            key: made.key,
             trouble,
         })));
         self.load_agents();
@@ -180,7 +200,7 @@ impl State {
         self.load_agents();
     }
 
-    /// Remove an agent, and the entry Postrinch put in its app's settings.
+    /// Remove an agent, and its entries from every app's settings.
     pub fn remove_agent(self, agent: &Agent) {
         let mut agents = match open() {
             Ok(a) => a,
@@ -189,27 +209,29 @@ impl State {
         if let Err(e) = agents.remove(&agent.id) {
             return self.agent_trouble(e.to_string());
         }
-        let text = match &agent.setup {
-            Some(setup) => match setup.app.remove(&setup.entry) {
-                Ok(_) => format!(
-                    "Removed {}, and its entry from {}\u{2019}s settings.",
-                    agent.name,
-                    setup.app.name()
-                ),
-                Err(e) => format!(
-                    "Removed {}. Its entry in {}\u{2019}s settings stays: {e}",
-                    agent.name,
-                    setup.app.name()
-                ),
-            },
-            None => format!(
+        let done = connect::disconnect(agent);
+        let mut text = match (&agent.setup, done.files.is_empty()) {
+            (_, false) => format!(
+                "Removed {}, and its entry from {}.",
+                agent.name,
+                files_line(&done.files)
+            ),
+            (Some(setup), true) => format!(
+                "Removed {}. {}\u{2019}s settings no longer held its entry.",
+                agent.name,
+                setup.app.name()
+            ),
+            (None, true) => format!(
                 "Removed {}. Take its entry out of the app\u{2019}s settings too.",
                 agent.name
             ),
         };
+        for e in &done.trouble {
+            text.push_str(&format!(" It may still be in {e}."));
+        }
         self.notice.set(Some(Notice {
             text,
-            trouble: false,
+            trouble: !done.trouble.is_empty(),
         }));
         self.load_agents();
     }
@@ -228,6 +250,76 @@ pub fn reach_of(every: bool, chosen: &[EmailAddress]) -> Reach {
         Reach::Every
     } else {
         Reach::Only(chosen.to_vec())
+    }
+}
+
+/// What the notice says once `app` is set up.
+fn added_text(app: App, changes: &Changes) -> String {
+    let what = match app {
+        App::Claude => "Added to Claude, for its Chat and Code tabs and the terminal",
+        App::Codex => "Added to Codex",
+        App::Cursor => "Added to Cursor",
+    };
+    format!(
+        "{what}. Restart {} to connect it.{}",
+        app.name(),
+        changes_text(changes)
+    )
+}
+
+/// What connecting did to other agents, after a space; or nothing.
+fn changes_text(changes: &Changes) -> String {
+    let mut text = replaced_text(&changes.replaced);
+    let left: Vec<String> = changes.left.iter().map(|a| a.name.clone()).collect();
+    match left.len() {
+        0 => {}
+        1 => text.push_str(&format!(
+            " {}\u{2019}s entry came out of Claude\u{2019}s settings; it still works where it is set up.",
+            left[0]
+        )),
+        _ => text.push_str(&format!(
+            " The entries of {} came out of Claude\u{2019}s settings; they still work where they are set up.",
+            and_list(&left)
+        )),
+    }
+    text
+}
+
+/// " It replaces A and B: …", or nothing when nothing was replaced.
+pub fn replaced_text(replaced: &[Agent]) -> String {
+    let names: Vec<String> = replaced.iter().map(|a| a.name.clone()).collect();
+    match names.len() {
+        0 => String::new(),
+        1 => format!(
+            " It replaces {}: that key no longer works, and rules that asked it ask this one.",
+            names[0]
+        ),
+        _ => format!(
+            " It replaces {}: their keys no longer work, and rules that asked them ask this one.",
+            and_list(&names)
+        ),
+    }
+}
+
+/// "A", "A and B", "A, B and C".
+pub fn and_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The files, with the home folder as `~`.
+pub fn files_line(files: &[std::path::PathBuf]) -> String {
+    and_list(&files.iter().map(|f| tilde(f)).collect::<Vec<_>>())
+}
+
+/// A path, with the home folder as `~`.
+pub fn tilde(path: &std::path::Path) -> String {
+    match dirs::home_dir().and_then(|home| path.strip_prefix(home).ok().map(ToOwned::to_owned)) {
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
     }
 }
 

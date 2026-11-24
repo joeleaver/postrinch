@@ -60,7 +60,27 @@ pub struct Agent {
     /// Postrinch rather than by hand.
     #[serde(default)]
     pub setup: Option<Setup>,
+    /// The agents this one took the place of, by id, theirs included: rules
+    /// that asked them ask this one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replaces: Vec<String>,
     key_sha256: String,
+}
+
+impl Agent {
+    /// Whether `key` is this agent's.
+    pub fn holds_key(&self, key: &str) -> bool {
+        let hash = hex(&Sha256::digest(key.as_bytes()));
+        same(hash.as_bytes(), self.key_sha256.as_bytes())
+    }
+}
+
+/// An agent made but not saved yet ([`Agents::mint`]).
+#[derive(Debug)]
+pub struct Pending {
+    pub agent: Agent,
+    /// Its key, which is not kept.
+    pub key: String,
 }
 
 /// An app's settings entry Postrinch wrote for an agent.
@@ -119,6 +139,21 @@ impl Agents {
     /// Make an agent. Returns it and its key, which is not kept: show it
     /// to the person now.
     pub fn create(&mut self, name: &str, reach: Reach) -> Result<(Agent, String), RegistryError> {
+        let pending = self.mint(name, reach, &[])?;
+        let key = pending.key.clone();
+        let (agent, _) = self.commit(pending, None)?;
+        Ok((agent, key))
+    }
+
+    /// An agent to make in place of the agents `retire` names (by id),
+    /// with its key, not saved yet: nothing changes until [`Self::commit`].
+    /// Its name may be one of theirs, as they will be gone.
+    pub fn mint(
+        &self,
+        name: &str,
+        reach: Reach,
+        retire: &[String],
+    ) -> Result<Pending, RegistryError> {
         let name = name.trim();
         if name.is_empty() {
             return Err(RegistryError::NoName);
@@ -126,7 +161,7 @@ impl Agents {
         if self
             .agents
             .iter()
-            .any(|a| a.name.eq_ignore_ascii_case(name))
+            .any(|a| a.name.eq_ignore_ascii_case(name) && !retire.contains(&a.id))
         {
             return Err(RegistryError::NameTaken(name.to_owned()));
         }
@@ -142,11 +177,48 @@ impl Agents {
             created: now(),
             last_used: None,
             setup: None,
+            replaces: self
+                .agents
+                .iter()
+                .filter(|a| retire.contains(&a.id))
+                .flat_map(|a| std::iter::once(a.id.clone()).chain(a.replaces.iter().cloned()))
+                .collect(),
             key_sha256: hex(&Sha256::digest(key.as_bytes())),
         };
+        Ok(Pending { agent, key })
+    }
+
+    /// Save a minted agent, with where its entry went, and remove the
+    /// agents it replaces, in one save: their keys stop working and rules
+    /// that asked them ask it. Returns it and the agents removed.
+    pub fn commit(
+        &mut self,
+        pending: Pending,
+        setup: Option<Setup>,
+    ) -> Result<(Agent, Vec<Agent>), RegistryError> {
+        let before = self.agents.clone();
+        let mut agent = pending.agent;
+        agent.setup = setup;
+        let (retired, kept): (Vec<Agent>, Vec<Agent>) = std::mem::take(&mut self.agents)
+            .into_iter()
+            .partition(|a| agent.replaces.contains(&a.id));
+        self.agents = kept;
         self.agents.push(agent.clone());
-        self.save()?;
-        Ok((agent, key))
+        if let Err(e) = self.save() {
+            // Nothing changed on disk: nor here.
+            self.agents = before;
+            return Err(e);
+        }
+        Ok((agent, retired))
+    }
+
+    /// The agent `id` names: that agent, or the one that took its place.
+    pub fn get(&self, id: &str) -> Option<&Agent> {
+        self.agents.iter().find(|a| a.id == id).or_else(|| {
+            self.agents
+                .iter()
+                .find(|a| a.replaces.iter().any(|r| r == id))
+        })
     }
 
     /// Remove an agent by id or name. Its key stops working at once.
@@ -165,7 +237,17 @@ impl Agents {
 
     /// `base`, or `base 2`, `base 3`…: a name no agent has yet.
     pub fn free_name(&self, base: &str) -> String {
-        let taken = |n: &str| self.agents.iter().any(|a| a.name.eq_ignore_ascii_case(n));
+        self.free_name_ignoring(base, &[])
+    }
+
+    /// A name free once the agents `ignore` names (by id) are gone: those a
+    /// new agent will replace.
+    pub fn free_name_ignoring(&self, base: &str, ignore: &[String]) -> String {
+        let taken = |n: &str| {
+            self.agents
+                .iter()
+                .any(|a| a.name.eq_ignore_ascii_case(n) && !ignore.contains(&a.id))
+        };
         let base = base.trim();
         if !taken(base) {
             return base.to_owned();
@@ -199,8 +281,7 @@ impl Agents {
         let rest = key.strip_prefix(KEY_PREFIX)?;
         let (id, _) = rest.split_once('_')?;
         let agent = self.agents.iter().find(|a| a.id == id)?;
-        let hash = hex(&Sha256::digest(key.as_bytes()));
-        same(hash.as_bytes(), agent.key_sha256.as_bytes()).then_some(agent)
+        agent.holds_key(key).then_some(agent)
     }
 
     /// Note that an agent was used now, at most once a minute.
@@ -317,7 +398,7 @@ mod tests {
         assert_eq!(agents.free_name("Cursor"), "Cursor");
         agents.set_reach(&agent.id, Reach::Every).unwrap();
         let setup = Setup {
-            app: App::ClaudeDesktop,
+            app: App::Claude,
             entry: "postrinch-claude-desktop".into(),
         };
         agents.set_setup(&agent.id, Some(setup.clone())).unwrap();

@@ -12,7 +12,6 @@ use std::sync::atomic::AtomicUsize;
 use crate::later::{self, Finished};
 use crate::registry::Agents;
 use crate::rule_shape::{Names, RuleShape};
-use crate::setup::App;
 use crate::views::{Asker, say};
 use crate::wire::Call;
 use crate::wire::Changed;
@@ -247,7 +246,7 @@ fn known(commands: &Commands, account: &EmailAddress, id: u32) -> Result<Rule, S
 struct AccountNames {
     account: EmailAddress,
     labels: Vec<LabelChoice>,
-    /// Agents set up in Claude Code, by id and name: the ones a rule can
+    /// Agents connected to Claude, by id and name: the ones a rule can
     /// start.
     agents: Vec<(String, String)>,
 }
@@ -257,11 +256,9 @@ impl AccountNames {
         Ok(Self {
             account: account.clone(),
             labels: commands.label_choices(account).map_err(say)?,
-            agents: agents
-                .list()
-                .iter()
-                .filter(|a| a.setup.as_ref().is_some_and(|s| s.app == App::ClaudeCode))
-                .map(|a| (a.id.clone(), a.name.clone()))
+            agents: crate::connect::askable(agents)
+                .into_iter()
+                .map(|a| (a.id, a.name))
                 .collect(),
         })
     }
@@ -301,11 +298,11 @@ impl Names for AccountNames {
             .ok_or_else(|| {
                 let known: Vec<&str> = self.agents.iter().map(|(_, n)| n.as_str()).collect();
                 if known.is_empty() {
-                    "A rule can ask only an agent set up in Claude Code, and there is none."
+                    "A rule can ask only an agent connected to Claude from Postrinch, and there is none."
                         .to_owned()
                 } else {
                     format!(
-                        "A rule can ask only an agent set up in Claude Code: {}.",
+                        "A rule can ask only an agent connected to Claude from Postrinch: {}.",
                         known.join(", ")
                     )
                 }
