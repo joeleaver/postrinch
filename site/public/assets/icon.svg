@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Postrinch">
+  <title>Postrinch</title>
+  <!-- The app icon: the paper-plane mark, in white and pale blue, on a
+       rounded square of the accent blue. Same drawing as plane.svg, enlarged and
+       to sit centred in the square. -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#2456b8"/>
+  <g transform="translate(32 32) scale(1.27) translate(-30.6 -31.2)" stroke-linejoin="round" stroke-linecap="round">
+    <g transform="translate(16.7 43.6) rotate(-38) scale(1.15)">
+      <g fill="#0f2a5e" stroke="#0f2a5e" stroke-width="3">
+        <rect x="2" y="-1.15" width="9.5" height="2.3" rx="1.15"/>
+        <path d="M-2.95 -1.7 A3.4 3.4 0 1 1 -2.95 1.7 L-0.3 1.7 L-0.3 -1.7 Z"/>
+      </g>
+      <g fill="#bcd4f6">
+        <rect x="2" y="-1.15" width="9.5" height="2.3" rx="1.15"/>
+        <path d="M-2.95 -1.7 A3.4 3.4 0 1 1 -2.95 1.7 L-0.3 1.7 L-0.3 -1.7 Z"/>
+      </g>
+    </g>
+    <g stroke="#0f2a5e" stroke-width="2">
+      <path d="M48 18.5 L15.5 29 L24 32.8 Z" fill="#ffffff"/>
+      <path d="M48 18.5 L24 32.8 L25.4 36.8 Z" fill="#bcd4f6"/>
+      <path d="M48 18.5 L25.4 36.8 L31.6 44 Z" fill="#ffffff"/>
+    </g>
+  </g>
+</svg>

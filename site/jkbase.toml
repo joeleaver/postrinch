@@ -1,0 +1,8 @@
+[project]
+name = "postrinch"
+# Only public/ is served; the deploy script and its notes stay in the repo.
+ignore = ["README.md", "deploy.sh"]
+
+[hosting]
+public = "public"
+spa = false
