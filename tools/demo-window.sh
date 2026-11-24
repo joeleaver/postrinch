@@ -15,11 +15,11 @@
 #   * XDG_CACHE_HOME, XDG_STATE_HOME → <scratch>/cache, <scratch>/state, so
 #                                        opened attachments and logs stay there
 #   * CODEX_HOME unset, so Codex is looked for in the scratch home only
+#   * POSTRINCH_APP_ADDR → 127.0.0.1:7466, off the installed window's port
 #
 # In that home the demo person has Claude and Cursor (empty .claude/,
 # Claude/ and .cursor/ folders), so Settings › Agents finds them and
 # connecting one writes its settings there.
-#   * POSTRINCH_APP_ADDR → 127.0.0.1:7466, off the installed window's port
 #
 # With sync off the window says so in the sidebar's Sync section ("Sync is
 # off: Google sign-in is not set up on this computer."), and an invitation

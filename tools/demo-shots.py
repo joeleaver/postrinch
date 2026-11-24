@@ -25,17 +25,36 @@ import struct
 import sys
 import time
 
+# The window's size, and so every shot's.
+WIDTH, HEIGHT = 1440, 900
+
 
 class Window:
-    """One demo window's debug server."""
+    """One demo window's debug server, as a context manager that closes
+    the connection however the steps end."""
 
     def __init__(self, pid):
         with open(os.path.expanduser(f"~/.rinch/debug/{pid}.json")) as f:
             found = json.load(f)
-        self.sock = socket.create_connection(("127.0.0.1", found["port"]))
+        # A window that stops answering fails the step, rather than
+        # leaving the script waiting for good.
+        self.sock = socket.create_connection(("127.0.0.1", found["port"]), timeout=30)
         self.next_id = 0
-        self._send({"protocol": "rinch-debug", "version": 1, "token": found["token"]})
-        self._recv()
+        try:
+            self._send({"protocol": "rinch-debug", "version": 1, "token": found["token"]})
+            reply = self._recv()
+        except BaseException:
+            self.sock.close()
+            raise
+        if isinstance(reply, dict) and reply.get("error"):
+            self.sock.close()
+            raise ConnectionRefusedError(f"the window refused the connection: {reply['error']}")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.sock.close()
 
     def _send(self, obj):
         data = json.dumps(obj).encode()
@@ -69,13 +88,13 @@ class Window:
 
     def find(self, selector, text=None):
         """Elements matching `selector` whose text contains `text`, in
-        document order: those shown, as a hidden one has no size."""
+        document order: those shown, as a hidden one has no size, and
+        whose middle is inside the window, where a click would reach it."""
         found = self.call("query_selector", {"selector": selector}) or []
         return [
             e
             for e in found
-            if e["absolute"]["width"] > 0
-            and e["absolute"]["height"] > 0
+            if shown(e["absolute"])
             and (text is None or text in (e.get("text_content") or ""))
         ]
 
@@ -102,13 +121,24 @@ class Window:
         time.sleep(0.8)
 
     def shot(self, path):
+        """Write the window as it is to `path`, once it is checked to be a
+        PNG of the window's size: a wrong one is never written."""
         png = self.call("screenshot")
+        if png[:8] != b"\x89PNG\r\n\x1a\n":
+            raise RuntimeError(f"the screenshot for {path} is not a PNG")
+        width, height = struct.unpack(">II", png[16:24])
+        if (width, height) != (WIDTH, HEIGHT):
+            raise RuntimeError(f"the screenshot for {path} is {width}x{height}, not {WIDTH}x{HEIGHT}")
         with open(path, "wb") as f:
             f.write(png)
-        width, height = struct.unpack(">II", png[16:24])
-        if (width, height) != (1440, 900):
-            raise RuntimeError(f"{path} is {width}x{height}, not 1440x900")
         print(f"wrote {path}")
+
+
+def shown(box):
+    """Whether an element's box has a size and its middle is in the window."""
+    x = box["x"] + box["width"] / 2
+    y = box["y"] + box["height"] / 2
+    return box["width"] > 0 and box["height"] > 0 and 0 <= x < WIDTH and 0 <= y < HEIGHT
 
 
 def settings(w, section):
@@ -177,7 +207,12 @@ def main():
     find_cmd.add_argument("selector")
     find_cmd.add_argument("text", nargs="?")
     args = parser.parse_args()
-    w = Window(args.pid)
+    with Window(args.pid) as w:
+        run(w, args)
+
+
+def run(w, args):
+    """Do what the command line asks, through the window `w`."""
     if args.command == "find":
         for e in w.find(args.selector, args.text):
             box = e["absolute"]
