@@ -154,6 +154,7 @@ fn body(state: State) -> NodeHandle {
             p { class: "panel-kind", {move || title.get()} }
             div { class: "panel-title",
                 TextInput {
+                    spellcheck: false,
                     placeholder: name_hint,
                     value_fn: move || read(state, |e| e.draft.name.clone()),
                     oninput: move |v: String| state.change_edit(|view| view.name = v),

@@ -88,6 +88,7 @@ pub fn editor(state: State) -> NodeHandle {
             label { class: "editor-field",
                 span { class: "editor-label", "What" }
                 TextInput {
+                    spellcheck: true,
                     value_fn: move || get(state, |f| f.summary.clone()),
                     oninput: move |v: String| state.edit_form(|f| f.summary = v),
                 }
@@ -96,13 +97,13 @@ pub fn editor(state: State) -> NodeHandle {
                 div { class: "editor-row",
                     label { class: "editor-field",
                         span { class: "editor-label", "From" }
-                        TextInput { placeholder: "2026-11-25",
+                        TextInput { spellcheck: false, placeholder: "2026-11-25",
                             value_fn: move || get(state, |f| f.day.clone()),
                             oninput: move |v: String| state.edit_form(|f| f.day = v) }
                     }
                     label { class: "editor-field",
                         span { class: "editor-label", "To" }
-                        TextInput { placeholder: "2026-11-25",
+                        TextInput { spellcheck: false, placeholder: "2026-11-25",
                             value_fn: move || get(state, |f| f.last_day.clone()),
                             oninput: move |v: String| state.edit_form(|f| f.last_day = v) }
                     }
@@ -111,19 +112,19 @@ pub fn editor(state: State) -> NodeHandle {
                 div { class: "editor-row",
                     label { class: "editor-field wide",
                         span { class: "editor-label", "Day" }
-                        TextInput { placeholder: "2026-11-25",
+                        TextInput { spellcheck: false, placeholder: "2026-11-25",
                             value_fn: move || get(state, |f| f.day.clone()),
                             oninput: move |v: String| state.edit_form(|f| f.day = v) }
                     }
                     label { class: "editor-field",
                         span { class: "editor-label", "From" }
-                        TextInput { placeholder: "14:00",
+                        TextInput { spellcheck: false, placeholder: "14:00",
                             value_fn: move || get(state, |f| f.from.clone()),
                             oninput: move |v: String| state.edit_form(|f| f.from = v) }
                     }
                     label { class: "editor-field",
                         span { class: "editor-label", "To" }
-                        TextInput { placeholder: "15:00",
+                        TextInput { spellcheck: false, placeholder: "15:00",
                             value_fn: move || get(state, |f| f.to.clone()),
                             oninput: move |v: String| state.edit_form(|f| f.to = v) }
                     }
@@ -145,6 +146,7 @@ pub fn editor(state: State) -> NodeHandle {
             label { class: "editor-field",
                 span { class: "editor-label", "Where" }
                 TextInput {
+                    spellcheck: false,
                     value_fn: move || get(state, |f| f.location.clone()),
                     oninput: move |v: String| state.edit_form(|f| f.location = v),
                 }
@@ -152,6 +154,7 @@ pub fn editor(state: State) -> NodeHandle {
             label { class: "editor-field",
                 span { class: "editor-label", "Guests" }
                 TextInput {
+                    spellcheck: false,
                     placeholder: "Ada <ada@example.org>, bob@example.org",
                     value_fn: move || get(state, |f| f.guests.clone()),
                     oninput: move |v: String| state.edit_form(|f| f.guests = v),
@@ -160,6 +163,7 @@ pub fn editor(state: State) -> NodeHandle {
             label { class: "editor-field grow",
                 span { class: "editor-label", "Notes" }
                 Textarea {
+                    spellcheck: true,
                     value_fn: move || get(state, |f| f.notes.clone()),
                     oninput: move |v: String| state.edit_form(|f| f.notes = v),
                 }

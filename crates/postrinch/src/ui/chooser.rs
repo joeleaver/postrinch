@@ -83,6 +83,7 @@ where
                     {extra}
                 }
                 TextInput {
+                    spellcheck: false,
                     size: "sm",
                     placeholder: placeholder,
                     value_fn: move || find.get(),

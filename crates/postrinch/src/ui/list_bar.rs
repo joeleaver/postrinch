@@ -33,6 +33,7 @@ pub fn list_bar(state: State) -> NodeHandle {
                 div { key: key.clone(), class: "list-filter",
                     style: {move || if searching() { "display: none" } else { "" }},
                     TextInput {
+                        spellcheck: false,
                         id: FILTER_ID,
                         size: "sm",
                         placeholder: {format!("Filter {}", view_name(state))},

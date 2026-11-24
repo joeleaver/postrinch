@@ -141,6 +141,7 @@ fn connect(state: State, app: Option<App>, editing: Option<Agent>) -> NodeHandle
                 div { class: "agent-field",
                     span { class: "agent-field-name", "Name" }
                     TextInput {
+                        spellcheck: false,
                         value_fn: move || name.get(),
                         oninput: move |v: String| name.set(v),
                     }
