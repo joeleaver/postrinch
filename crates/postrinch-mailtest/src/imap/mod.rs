@@ -1,0 +1,161 @@
+//! The fake IMAP server.
+//!
+//! [`ImapServer::start`] listens on loopback ports (implicit TLS, and
+//! optionally plain text with STARTTLS) and serves each connection from
+//! the shared in-memory state. The test drives the mail itself through
+//! [`ImapServer::user`] (a [`UserHandle`]), programs failures with
+//! [`ImapServer::fail_next`], and checks what the client did with
+//! [`ImapServer::commands`] and [`ImapServer::command_count`].
+
+mod auth;
+mod config;
+mod fetch;
+mod idle;
+mod mailbox;
+mod mailbox_cmds;
+mod message;
+mod message_cmds;
+mod parser;
+mod response;
+mod search;
+mod select;
+mod seqset;
+mod session;
+mod state;
+mod user;
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use tokio::task::JoinHandle;
+
+pub use config::{Extension, ImapConfig};
+pub use mailbox::{DELIMITER, SpecialUse};
+pub use state::ImapFault;
+pub use user::{FolderInfo, MessageInfo, NewMessage, UserHandle};
+
+use crate::Error;
+use crate::listener;
+use crate::tls::TestCertificate;
+use session::Session;
+use state::{Shared, State};
+
+/// A running fake IMAP server. Dropping it stops the server and every
+/// session on it.
+pub struct ImapServer {
+    shared: Arc<Shared>,
+    certificate: TestCertificate,
+    tls_addr: Option<SocketAddr>,
+    starttls_addr: Option<SocketAddr>,
+    listeners: Vec<JoinHandle<()>>,
+}
+
+impl std::fmt::Debug for ImapServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImapServer")
+            .field("tls_addr", &self.tls_addr)
+            .field("starttls_addr", &self.starttls_addr)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ImapServer {
+    /// Starts a server with a fresh self-signed certificate. Needs a tokio
+    /// runtime.
+    pub async fn start(config: ImapConfig) -> Result<Self, Error> {
+        let certificate = TestCertificate::generate()?;
+        let (implicit, starttls) = (config.implicit_tls, config.starttls);
+        let shared = Arc::new(Shared::new(State::new(config), certificate.acceptor()?));
+        let mut server = Self {
+            shared,
+            certificate,
+            tls_addr: None,
+            starttls_addr: None,
+            listeners: Vec::new(),
+        };
+        if implicit {
+            server.tls_addr = Some(server.listen(true).await?);
+        }
+        if starttls {
+            server.starttls_addr = Some(server.listen(false).await?);
+        }
+        Ok(server)
+    }
+
+    async fn listen(&mut self, tls: bool) -> Result<SocketAddr, Error> {
+        let shared = self.shared.clone();
+        let (addr, task) = listener::listen(self.shared.acceptor.clone(), tls, move |conn| {
+            Session::new(shared.clone(), conn).run()
+        })
+        .await?;
+        self.listeners.push(task);
+        Ok(addr)
+    }
+
+    /// The implicit-TLS address (993-style), if it listens on one.
+    pub fn tls_addr(&self) -> Option<SocketAddr> {
+        self.tls_addr
+    }
+
+    /// The plain-text STARTTLS address (143-style), if it listens on one.
+    pub fn starttls_addr(&self) -> Option<SocketAddr> {
+        self.starttls_addr
+    }
+
+    /// The certificate the server presents, for the client to trust.
+    pub fn certificate(&self) -> &TestCertificate {
+        &self.certificate
+    }
+
+    /// The test's access to one user's mail. The user must have been
+    /// configured; the handle's methods fail with [`Error::UnknownUser`]
+    /// otherwise.
+    pub fn user(&self, name: &str) -> UserHandle {
+        UserHandle::new(self.shared.clone(), name)
+    }
+
+    /// Makes the next `times` commands named `command` fail as `fault`
+    /// says. Names are as the client sends them, upper case, with `UID `
+    /// before UID commands: `"SELECT"`, `"UID FETCH"`, `"UID MOVE"`.
+    pub fn fail_next(&self, command: &str, times: usize, fault: ImapFault) {
+        self.shared.lock().add_fault(command, times, fault);
+    }
+
+    /// Closes every open connection at once, as a server restart would.
+    pub fn disconnect_all(&self) {
+        self.shared.lock().kill_epoch += 1;
+        self.shared.notify();
+    }
+
+    /// Every command received so far, in order, without tags, literals
+    /// shown as `{n}` and LOGIN's credentials hidden: for example
+    /// `UID FETCH 1:* (FLAGS) (CHANGEDSINCE 4)`.
+    pub fn commands(&self) -> Vec<String> {
+        self.shared
+            .lock()
+            .log
+            .iter()
+            .map(|c| c.text.clone())
+            .collect()
+    }
+
+    /// How many commands named `command` (as for [`ImapServer::fail_next`])
+    /// were received.
+    pub fn command_count(&self, command: &str) -> usize {
+        let command = command.to_ascii_uppercase();
+        self.shared
+            .lock()
+            .log
+            .iter()
+            .filter(|c| c.name == command)
+            .count()
+    }
+}
+
+impl Drop for ImapServer {
+    fn drop(&mut self) {
+        for listener in &self.listeners {
+            listener.abort();
+        }
+    }
+}
