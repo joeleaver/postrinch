@@ -23,5 +23,6 @@ tracing = { workspace = true }
 url = "2"
 
 [dev-dependencies]
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
 wiremock = "0.6"

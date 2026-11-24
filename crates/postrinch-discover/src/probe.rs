@@ -3,7 +3,15 @@
 //!
 //! A TLS server (993, 465) must complete a TLS handshake that the
 //! platform's verifier accepts, then greet as its protocol does. A STARTTLS
-//! server (143, 587) must greet and offer STARTTLS. No one signs in.
+//! server (143, 587) must greet, offer STARTTLS, accept it, and then
+//! complete the same verified handshake. No one signs in.
+//!
+//! The server's name is resolved and its addresses tried as RFC 8305 says
+//! ([`connect`]), so one unreachable address does not use up the probe's
+//! time.
+
+mod connect;
+mod dialogue;
 
 use std::sync::Arc;
 
@@ -11,20 +19,12 @@ use rustls::ClientConfig;
 use rustls::pki_types::ServerName;
 use rustls_platform_verifier::BuilderVerifierExt;
 use thiserror::Error;
-use tokio::io::{
-    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
-};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio_rustls::TlsConnector;
+use tokio_rustls::client::TlsStream;
 
 use crate::BoxFuture;
 use crate::types::Security;
-
-/// The longest line read from a server while probing.
-const MAX_LINE: usize = 8 * 1024;
-
-/// The most lines read for one reply while probing.
-const MAX_LINES: usize = 100;
 
 /// Which protocol a server is probed for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,6 +47,13 @@ pub enum ProbeError {
     /// The server does not offer STARTTLS.
     #[error("the server does not offer STARTTLS")]
     NoStartTls,
+    /// The server offered STARTTLS, then refused it.
+    #[error("the server refused STARTTLS: {0:?}")]
+    StartTlsRefused(String),
+    /// An IMAP server on a STARTTLS port greeted with `* PREAUTH`: it signs
+    /// the connection in before TLS can start, so TLS never can.
+    #[error("the server signs in before TLS (PREAUTH)")]
+    PreAuth,
     /// The server closed the connection or sent something unreadable.
     #[error("{0}")]
     Io(String),
@@ -90,9 +97,28 @@ impl NetProbe {
             .with_safe_default_protocol_versions()?
             .with_platform_verifier()?
             .with_no_client_auth();
-        Ok(NetProbe {
-            tls: TlsConnector::from(Arc::new(config)),
-        })
+        Ok(Self::with_tls_config(Arc::new(config)))
+    }
+
+    /// A prober verifying certificates as `config` says instead: tests use
+    /// this to trust a root of their own.
+    pub fn with_tls_config(config: Arc<ClientConfig>) -> Self {
+        NetProbe {
+            tls: TlsConnector::from(config),
+        }
+    }
+
+    /// The TLS handshake, the certificate verified for `host`.
+    async fn handshake<S>(&self, host: &str, stream: S) -> Result<TlsStream<S>, ProbeError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        let name = ServerName::try_from(host.to_owned())
+            .map_err(|e| ProbeError::Connect(e.to_string()))?;
+        self.tls
+            .connect(name, stream)
+            .await
+            .map_err(|e| ProbeError::Connect(e.to_string()))
     }
 
     async fn run(
@@ -102,31 +128,41 @@ impl NetProbe {
         port: u16,
         security: Security,
     ) -> Result<(), ProbeError> {
-        let tcp = TcpStream::connect((host, port))
+        let tcp = connect::connect(host, port)
             .await
             .map_err(|e| ProbeError::Connect(e.to_string()))?;
         match security {
             Security::Tls => {
-                let name = ServerName::try_from(host.to_owned())
-                    .map_err(|e| ProbeError::Connect(e.to_string()))?;
-                let tls = self
-                    .tls
-                    .connect(name, tcp)
-                    .await
-                    .map_err(|e| ProbeError::Connect(e.to_string()))?;
-                let mut stream = BufReader::new(tls);
+                let mut stream = BufReader::new(self.handshake(host, tcp).await?);
                 match protocol {
-                    Protocol::Imap => imap_greeting(&mut stream).await.map(drop),
-                    Protocol::Smtp => smtp_reply(&mut stream, 220).await.map(drop),
+                    Protocol::Imap => dialogue::imap_greeting(&mut stream).await.map(drop),
+                    Protocol::Smtp => dialogue::smtp_reply(&mut stream, 220).await.map(drop),
                 }
             }
             Security::StartTls => {
                 let local = tcp.local_addr()?.ip();
-                let mut stream = BufReader::new(tcp);
+                let mut plain = BufReader::new(tcp);
                 match protocol {
-                    Protocol::Imap => imap_starttls(&mut stream).await,
-                    Protocol::Smtp => smtp_starttls(&mut stream, local).await,
+                    Protocol::Imap => dialogue::imap_starttls(&mut plain).await?,
+                    Protocol::Smtp => dialogue::smtp_starttls(&mut plain, local).await?,
                 }
+                // Bytes sent after the go-ahead but before the handshake
+                // could be taken for the server's answers over TLS.
+                if !plain.buffer().is_empty() {
+                    return Err(ProbeError::Io(
+                        "the server sent data before TLS began".to_owned(),
+                    ));
+                }
+                let mut tls = self.handshake(host, plain.into_inner()).await?;
+                // Courtesy only: the probe's answer is already known.
+                let goodbye: &[u8] = match protocol {
+                    Protocol::Imap => b"P3 LOGOUT\r\n",
+                    Protocol::Smtp => b"QUIT\r\n",
+                };
+                if tls.write_all(goodbye).await.is_ok() {
+                    let _ = tls.flush().await;
+                }
+                Ok(())
             }
         }
     }
@@ -141,126 +177,5 @@ impl Probe for NetProbe {
         security: Security,
     ) -> BoxFuture<'a, Result<(), ProbeError>> {
         Box::pin(self.run(protocol, host, port, security))
-    }
-}
-
-/// Reads one line, without its line ending.
-async fn read_line<S: AsyncBufRead + Unpin>(stream: &mut S) -> Result<String, ProbeError> {
-    let mut line = Vec::new();
-    let read = (&mut *stream)
-        .take(MAX_LINE as u64)
-        .read_until(b'\n', &mut line)
-        .await?;
-    if read == 0 {
-        return Err(ProbeError::Io(
-            "the server closed the connection".to_owned(),
-        ));
-    }
-    if line.last() != Some(&b'\n') {
-        return Err(ProbeError::Io(
-            "the server sent an over-long line".to_owned(),
-        ));
-    }
-    let text = String::from_utf8_lossy(&line);
-    Ok(text.trim_end_matches(['\r', '\n']).to_owned())
-}
-
-/// Reads an IMAP greeting, which must be `* OK` or `* PREAUTH`.
-async fn imap_greeting<S: AsyncBufRead + Unpin>(stream: &mut S) -> Result<String, ProbeError> {
-    let line = read_line(stream).await?;
-    let upper = line.to_ascii_uppercase();
-    if upper.starts_with("* OK") || upper.starts_with("* PREAUTH") {
-        Ok(line)
-    } else {
-        Err(ProbeError::Greeting(line))
-    }
-}
-
-/// `text` lists `STARTTLS` among its space-separated words.
-fn lists_starttls(text: &str) -> bool {
-    text.split([' ', '[', ']'])
-        .any(|word| word.eq_ignore_ascii_case("STARTTLS"))
-}
-
-/// An IMAP server on a plain port: greets, and offers STARTTLS in its
-/// greeting's capabilities or in answer to CAPABILITY.
-async fn imap_starttls<S>(stream: &mut BufReader<S>) -> Result<(), ProbeError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    let greeting = imap_greeting(stream).await?;
-    let offered = if greeting.to_ascii_uppercase().contains("[CAPABILITY ") {
-        lists_starttls(&greeting)
-    } else {
-        stream.get_mut().write_all(b"P1 CAPABILITY\r\n").await?;
-        let mut offered = false;
-        for _ in 0..MAX_LINES {
-            let line = read_line(stream).await?;
-            let upper = line.to_ascii_uppercase();
-            if upper.starts_with("* CAPABILITY ") {
-                offered |= lists_starttls(&line);
-            } else if upper.starts_with("P1 ") {
-                break;
-            }
-        }
-        offered
-    };
-    // Courtesy only: the probe's answer is already known.
-    let _ = stream.get_mut().write_all(b"P2 LOGOUT\r\n").await;
-    if offered {
-        Ok(())
-    } else {
-        Err(ProbeError::NoStartTls)
-    }
-}
-
-/// Reads an SMTP reply (all its lines), which must have status `code`.
-async fn smtp_reply<S: AsyncBufRead + Unpin>(
-    stream: &mut S,
-    code: u16,
-) -> Result<Vec<String>, ProbeError> {
-    let mut lines = Vec::new();
-    for _ in 0..MAX_LINES {
-        let line = read_line(stream).await?;
-        let status = line.get(..3).and_then(|s| s.parse::<u16>().ok());
-        if status != Some(code) {
-            return Err(ProbeError::Greeting(line));
-        }
-        let last = line.as_bytes().get(3) != Some(&b'-');
-        lines.push(line);
-        if last {
-            return Ok(lines);
-        }
-    }
-    Err(ProbeError::Io("the server's reply did not end".to_owned()))
-}
-
-/// An SMTP server on a plain port: greets with 220 and lists STARTTLS in
-/// its answer to EHLO.
-async fn smtp_starttls<S>(
-    stream: &mut BufReader<S>,
-    local: std::net::IpAddr,
-) -> Result<(), ProbeError>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    smtp_reply(stream, 220).await?;
-    // RFC 5321: a client without a domain name gives its address literal.
-    let ehlo = match local {
-        std::net::IpAddr::V4(ip) => format!("EHLO [{ip}]\r\n"),
-        std::net::IpAddr::V6(ip) => format!("EHLO [IPv6:{ip}]\r\n"),
-    };
-    stream.get_mut().write_all(ehlo.as_bytes()).await?;
-    let lines = smtp_reply(stream, 250).await?;
-    // Courtesy only: the probe's answer is already known.
-    let _ = stream.get_mut().write_all(b"QUIT\r\n").await;
-    let offered = lines.iter().skip(1).any(|line| {
-        line.get(4..)
-            .is_some_and(|keyword| keyword.trim().eq_ignore_ascii_case("STARTTLS"))
-    });
-    if offered {
-        Ok(())
-    } else {
-        Err(ProbeError::NoStartTls)
     }
 }

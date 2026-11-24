@@ -67,6 +67,8 @@ fn from_config(config: ProviderConfig, source: Source) -> Discovery {
         smtp: config.smtp,
         documentation_url: config.documentation_url,
         enable_url: config.enable_url,
+        // The domain's own file, or the ISPDB, vouches for its servers.
+        confirm_servers: false,
     }
 }
 
@@ -192,11 +194,22 @@ pub(crate) async fn srv(d: &Discoverer, address: &Address) -> Option<Discovery> 
     }
     Some(Discovery {
         source: Source::Srv,
+        confirm_servers: !within_domain(&address.domain, imap.iter().chain(&smtp)),
         hosted_by: providers::hosted_by_servers(&imap),
         app_password_url: providers::app_password_url(&imap),
         imap,
         smtp,
         ..Discovery::nothing()
+    })
+}
+
+/// Every server's host is `domain` or a name under it.
+fn within_domain<'a>(domain: &str, mut servers: impl Iterator<Item = &'a Candidate>) -> bool {
+    servers.all(|server| {
+        server
+            .host
+            .strip_suffix(domain)
+            .is_some_and(|rest| rest.is_empty() || rest.ends_with('.'))
     })
 }
 
@@ -262,6 +275,7 @@ pub(crate) async fn common_names(d: &Discoverer, address: &Address) -> Option<Di
     }
     Some(Discovery {
         source: Source::Guess,
+        confirm_servers: !within_domain(&address.domain, imap.iter().chain(&smtp)),
         imap,
         smtp,
         ..Discovery::nothing()

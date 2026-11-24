@@ -1,11 +1,11 @@
 //! Mozilla's autoconfig format (`clientConfig` version 1.1), as the domain's
 //! own autoconfig files and Thunderbird's ISPDB serve it.
 //!
-//! Only the first `emailProvider` is read, and in it the IMAP incoming
-//! servers, the SMTP outgoing servers, the display name, and the
-//! `documentation` and `enable` pages. POP3 servers are ignored, and so are
-//! plain-text servers (`socketType` plain, or none given, which means
-//! plain).
+//! Only the first `emailProvider` is read (other top-level elements, such
+//! as `webMail`, are skipped), and in it the IMAP incoming servers, the
+//! SMTP outgoing servers, the display name, and the `documentation` and
+//! `enable` pages. POP3 servers are ignored, and so are plain-text servers
+//! (`socketType` plain, or none given, which means plain).
 
 use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
@@ -134,11 +134,13 @@ fn candidates<'a>(
 
 fn candidate(server: &RawServer, address: &Address) -> Option<Candidate> {
     let security = security(&server.socket_type)?;
-    let host = fill(&server.hostname, address).to_ascii_lowercase();
-    let host = host.strip_suffix('.').unwrap_or(&host).to_owned();
-    if host.is_empty() || !matches!(url::Host::parse(&host), Ok(url::Host::Domain(_))) {
-        return None;
-    }
+    let host = fill(&server.hostname, address);
+    let host = host.strip_suffix('.').unwrap_or(&host);
+    // The host in ASCII: an internationalised name in its `xn--` form.
+    let host = match url::Host::parse(host) {
+        Ok(url::Host::Domain(ascii)) if !ascii.is_empty() => ascii.to_ascii_lowercase(),
+        _ => return None,
+    };
     let port: u16 = server.port.parse().ok().filter(|p| *p != 0)?;
     let username = match server.username.as_deref() {
         None | Some("%EMAILADDRESS%") => Username::Address,
@@ -165,11 +167,35 @@ fn security(socket_type: &str) -> Option<Security> {
     }
 }
 
-/// Fills in the address placeholders.
+/// Fills in the address placeholders, in one pass over `text`: what the
+/// address brings in is never read for placeholders itself.
 fn fill(text: &str, address: &Address) -> String {
-    text.replace("%EMAILADDRESS%", &address.full)
-        .replace("%EMAILLOCALPART%", &address.local)
-        .replace("%EMAILDOMAIN%", &address.domain)
+    let placeholders = [
+        ("%EMAILADDRESS%", address.full.as_str()),
+        ("%EMAILLOCALPART%", address.local.as_str()),
+        ("%EMAILDOMAIN%", address.domain.as_str()),
+    ];
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('%') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        match placeholders
+            .iter()
+            .find(|(placeholder, _)| rest.starts_with(placeholder))
+        {
+            Some((placeholder, value)) => {
+                out.push_str(value);
+                rest = &rest[placeholder.len()..];
+            }
+            None => {
+                out.push('%');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn is_https(url: &str) -> bool {
@@ -262,10 +288,16 @@ fn attribute(e: &BytesStart<'_>, name: &str) -> Result<Option<String>, XmlError>
     }
 }
 
+/// `path` is inside `clientConfig > emailProvider`, the provider's own
+/// elements; not inside another top-level element.
+fn in_provider(path: &[String]) -> bool {
+    path.get(1).is_some_and(|name| name == "emailProvider")
+}
+
 /// An element opened inside the first provider: servers start, and the
 /// pages are read from their attributes.
 fn open(provider: &mut RawProvider, path: &[String], e: &BytesStart<'_>) -> Result<(), XmlError> {
-    if path.len() != 3 {
+    if path.len() != 3 || !in_provider(path) {
         return Ok(());
     }
     match path[2].as_str() {
@@ -295,6 +327,9 @@ fn open(provider: &mut RawProvider, path: &[String], e: &BytesStart<'_>) -> Resu
 
 /// An element closed inside the first provider, with its text.
 fn close(provider: &mut RawProvider, path: &[String], text: &str) {
+    if !in_provider(path) {
+        return;
+    }
     let value = || (!text.is_empty()).then(|| text.to_owned());
     match path.len() {
         3 => match path[2].as_str() {

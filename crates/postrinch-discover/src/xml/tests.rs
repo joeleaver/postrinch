@@ -270,3 +270,62 @@ fn documents_that_are_not_autoconfig() {
         Err(XmlError::Malformed(_))
     ));
 }
+
+#[test]
+fn other_top_level_elements_fill_nothing() {
+    let xml = r#"<clientConfig version="1.1">
+        <emailProvider id="a">
+          <incomingServer type="imap"><hostname>imap.a.example</hostname>
+            <port>993</port><socketType>SSL</socketType></incomingServer>
+        </emailProvider>
+        <webMail>
+          <displayName>Not the provider</displayName>
+          <documentation url="https://elsewhere.example/docs"/>
+          <enable visiturl="https://elsewhere.example/enable"/>
+          <incomingServer type="imap"><hostname>imap.elsewhere.example</hostname>
+            <port>993</port><socketType>SSL</socketType></incomingServer>
+        </webMail></clientConfig>"#;
+    let c = parse(xml, &address("ada@a.example")).unwrap();
+    assert_eq!(c.provider_name, None);
+    assert_eq!(c.documentation_url, None);
+    assert_eq!(c.enable_url, None);
+    assert_eq!(hosts(&c.imap), ["imap.a.example"]);
+}
+
+#[test]
+fn unicode_host_names_are_stored_in_ascii() {
+    let xml = config(
+        r#"<incomingServer type="imap"><hostname>IMAP.Bücher.example</hostname>
+             <port>993</port><socketType>SSL</socketType></incomingServer>
+           <outgoingServer type="smtp"><hostname>smtp.%EMAILDOMAIN%</hostname>
+             <port>465</port><socketType>SSL</socketType></outgoingServer>"#,
+    );
+    let c = parse(&xml, &address("jo@bücher.de")).unwrap();
+    assert_eq!(hosts(&c.imap), ["imap.xn--bcher-kva.example"]);
+    assert_eq!(hosts(&c.smtp), ["smtp.xn--bcher-kva.de"]);
+}
+
+#[test]
+fn placeholders_the_address_brings_in_are_not_filled() {
+    let xml = config(
+        r#"<incomingServer type="imap"><hostname>imap.example.org</hostname>
+             <port>993</port><socketType>SSL</socketType>
+             <username>%EMAILLOCALPART%+%EMAILDOMAIN%</username></incomingServer>
+           <outgoingServer type="smtp"><hostname>smtp.example.org</hostname>
+             <port>465</port><socketType>SSL</socketType>
+             <username>x/%EMAILADDRESS%/100%</username></outgoingServer>"#,
+    );
+    let c = parse(&xml, &address("%EMAILDOMAIN%@example.org")).unwrap();
+    assert_eq!(
+        c.imap[0].username,
+        Username::Literal("%EMAILDOMAIN%+example.org".to_owned())
+    );
+    assert_eq!(
+        c.smtp[0].username,
+        Username::Literal("x/%EMAILDOMAIN%@example.org/100%".to_owned())
+    );
+}
+
+fn hosts(servers: &[Candidate]) -> Vec<&str> {
+    servers.iter().map(|s| s.host.as_str()).collect()
+}

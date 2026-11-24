@@ -110,6 +110,13 @@ pub struct Discovery {
     /// other way for IMAP, and it is not one Postrinch knows takes app
     /// passwords (see `app_password_url`).
     pub oauth2_only: bool,
+    /// The person must confirm the servers before any password is sent to
+    /// them. Set when a server's host is outside the address's domain and
+    /// nobody vouches for it: DNS SRV records are not authenticated (RFC
+    /// 6186 §6), so a forged answer could point anywhere. Servers from the
+    /// domain's own autoconfig or from the ISPDB are vouched for, and
+    /// guesses are always within the domain.
+    pub confirm_servers: bool,
 }
 
 impl Discovery {
@@ -125,6 +132,7 @@ impl Discovery {
             documentation_url: None,
             enable_url: None,
             oauth2_only: false,
+            confirm_servers: false,
         }
     }
 }

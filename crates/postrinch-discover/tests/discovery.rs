@@ -229,6 +229,10 @@ async fn another_mx_is_looked_up_by_its_registrable_domain() {
     assert_eq!(found.source, Source::IspdbViaMx);
     assert_eq!(found.provider_name.as_deref(), Some("Fastmail"));
     assert_eq!(found.hosted_by, None);
+    assert!(
+        !found.confirm_servers,
+        "the ISPDB vouches for servers outside the domain"
+    );
 }
 
 #[tokio::test]
@@ -275,6 +279,28 @@ async fn srv_records_best_first_without_the_ones_not_offered() {
     );
     assert_eq!(found.smtp[1].security, Security::StartTls);
     assert_eq!(resolver.asked()[0], "MX example.org");
+    assert!(!found.confirm_servers, "every server is within the domain");
+}
+
+#[tokio::test]
+async fn srv_servers_outside_the_domain_are_for_the_person_to_confirm() {
+    for (imap, smtp) in [
+        ("imap.elsewhere.net", "smtp.example.org"),
+        ("mail.example.org", "smtp.notexample.org"),
+    ] {
+        let server = MockServer::start().await;
+        let resolver = Arc::new(
+            FakeResolver::default()
+                .with_srv("_imaps._tcp.example.org", 0, 0, imap, 993)
+                .with_srv("_submissions._tcp.example.org", 0, 0, smtp, 465),
+        );
+        let d = discoverer(&server, resolver, Arc::default());
+
+        let found = discover("ada@example.org", &d, |_| {}).await.unwrap();
+
+        assert_eq!(found.source, Source::Srv);
+        assert!(found.confirm_servers, "{imap}, {smtp}");
+    }
 }
 
 #[tokio::test]
@@ -320,6 +346,7 @@ async fn common_names_probed_tls_first() {
         .unwrap();
 
     assert_eq!(found.source, Source::Guess);
+    assert!(!found.confirm_servers, "guesses are within the domain");
     assert_eq!(
         hosts(&found.imap),
         [("mail.example.org", 993), ("imap.example.org", 143)]
