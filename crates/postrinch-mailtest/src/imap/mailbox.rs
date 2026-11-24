@@ -13,7 +13,7 @@ use chrono::{DateTime, FixedOffset};
 /// The hierarchy delimiter of every folder name.
 pub const DELIMITER: char = '/';
 
-/// A folder's special use (RFC 6154).
+/// A folder's special use (RFC 6154), or Gmail's `\Important`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SpecialUse {
     Sent,
@@ -23,6 +23,8 @@ pub enum SpecialUse {
     Archive,
     All,
     Flagged,
+    /// Gmail's virtual folder of important mail; not RFC 6154's.
+    Important,
 }
 
 impl SpecialUse {
@@ -36,6 +38,7 @@ impl SpecialUse {
             SpecialUse::Archive => "\\Archive",
             SpecialUse::All => "\\All",
             SpecialUse::Flagged => "\\Flagged",
+            SpecialUse::Important => "\\Important",
         }
     }
 }

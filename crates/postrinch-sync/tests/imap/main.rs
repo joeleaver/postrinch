@@ -16,3 +16,6 @@ mod secrets;
 mod smtp;
 mod smtp_limits;
 mod support;
+mod sync;
+mod sync_folders;
+mod sync_support;
