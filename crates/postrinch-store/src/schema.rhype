@@ -17,11 +17,14 @@ type Account {
     display_name: String
     provider: String
     state: Json
+    // ImapSettings for an IMAP account (no secrets); null for Google.
+    imap: Json
     // The provider's sync position (Gmail's historyId), written only after
     // everything before it has been stored.
     sync_cursor: String
     labels: [Label] @inverse(Label.account)
     threads: [Thread] @inverse(Thread.account)
+    imap_folders: [ImapFolder] @inverse(ImapFolder.account)
 }
 
 type Label {
@@ -206,4 +209,49 @@ type ProposedEvent {
     key: String @unique
     account: String
     proposal: Json
+}
+
+// One folder of an IMAP account as sync knows it (imap_state.rs): the label
+// it is shown as, its name on the server and how far sync has read it.
+// Deleting the account deletes its folders, and a folder its places. A
+// folder has one to-one relation and no @indexed field, so rhypedb copies
+// it nowhere.
+type ImapFolder {
+    // "<account address key>\u001f<label id>".
+    key: String @unique
+    account: Account @on_delete(cascade)
+    label_id: String
+    // As the server spells it: modified UTF-7, the server's delimiter.
+    name: String
+    // Null for a flat namespace.
+    delimiter: String
+    // FolderRole, or null.
+    role: Json
+    uidvalidity: u32
+    uidnext: u32
+    // 0 for none (no CONDSTORE).
+    highest_modseq: u64
+    subscribed: Bool
+    places: [ImapPlace] @inverse(ImapPlace.folder)
+}
+
+// One copy of a message on an IMAP server: a UID in a folder
+// (imap_state.rs). Its one to-one relation is its folder, so its reverse
+// entry holds no copy of it; `message` is indexed, to find a message's
+// copies, so rhypedb copies a place's scalars into that index, and they
+// stay few and small.
+type ImapPlace {
+    // "<folder key>\u001f<uidvalidity>\u001f<uid>".
+    key: String @unique
+    folder: ImapFolder @on_delete(cascade)
+    // The folder's label id, so a place reads without its folder.
+    label_id: String
+    uidvalidity: u32
+    uid: u32
+    // "<account address key>\u001f<message provider id>".
+    message: String @indexed
+    // The copy's flags as the server has them, a JSON list.
+    flags: Json
+    // 0 for none (no CONDSTORE).
+    modseq: u64
 }

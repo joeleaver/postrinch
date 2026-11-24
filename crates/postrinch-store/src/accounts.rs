@@ -32,6 +32,7 @@ fn decode(fields: &Fields) -> StoreResult<Account> {
         display_name: fields.opt_str("display_name")?,
         provider,
         state: fields.json("state")?,
+        imap: fields.opt_json("imap")?,
     })
 }
 
@@ -47,6 +48,7 @@ impl Store {
                 .opt_str("display_name", account.display_name.clone())
                 .str("provider", provider_name(account.provider))
                 .json("state", &account.state)
+                .opt_json("imap", account.imap.as_ref())
         };
         self.upsert(TYPE, "key", &key, fields().build(), fields().build())?;
         Ok(())
@@ -95,9 +97,9 @@ impl Store {
         Ok(())
     }
 
-    /// Remove an account with its labels, threads and messages. Raw
-    /// messages stay in the blob store; [`Store::collect_garbage`] removes
-    /// them.
+    /// Remove an account with its labels, threads, messages and IMAP
+    /// folder state (the relations cascade). Raw messages stay in the blob
+    /// store; [`Store::collect_garbage`] removes them.
     pub fn remove_account(&self, address: &EmailAddress) -> StoreResult<()> {
         let id = self.account_id(address)?;
         self.remove_calendars(address)?;
@@ -107,7 +109,8 @@ impl Store {
     }
 
     /// Forget an account's mail but keep the account, its labels and its
-    /// sign-in: every thread and message goes and the sync cursor is
+    /// sign-in: every thread and message goes and the sync cursor (an IMAP
+    /// account's position in each folder, and the copies it knew) is
     /// cleared, so the next sync rebuilds the local copy from the provider.
     /// Returns how many messages were removed. Raw messages stay in the
     /// blob store until [`Store::collect_garbage`].
@@ -116,6 +119,9 @@ impl Store {
         // Clear the cursor first: if this is interrupted, the next sync is a
         // full one, which removes or refetches whatever is left.
         self.set_sync_cursor(address, None)?;
+        // An IMAP account's positions are per folder: they go the same way,
+        // first, and so do the copies they knew.
+        self.reset_imap_folders(address)?;
         let messages = self.message_ids(address)?.len();
         // A thread's messages are deleted with it (Message.thread cascades).
         for thread in self.links(TYPE, id, "threads")? {

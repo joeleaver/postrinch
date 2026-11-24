@@ -19,6 +19,10 @@ pub enum StoreError {
     /// the messages that use them.
     #[error("no label {id} in account {account}")]
     UnknownLabel { account: EmailAddress, id: String },
+    /// A place names an IMAP folder the store does not have: put folders
+    /// before the places in them.
+    #[error("no IMAP folder {id} in account {account}")]
+    UnknownImapFolder { account: EmailAddress, id: String },
     /// The store was written in another format (see `format.rs`). While
     /// Postrinch is in development, the fix is to delete `dir` and add the
     /// accounts again.

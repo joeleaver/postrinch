@@ -3,6 +3,8 @@
 use postrinch_model::EmailAddress;
 use serde::{Deserialize, Serialize};
 
+use crate::Category;
+
 /// The start of every label Postrinch makes for itself in an account
 /// (rule markers, the settings message's label). Kept out of the sidebar,
 /// the label chips and menus, and agents' label lists.
@@ -169,47 +171,6 @@ impl Test {
                 | Test::AttachmentType(_)
                 | Test::AttachmentName(_)
         )
-    }
-}
-
-/// A Gmail inbox category.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Category {
-    Primary,
-    Social,
-    Promotions,
-    Updates,
-    Forums,
-}
-
-impl Category {
-    pub const ALL: [Category; 5] = [
-        Category::Primary,
-        Category::Social,
-        Category::Promotions,
-        Category::Updates,
-        Category::Forums,
-    ];
-
-    /// Gmail's label id for it.
-    pub fn label_id(self) -> &'static str {
-        match self {
-            Category::Primary => "CATEGORY_PERSONAL",
-            Category::Social => "CATEGORY_SOCIAL",
-            Category::Promotions => "CATEGORY_PROMOTIONS",
-            Category::Updates => "CATEGORY_UPDATES",
-            Category::Forums => "CATEGORY_FORUMS",
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Category::Primary => "Primary",
-            Category::Social => "Social",
-            Category::Promotions => "Promotions",
-            Category::Updates => "Updates",
-            Category::Forums => "Forums",
-        }
     }
 }
 

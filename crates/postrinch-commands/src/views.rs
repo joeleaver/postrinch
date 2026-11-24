@@ -8,13 +8,12 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
-use postrinch_model::{EmailAddress, LabelKind, ListOrder, SavedView, Timestamp, ViewCount};
+use postrinch_model::{EmailAddress, ListOrder, SavedView, Timestamp, ViewCount};
 use postrinch_store::ThreadEntry;
 use serde::{Deserialize, Serialize};
 
 use crate::labels::Chip;
 use crate::messages::message_row;
-use crate::query::{LabelName, Query, label_matches};
 use crate::query_or::Either;
 use crate::views_accounts::{TABS, account_views, followed};
 use crate::{CommandError, CommandResult, Commands, ThreadPage};
@@ -82,7 +81,8 @@ impl ViewTally {
 /// The built-in views, in the sidebar's order: key, name, search, count.
 const BUILT_IN: [(&str, &str, &str, ViewCount); 9] = [
     // Gmail's inbox as Gmail shows it with its tabs: Primary. The other
-    // tabs are each account's, listed under it (views_accounts.rs).
+    // tabs are each account's, listed under it (views_accounts.rs). An
+    // account without categories shows its whole inbox (system_labels.rs).
     (
         "inbox",
         "Inbox",
@@ -396,69 +396,6 @@ impl Commands {
         }
         let (found, _) = self.found_in(&either, true, accounts)?;
         Ok(self.store.found_threads(&found)?)
-    }
-
-    /// The conversations a search finds when it only names a label or two
-    /// (`in:inbox category:primary`, the tabs and most views), read through
-    /// the labels' links alone, which is many times quicker than reading
-    /// every message the labels have. `None` for any other search.
-    fn labelled_threads(
-        &self,
-        either: &Either,
-        only: &[EmailAddress],
-    ) -> CommandResult<Option<Vec<ThreadEntry>>> {
-        let labels_only = |q: &Query| {
-            (1..=2).contains(&q.labels.len())
-                && Query {
-                    labels: Vec::new(),
-                    accounts: Vec::new(),
-                    gmail: String::new(),
-                    ..q.clone()
-                } == Query::default()
-        };
-        if !either.queries.iter().all(labels_only) {
-            return Ok(None);
-        }
-        let mut threads: HashMap<(String, String), ThreadEntry> = HashMap::new();
-        for q in &either.queries {
-            for account in self.search_accounts(q)? {
-                if !only.is_empty() && !only.contains(&account) {
-                    continue;
-                }
-                let labels = self.store.labels(&account)?;
-                let id = |name: &LabelName| {
-                    labels
-                        .iter()
-                        .find(|l| match (name, &l.kind) {
-                            (LabelName::System(s), LabelKind::System(k)) => s == k,
-                            (LabelName::Named(n), LabelKind::User) => label_matches(&l.name, n),
-                            _ => false,
-                        })
-                        .map(|l| l.provider_id.clone())
-                };
-                let ids: Option<Vec<String>> = q.labels.iter().map(id).collect();
-                let Some(ids) = ids else { continue };
-                let within = ids.get(1).map(String::as_str);
-                for t in self
-                    .store
-                    .label_threads_sorting(&account, &ids[0], within, true)?
-                {
-                    let key = (t.account.key(), t.thread.0.clone());
-                    let unread = t.unread;
-                    threads
-                        .entry(key)
-                        .and_modify(|had| had.unread |= unread)
-                        .or_insert(t);
-                }
-            }
-        }
-        let mut threads: Vec<ThreadEntry> = threads.into_values().collect();
-        threads.sort_by(|a, b| {
-            b.latest
-                .cmp(&a.latest)
-                .then_with(|| a.thread.cmp(&b.thread))
-        });
-        Ok(Some(threads))
     }
 }
 

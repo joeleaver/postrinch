@@ -6,7 +6,8 @@
 use std::collections::BTreeSet;
 
 use postrinch_model::{
-    EmailAddress, Label, Message, MessageChange, ProviderMessageId, ProviderThreadId, Timestamp,
+    EmailAddress, Label, Message, MessageChange, ProviderMessageId, ProviderThreadId, SystemLabel,
+    Timestamp,
 };
 use postrinch_rules::gmail::Part;
 use postrinch_rules::matching::{Verdict, matches};
@@ -19,7 +20,13 @@ use crate::{CommandResult, Commands};
 /// How often rules about mail that has been in the inbox a while run.
 const WAITED_EVERY_MILLIS: i64 = 60 * 60 * 1000;
 /// Labels mail sits under that rules leave alone.
-const LEFT_ALONE: [&str; 3] = ["DRAFT", "SPAM", "TRASH"];
+const LEFT_ALONE: [&str; 3] = [
+    SystemLabel::Drafts.provider_id(),
+    SystemLabel::Spam.provider_id(),
+    SystemLabel::Trash.provider_id(),
+];
+const INBOX: &str = SystemLabel::Inbox.provider_id();
+const IMPORTANT: &str = SystemLabel::Important.provider_id();
 
 /// An agent to ask about a message, as a rule said.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,14 +82,14 @@ pub(crate) fn change_for(actions: &[Action], message: &Message, labels: &[Label]
     for action in actions {
         match action {
             Action::AddLabel(id) => add(&mut change, id),
-            Action::SkipInbox if message.has_label("INBOX") => {
-                change.remove_labels.push("INBOX".into());
+            Action::SkipInbox if message.has_label(INBOX) => {
+                change.remove_labels.push(INBOX.into());
             }
             Action::MarkRead if message.flags.unread => change.unread = Some(false),
             Action::Star if !message.flags.starred => change.starred = Some(true),
-            Action::MarkImportant => add(&mut change, "IMPORTANT"),
-            Action::NeverImportant if message.has_label("IMPORTANT") => {
-                change.remove_labels.push("IMPORTANT".into());
+            Action::MarkImportant => add(&mut change, IMPORTANT),
+            Action::NeverImportant if message.has_label(IMPORTANT) => {
+                change.remove_labels.push(IMPORTANT.into());
             }
             Action::Category(category) => {
                 add(&mut change, category.label_id());
@@ -92,7 +99,7 @@ pub(crate) fn change_for(actions: &[Action], message: &Message, labels: &[Label]
                     }
                 }
             }
-            Action::Trash => add(&mut change, "TRASH"),
+            Action::Trash => add(&mut change, SystemLabel::Trash.provider_id()),
             // Gmail only, as mail arrives; and sending is Gmail's to do.
             Action::NeverSpam | Action::Forward(_) => {}
             Action::AskAgent { .. } => {}
@@ -125,7 +132,7 @@ fn arrived(message: &Message) -> bool {
         return false;
     }
     // Mail this account sent, unless it also came in.
-    !message.has_label("SENT") || message.has_label("INBOX")
+    !message.has_label(SystemLabel::Sent.provider_id()) || message.has_label(INBOX)
 }
 
 impl Commands {
@@ -226,7 +233,7 @@ impl Commands {
             .waited_at
             .is_none_or(|t| now.as_millis() - t.as_millis() >= WAITED_EVERY_MILLIS);
         if !waited.is_empty() && due {
-            for entry in self.store.label_messages(account, "INBOX")? {
+            for entry in self.store.label_messages(account, INBOX)? {
                 let Some(message) = self.store.message(account, &entry.message)? else {
                     continue;
                 };

@@ -154,6 +154,39 @@ fn a_category_narrows_the_inbox_like_gmails_tabs() {
 }
 
 #[test]
+fn primary_everywhere_is_the_whole_inbox_of_an_account_without_categories() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    // A Gmail account with categories but no Primary label here, and an
+    // IMAP account, whose inbox has no categories, so all of it is its
+    // Primary.
+    let a = address("a@example.org");
+    account(&store, &a);
+    store
+        .put_message(&message(&a, "a1", "ta1", 100, &["INBOX"], true), None)
+        .unwrap();
+    let c = address("c@example.org");
+    store
+        .put_account(&Account::new(c.clone(), Provider::Imap))
+        .unwrap();
+    let inbox = Label::new("INBOX", "Inbox", LabelKind::System(SystemLabel::Inbox));
+    store.put_label(&c, &inbox).unwrap();
+    store
+        .put_message(&message(&c, "c1", "tc1", 400, &["INBOX"], true), None)
+        .unwrap();
+    let commands = Commands::new(store);
+
+    let primary = Folder::Everywhere(SystemLabel::CategoryPersonal);
+    let listed = commands.list_threads(&primary, None, 0, 10).unwrap();
+    let ids: Vec<_> = listed
+        .threads
+        .iter()
+        .map(|t| t.summary.id.0.as_str())
+        .collect();
+    assert_eq!(ids, ["tc1"]);
+}
+
+#[test]
 fn rows_carry_tag_like_labels_but_not_the_one_listed() {
     let (_dir, commands, a, _b) = setup();
     let inbox = Folder::Everywhere(SystemLabel::Inbox);

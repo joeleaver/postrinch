@@ -3,6 +3,7 @@
 
 use std::collections::BTreeSet;
 
+use postrinch_model::SystemLabel;
 use serde::{Deserialize, Serialize};
 
 use crate::words::words;
@@ -14,6 +15,12 @@ pub const FILTER_LIMIT: usize = 1000;
 /// testing, but whether so long a query still matches as written was not
 /// tried.
 pub const QUERY_LIMIT: usize = 1500;
+
+/// Gmail's own labels for an unread and a starred message. Postrinch keeps
+/// these as flags, so they are not system labels, but a filter sets them as
+/// labels.
+const UNREAD: &str = "UNREAD";
+const STARRED: &str = "STARRED";
 
 /// One Gmail filter, as Postrinch wants it.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -198,14 +205,16 @@ fn filters_for(rule: &Rule, queries: &[String]) -> (Vec<Filter>, Vec<Action>) {
     for action in &rule.actions {
         match action {
             Action::AddLabel(id) => labels.push(id.clone()),
-            Action::SkipInbox => first.remove.push("INBOX".into()),
-            Action::MarkRead => first.remove.push("UNREAD".into()),
-            Action::Star => first.add.push("STARRED".into()),
-            Action::MarkImportant => first.add.push("IMPORTANT".into()),
-            Action::NeverImportant => first.remove.push("IMPORTANT".into()),
+            Action::SkipInbox => first.remove.push(SystemLabel::Inbox.provider_id().into()),
+            Action::MarkRead => first.remove.push(UNREAD.into()),
+            Action::Star => first.add.push(STARRED.into()),
+            Action::MarkImportant => first.add.push(SystemLabel::Important.provider_id().into()),
+            Action::NeverImportant => first
+                .remove
+                .push(SystemLabel::Important.provider_id().into()),
             Action::Category(c) => first.add.push(c.label_id().into()),
-            Action::NeverSpam => first.remove.push("SPAM".into()),
-            Action::Trash => first.add.push("TRASH".into()),
+            Action::NeverSpam => first.remove.push(SystemLabel::Spam.provider_id().into()),
+            Action::Trash => first.add.push(SystemLabel::Trash.provider_id().into()),
             Action::Forward(to) => first.forward = Some(to.clone()),
             Action::AskAgent { .. } => rest.push(action.clone()),
         }
@@ -260,10 +269,7 @@ fn has_user_label(f: &Filter) -> bool {
 }
 
 fn is_system(id: &str) -> bool {
-    matches!(
-        id,
-        "STARRED" | "IMPORTANT" | "TRASH" | "UNREAD" | "INBOX" | "SPAM"
-    ) || id.starts_with("CATEGORY_")
+    matches!(id, UNREAD | STARRED) || SystemLabel::from_provider_id(id).is_some()
 }
 
 /// A condition as a Gmail search term, when Gmail matches exactly the same

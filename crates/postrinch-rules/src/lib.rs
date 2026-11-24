@@ -8,6 +8,7 @@
 //! ([`gmail::compile`]). Sync creates the filters and the local runner acts
 //! on what the compiler leaves to it.
 
+mod category;
 pub mod gmail;
 pub mod matching;
 mod record;
@@ -15,9 +16,8 @@ mod rule;
 mod summary;
 mod words;
 
+pub use category::Category;
 pub use record::{Elsewhere, Local, Made, Proposed, Running, Settings};
-pub use rule::{
-    Action, Category, Condition, MARKER_PREFIX, Match, Rule, RuleError, RuleSet, Test, When,
-};
+pub use rule::{Action, Condition, MARKER_PREFIX, Match, Rule, RuleError, RuleSet, Test, When};
 pub use summary::summarize;
 pub use words::words;
