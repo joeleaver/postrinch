@@ -1,0 +1,28 @@
+[package]
+name = "postrinch-discover"
+description = "Postrinch's mail server discovery: from an email address to its IMAP and SMTP servers."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+hickory-resolver = "0.26"
+psl = "2"
+quick-xml = "0.41"
+# reqwest's default TLS is rustls with aws-lc-rs and the platform verifier,
+# as in postrinch-sync.
+reqwest = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
+rustls-platform-verifier = "0.7"
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt", "net", "io-util", "time", "macros"] }
+tokio-rustls = { version = "0.26", default-features = false }
+tracing = { workspace = true }
+url = "2"
+
+[dev-dependencies]
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
+wiremock = "0.6"

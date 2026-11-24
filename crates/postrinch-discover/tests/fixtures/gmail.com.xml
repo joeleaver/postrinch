@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Written by hand after the ISPDB's entry for gmail.com. Its
+     documentation link is plain HTTP, and its enable link has an escaped
+     ampersand. -->
+<clientConfig version="1.1">
+  <emailProvider id="googlemail.com">
+    <domain>gmail.com</domain>
+    <domain>googlemail.com</domain>
+    <displayName>Google Mail</displayName>
+    <displayShortName>GMail</displayShortName>
+    <incomingServer type="imap">
+      <hostname>imap.gmail.com</hostname>
+      <port>993</port>
+      <socketType>SSL</socketType>
+      <username>%EMAILADDRESS%</username>
+      <authentication>OAuth2</authentication>
+      <authentication>password-cleartext</authentication>
+    </incomingServer>
+    <incomingServer type="pop3">
+      <hostname>pop.gmail.com</hostname>
+      <port>995</port>
+      <socketType>SSL</socketType>
+      <username>%EMAILADDRESS%</username>
+      <authentication>OAuth2</authentication>
+      <authentication>password-cleartext</authentication>
+    </incomingServer>
+    <outgoingServer type="smtp">
+      <hostname>smtp.gmail.com</hostname>
+      <port>465</port>
+      <socketType>SSL</socketType>
+      <username>%EMAILADDRESS%</username>
+      <authentication>OAuth2</authentication>
+      <authentication>password-cleartext</authentication>
+    </outgoingServer>
+    <enable visiturl="https://mail.google.com/mail/?ui=2&amp;shva=1#settings/fwdandpop">
+      <instruction>You need to enable IMAP access</instruction>
+    </enable>
+    <documentation url="http://mail.google.com/support/bin/answer.py?answer=13273">
+      <descr>How to enable IMAP/POP3 in GMail</descr>
+    </documentation>
+  </emailProvider>
+</clientConfig>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Written by hand after the ISPDB's entry for icloud.com (also me.com
+     and mac.com). iCloud signs IMAP in with the local part only. -->
+<clientConfig version="1.1">
+  <emailProvider id="icloud.com">
+    <domain>icloud.com</domain>
+    <domain>me.com</domain>
+    <domain>mac.com</domain>
+    <displayName>iCloud Mail</displayName>
+    <displayShortName>iCloud</displayShortName>
+    <incomingServer type="imap">
+      <hostname>imap.mail.me.com</hostname>
+      <port>993</port>
+      <socketType>SSL</socketType>
+      <username>%EMAILLOCALPART%</username>
+      <authentication>password-cleartext</authentication>
+    </incomingServer>
+    <outgoingServer type="smtp">
+      <hostname>smtp.mail.me.com</hostname>
+      <port>587</port>
+      <socketType>STARTTLS</socketType>
+      <username>%EMAILADDRESS%</username>
+      <authentication>password-cleartext</authentication>
+    </outgoingServer>
+    <documentation url="https://support.apple.com/en-us/102525">
+      <descr lang="en">iCloud Mail server settings for other email client apps</descr>
+    </documentation>
+  </emailProvider>
+</clientConfig>
