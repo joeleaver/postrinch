@@ -4659,6 +4659,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "postrinch-demo"
+version = "0.1.34"
+dependencies = [
+ "base64 0.22.1",
+ "dirs",
+ "jiff",
+ "postrinch-commands",
+ "postrinch-model",
+ "postrinch-rules",
+ "postrinch-store",
+ "postrinch-sync",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "postrinch-discover"
 version = "0.1.34"
 dependencies = [
