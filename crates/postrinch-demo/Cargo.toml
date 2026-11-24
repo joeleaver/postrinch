@@ -1,0 +1,26 @@
+[package]
+name = "postrinch-demo"
+description = "Seeds a scratch store with made-up mail and calendars, for the website's screenshots and for trying the window without a real account."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "postrinch-demo"
+path = "src/main.rs"
+
+[dependencies]
+postrinch-commands = { workspace = true }
+postrinch-model = { workspace = true }
+postrinch-rules = { workspace = true }
+postrinch-store = { workspace = true }
+postrinch-sync = { workspace = true }
+base64 = "0.22"
+dirs = "7"
+jiff = "0.2"
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
