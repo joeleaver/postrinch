@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Postrinch: mail and calendar, on your computer, open to your agents</title>
+<meta name="description" content="A fast desktop mail client for Gmail and IMAP, written in Rust, with your calendar beside it and search that runs on your own computer. Everything you can do in the window, Claude can do too, through MCP.">
+<meta name="theme-color" content="#2456b8">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/icon-96.png" type="image/png" sizes="96x96">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/icon.svg" alt="" width="34" height="34">Postrinch</a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="#features">Features</a>
+      <a href="#agents" class="hide-narrow">Agents</a>
+      <a href="/gmail-setup.html" class="hide-narrow">Set up Gmail</a>
+      <a href="#download">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <div class="hero">
+    <div class="wrap">
+      <span class="badge">Early preview · Linux</span>
+      <h1>Your mail, on your computer, open to your agents.</h1>
+      <p class="lede">Postrinch is a fast desktop mail client for Gmail and, soon, any IMAP account, written in Rust, with your calendar beside it and search that runs on your own machine. Everything you can do in the window, Claude can do too, through MCP, and nothing that leaves your account goes without your say.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="#download">Download for Linux</a>
+        <a class="btn btn-quiet" href="https://github.com/joeleaver/postrinch">Source on GitHub</a>
+      </div>
+      <p class="fineprint" data-release-line>Linux x86-64 · keeps itself up to date</p>
+      <figure class="shot shot-hero">
+        <img src="/assets/shots/mail.png" width="1440" height="900" alt="The Postrinch window: views in the sidebar, the inbox in the middle, a conversation open on the right.">
+      </figure>
+    </div>
+  </div>
+
+  <section class="band" id="features">
+    <div class="wrap">
+      <h2>Mail that keeps up with you</h2>
+      <p class="intro">Postrinch keeps your mail and its index on your computer, so lists open at once, search answers in milliseconds, and it all works on a train.</p>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Search for what you remember<span class="tag">Coming</span></h3>
+          <p>You remember what an email was about, not the words in it. Ask for "the email where someone offered to cover my shift" and Postrinch will find it by meaning, with a language model that runs on your computer. Your mail never goes to a search service.</p>
+          <p>Today, search is instant over every account at once: 64,000 messages in tens of milliseconds, by words, people, labels, dates and attachments, with the filters you know from Gmail. Mail that hasn't downloaded yet is asked of Gmail and listed below.</p>
+        </div>
+        <figure class="shot"><img src="/assets/shots/search.png" width="1440" height="900" alt="A search with operators in the box and its results." loading="lazy"></figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Every account, one inbox or many</h3>
+          <p>Add as many Gmail accounts as you have and see them side by side, or together in one inbox. Fastmail, iCloud, Outlook and your work server join them over IMAP soon<span class="tag">Coming</span>, with the same views, search, rules and agents.</p>
+          <p>The sidebar holds views, not labels: saved searches like "everything from my bank, any account" or "unanswered for a week". The inbox keeps Gmail's tabs. Read in conversations, or one message at a time.</p>
+          <p>Archive, label, star or trash and it happens at once. Postrinch tells Gmail in the background, in the order you did things, even after a day offline.</p>
+        </div>
+        <figure class="shot"><img src="/assets/shots/views.png" width="1440" height="900" alt="A view's panel open beside the mail it shows." loading="lazy"></figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Rules that run where they should</h3>
+          <p>One set of rules per account: label it, file it, flag it, forward it, or ask an agent to summarise it.</p>
+          <p>A rule runs on Gmail when Gmail matches exactly the same mail, so it works while your computer is off, and in Postrinch when Gmail can't. You never have to think about which.</p>
+        </div>
+        <figure class="shot"><img src="/assets/shots/rules.png" width="1440" height="900" alt="The rule editor in Settings › Rules." loading="lazy"></figure>
+      </div>
+
+      <div class="feature">
+        <div class="feature-text">
+          <h3>Your calendar beside your mail</h3>
+          <p>Day, week and month of every Google calendar you have. Drag an event to move it; Postrinch asks before it tells anyone.</p>
+          <p>Invitations show as a card in the mail, with what clashes, and you answer Yes, Maybe or No right there. Share a calendar, or add one someone shared with you.</p>
+        </div>
+        <figure class="shot"><img src="/assets/shots/calendar.png" width="1440" height="900" alt="The calendar's week with an event open." loading="lazy"></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="agents">
+    <div class="wrap">
+      <div class="feature">
+        <div class="feature-text">
+          <h2>Built for agents, with you in charge</h2>
+          <p>Every action the window offers is a tool an agent can use. Connect Claude, Cursor or Codex from Settings › Agents in one click.</p>
+          <ul>
+            <li>Read, search, file and label mail; keep your views and rules.</li>
+            <li>See your calendars, find you free time, add and move your own events.</li>
+            <li>Write a reply or a new message, and answer an invitation, as a proposal you send or not.</li>
+          </ul>
+          <p>An agent can't send mail, tell anyone about an event, or see a password. Each sees only the accounts you give it, and mail reaches it marked as text written by strangers.</p>
+        </div>
+        <figure class="shot"><img src="/assets/shots/agents.png" width="1440" height="900" alt="Settings › Agents with Claude connected." loading="lazy"></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="more">
+    <div class="wrap">
+      <h2>And the rest</h2>
+      <p class="intro">The parts you notice only when another mail app gets them wrong.</p>
+      <div class="cards">
+        <div class="card">
+          <h3>Mail that can't follow you</h3>
+          <p>HTML mail is cleaned before it's drawn. Pictures from the web stay off until you allow a sender, so tracking pixels don't fire, and a link shows where it really goes.</p>
+        </div>
+        <div class="card">
+          <h3>Notices you choose</h3>
+          <p>New mail by view, not by account. Event reminders as Google Calendar sets them. Quiet hours, with reminders let through or not.</p>
+        </div>
+        <div class="card">
+          <h3>Updates you can trust</h3>
+          <p>It checks for a new version daily, verifies its signature, and waits for you to choose "Restart to update".</p>
+        </div>
+        <div class="card">
+          <h3>Sign-in that stays yours</h3>
+          <p>You sign in to Google on Google's own page, in your browser, so Postrinch never sees your password. What it keeps to stay signed in lives in your system's keychain, out of every agent's reach.</p>
+        </div>
+        <div class="card">
+          <h3>Its own database</h3>
+          <p>Mail, people, labels and views are stored and searched by <a href="https://github.com/joeleaver/rhypedb">rhypedb</a>, an embedded database in Rust that runs inside Postrinch, not beside it.</p>
+        </div>
+        <div class="card">
+          <h3>Windows and macOS<span class="tag">Coming</span></h3>
+          <p>Linux first. The same app, packaged for the others, is next.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="rinch">
+    <div class="wrap narrow">
+      <h2>Written in Rust, drawn by Rinch</h2>
+      <p>Postrinch is built with <a href="https://github.com/joeleaver/rinch">Rinch</a>, a GUI framework for Rust. Rinch lays a window out with HTML and CSS and draws every pixel itself, in Rust, with no Electron and no web view: one small program that starts in a moment. When something changes, such as an unread count or a new message, Rinch updates just that part of the window.</p>
+      <p>The same engine draws your HTML mail. Each message is cleaned first, then laid out by Rinch, so reading mail never means running a web browser inside your mail app.</p>
+    </div>
+  </section>
+
+  <section class="band" id="yours">
+    <div class="wrap narrow">
+      <h2>Yours, on your computer</h2>
+      <p>There is no Postrinch server. Your mail, its index and search live on your computer, and your sign-ins are kept in your system's keychain, out of every agent's reach. Besides your mail and calendars, the only thing Postrinch asks the internet for is the daily update check, from GitHub. Read the <a href="/privacy.html">privacy policy</a>.</p>
+    </div>
+  </section>
+
+  <section class="band" id="download">
+    <div class="wrap">
+      <h2>Download</h2>
+      <p class="intro">Postrinch is an early preview. It works every day for the person who makes it, and it will change as it grows.</p>
+      <div class="download">
+        <div class="dl-box" data-download>
+          <h3>Linux</h3>
+          <p class="dl-version" data-version>The latest release, from GitHub</p>
+          <a class="btn btn-primary" data-package href="https://github.com/joeleaver/postrinch/releases/latest">Download for Linux (x86-64)</a>
+          <ul class="dl-files">
+            <li><a data-signature href="https://github.com/joeleaver/postrinch/releases/latest">Signature</a> · <a href="/postrinch-update-key.pem">release key</a></li>
+            <li><a href="https://github.com/joeleaver/postrinch/releases">All releases</a></li>
+          </ul>
+          <p class="fineprint dl-req">64-bit x86 with glibc 2.39 or newer (Ubuntu 24.04, Fedora 40, Debian 13 or later), GTK 3, and a keyring: GNOME Keyring or KDE Wallet.</p>
+        </div>
+        <div>
+          <ol class="steps">
+            <li><strong>Unpack and install.</strong> It installs into your home folder and your app menu, no root needed:
+<pre><code>mkdir postrinch && tar -xzf postrinch-*-linux-x86_64.tar.gz -C postrinch
+./postrinch/postrinch --install</code></pre></li>
+            <li><strong>Set up Gmail sign-in.</strong> For now, Postrinch signs in with a Google client you make yourself: <a href="/gmail-setup.html">ten minutes, step by step</a>.</li>
+            <li><strong>Add your accounts</strong> in Settings › Accounts, and connect an agent in Settings › Agents if you like.</li>
+          </ol>
+          <details>
+            <summary>Check the download's signature</summary>
+<pre><code>openssl pkeyutl -verify -rawin -pubin \
+  -inkey postrinch-update-key.pem \
+  -in postrinch-*-linux-x86_64.tar.gz \
+  -sigfile postrinch-*-linux-x86_64.tar.gz.sig</code></pre>
+            <p class="fineprint">The same key is built into Postrinch, which refuses any update it doesn't verify.</p>
+          </details>
+        </div>
+      </div>
+      <div class="note">
+        <strong>Why your own Google client?</strong>
+        Google lets a new mail app sign in only a few listed testers until it has passed Google's review. Until Postrinch has, a client of your own puts you in charge of your own sign-in, and your mail still goes only between your computer and Google.
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <p><em>postrinner</em> (Older Scots): one who travels post-haste; a fast courier.<br>© 2026 LBME Publishing</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/joeleaver/postrinch">GitHub</a>
+      <a href="/gmail-setup.html">Set up Gmail</a>
+      <a href="/privacy.html">Privacy</a>
+    </nav>
+  </div>
+</footer>
+<script src="/assets/download.js" defer></script>
+</body>
+</html>
