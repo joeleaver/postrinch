@@ -1,6 +1,6 @@
 //! Adding an IMAP account, signing one in again in the browser, and
 //! removing one (docs/imap.md, "Adding an account"). The add-account
-//! dialog (IMAP 10) and `postrinch-cli add-imap` both add through
+//! dialog and `postrinch-cli add-imap` both add through
 //! [`ImapSync::add_account`]: nothing is stored until both servers have
 //! passed the check, and a password or OAuth grant is kept only then, so
 //! a failed check leaves an account already here exactly as it was.
@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use postrinch_model::{Account, EmailAddress, ImapSettings, Provider};
+use tokio::sync::oneshot;
 
 use super::ImapSync;
 use crate::imap::{AccountCheck, ImapOAuth, ImapSecret, OAuthGrant, OAuthProvider, check_account};
@@ -38,11 +39,45 @@ pub enum NewSignIn<'a> {
     Password(ImapSecret),
     /// In the browser, with `provider`'s OAuth: the grant is checked
     /// first, kept only once both servers took it, and otherwise given
-    /// back.
+    /// back. With `cancel`, the person can stop waiting for the browser.
     OAuth {
         provider: OAuthProvider,
         open_browser: OpenBrowser<'a>,
+        cancel: Option<SignInCancel>,
     },
+}
+
+/// Lets the person stop an OAuth sign-in while its browser is open
+/// ([`NewSignIn::OAuth`]): made with [`sign_in_cancel`].
+pub struct SignInCancel(oneshot::Receiver<()>);
+
+/// Stops the sign-in its [`SignInCancel`] belongs to.
+pub struct SignInCanceller(oneshot::Sender<()>);
+
+/// A way to stop a browser sign-in, and the sign-in's side of it.
+pub fn sign_in_cancel() -> (SignInCanceller, SignInCancel) {
+    let (tx, rx) = oneshot::channel();
+    (SignInCanceller(tx), SignInCancel(rx))
+}
+
+impl SignInCanceller {
+    /// Stops the wait for the browser. Once the browser has come back
+    /// the sign-in goes on: its servers are being checked, and stopping
+    /// then would leave the keychain half-changed.
+    pub fn cancel(self) {
+        // The sign-in may be over already, and so not listening.
+        let _ = self.0.send(());
+    }
+}
+
+impl SignInCancel {
+    /// Ends when the person cancels; never, once its canceller is gone
+    /// without cancelling.
+    async fn cancelled(self) {
+        if self.0.await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
 }
 
 /// How adding an account went.
@@ -97,8 +132,20 @@ impl ImapSync {
             NewSignIn::OAuth {
                 provider,
                 open_browser,
+                cancel,
             } => {
-                let grant = oauth.grant(provider, &address, open_browser).await?;
+                let granting = oauth.grant(provider, &address, open_browser);
+                let grant = match cancel {
+                    // A grant made as the person cancelled is dropped
+                    // unkept: unused, it lapses.
+                    Some(cancel) => tokio::select! {
+                        grant = granting => grant?,
+                        () = cancel.cancelled() => {
+                            return Err(SyncError::SignIn("the sign-in was cancelled".into()));
+                        }
+                    },
+                    None => granting.await?,
+                };
                 settings.sign_in = grant.method();
                 display_name = display_name.or(grant.display_name());
                 let secret = grant.secret();
@@ -157,11 +204,10 @@ impl ImapSync {
         Ok(Added::Account(Box::new(account)))
     }
 
-    /// Signs an OAuth account in again in the browser ("Sign in again" on
-    /// one that has to), and marks it signed in. An account that signs in
-    /// with a password has no browser sign-in: it gives its password
-    /// again in the account's settings.
-    pub async fn sign_in_again(
+    /// Signs an OAuth account in again in the browser, and marks it
+    /// signed in ([`ImapSync::sign_in_again`] with
+    /// [`super::SignInAgain::Browser`]).
+    pub(super) async fn sign_in_in_browser(
         &self,
         oauth: &ImapOAuth,
         account: &EmailAddress,

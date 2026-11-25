@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use postrinch_model::{EmailAddress, SignInMethod, SignInReason};
-use postrinch_sync::imap::{AccessTokens, Added, ImapSecret, NewSignIn};
+use postrinch_sync::imap::{AccessTokens, Added, ImapSecret, NewSignIn, SignInAgain};
 use postrinch_sync::{MemorySecrets, SecretStore, SyncError, SyncResult};
 use serde_json::json;
 use wiremock::matchers::{body_string_contains, method, path};
@@ -250,9 +250,17 @@ async fn signing_in_again_keeps_what_sync_learned() {
 
     let signed_in = a
         .sync
-        .sign_in_again(&a.oauth, &account(), Box::new(browser(|_| {})))
+        .sign_in_again(
+            &a.oauth,
+            &account(),
+            SignInAgain::Browser(Box::new(browser(|_| {}))),
+        )
         .await
         .unwrap();
+    let Added::Account(signed_in) = signed_in else {
+        panic!("{signed_in:?}")
+    };
+    let signed_in = *signed_in;
     assert!(signed_in.is_active());
     assert_eq!(signed_in.imap, learned.imap, "what was learned stays");
     assert_eq!(a.stored(), Some(signed_in));

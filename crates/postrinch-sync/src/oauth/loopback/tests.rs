@@ -129,6 +129,25 @@ async fn garbage_and_resets_do_not_end_the_wait() {
 }
 
 #[tokio::test]
+async fn a_redirect_that_closes_partway_does_not_end_the_wait() {
+    let loopback = Loopback::bind(RedirectHost::Ip).await.unwrap();
+    let port = port(loopback.redirect_uri());
+    let wait = tokio::spawn(loopback.wait_for_code("st", "Google", PROMPT));
+
+    // The right state, cut short before the code, and the connection
+    // closed cleanly: no request was sent, so nothing is answered.
+    let mut cut = TcpStream::connect(v4(port)).await.unwrap();
+    cut.write_all(b"GET /?state=st&co").await.unwrap();
+    cut.shutdown().await.unwrap();
+    let mut answer = Vec::new();
+    cut.read_to_end(&mut answer).await.unwrap();
+    assert!(answer.is_empty(), "{answer:?}");
+
+    assert_eq!(redirect(v4(port), "state=st&code=the-code").await, 200);
+    assert_eq!(wait.await.unwrap().unwrap(), "the-code");
+}
+
+#[tokio::test]
 async fn the_wait_ends_on_the_first_redirect_and_closes_the_listener() {
     let loopback = Loopback::bind(RedirectHost::Ip).await.unwrap();
     let port = port(loopback.redirect_uri());

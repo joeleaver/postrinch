@@ -3,7 +3,7 @@
 //! configure.
 
 use postrinch_commands::AccountInfo;
-use postrinch_model::{AccountState, EmailAddress};
+use postrinch_model::{AccountState, EmailAddress, SignInMethod};
 use rinch::prelude::*;
 
 use crate::appearance::Appearance;
@@ -13,6 +13,7 @@ use crate::ui::about::about;
 use crate::ui::account_color;
 use crate::ui::agent_dialogs::agent_dialogs;
 use crate::ui::agents_settings::agents_page;
+use crate::ui::imap_account::imap_account_detail;
 use crate::ui::labels::labels_page;
 use crate::ui::reading_settings::reading;
 use crate::ui::rule_editor::rule_editor;
@@ -58,7 +59,7 @@ fn accounts(state: State) -> NodeHandle {
             section { class: "settings-accounts",
                 div { class: "settings-accounts-head",
                     h1 { "Accounts" }
-                    Button { variant: "filled", size: "xs", onclick: move || state.sign_in(None), "Add Google account" }
+                    Button { variant: "filled", size: "xs", onclick: move || state.adding.open(), "Add account…" }
                 }
                 for (i, info) in state.accounts.get().into_iter().enumerate() {
                     div { key: format!("{}|{:?}", info.account.address.key(), info.account.state),
@@ -66,7 +67,7 @@ fn accounts(state: State) -> NodeHandle {
                     }
                 }
                 if state.accounts.get().is_empty() {
-                    p { class: "settings-hint", "No accounts yet. Add a Google account to start." }
+                    p { class: "settings-hint", "No accounts yet. Add one to start." }
                 }
             }
             main { class: "settings-main",
@@ -79,7 +80,10 @@ fn accounts(state: State) -> NodeHandle {
                 }
                 for info in shown(state) {
                     div { key: format!("{info:?}"),
-                        {account_detail(__scope, state, info.clone())}
+                        match info.account.imap.clone() {
+                            Some(settings) => {imap_account_detail(__scope, state, info.clone(), settings)},
+                            None => {account_detail(__scope, state, info.clone())},
+                        }
                     }
                 }
             }
@@ -145,7 +149,20 @@ fn shown(state: State) -> Option<AccountInfo> {
         .cloned()
 }
 
-fn state_line(state: &AccountState) -> (String, bool) {
+/// What of an account is on this computer: "1 message · 1 downloaded
+/// whole".
+pub(crate) fn here_line(info: &AccountInfo) -> String {
+    let messages = match info.messages {
+        1 => "1 message".to_owned(),
+        n => format!("{} messages", thousands(n)),
+    };
+    format!(
+        "{messages} · {} downloaded whole",
+        thousands(info.downloaded)
+    )
+}
+
+pub(crate) fn state_line(state: &AccountState) -> (String, bool) {
     match state {
         AccountState::Active => ("Signed in".to_owned(), false),
         AccountState::NeedsSignIn(reason) => (format!("Needs to sign in: {reason}"), true),
@@ -179,11 +196,7 @@ fn account_detail(state: State, info: AccountInfo) -> NodeHandle {
     let address = info.account.address.clone();
     let (line, trouble) = state_line(&info.account.state);
     let syncing = address.clone();
-    let here = format!(
-        "{} messages · {} downloaded whole",
-        thousands(info.messages),
-        thousands(info.downloaded)
-    );
+    let here = here_line(&info);
     let (again, remove) = (address.clone(), address.clone());
     rsx! {
         div { class: "account-detail",
@@ -211,7 +224,7 @@ fn account_detail(state: State, info: AccountInfo) -> NodeHandle {
 }
 
 /// What an account's sync is doing, as the sidebar says it.
-fn sync_line(state: State, account: &EmailAddress) -> String {
+pub(crate) fn sync_line(state: State, account: &EmailAddress) -> String {
     state
         .sync
         .get()
@@ -238,7 +251,7 @@ fn confirm_removal(state: State) -> NodeHandle {
             size: "sm",
             div { class: "dialog",
                 h2 { class: "dialog-title", "Remove this account?" }
-                p { class: "dialog-hint", {move || removal_text(state.removing.get().as_ref())} }
+                p { class: "dialog-hint", {move || removal_text(state, state.removing.get().as_ref())} }
                 div { class: "dialog-actions",
                     Button { variant: "default", size: "sm", onclick: move || state.removing.set(None), "Keep it" }
                     Button { variant: "filled", color: "red", size: "sm", onclick: confirm, "Remove" }
@@ -248,11 +261,25 @@ fn confirm_removal(state: State) -> NodeHandle {
     }
 }
 
-fn removal_text(account: Option<&EmailAddress>) -> String {
-    match account {
-        Some(a) => format!(
-            "{a} and all its mail will be deleted from this computer, and Postrinch will be signed out of it. Nothing is deleted from Gmail; you can add it again later."
-        ),
-        None => String::new(),
-    }
+fn removal_text(state: State, account: Option<&EmailAddress>) -> String {
+    let Some(a) = account else {
+        return String::new();
+    };
+    let imap = state
+        .accounts
+        .get()
+        .into_iter()
+        .find(|info| &info.account.address == a)
+        .and_then(|info| info.account.imap);
+    // A password is forgotten; a browser sign-in is signed out of.
+    let (server, leaves) = match imap.map(|settings| settings.sign_in) {
+        None => ("Gmail", "Postrinch will be signed out of it"),
+        Some(SignInMethod::OAuth2 { .. }) => ("the server", "Postrinch will be signed out of it"),
+        Some(SignInMethod::Password | SignInMethod::SeparateSmtpPassword) => {
+            ("the server", "its password forgotten")
+        }
+    };
+    format!(
+        "{a} and all its mail will be deleted from this computer, and {leaves}. Nothing is deleted from {server}; you can add it again later."
+    )
 }

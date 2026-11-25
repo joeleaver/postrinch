@@ -93,8 +93,14 @@ impl Role {
 /// A folder's name as the person reads it: decoded from modified UTF-7,
 /// with `/` between levels whatever the server's delimiter.
 pub(super) fn display_name(folder: &ListedFolder) -> String {
-    let decoded = utf7::decode(&folder.name);
-    match folder.delimiter {
+    shown_name(&folder.name, folder.delimiter)
+}
+
+/// A folder's name as the person reads it, from its name on the server
+/// and the server's delimiter.
+pub(super) fn shown_name(name: &str, delimiter: Option<char>) -> String {
+    let decoded = utf7::decode(name);
+    match delimiter {
         Some(d) if d != '/' => decoded.replace(d, "/"),
         _ => decoded,
     }

@@ -48,6 +48,7 @@ pub fn settings(imap: Server, smtp: Server, sign_in: SignInMethod) -> ImapSettin
         sign_in,
         roles: FolderRoles::default(),
         server_files_sent: true,
+        server_files_sent_chosen: false,
     }
 }
 

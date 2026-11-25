@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 postrinch-agents = { workspace = true }
 postrinch-commands = { workspace = true }
+postrinch-discover = { workspace = true }
 postrinch-log = { workspace = true }
 postrinch-model = { workspace = true }
 postrinch-render = { workspace = true }

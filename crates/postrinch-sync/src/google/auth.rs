@@ -92,10 +92,15 @@ impl GoogleAuth {
         login_hint: Option<&EmailAddress>,
         open_browser: impl FnOnce(&str) -> std::io::Result<()>,
     ) -> SyncResult<Account> {
+        // Counted as under way from before the browser opens when the
+        // address is known, otherwise from when Google names it: an IMAP
+        // account's give-back does not revoke meanwhile.
+        let mut under_way = None;
         if let Some(hint) = login_hint {
             self.grants
                 .refuse_other_kind(hint, Provider::Google)
                 .await?;
+            under_way = Some(self.grants.under_way(hint, Provider::Google));
         }
         let Granted {
             tokens,
@@ -105,6 +110,8 @@ impl GoogleAuth {
         let user = self.oauth.userinfo(&tokens.access_token).await?;
         let address =
             EmailAddress::parse(&user.email).map_err(|e| SyncError::SignIn(e.to_string()))?;
+        let _under_way =
+            under_way.unwrap_or_else(|| self.grants.under_way(&address, Provider::Google));
         // Revoking a Google refresh token withdraws the whole grant for the
         // account and this client, every token issued under it included. So
         // a token Postrinch cannot use is given back only when Postrinch
@@ -139,9 +146,11 @@ impl GoogleAuth {
         }
 
         // The new token replaces the one the account had, which shares its
-        // grant: neither is revoked.
+        // grant: neither is revoked. It is kept only if no IMAP account
+        // was added for the address while the browser was open.
         let stored = refresh_token.clone();
-        if let Err(e) = self.secret(&address, move |s, a| s.set(a, &stored)).await {
+        let keep = self.secret(&address, move |s, a| s.set(a, &stored));
+        if let Err(e) = self.grants.keep_as(&address, Provider::Google, keep).await {
             if !held {
                 self.revoke_unless_shared(&refresh_token, &address).await;
             }

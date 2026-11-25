@@ -8,7 +8,7 @@
 //! interleave: no rotated token is written over the new secret, and the
 //! secret read as replaced is the one actually replaced, rotated or not.
 
-use postrinch_model::EmailAddress;
+use postrinch_model::{EmailAddress, Provider};
 use tokio::sync::OwnedMutexGuard;
 
 use super::ImapOAuth;
@@ -53,10 +53,19 @@ impl ImapOAuth {
 }
 
 impl Replacing<'_> {
-    /// Keeps `secret` as the account's, over the one it had.
+    /// Keeps `secret` as the account's, over the one it had, in the
+    /// address's turn and only if it is not a Google account's: one may
+    /// have been added since the sign-in started ([`SyncError::AlreadyAdded`],
+    /// and then nothing is written).
     pub(crate) async fn write(&mut self, secret: &ImapSecret) -> SyncResult<()> {
-        self.written = true;
-        self.oauth.secrets.set(&self.account, secret).await
+        let oauth = self.oauth;
+        let account = &self.account;
+        let written = &mut self.written;
+        let keep = async {
+            *written = true;
+            oauth.secrets.set(account, secret).await
+        };
+        oauth.grants.keep_as(account, Provider::Imap, keep).await
     }
 
     /// The new secret stays. The account's next connections use `grant`'s

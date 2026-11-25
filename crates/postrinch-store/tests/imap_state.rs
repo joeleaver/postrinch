@@ -30,6 +30,7 @@ fn settings() -> ImapSettings {
             ..FolderRoles::default()
         },
         server_files_sent: true,
+        server_files_sent_chosen: false,
     }
 }
 

@@ -132,6 +132,8 @@ pub async fn add_imap(
                 eprintln!("Opening your browser to sign in. If it does not open, visit:\n{url}\n");
                 open::that_detached(url)
             }),
+            // Ctrl-C ends the command, and the sign-in with it.
+            cancel: None,
         },
         None if args.separate_smtp_password => {
             settings.sign_in = SignInMethod::SeparateSmtpPassword;
@@ -257,6 +259,7 @@ fn settings(imap: Server, smtp: Server) -> ImapSettings {
         sign_in: SignInMethod::Password,
         roles: FolderRoles::default(),
         server_files_sent: true,
+        server_files_sent_chosen: false,
     }
 }
 

@@ -12,7 +12,7 @@ use postrinch_model::{
 use postrinch_store::Store;
 use postrinch_sync::imap::{
     Added, CheckFailure, ImapOAuth, ImapSecret, ImapSecrets, ImapSync, NewImapAccount, NewSignIn,
-    OAuthClients, OAuthProvider,
+    OAuthClients, OAuthProvider, SignInAgain,
 };
 use postrinch_sync::{MemorySecrets, SecretStore, SyncError};
 use wiremock::MockServer;
@@ -113,6 +113,7 @@ impl Adding {
         let sign_in = NewSignIn::OAuth {
             provider: OAuthProvider::Google,
             open_browser: Box::new(browser(|_| {})),
+            cancel: None,
         };
         self.sync
             .add_account(&self.oauth, self.new_account(), sign_in)
@@ -229,9 +230,13 @@ async fn a_password_account_has_no_browser_sign_in() {
     a.add(PASSWORD).await;
     let result = a
         .sync
-        .sign_in_again(&a.oauth, &account(), Box::new(|_| Ok(())))
+        .sign_in_again(
+            &a.oauth,
+            &account(),
+            SignInAgain::Browser(Box::new(|_| Ok(()))),
+        )
         .await;
-    assert!(matches!(result, Err(SyncError::SignIn(_))), "{result:?}");
+    assert!(matches!(result, Err(SyncError::Config(_))), "{result:?}");
 }
 
 #[tokio::test]

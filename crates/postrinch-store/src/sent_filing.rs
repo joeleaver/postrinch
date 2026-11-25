@@ -23,6 +23,12 @@
 //! the back-off again from an hour. Only copies under the folder's
 //! UIDVALIDITY now count.
 //!
+//! Once the person sets the setting themselves (in the account's
+//! settings: [`ImapSettings::server_files_sent_chosen`]), sends no longer
+//! change it: neither misses nor a second copy override their choice.
+//! They can hand it back to Postrinch, which then learns again from the
+//! setting as it is ([`Store::choose_server_files_sent`]).
+//!
 //! Each change reads the account as it is now and writes back only the
 //! setting and this state, under the account lock, so settings saved
 //! meanwhile (the person's, or another send's) are never reverted.
@@ -112,6 +118,9 @@ impl Store {
     ) -> StoreResult<bool> {
         let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
         let (id, mut settings, mut filing) = self.sent_filing(address)?;
+        if settings.server_files_sent_chosen {
+            return Ok(settings.server_files_sent);
+        }
         let doubled = match (&filing.filed, sent) {
             (Some(message), Some((sent, uidvalidity))) => {
                 let copies = self
@@ -132,8 +141,9 @@ impl Store {
         }
         filing.filed = None;
         if !settings.server_files_sent {
-            // Off with no time kept (the person turned it off), or a
-            // clock set back since: the wait starts now.
+            // Off with no time kept (the person handed back a setting
+            // they had turned off), or a clock set back since: the wait
+            // starts now.
             let since = match filing.off_since {
                 Some(since) if since <= now => since,
                 _ => {
@@ -182,7 +192,7 @@ impl Store {
         let (id, mut settings, mut filing) = self.sent_filing(address)?;
         filing.filed = Some(message.clone());
         let mut turned_off = false;
-        if missed && settings.server_files_sent {
+        if missed && settings.server_files_sent && !settings.server_files_sent_chosen {
             filing.misses = filing.misses.saturating_add(1);
             if filing.misses >= misses_allowed {
                 settings.server_files_sent = false;
@@ -194,6 +204,29 @@ impl Store {
         }
         self.write_sent_filing(id, &settings, &filing)?;
         Ok(turned_off)
+    }
+
+    /// The person sets whether the provider files sent mail in Sent
+    /// itself (`Some`), and sends no longer change it; or hands it back
+    /// to Postrinch (`None`), which learns again from the setting as it
+    /// is. Either way, what sends had shown so far is forgotten. Returns
+    /// the settings as stored.
+    pub fn choose_server_files_sent(
+        &self,
+        address: &EmailAddress,
+        choice: Option<bool>,
+    ) -> StoreResult<ImapSettings> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let (id, mut settings, _) = self.sent_filing(address)?;
+        match choice {
+            Some(on) => {
+                settings.server_files_sent = on;
+                settings.server_files_sent_chosen = true;
+            }
+            None => settings.server_files_sent_chosen = false,
+        }
+        self.write_sent_filing(id, &settings, &SentFiling::default())?;
+        Ok(settings)
     }
 
     /// The account's id, its IMAP settings as stored now, and its state.

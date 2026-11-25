@@ -15,6 +15,7 @@
 //! each reused while the server keeps it open (Gmail allows about 15 at
 //! once per account).
 
+mod account_settings;
 mod accounts;
 mod answers;
 mod bodies;
@@ -45,7 +46,10 @@ use postrinch_model::{AccountState, EmailAddress, ImapSettings};
 use postrinch_store::{Store, StoreResult};
 use tokio::sync::Mutex as AsyncMutex;
 
-pub use self::accounts::{Added, NewImapAccount, NewSignIn, OpenBrowser};
+pub use self::account_settings::{AccountFolder, SignInAgain};
+pub use self::accounts::{
+    Added, NewImapAccount, NewSignIn, OpenBrowser, SignInCancel, SignInCanceller, sign_in_cancel,
+};
 pub use self::send::SentLookup;
 use self::wire::Conn;
 use super::{AccessTokens, BusyGate, Connector, ImapSecrets, ImapSession};
