@@ -184,7 +184,9 @@ async fn microsoft_without_its_client_file_is_not_set_up() {
     )
     .unwrap();
     let secrets = ImapSecrets::new(Arc::new(MemorySecrets::default()));
-    let oauth = ImapOAuth::new(OAuthClients::load_from(dir.path()), secrets.clone());
+    let google = Arc::new(MemorySecrets::default());
+    let oauth =
+        ImapOAuth::new(OAuthClients::load_from(dir.path()), secrets.clone(), google).unwrap();
     assert!(!oauth.is_set_up(OAuthProvider::Microsoft));
     assert!(oauth.is_set_up(OAuthProvider::Google));
 

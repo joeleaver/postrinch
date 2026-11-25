@@ -79,28 +79,41 @@ impl Identified {
 struct Claims {
     email: Option<String>,
     preferred_username: Option<String>,
+    /// A work account's user principal name, where the token has one.
+    upn: Option<String>,
     name: Option<String>,
 }
 
-/// Who an ID token says signed in: its `email` claim, or the
-/// `preferred_username` (a work account's sign-in name, its address) when
-/// that is an address.
+/// Who an ID token says signed in. Its addresses are the `email` claim,
+/// the `preferred_username` (a work account's sign-in name) and the `upn`,
+/// those of them that are addresses: `email` may be an alias of the
+/// sign-in name, or missing. With `asked`, the address the sign-in was
+/// for, whichever of them is that address (compared without regard to
+/// case); when none is, or without `asked`, the first.
 ///
 /// The token's signature is not checked: it came straight from the token
 /// endpoint over TLS, which OpenID Connect Core (3.1.3.7) accepts in place
 /// of one. Nor does the address grant anything: the mail server checks
 /// the access token against the user it signs in.
-pub(crate) fn from_id_token(id_token: &str) -> SyncResult<Identified> {
+pub(crate) fn from_id_token(
+    id_token: &str,
+    asked: Option<&EmailAddress>,
+) -> SyncResult<Identified> {
     let unreadable = || SyncError::SignIn("the sign-in's ID token does not parse".into());
     let payload = id_token.split('.').nth(1).ok_or_else(unreadable)?;
     let json = URL_SAFE_NO_PAD
         .decode(payload.trim_end_matches('='))
         .map_err(|_| unreadable())?;
     let claims: Claims = serde_json::from_slice(&json).map_err(|_| unreadable())?;
-    let address = [claims.email, claims.preferred_username]
+    let addresses: Vec<EmailAddress> = [claims.email, claims.preferred_username, claims.upn]
         .into_iter()
         .flatten()
-        .find_map(|a| EmailAddress::parse(&a).ok())
+        .filter_map(|a| EmailAddress::parse(&a).ok())
+        .collect();
+    let address = asked
+        .and_then(|asked| addresses.iter().find(|a| a.key() == asked.key()))
+        .or(addresses.first())
+        .cloned()
         .ok_or_else(|| SyncError::SignIn("the sign-in did not say which address it is".into()))?;
     Ok(Identified {
         address,
@@ -128,22 +141,57 @@ mod tests {
 
     #[test]
     fn reads_the_address_from_an_id_token() {
-        let who = from_id_token(&id_token(serde_json::json!({
-            "email": "Ada@Outlook.com", "preferred_username": "x", "name": "Ada"
-        })))
+        let who = from_id_token(
+            &id_token(serde_json::json!({
+                "email": "Ada@Outlook.com", "preferred_username": "x", "name": "Ada"
+            })),
+            None,
+        )
         .unwrap();
         assert_eq!(who.address.key(), "ada@outlook.com");
         assert_eq!(who.name.as_deref(), Some("Ada"));
 
         // A work account without the optional `email` claim.
-        let work = from_id_token(&id_token(serde_json::json!({
-            "preferred_username": "ada@contoso.com"
-        })))
+        let work = from_id_token(
+            &id_token(serde_json::json!({
+                "preferred_username": "ada@contoso.com"
+            })),
+            None,
+        )
         .unwrap();
         assert_eq!(work.address.key(), "ada@contoso.com");
 
-        assert!(from_id_token(&id_token(serde_json::json!({"name": "Ada"}))).is_err());
-        assert!(from_id_token("not-a-jwt").is_err());
+        assert!(from_id_token(&id_token(serde_json::json!({"name": "Ada"})), None).is_err());
+        assert!(from_id_token("not-a-jwt", None).is_err());
+    }
+
+    #[test]
+    fn the_address_asked_for_is_found_among_the_claims() {
+        let asked = EmailAddress::parse("Ada@Contoso.com").unwrap();
+        // `email` is an alias; the sign-in name is the address asked for.
+        let alias = id_token(serde_json::json!({
+            "email": "ada.lovelace@contoso.com", "preferred_username": "ada@contoso.com"
+        }));
+        let who = from_id_token(&alias, Some(&asked)).unwrap();
+        assert_eq!(who.address.key(), "ada@contoso.com");
+
+        let by_upn = id_token(serde_json::json!({
+            "email": "ada.lovelace@contoso.com", "preferred_username": "Ada Lovelace",
+            "upn": "ADA@contoso.com"
+        }));
+        assert_eq!(
+            from_id_token(&by_upn, Some(&asked)).unwrap().address.key(),
+            "ada@contoso.com"
+        );
+
+        // None of them is: the first, to name the account that signed in.
+        let other = id_token(serde_json::json!({
+            "email": "grace@contoso.com", "preferred_username": "grace.h@contoso.com"
+        }));
+        assert_eq!(
+            from_id_token(&other, Some(&asked)).unwrap().address.key(),
+            "grace@contoso.com"
+        );
     }
 
     #[test]

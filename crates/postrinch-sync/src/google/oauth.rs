@@ -154,9 +154,14 @@ pub(crate) fn check_scopes(granted: &str) -> SyncResult<()> {
 }
 
 /// What a token error means. `invalid_grant` is every way a refresh token
-/// stops working; Google does not say which.
+/// stops working; Google does not say which. Google's description is kept
+/// whole: unlike Microsoft's, it carries no trace ids.
 fn classify(status: u16, e: TokenError) -> SyncError {
-    let detail = e.detail();
+    let detail = if e.error_description.is_empty() {
+        e.error.clone()
+    } else {
+        e.error_description.clone()
+    };
     match e.error.as_str() {
         "invalid_grant" => SyncError::NeedsSignIn(SignInReason::CredentialRejected { detail }),
         "admin_policy_enforced" => SyncError::NeedsSignIn(SignInReason::AdminPolicy { detail }),
@@ -211,6 +216,26 @@ mod tests {
             flow.token_error(500, "oops"),
             SyncError::Api { status: 500, .. }
         ));
+    }
+
+    #[test]
+    fn googles_whole_description_is_kept() {
+        let flow = flow();
+        let err = flow.token_error(
+            400,
+            r#"{"error":"invalid_grant","error_description":"Bad Request.\nAsk the admin."}"#,
+        );
+        match err {
+            SyncError::NeedsSignIn(SignInReason::CredentialRejected { detail }) => {
+                assert_eq!(detail, "Bad Request.\nAsk the admin.");
+            }
+            other => panic!("expected a refused grant, got {other:?}"),
+        }
+        let other = flow.token_error(400, r#"{"error":"invalid_client"}"#);
+        assert_eq!(
+            other.to_string(),
+            "Google OAuth answered 400: invalid_client: invalid_client"
+        );
     }
 
     #[test]

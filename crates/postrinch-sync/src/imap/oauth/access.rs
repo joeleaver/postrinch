@@ -10,8 +10,10 @@ use postrinch_model::{EmailAddress, SignInReason};
 use tokio::sync::Mutex;
 
 use super::{OAuthClients, OAuthProvider};
+use crate::google::GoogleGrants;
 use crate::imap::{AccessTokens, ImapSecret, ImapSecrets, TokenFuture};
-use crate::oauth::{OAuthFlow, Tokens};
+use crate::oauth::{OAuthFlow, OAuthTimeouts, Tokens, http_client};
+use crate::secrets::SecretStore;
 use crate::{SyncError, SyncResult};
 
 /// Refresh an access token this long before the provider says it expires.
@@ -43,23 +45,40 @@ pub(super) type Slot = Arc<Mutex<Option<AccessToken>>>;
 /// OAuth for IMAP accounts: sign-in through the browser
 /// ([`ImapOAuth::sign_in`]) and the access tokens IMAP and SMTP sign in
 /// with ([`AccessTokens`]). Refresh tokens are the accounts' own, in
-/// [`ImapSecrets`] (`postrinch.imap`), apart from any Google account's.
+/// [`ImapSecrets`] (`postrinch.imap`), apart from any Google account's,
+/// which is read, never changed: an address that is a Google account is
+/// not added as an IMAP account, and a grant it shares is not revoked.
 /// Cheap to share: wrap in an `Arc`.
 pub struct ImapOAuth {
     pub(super) clients: OAuthClients,
     pub(super) secrets: ImapSecrets,
+    pub(super) grants: GoogleGrants,
     http: reqwest::Client,
     slots: std::sync::Mutex<HashMap<String, Slot>>,
 }
 
 impl ImapOAuth {
-    pub fn new(clients: OAuthClients, secrets: ImapSecrets) -> Self {
-        Self {
+    /// IMAP accounts' secrets in `secrets`, Google accounts' refresh
+    /// tokens in `google_secrets` (the keychain's `postrinch.google`).
+    pub fn new(
+        clients: OAuthClients,
+        secrets: ImapSecrets,
+        google_secrets: Arc<dyn SecretStore>,
+    ) -> SyncResult<Self> {
+        Ok(Self {
             clients,
+            grants: GoogleGrants::new(google_secrets, secrets.clone()),
             secrets,
-            http: reqwest::Client::new(),
+            http: http_client(OAuthTimeouts::default())?,
             slots: std::sync::Mutex::new(HashMap::new()),
-        }
+        })
+    }
+
+    /// With other timeouts for the providers' OAuth requests than the
+    /// default.
+    pub fn with_timeouts(mut self, timeouts: OAuthTimeouts) -> SyncResult<Self> {
+        self.http = http_client(timeouts)?;
+        Ok(self)
     }
 
     /// Whether accounts with `provider` can sign in in this copy of

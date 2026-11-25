@@ -7,6 +7,7 @@
 
 mod browser;
 mod flow;
+mod http;
 mod loopback;
 mod pkce;
 mod spec;
@@ -14,6 +15,8 @@ mod tokens;
 
 pub(crate) use browser::{Granted, browser_sign_in};
 pub(crate) use flow::OAuthFlow;
+pub use http::OAuthTimeouts;
+pub(crate) use http::http_client;
 pub(crate) use loopback::RedirectHost;
 pub(crate) use spec::{AuthorizeParams, Identity, Names, OAuthEndpoints, OAuthSpec, TokenError};
 pub(crate) use tokens::{Identified, Tokens};

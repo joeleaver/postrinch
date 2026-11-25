@@ -1,6 +1,6 @@
 //! Signing an IMAP account in with OAuth in the browser, again, and out.
 
-use postrinch_model::{EmailAddress, SignInMethod};
+use postrinch_model::{EmailAddress, Provider, SignInMethod};
 
 use super::access::AccessToken;
 use super::{ImapOAuth, OAuthProvider};
@@ -29,7 +29,10 @@ impl ImapOAuth {
     /// any it had.
     ///
     /// A provider without a client here fails with
-    /// [`SyncError::OAuthNotSetUp`] before anything opens.
+    /// [`SyncError::OAuthNotSetUp`] before anything opens, and so does an
+    /// address that is already a Google account, with
+    /// [`SyncError::AlreadyAdded`]: the two kinds of account cannot share
+    /// an address, and Google's grant (docs/imap.md, "Credentials").
     ///
     /// A refused sign-in's token is not revoked but left to lapse: with
     /// Google, revoking it would withdraw the whole grant for the address,
@@ -41,12 +44,15 @@ impl ImapOAuth {
         open_browser: impl FnOnce(&str) -> std::io::Result<()>,
     ) -> SyncResult<OAuthSignIn> {
         let flow = self.flow(provider)?;
+        self.grants
+            .refuse_other_kind(address, Provider::Imap)
+            .await?;
         let Granted {
             tokens,
             refresh_token,
         } = browser_sign_in(&flow, Some(address), open_browser).await?;
         flow.check_scopes(&tokens.scope)?;
-        let who = flow.identify(&tokens).await?;
+        let who = flow.identify(&tokens, Some(address)).await?;
         if who.address.key() != address.key() {
             return Err(SyncError::OtherAccount {
                 asked: address.clone(),
@@ -101,7 +107,9 @@ impl ImapOAuth {
 
     /// Sign an account out: forget its access token, give its refresh
     /// token back to the provider where the provider takes it back
-    /// (Google; Microsoft has no way to), and remove its secret.
+    /// (Google, unless a Google account for the address holds a token
+    /// under the same grant; Microsoft has no way to), and remove its
+    /// secret.
     pub async fn sign_out(&self, account: &EmailAddress) -> SyncResult<()> {
         let slot = self.slot(account);
         let mut cached = slot.lock().await;
@@ -110,11 +118,22 @@ impl ImapOAuth {
             provider,
             refresh_token,
         }) = self.secrets.get(account).await
-            && let Some(flow) = OAuthProvider::from_id(&provider).and_then(|p| self.flow(p).ok())
-            && let Err(e) = flow.revoke(&refresh_token).await
+            && let Some(provider) = OAuthProvider::from_id(&provider)
+            && let Ok(flow) = self.flow(provider)
         {
-            // The token goes unused either way.
-            tracing::warn!("could not revoke {account}'s refresh token: {e}");
+            match provider {
+                OAuthProvider::Google => {
+                    self.grants
+                        .revoke_unless_shared(&flow, &refresh_token, account, Provider::Imap)
+                        .await;
+                }
+                OAuthProvider::Microsoft => {
+                    if let Err(e) = flow.revoke(&refresh_token).await {
+                        // The token goes unused either way.
+                        tracing::warn!("could not revoke {account}'s refresh token: {e}");
+                    }
+                }
+            }
         }
         self.secrets.delete(account).await
     }

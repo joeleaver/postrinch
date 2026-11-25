@@ -34,7 +34,9 @@ pub(crate) async fn browser_sign_in(
     let url = flow.authorize_url(&redirect_uri, &pkce.challenge, &pkce.state, login_hint)?;
     open_browser(url.as_str())?;
 
-    let code = loopback.wait_for_code(&pkce.state, SIGN_IN_TIMEOUT).await?;
+    let code = loopback
+        .wait_for_code(&pkce.state, flow.spec.names.provider, SIGN_IN_TIMEOUT)
+        .await?;
     let tokens = flow
         .exchange_code(&code, &pkce.verifier, &redirect_uri)
         .await?;

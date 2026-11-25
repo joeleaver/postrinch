@@ -22,9 +22,10 @@ pub(crate) struct OAuthEndpoints {
 pub(crate) enum Identity {
     /// The userinfo endpoint's `email` and `email_verified` (Google).
     Userinfo,
-    /// The token response's `id_token`: its `email` claim, or failing that
-    /// `preferred_username` (Microsoft, whose userinfo is Graph's and wants
-    /// a token for Graph, not for Outlook).
+    /// The token response's `id_token`: whichever of its `email`,
+    /// `preferred_username` and `upn` claims is the address asked for
+    /// (Microsoft, whose userinfo is Graph's and wants a token for Graph,
+    /// not for Outlook).
     IdToken,
 }
 

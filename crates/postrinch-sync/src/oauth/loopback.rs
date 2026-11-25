@@ -1,10 +1,12 @@
 //! The loopback redirect: a one-shot HTTP listener on this machine that
 //! receives the provider's redirect at the end of the browser sign-in.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::task::JoinSet;
 use url::Url;
 
 use super::first_line;
@@ -15,6 +17,13 @@ const MAX_REQUEST: usize = 16 * 1024;
 /// Ports tried for a `localhost` redirect before giving up on finding one
 /// free on both 127.0.0.1 and ::1.
 const PORT_ATTEMPTS: usize = 8;
+/// How long a connection has to send its request line and headers. A
+/// browser sends its redirect at once; one that opened a connection ahead
+/// of time and sent nothing is dropped.
+const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
+/// The pause after a failed accept, so a failure that repeats (no file
+/// descriptors left) does not spin.
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
 
 const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Postrinch</title>\
     <body style=\"font-family:sans-serif;margin:3em\"><h1>Signed in</h1>\
@@ -84,14 +93,25 @@ impl Loopback {
     }
 
     /// Wait for the redirect carrying `expected_state` and return its
-    /// authorization code. Requests that are not that redirect (a browser's
-    /// `/favicon.ico`, a stale tab) get a 404 and are ignored.
+    /// authorization code. `provider` names the sign-in page in an error
+    /// it redirects with.
+    ///
+    /// Connections are served side by side, so one that never sends (a
+    /// browser's preconnect, the address of `localhost` it tried first)
+    /// holds nothing up; each gets [`CONNECTION_TIMEOUT`] to send its
+    /// request. A connection that fails, sends something that is not a
+    /// request, or asks for something else (a browser's `/favicon.ico`, a
+    /// stale tab's redirect) is not the sign-in's and is answered or
+    /// dropped while listening goes on. The first redirect with the
+    /// expected state ends the wait, and the listeners close.
     pub(crate) async fn wait_for_code(
         self,
         expected_state: &str,
+        provider: &'static str,
         timeout: Duration,
     ) -> SyncResult<String> {
-        tokio::time::timeout(timeout, self.accept_until_code(expected_state))
+        let state: Arc<str> = Arc::from(expected_state);
+        tokio::time::timeout(timeout, self.serve_until_redirect(state, provider))
             .await
             .map_err(|_| SyncError::SignIn("timed out waiting for the browser".into()))?
     }
@@ -107,24 +127,75 @@ impl Loopback {
         Ok(stream)
     }
 
-    async fn accept_until_code(&self, expected_state: &str) -> SyncResult<String> {
+    async fn serve_until_redirect(
+        &self,
+        state: Arc<str>,
+        provider: &'static str,
+    ) -> SyncResult<String> {
+        // Dropped on return, and with it any connection still being served.
+        let mut connections = JoinSet::new();
         loop {
-            let mut stream = self.accept().await?;
-            let Some(target) = read_request_target(&mut stream).await? else {
-                respond(&mut stream, "400 Bad Request", FAILED_PAGE).await;
-                continue;
-            };
-            match redirect_result(&target, expected_state) {
-                Redirect::NotOurs => respond(&mut stream, "404 Not Found", "").await,
-                Redirect::Code(code) => {
-                    respond(&mut stream, "200 OK", DONE_PAGE).await;
-                    return Ok(code);
-                }
-                Redirect::Error(e) => {
-                    respond(&mut stream, "200 OK", FAILED_PAGE).await;
-                    return Err(SyncError::SignIn(e));
-                }
+            tokio::select! {
+                accepted = self.accept() => match accepted {
+                    Ok(stream) => {
+                        connections.spawn(serve(stream, Arc::clone(&state), provider));
+                    }
+                    Err(e) => {
+                        // A connection that went away before it was taken,
+                        // or the process out of descriptors for a moment.
+                        tracing::debug!("loopback accept failed: {e}");
+                        tokio::time::sleep(ACCEPT_BACKOFF).await;
+                    }
+                },
+                Some(served) = connections.join_next() => match served {
+                    Ok(Some(Ours::Code(code))) => return Ok(code),
+                    Ok(Some(Ours::Error(e))) => return Err(SyncError::SignIn(e)),
+                    Ok(None) => {}
+                    Err(e) => tracing::debug!("a loopback connection's task failed: {e}"),
+                },
             }
+        }
+    }
+}
+
+/// The sign-in's own redirect.
+enum Ours {
+    Code(String),
+    Error(String),
+}
+
+/// Serve one connection: the sign-in's redirect, answered and returned, or
+/// `None` for anything else, which is answered (or, if it fails or sends
+/// no request in time, dropped).
+async fn serve(mut stream: TcpStream, state: Arc<str>, provider: &'static str) -> Option<Ours> {
+    let read = tokio::time::timeout(CONNECTION_TIMEOUT, read_request_target(&mut stream)).await;
+    let target = match read {
+        Ok(Ok(target)) => target,
+        Ok(Err(e)) => {
+            tracing::debug!("a loopback connection failed: {e}");
+            return None;
+        }
+        Err(_) => {
+            tracing::debug!("a loopback connection sent no request in time");
+            return None;
+        }
+    };
+    let Some(target) = target else {
+        respond(&mut stream, "400 Bad Request", FAILED_PAGE).await;
+        return None;
+    };
+    match redirect_result(&target, &state, provider) {
+        Redirect::NotOurs => {
+            respond(&mut stream, "404 Not Found", "").await;
+            None
+        }
+        Redirect::Code(code) => {
+            respond(&mut stream, "200 OK", DONE_PAGE).await;
+            Some(Ours::Code(code))
+        }
+        Redirect::Error(e) => {
+            respond(&mut stream, "200 OK", FAILED_PAGE).await;
+            Some(Ours::Error(e))
         }
     }
 }
@@ -136,8 +207,9 @@ enum Redirect {
     Error(String),
 }
 
-/// Classify a request target (`/?code=…&state=…`).
-fn redirect_result(target: &str, expected_state: &str) -> Redirect {
+/// Classify a request target (`/?code=…&state=…`). `provider` names the
+/// sign-in page in an error that comes without a description.
+fn redirect_result(target: &str, expected_state: &str, provider: &str) -> Redirect {
     let Ok(url) = Url::parse("http://127.0.0.1").and_then(|base| base.join(target)) else {
         return Redirect::NotOurs;
     };
@@ -161,7 +233,7 @@ fn redirect_result(target: &str, expected_state: &str) -> Redirect {
         return Redirect::Error(match (error.as_str(), description) {
             (_, Some(description)) => description,
             ("access_denied", None) => "access was not granted".into(),
-            (other, None) => format!("the sign-in page answered {other}"),
+            (other, None) => format!("{provider} answered {other}"),
         });
     }
     match param("code") {
@@ -171,7 +243,7 @@ fn redirect_result(target: &str, expected_state: &str) -> Redirect {
 }
 
 /// The target of a `GET` request line, or `None` for anything else.
-async fn read_request_target(stream: &mut TcpStream) -> SyncResult<Option<String>> {
+async fn read_request_target(stream: &mut TcpStream) -> std::io::Result<Option<String>> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 2048];
     while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
@@ -207,79 +279,4 @@ async fn respond(stream: &mut TcpStream, status: &str, body: &str) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn classifies_redirects() {
-        assert_eq!(
-            redirect_result("/?state=s&code=abc", "s"),
-            Redirect::Code("abc".into())
-        );
-        assert_eq!(
-            redirect_result("/?state=other&code=abc", "s"),
-            Redirect::NotOurs
-        );
-        assert_eq!(redirect_result("/favicon.ico", "s"), Redirect::NotOurs);
-        assert!(matches!(
-            redirect_result("/?state=s&error=access_denied", "s"),
-            Redirect::Error(_)
-        ));
-        assert!(matches!(
-            redirect_result("/?state=s", "s"),
-            Redirect::Error(_)
-        ));
-    }
-
-    #[test]
-    fn a_refusal_keeps_the_providers_words() {
-        let target = "/?state=s&error=consent_required\
-            &error_description=AADSTS65001%3A+Not+consented.%0D%0ATrace+ID%3A+x";
-        assert_eq!(
-            redirect_result(target, "s"),
-            Redirect::Error("AADSTS65001: Not consented.".into())
-        );
-    }
-
-    #[tokio::test]
-    async fn receives_the_code_over_http() {
-        let loopback = Loopback::bind(RedirectHost::Ip).await.unwrap();
-        let uri = loopback.redirect_uri().to_owned();
-        let wait = tokio::spawn(loopback.wait_for_code("st", Duration::from_secs(5)));
-
-        let http = reqwest::Client::new();
-        let favicon = http.get(format!("{uri}favicon.ico")).send().await.unwrap();
-        assert_eq!(favicon.status(), 404);
-        let done = http
-            .get(format!("{uri}?state=st&code=the-code"))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(done.status(), 200);
-
-        assert_eq!(wait.await.unwrap().unwrap(), "the-code");
-    }
-
-    #[tokio::test]
-    async fn a_localhost_redirect_is_heard_on_both_loopbacks() {
-        let loopback = Loopback::bind(RedirectHost::Localhost).await.unwrap();
-        let uri = loopback.redirect_uri().to_owned();
-        assert!(uri.starts_with("http://localhost:"), "{uri}");
-        let port = uri.rsplit(':').next().unwrap().to_owned();
-        let has_v6 = loopback.v6.is_some();
-        let wait = tokio::spawn(loopback.wait_for_code("st", Duration::from_secs(5)));
-
-        let http = reqwest::Client::new();
-        if has_v6 {
-            let stale = http.get(format!("http://[::1]:{port}/?state=old&code=x"));
-            assert_eq!(stale.send().await.unwrap().status(), 404);
-        }
-        let done = http
-            .get(format!("http://127.0.0.1:{port}/?state=st&code=the-code"))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(done.status(), 200);
-        assert_eq!(wait.await.unwrap().unwrap(), "the-code");
-    }
-}
+mod tests;

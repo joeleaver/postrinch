@@ -132,8 +132,13 @@ impl OAuthFlow {
         let status = response.status();
         let body = response.text().await?;
         if status.is_success() {
-            return serde_json::from_str(&body).map_err(|e| {
-                SyncError::api(self.spec.names.token, status.as_u16(), e.to_string())
+            // serde's message can quote the answer, tokens and all.
+            return serde_json::from_str(&body).map_err(|_| {
+                SyncError::api(
+                    self.spec.names.token,
+                    status.as_u16(),
+                    "the token endpoint's answer could not be read",
+                )
             });
         }
         Err(self.token_error(status.as_u16(), &body))
@@ -154,8 +159,14 @@ impl OAuthFlow {
         }
     }
 
-    /// Who signed in, from the tokens a code exchange returned.
-    pub(crate) async fn identify(&self, tokens: &Tokens) -> SyncResult<Identified> {
+    /// Who signed in, from the tokens a code exchange returned. `asked`
+    /// is the address the sign-in was for, when there was one: an ID
+    /// token that names it among its addresses is taken to be for it.
+    pub(crate) async fn identify(
+        &self,
+        tokens: &Tokens,
+        asked: Option<&EmailAddress>,
+    ) -> SyncResult<Identified> {
         match self.spec.identity {
             Identity::Userinfo => {
                 Identified::from_userinfo(self.userinfo(&tokens.access_token).await?)
@@ -164,7 +175,7 @@ impl OAuthFlow {
                 let id_token = tokens.id_token.as_deref().ok_or_else(|| {
                     SyncError::SignIn(format!("{} sent no ID token", self.spec.names.provider))
                 })?;
-                from_id_token(id_token)
+                from_id_token(id_token, asked)
             }
         }
     }
@@ -191,7 +202,14 @@ impl OAuthFlow {
                 body,
             ));
         }
-        Ok(response.json().await?)
+        let body = response.text().await?;
+        serde_json::from_str(&body).map_err(|_| {
+            SyncError::api(
+                self.spec.names.userinfo,
+                status.as_u16(),
+                "the userinfo endpoint's answer could not be read",
+            )
+        })
     }
 
     /// Revoke a refresh token Postrinch no longer uses. With a provider

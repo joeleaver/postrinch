@@ -1,4 +1,4 @@
-use postrinch_model::{EmailAddress, SignInReason};
+use postrinch_model::{EmailAddress, Provider, SignInReason};
 use postrinch_store::StoreError;
 
 pub type SyncResult<T> = Result<T, SyncError>;
@@ -31,6 +31,14 @@ pub enum SyncError {
     OtherAccount {
         asked: EmailAddress,
         signed_in: EmailAddress,
+    },
+    /// The address is already here as the other kind of account (a
+    /// Google account, or an IMAP account): the two cannot both be kept,
+    /// so nothing was added (docs/imap.md, "Credentials").
+    #[error("{address} is already added as {}", kind_phrase(*.existing))]
+    AlreadyAdded {
+        address: EmailAddress,
+        existing: Provider,
     },
     #[error("the keychain: {0}")]
     Keychain(String),
@@ -69,6 +77,14 @@ pub enum SyncError {
     Store(#[from] StoreError),
     #[error("{0}")]
     Io(#[from] std::io::Error),
+}
+
+/// "a Google account", "an IMAP account".
+fn kind_phrase(provider: Provider) -> &'static str {
+    match provider {
+        Provider::Google => "a Google account",
+        Provider::Imap => "an IMAP account",
+    }
 }
 
 impl SyncError {
