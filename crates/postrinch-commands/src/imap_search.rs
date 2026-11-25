@@ -5,10 +5,11 @@
 //! Each alternative of the query (query_or.rs) becomes one
 //! [`ImapAlternative`]: its labels the folders to look in, its terms the
 //! keys. Every key asks for at least what the term asks, so nothing the
-//! query matches is missed: dates go a few days wider (a server dates mail
-//! in its own zone), and terms the headers here can answer but IMAP cannot
-//! ask (a second label, `last:`) are left to the check made on what is
-//! found ([`Commands::remote_rows`]). The one term neither can answer,
+//! query matches is missed: words go by their stems' text ([`key`]),
+//! dates go a few days wider (a server dates mail in its own zone), and
+//! terms the headers here can answer but IMAP cannot ask (a second label,
+//! `last:`, a word left out) are left to the check made on what is found
+//! ([`Commands::remote_rows`]). The one term neither can answer,
 //! `has:attachment`, is named in [`ImapAlternative::inexact`], so a server
 //! without Gmail's own language refuses the search rather than answer it
 //! wrongly.
@@ -19,6 +20,8 @@ use jiff::{Timestamp as Instant, ToSpan};
 use postrinch_model::{
     Day, EmailAddress, ImapAlternative, ImapSearch, Label, LabelKind, SearchKey, Timestamp,
 };
+
+use postrinch_store::{search_tokens, server_texts};
 
 use crate::query::{LabelName, Query, label_matches};
 use crate::query_or::Either;
@@ -113,24 +116,27 @@ fn label_ids(labels: &[Label], name: &LabelName) -> Vec<String> {
 /// the term no key can ask, if it has one. Dates are days in `zone`.
 pub(crate) fn key(query: &Query, zone: &TimeZone) -> (SearchKey, Option<String>) {
     let mut keys = Vec::new();
-    for word in &query.words {
-        // A phrase is its words in order, a `prefix*` its prefix: IMAP
-        // matches substrings, so either is found by its text.
-        let (without, word) = match word.strip_prefix('-') {
-            Some(rest) => (true, rest),
-            None => (false, word.as_str()),
-        };
-        let text: String = word.trim_end_matches('*').replace('"', "");
-        let text = text.trim();
-        if text.is_empty() {
-            continue;
+    // Words are asked term by term, as full-text search here reads them
+    // (`search_tokens`): `invoice-4471` is two terms, and a phrase is its
+    // terms wherever they are, so a hard wrap or punctuation between its
+    // words does not hide it, and a `prefix*` is its prefix. A term is
+    // asked by text every word of its stem contains (`server_texts`), as
+    // TEXT matches substrings: `shipping` asks for `ship`, which
+    // `shipped` has too. Words left out (`-draft`) are not asked at all:
+    // TEXT matches a part of a word in any header, so NOT TEXT would leave
+    // out mail that search here keeps (`-cat` and "concatenate", or a word
+    // in a `Received:` header); the check made on what is found leaves
+    // them out as search here does.
+    for word in query.wanted_words() {
+        let word = word.replace(['"', '*'], " ");
+        for token in search_tokens(&word) {
+            let texts = server_texts(&token).into_iter().map(SearchKey::Text);
+            if let Some(key) = SearchKey::any(texts)
+                && !keys.contains(&key)
+            {
+                keys.push(key);
+            }
         }
-        let key = SearchKey::Text(text.to_owned());
-        keys.push(if without {
-            SearchKey::negated(key)
-        } else {
-            key
-        });
     }
     keys.extend(query.from.iter().map(|v| SearchKey::From(v.clone())));
     keys.extend(query.to.iter().map(|v| recipient(v)));

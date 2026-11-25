@@ -56,26 +56,43 @@ impl Asked {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteStatus {
     /// Waiting for the servers; `waiting` messages are not downloaded.
-    Asking {
-        waiting: usize,
-    },
-    /// They found `count` more; `incomplete` says what was not searched,
-    /// when something was not.
-    Found {
-        count: usize,
-        incomplete: Option<String>,
-    },
-    /// The servers could not be reached.
-    Offline {
-        waiting: usize,
-    },
-    /// A server is busy for the account, and asked again later.
-    Busy {
-        waiting: usize,
-    },
-    /// A server would not search as asked: the results are the mail
-    /// here. The reason is the server's, or what IMAP cannot ask.
+    Asking { waiting: usize },
+    /// The servers that answered found `count` more. `notes` says, for
+    /// each account, what was not searched, or why its server was not
+    /// asked, when something was not.
+    Found { count: usize, notes: Vec<Note> },
+    /// The server could not be reached, or none of the servers could.
+    Offline { waiting: usize },
+    /// The one server asked is busy for the account, and asked again later.
+    Busy { waiting: usize },
+    /// The one server asked would not search as asked: the results are the
+    /// mail here. The reason is the server's, or what IMAP cannot ask.
     Refused(String),
+    /// The one server asked could not be asked.
+    Failed(String),
+    /// None of the several servers asked could search, each for the
+    /// reason its note gives.
+    Unanswered { waiting: usize, notes: Vec<Note> },
+}
+
+/// What one account's server search left out, or why it did not search.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Note {
+    pub account: EmailAddress,
+    pub what: Trouble,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Trouble {
+    /// It searched, but not everywhere: what was not searched, and why.
+    Incomplete(String),
+    /// Its server could not be reached.
+    Offline,
+    /// Its server is busy for the account.
+    Busy,
+    /// Its server would not search as asked, and why.
+    Refused(String),
+    /// It could not be asked, and why.
     Failed(String),
 }
 
@@ -132,8 +149,8 @@ impl State {
         let mail = sync.mail().clone();
         sync.runtime.clone().spawn(async move {
             let mut rows: Vec<ThreadRow> = Vec::new();
-            let mut trouble: Option<RemoteStatus> = None;
-            let mut incomplete: Option<String> = None;
+            let mut notes: Vec<Note> = Vec::new();
+            let mut answered = 0;
             for (account, _) in &remote.accounts {
                 let found = mail
                     .search_server(
@@ -145,12 +162,17 @@ impl State {
                     .await;
                 let found = match found {
                     Ok(found) => found,
+                    // A newer search took this one's place; it says what
+                    // the servers found.
+                    Err(SyncError::SearchSuperseded) => return,
                     Err(e) => {
-                        trouble = Some(trouble_of(account, e, waiting));
+                        notes.push(Note {
+                            account: account.clone(),
+                            what: trouble_of(account, e),
+                        });
                         continue;
                     }
                 };
-                incomplete = incomplete.or(found.incomplete);
                 let here: HashSet<String> = listed
                     .iter()
                     .filter(|(a, _)| a == account)
@@ -158,23 +180,42 @@ impl State {
                     .collect();
                 let (store, q, a) = (sync.store.clone(), query.clone(), account.clone());
                 let ids = found.ids;
-                let found = tokio::task::spawn_blocking(move || {
+                let checked = tokio::task::spawn_blocking(move || {
                     Commands::new(store).remote_rows(&q, &a, &ids, &here, grouping)
                 })
                 .await;
-                match found {
-                    Ok(Ok(found)) => rows.extend(found),
-                    Ok(Err(e)) => trouble = Some(RemoteStatus::Failed(e.to_string())),
-                    Err(e) => trouble = Some(RemoteStatus::Failed(e.to_string())),
+                let failed = match checked {
+                    Ok(Ok(found)) => {
+                        rows.extend(found);
+                        None
+                    }
+                    Ok(Err(e)) => Some(e.to_string()),
+                    Err(e) => Some(e.to_string()),
+                };
+                if let Some(why) = failed {
+                    tracing::warn!("server search for {account}: {why}");
+                    notes.push(Note {
+                        account: account.clone(),
+                        what: Trouble::Failed(why),
+                    });
+                    continue;
+                }
+                answered += 1;
+                if let Some(why) = found.incomplete {
+                    notes.push(Note {
+                        account: account.clone(),
+                        what: Trouble::Incomplete(why),
+                    });
                 }
             }
             rows.sort_by_key(|r| std::cmp::Reverse(r.summary.latest));
-            let status = match trouble {
-                Some(trouble) if rows.is_empty() => trouble,
-                _ => RemoteStatus::Found {
+            let status = if answered > 0 {
+                RemoteStatus::Found {
                     count: rows.len(),
-                    incomplete,
-                },
+                    notes,
+                }
+            } else {
+                unanswered(notes, waiting)
             };
             signal.update_send(move |r| {
                 if let Some(r) = r
@@ -188,24 +229,81 @@ impl State {
     }
 }
 
+/// The status when no server searched: one server's trouble as it is,
+/// several offline as offline, otherwise each one's.
+fn unanswered(mut notes: Vec<Note>, waiting: usize) -> RemoteStatus {
+    if notes.iter().all(|n| n.what == Trouble::Offline) {
+        return RemoteStatus::Offline { waiting };
+    }
+    if notes.len() > 1 {
+        return RemoteStatus::Unanswered { waiting, notes };
+    }
+    match notes.pop().map(|n| n.what) {
+        Some(Trouble::Busy) => RemoteStatus::Busy { waiting },
+        Some(Trouble::Refused(why)) => RemoteStatus::Refused(why),
+        Some(Trouble::Failed(why) | Trouble::Incomplete(why)) => RemoteStatus::Failed(why),
+        Some(Trouble::Offline) | None => RemoteStatus::Offline { waiting },
+    }
+}
+
 /// What a server search's failure means for the line.
-fn trouble_of(account: &EmailAddress, e: SyncError, waiting: usize) -> RemoteStatus {
+fn trouble_of(account: &EmailAddress, e: SyncError) -> Trouble {
     match e {
         SyncError::Http(_) | SyncError::Unreachable { .. } => {
             tracing::info!("server search for {account}: {e}");
-            RemoteStatus::Offline { waiting }
+            Trouble::Offline
         }
         SyncError::Busy { .. } => {
             tracing::info!("server search for {account}: {e}");
-            RemoteStatus::Busy { waiting }
+            Trouble::Busy
         }
         SyncError::SearchRefused { message, .. } => {
             tracing::info!("server search for {account} refused: {message}");
-            RemoteStatus::Refused(message)
+            Trouble::Refused(message)
         }
         e => {
             tracing::warn!("server search for {account}: {e}");
-            RemoteStatus::Failed(e.to_string())
+            Trouble::Failed(e.to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn note(account: &str, what: Trouble) -> Note {
+        Note {
+            account: EmailAddress::parse(account).unwrap(),
+            what,
+        }
+    }
+
+    #[test]
+    fn one_servers_trouble_is_the_status() {
+        let busy = vec![note("a@x.org", Trouble::Busy)];
+        assert_eq!(unanswered(busy, 3), RemoteStatus::Busy { waiting: 3 });
+        let refused = vec![note("a@x.org", Trouble::Refused("why".into()))];
+        assert_eq!(unanswered(refused, 3), RemoteStatus::Refused("why".into()));
+    }
+
+    #[test]
+    fn several_servers_troubles_are_each_kept() {
+        let offline = vec![
+            note("a@x.org", Trouble::Offline),
+            note("b@x.org", Trouble::Offline),
+        ];
+        assert_eq!(unanswered(offline, 2), RemoteStatus::Offline { waiting: 2 });
+        let mixed = vec![
+            note("a@x.org", Trouble::Busy),
+            note("b@x.org", Trouble::Offline),
+        ];
+        assert_eq!(
+            unanswered(mixed.clone(), 2),
+            RemoteStatus::Unanswered {
+                waiting: 2,
+                notes: mixed
+            }
+        );
     }
 }

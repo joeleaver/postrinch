@@ -40,6 +40,9 @@ pub struct Find {
     /// A full-text query in rhypedb's syntax (`+word`, `+"a phrase"`,
     /// `prefix*`), over subject, people and body.
     pub text: Option<String>,
+    /// Full-text queries no message may match, each as `text` is written:
+    /// Gmail's `-word`. A message is left out when it matches one.
+    pub text_without: Vec<String>,
     /// Only these accounts' mail; empty for every account's.
     pub accounts: Vec<EmailAddress>,
     /// Each entry must match a sender's address or name (a part of it,
@@ -165,6 +168,9 @@ impl Store {
         }
         for part in &find.not_to {
             without.extend(self.people_messages(part, "received")?);
+        }
+        for text in &find.text_without {
+            without.extend(self.text_matches(text, candidates.as_ref())?);
         }
 
         // A few candidates are read one by one; past BY_ONE, one pass over
@@ -356,6 +362,24 @@ impl Store {
             }
         }
         Ok(hits)
+    }
+
+    /// Every message `text` matches (among `within`, when given).
+    fn text_matches(&self, text: &str, within: Option<&HashSet<u64>>) -> StoreResult<HashSet<u64>> {
+        let hits = match within {
+            Some(messages) if messages.len() <= BY_ONE => {
+                if messages.is_empty() {
+                    return Ok(HashSet::new());
+                }
+                let contents = self.contents_of(messages)?;
+                self.text_hits(text, contents.len().max(1), Some(&contents))?
+            }
+            _ => {
+                let every = (self.db.count_type(CONTENT)? as usize).max(1);
+                self.text_hits(text, every, None)?
+            }
+        };
+        Ok(hits.into_keys().collect())
     }
 
     /// The content objects of `messages`, which the full-text index holds.

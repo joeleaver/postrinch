@@ -15,7 +15,7 @@ use super::sync_support::{Fixture, fixture, fixture_with, mail};
 const BANDWIDTH: &str = "[ALERT] Account exceeded command or bandwidth limits. (Failure)";
 
 /// A search for `word` in the text, wherever a search covers.
-fn text(word: &str) -> ImapAlternative {
+pub(super) fn text(word: &str) -> ImapAlternative {
     ImapAlternative {
         folders: Vec::new(),
         not_in: Vec::new(),
@@ -26,18 +26,22 @@ fn text(word: &str) -> ImapAlternative {
     }
 }
 
-fn one(alternative: ImapAlternative) -> ImapSearch {
+pub(super) fn one(alternative: ImapAlternative) -> ImapSearch {
     ImapSearch {
         alternatives: vec![alternative],
     }
 }
 
-fn on(day: u32) -> DateTime<FixedOffset> {
+pub(super) fn on(day: u32) -> DateTime<FixedOffset> {
     DateTime::parse_from_rfc3339(&format!("2026-11-{day:02}T09:00:00+00:00")).unwrap()
 }
 
 impl Fixture {
-    async fn search(&self, search: &ImapSearch, max: usize) -> Result<ServerFound, SyncError> {
+    pub(super) async fn search(
+        &self,
+        search: &ImapSearch,
+        max: usize,
+    ) -> Result<ServerFound, SyncError> {
         self.sync.search_server(&self.me, search, max).await
     }
 
@@ -189,6 +193,48 @@ async fn a_busy_folder_is_left_out_and_said_so() {
     let why = found.incomplete.expect("said so");
     assert!(why.contains("1 folder was not searched"), "{why}");
     assert!(why.contains("Mailbox is locked"), "{why}");
+}
+
+#[tokio::test]
+async fn every_folder_busy_is_busy_not_refused() {
+    let f = fixture().await;
+    f.user.create_folder("Work").unwrap();
+    f.sync().await;
+    f.user
+        .append("Work", mail(Some("w@x"), "Rota", ""))
+        .unwrap();
+    // INBOX and Work, both locked.
+    f.server.fail_next(
+        "EXAMINE",
+        2,
+        ImapFault::No("[INUSE] Mailbox is locked".into()),
+    );
+    let result = f.search(&one(text("rota")), 50).await;
+    match result {
+        Err(SyncError::Busy { message, .. }) => {
+            assert!(message.contains("Mailbox is locked"), "{message}");
+        }
+        other => panic!("busy, not {other:?}"),
+    }
+    // Busy for those folders, not the account: the next search asks.
+    let found = f.search(&one(text("rota")), 50).await.unwrap();
+    assert_eq!(found.ids, [f.id("w@x")]);
+}
+
+#[tokio::test]
+async fn a_page_slot_is_a_messages_not_a_copys() {
+    let f = fixture().await;
+    f.user.create_folder("Work").unwrap();
+    f.sync().await;
+    let at = |id: &str, day| mail(Some(id), "Rota", "").internal_date(on(day));
+    // One message filed in both folders, the newest.
+    f.user.append("INBOX", at("both@x", 20)).unwrap();
+    f.user.append("Work", at("both@x", 20)).unwrap();
+    f.user.append("Work", at("ten@x", 10)).unwrap();
+    f.user.append("INBOX", at("one@x", 1)).unwrap();
+    let found = f.search(&one(text("rota")), 2).await.unwrap();
+    assert_eq!(found.ids, [f.id("both@x"), f.id("ten@x")]);
+    assert!(f.message("one@x").is_none(), "past the page");
 }
 
 #[tokio::test]

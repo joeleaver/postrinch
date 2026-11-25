@@ -117,6 +117,7 @@ impl Commands {
         };
         Ok(Find {
             text: query.text(),
+            text_without: query.text_without(),
             accounts: accounts.to_vec(),
             from: query.from.clone(),
             to: query.to.clone(),

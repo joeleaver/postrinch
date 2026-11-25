@@ -109,6 +109,11 @@ pub enum SyncError {
     /// in the server's words where it gave some.
     #[error("{server} could not search: {message}")]
     SearchRefused { server: String, message: String },
+    /// A server search stopped because a newer one of the same account
+    /// began: the person has moved on to another search, which takes the
+    /// account's search connection next. Nothing is wrong.
+    #[error("a newer search took this one's place")]
+    SearchSuperseded,
     #[error("store: {0}")]
     Store(#[from] StoreError),
     #[error("{0}")]

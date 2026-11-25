@@ -1,37 +1,42 @@
 //! Searching an IMAP server for mail not downloaded yet (docs/imap.md,
 //! "Searching the server"): the search the command layer made from the
 //! search language ([`ImapSearch`]) asked in each folder it covers
-//! ([`plan`]), over the account's reader connection, as the person is
-//! waiting and it must not wait behind a pass.
+//! ([`plan`]), over the account's search connection, so that neither a
+//! pass nor opening a message waits behind it.
 //!
-//! What is found is kept to a page, newest first: the highest UIDs of
-//! each folder, and across folders by when they arrived. The copies the
-//! store does not have yet are fetched by their headers and stored as a
-//! pass stores them, so they show in the results and open normally (their
-//! bodies come when opened, or by backfill); a pass that reads the folder
-//! later finds them kept.
+//! A search begun while another of the account's is running takes its
+//! place: the older one stops at its next command
+//! ([`SyncError::SearchSuperseded`]), keeping the connection, and the
+//! newer one goes next. Only the newest is the one the person waits for.
+//!
+//! What is found is kept to a page ([`search_page`](super::search_page)),
+//! newest first, each message once. The copies the store does not have
+//! yet are fetched by their headers and stored as a pass stores them, so
+//! they show in the results and open normally (their bodies come when
+//! opened, or by backfill); a pass that reads the folder later finds them
+//! kept.
 //!
 //! A server busy for the account is [`SyncError::Busy`], never a sign-in
 //! prompt, and a server whose busy wait is still running is not asked. A
 //! folder the server is busy for, or refuses to search in, is left out
-//! and said so ([`ServerFound::incomplete`]); a search refused in every
-//! folder is [`SyncError::SearchRefused`], and the window keeps to the
-//! mail here.
+//! and said so ([`ServerFound::incomplete`]). When no folder was searched,
+//! a search refused in one is [`SyncError::SearchRefused`] (the window
+//! keeps to the mail here), and one every folder was busy for is
+//! [`SyncError::Busy`]: busy for those folders, so the account's busy
+//! wait does not start, and the next search asks again.
 
-use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use postrinch_model::{EmailAddress, ImapFolder, ImapSearch, ProviderMessageId, Timestamp};
-use postrinch_store::Store;
+use postrinch_model::{EmailAddress, ImapFolder, ImapSearch, ProviderMessageId};
 
 use super::folder_error::{FolderError, FolderResult};
 use super::folders::GMAIL;
-use super::places::internal_date;
 use super::search_folders::{FolderSearch, inexact, plan};
-use super::wire::{Conn, Refusal, uid_set};
+use super::wire::{Conn, Refusal};
 use super::{ImapSync, Lane};
 use crate::imap::connect::describe;
-use crate::{ProgressFn, SyncError, SyncReport, SyncResult};
+use crate::{SyncError, SyncResult};
 
 /// What a server search found.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -45,20 +50,36 @@ pub struct ServerFound {
 }
 
 /// A folder's answer to its search.
-struct Hits {
-    folder: ImapFolder,
-    uidvalidity: u32,
+pub(super) struct Hits {
+    pub folder: ImapFolder,
+    pub uidvalidity: u32,
     /// The highest UIDs found, at most a page of them.
-    uids: Vec<u32>,
+    pub uids: Vec<u32>,
 }
 
-/// One UID found, as it stands here.
-struct Candidate {
-    folder: usize,
-    uid: u32,
-    /// The message, when the store has the copy.
-    known: Option<ProviderMessageId>,
-    arrived: Option<Timestamp>,
+/// One search's turn on the account's search connection: it lasts until
+/// a newer search of the account begins.
+pub(super) struct Turn {
+    begun: Arc<AtomicU64>,
+    mine: u64,
+}
+
+impl Turn {
+    /// Begins a search of the account, ending the turn of any before it.
+    fn begin(begun: Arc<AtomicU64>) -> Self {
+        let mine = begun.fetch_add(1, Ordering::SeqCst) + 1;
+        Self { begun, mine }
+    }
+
+    /// [`SyncError::SearchSuperseded`] once a newer search began: checked
+    /// before each command, so the newer one waits for one at most.
+    pub(super) fn go_on(&self) -> SyncResult<()> {
+        if self.begun.load(Ordering::SeqCst) == self.mine {
+            Ok(())
+        } else {
+            Err(SyncError::SearchSuperseded)
+        }
+    }
 }
 
 impl ImapSync {
@@ -71,6 +92,7 @@ impl ImapSync {
         search: &ImapSearch,
         max: usize,
     ) -> SyncResult<ServerFound> {
+        let turn = Turn::begin(self.searches(account));
         if search.alternatives.is_empty() || max == 0 {
             return Ok(ServerFound::default());
         }
@@ -87,8 +109,8 @@ impl ImapSync {
             });
         }
         let result = self
-            .over(account, Lane::Reader, async |conn| {
-                self.search_in(conn, account, search, max).await
+            .over(account, Lane::Search, async |conn| {
+                self.search_in(conn, account, search, max, &turn).await
             })
             .await;
         self.note_sign_in(account, &result).await?;
@@ -101,6 +123,7 @@ impl ImapSync {
         account: &EmailAddress,
         search: &ImapSearch,
         max: usize,
+        turn: &Turn,
     ) -> SyncResult<ServerFound> {
         let gmail = conn.offers(GMAIL);
         if !gmail && let Some(term) = inexact(search) {
@@ -112,25 +135,41 @@ impl ImapSync {
         let a = account.clone();
         let folders = self.with_store(move |s| s.imap_folders(&a)).await?;
         let mut hits = Vec::new();
+        // Why folders were not searched: refused, and busy.
         let mut refused: Vec<String> = Vec::new();
+        let mut busy: Vec<String> = Vec::new();
         for FolderSearch { folder, command } in plan(&folders, search, gmail) {
+            turn.go_on()?;
             let name = folder.name.clone();
             match self.search_folder(conn, folder, &command, max).await {
                 Ok(Ok(found)) => hits.push(found),
                 Ok(Err(why)) => refused.push(why),
-                Err(FolderError::Busy(text)) => refused.push(format!("busy for {name:?}: {text}")),
+                Err(FolderError::Busy(text)) => busy.push(format!("busy for {name:?}: {text}")),
                 Err(FolderError::Sync(e)) => return Err(e),
             }
         }
-        if hits.is_empty()
-            && let Some(why) = refused.first()
-        {
-            return Err(SyncError::SearchRefused {
-                server: conn.describe(),
-                message: why.clone(),
-            });
+        if hits.is_empty() {
+            if let Some(why) = refused.first() {
+                return Err(SyncError::SearchRefused {
+                    server: conn.describe(),
+                    message: why.clone(),
+                });
+            }
+            if let Some(why) = busy.first() {
+                return Err(SyncError::Busy {
+                    service: "IMAP",
+                    server: conn.describe(),
+                    message: match busy.len() {
+                        1 => format!("the folder searched was {why}"),
+                        n => format!("all {n} folders searched were busy ({why})"),
+                    },
+                    connections: false,
+                });
+            }
         }
-        let ids = self.page(conn, account, hits, max).await?;
+        turn.go_on()?;
+        let ids = self.page(conn, account, hits, max, turn).await?;
+        refused.extend(busy);
         let incomplete = refused.first().map(|why| match refused.len() {
             1 => format!("1 folder was not searched ({why})"),
             n => format!("{n} folders were not searched ({why})"),
@@ -170,160 +209,6 @@ impl ImapSync {
             uids,
         }))
     }
-
-    /// The newest `max` of the hits, the copies the store lacks fetched by
-    /// their headers and stored.
-    async fn page(
-        &self,
-        conn: &mut Conn,
-        account: &EmailAddress,
-        hits: Vec<Hits>,
-        max: usize,
-    ) -> SyncResult<Vec<ProviderMessageId>> {
-        let mut candidates = self.candidates(account, &hits).await?;
-        let unknown = candidates.iter().filter(|c| c.known.is_none()).count();
-        // Only when there are more than a page is it worth asking when the
-        // unknown ones arrived, to keep the newest.
-        if candidates.len() > max && unknown > 0 {
-            self.arrivals(conn, &hits, &mut candidates).await?;
-        }
-        candidates.sort_by(|a, b| b.arrived.cmp(&a.arrived).then(b.uid.cmp(&a.uid)));
-        candidates.truncate(max);
-        let mut wanted: BTreeMap<usize, Vec<u32>> = BTreeMap::new();
-        for c in candidates.iter().filter(|c| c.known.is_none()) {
-            wanted.entry(c.folder).or_default().push(c.uid);
-        }
-        for (i, uids) in wanted {
-            self.fetch_found(conn, account, &hits[i], uids).await?;
-        }
-        // What the store has now of each, newest first, each once.
-        let keys: Vec<(String, u32, u32)> = candidates
-            .iter()
-            .map(|c| {
-                let h = &hits[c.folder];
-                (h.folder.label_id.clone(), h.uidvalidity, c.uid)
-            })
-            .collect();
-        let a = account.clone();
-        self.blocking(move |s| stored_ids(s, &a, &keys)).await
-    }
-
-    /// Each UID found, with the message the store has for it, if any.
-    async fn candidates(
-        &self,
-        account: &EmailAddress,
-        hits: &[Hits],
-    ) -> SyncResult<Vec<Candidate>> {
-        let keys: Vec<(usize, String, u32, u32)> = hits
-            .iter()
-            .enumerate()
-            .flat_map(|(i, h)| {
-                h.uids
-                    .iter()
-                    .map(move |&uid| (i, h.folder.label_id.clone(), h.uidvalidity, uid))
-            })
-            .collect();
-        let a = account.clone();
-        self.with_store(move |s| {
-            let mut out = Vec::with_capacity(keys.len());
-            for (folder, label, uidvalidity, uid) in keys {
-                let place = s.imap_place(&a, &label, uidvalidity, uid)?;
-                out.push(Candidate {
-                    folder,
-                    uid,
-                    arrived: place.as_ref().and_then(|p| p.arrived),
-                    known: place.map(|p| p.message),
-                });
-            }
-            Ok(out)
-        })
-        .await
-    }
-
-    /// When the unknown candidates arrived (`INTERNALDATE`), so the page
-    /// keeps the newest across folders. A folder that cannot say leaves
-    /// its candidates undated, after the dated ones.
-    async fn arrivals(
-        &self,
-        conn: &mut Conn,
-        hits: &[Hits],
-        candidates: &mut [Candidate],
-    ) -> SyncResult<()> {
-        for (i, h) in hits.iter().enumerate() {
-            let uids: Vec<u32> = candidates
-                .iter()
-                .filter(|c| c.folder == i && c.known.is_none())
-                .map(|c| c.uid)
-                .collect();
-            if uids.is_empty() || !self.reopen(conn, h).await? {
-                continue;
-            }
-            let reply = match conn
-                .uid_fetch(&uid_set(&uids), "(UID INTERNALDATE)", None)
-                .await
-            {
-                Ok(reply) => reply,
-                Err(FolderError::Busy(_)) => continue,
-                Err(FolderError::Sync(e)) => return Err(e),
-            };
-            for f in reply.messages {
-                let when = f.internal_date.as_deref().and_then(internal_date);
-                if let Some(c) = candidates
-                    .iter_mut()
-                    .find(|c| c.folder == i && c.uid == f.uid)
-                {
-                    c.arrived = when;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Fetches and stores found copies by their headers, as a pass does.
-    /// A folder the server is busy for now keeps them for the next pass.
-    async fn fetch_found(
-        &self,
-        conn: &mut Conn,
-        account: &EmailAddress,
-        hits: &Hits,
-        uids: Vec<u32>,
-    ) -> SyncResult<()> {
-        if !self.reopen(conn, hits).await? {
-            return Ok(());
-        }
-        // Stored at the UIDVALIDITY searched: a pass that reads the folder
-        // after a change of UIDVALIDITY finds them kept.
-        let mut state = hits.folder.clone();
-        state.uidvalidity = hits.uidvalidity;
-        let wanted = uids.into_iter().map(|uid| (uid, 0)).collect();
-        let quiet: ProgressFn = Arc::new(|_| {});
-        let mut report = SyncReport::default();
-        match self
-            .fetch_headers(conn, account, &state, wanted, &quiet, &mut report)
-            .await
-        {
-            Ok(_) => Ok(()),
-            Err(FolderError::Busy(text)) => {
-                tracing::info!(
-                    "IMAP: {} is busy for the folder {:?}: {text}",
-                    conn.describe(),
-                    hits.folder.name
-                );
-                Ok(())
-            }
-            Err(FolderError::Sync(e)) => Err(e),
-        }
-    }
-
-    /// Opens a searched folder again; `false` when it cannot be opened or
-    /// its UIDVALIDITY changed since it was searched.
-    async fn reopen(&self, conn: &mut Conn, hits: &Hits) -> SyncResult<bool> {
-        match conn.examine(&hits.folder.name).await {
-            Ok(Some(selected)) => Ok(selected.uidvalidity == hits.uidvalidity),
-            Ok(None) | Err(FolderError::Busy(_)) => Ok(false),
-            Err(FolderError::Sync(e)) => Err(e),
-        }
-    }
 }
 
 /// A refused search in the person's words.
@@ -333,24 +218,4 @@ fn refused(refusal: &Refusal) -> String {
     } else {
         refusal.text.clone()
     }
-}
-
-/// The stored messages at these places (folder, UIDVALIDITY, UID), in
-/// their order, each once.
-fn stored_ids(
-    store: &Store,
-    account: &EmailAddress,
-    places: &[(String, u32, u32)],
-) -> SyncResult<Vec<ProviderMessageId>> {
-    let mut seen = HashSet::new();
-    let mut ids = Vec::new();
-    for (label, uidvalidity, uid) in places {
-        let Some(place) = store.imap_place(account, label, *uidvalidity, *uid)? else {
-            continue;
-        };
-        if seen.insert(place.message.clone()) && store.has_message(account, &place.message)? {
-            ids.push(place.message);
-        }
-    }
-    Ok(ids)
 }

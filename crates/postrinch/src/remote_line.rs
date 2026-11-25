@@ -2,7 +2,7 @@
 //! ([`crate::remote_search`]): who is being asked, what they found, and
 //! why a server could not search.
 
-use crate::remote_search::{Asked, RemoteSearch, RemoteStatus};
+use crate::remote_search::{Asked, Note, RemoteSearch, RemoteStatus, Trouble};
 
 impl Asked {
     /// Who is asked, at the start of a sentence.
@@ -57,15 +57,26 @@ pub fn remote_line(remote: Option<&RemoteSearch>) -> String {
             "Asking {whom} too: {} here are not downloaded yet\u{2026}",
             messages(*waiting)
         ),
-        RemoteStatus::Found { count, incomplete } => {
+        RemoteStatus::Found { count, notes } => {
             let found = match count {
                 0 => format!("{who} found nothing more in mail not downloaded yet"),
                 n => format!("{who} found {n} more in mail not downloaded yet"),
             };
-            match incomplete {
-                Some(why) => format!("{found}; {why}."),
-                None => format!("{found}."),
+            let several = remote.asked == Asked::Servers;
+            let notes: Vec<String> = notes.iter().map(|n| note(n, several)).collect();
+            if notes.is_empty() {
+                format!("{found}.")
+            } else {
+                format!("{found}; {}.", notes.join("; "))
             }
+        }
+        RemoteStatus::Unanswered { waiting, notes } => {
+            let notes: Vec<String> = notes.iter().map(|n| note(n, true)).collect();
+            format!(
+                "No server could search, so {} ({}).",
+                here_only(*waiting).trim_end_matches('.'),
+                notes.join("; ")
+            )
         }
         RemoteStatus::Offline { waiting } => format!("Offline: {}", here_only(*waiting)),
         RemoteStatus::Busy { waiting } => {
@@ -79,9 +90,30 @@ pub fn remote_line(remote: Option<&RemoteSearch>) -> String {
     }
 }
 
+/// What one account's server left out, or why it did not search, within
+/// a sentence; named by its account when several are asked.
+fn note(note: &Note, several: bool) -> String {
+    let account = &note.account;
+    match (&note.what, several) {
+        (Trouble::Incomplete(why), false) => why.clone(),
+        (Trouble::Incomplete(why), true) => format!("for {account}, {why}"),
+        (Trouble::Offline, _) => format!("{account}'s server could not be reached"),
+        (Trouble::Busy, _) => format!("{account}'s server is busy"),
+        (Trouble::Refused(why), _) => format!("{account}'s server could not search ({why})"),
+        (Trouble::Failed(why), _) => format!("{account} could not be asked ({why})"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn note(account: &str, what: Trouble) -> Note {
+        Note {
+            account: postrinch_model::EmailAddress::parse(account).unwrap(),
+            what,
+        }
+    }
 
     fn line(asked: Asked, status: RemoteStatus) -> String {
         remote_line(Some(&RemoteSearch {
@@ -106,7 +138,7 @@ mod tests {
         assert!(line(Asked::Servers, asking).starts_with("Asking the servers too"));
         let found = |count| RemoteStatus::Found {
             count,
-            incomplete: None,
+            notes: Vec::new(),
         };
         assert_eq!(
             line(Asked::Gmail, found(0)),
@@ -123,7 +155,10 @@ mod tests {
     fn the_line_says_what_was_not_searched_and_why() {
         let partly = RemoteStatus::Found {
             count: 1,
-            incomplete: Some("1 folder was not searched (Archive is locked)".into()),
+            notes: vec![note(
+                "ada@example.org",
+                Trouble::Incomplete("1 folder was not searched (Archive is locked)".into()),
+            )],
         };
         assert_eq!(
             line(Asked::Server, partly),
@@ -150,6 +185,43 @@ mod tests {
             line(Asked::Gmail, RemoteStatus::Offline { waiting: 2 }),
             "Offline: mail not downloaded yet (2 messages) is searched by subject \
              and sender only."
+        );
+    }
+
+    #[test]
+    fn each_accounts_trouble_stays_on_the_line() {
+        // One account found mail; the other's server was busy, and a third
+        // searched all but one folder.
+        let found = RemoteStatus::Found {
+            count: 2,
+            notes: vec![
+                note("ada@example.org", Trouble::Busy),
+                note(
+                    "bob@example.org",
+                    Trouble::Incomplete("1 folder was not searched (Archive is locked)".into()),
+                ),
+                note("cy@example.org", Trouble::Refused("no ASCII".into())),
+            ],
+        };
+        assert_eq!(
+            line(Asked::Servers, found),
+            "The servers found 2 more in mail not downloaded yet; \
+             ada@example.org's server is busy; for bob@example.org, 1 folder was \
+             not searched (Archive is locked); cy@example.org's server could not \
+             search (no ASCII)."
+        );
+        let none = RemoteStatus::Unanswered {
+            waiting: 3,
+            notes: vec![
+                note("ada@example.org", Trouble::Busy),
+                note("bob@example.org", Trouble::Offline),
+            ],
+        };
+        assert_eq!(
+            line(Asked::Servers, none),
+            "No server could search, so mail not downloaded yet (3 messages) is \
+             searched by subject and sender only (ada@example.org's server is busy; \
+             bob@example.org's server could not be reached)."
         );
     }
 }

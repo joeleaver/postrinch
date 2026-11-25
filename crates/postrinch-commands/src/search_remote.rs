@@ -1,14 +1,16 @@
 //! What the servers found for a search, as rows after the local results
 //! (search.rs). Gmail's search is Gmail's language, so what it finds
 //! holds. An IMAP server's `SEARCH` asks for at least what the query asks
-//! (imap_search.rs), so what it finds is checked here against the rest of
-//! the query, by the headers stored for it: everything but the words,
-//! which only the server could match.
+//! (imap_search.rs), so what it finds is checked here against the whole
+//! query as search here reads it: a message whose body is here wholly,
+//! and one stored by its headers by all but the words it must have,
+//! which only the server could match in its body. Words it must not have
+//! are checked in what is stored.
 
 use std::collections::{HashMap, HashSet};
 
 use postrinch_model::{EmailAddress, LabelKind, Provider, ProviderMessageId, Timestamp};
-use postrinch_store::Found;
+use postrinch_store::{Find, Found};
 
 use crate::imap_search::names_only_labels_in;
 use crate::query::Last;
@@ -83,19 +85,30 @@ impl Commands {
     }
 
     /// Of the messages a server found, those every term of an alternative
-    /// of the query holds for by what is stored, but the words (matched by
-    /// the server, as the bodies are not here) and `has:attachment` (which
-    /// only Gmail's own language asks, and a server without it refused).
+    /// of the query holds for, as search here reads it. Of a message stored
+    /// by its headers, the words it must have (matched by the server, as
+    /// its body is not here) and `has:attachment` (which only Gmail's own
+    /// language asks, and a server without it refused) are taken as
+    /// found; words it must not have are looked for in what is stored.
     fn query_holds(
         &self,
         query: &Either,
         account: &EmailAddress,
         found: &[ProviderMessageId],
     ) -> CommandResult<HashSet<ProviderMessageId>> {
-        let within: Vec<(EmailAddress, ProviderMessageId)> = found
-            .iter()
-            .map(|id| (account.clone(), id.clone()))
-            .collect();
+        let mut whole = Vec::new();
+        let mut headers_only = Vec::new();
+        for id in found {
+            let Some(message) = self.store.message(account, id)? else {
+                continue;
+            };
+            let to = if message.downloaded {
+                &mut whole
+            } else {
+                &mut headers_only
+            };
+            to.push((account.clone(), id.clone()));
+        }
         let labels = self.store.labels(account)?;
         let mut holds: Vec<Found> = Vec::new();
         let mut seen = HashSet::new();
@@ -104,13 +117,27 @@ impl Commands {
             {
                 continue;
             }
-            let mut find = self.to_find(one, std::slice::from_ref(account))?;
-            find.text = None;
-            find.attachments = None;
-            find.within = Some(within.clone());
-            for f in self.store.find_messages(&find)? {
-                if seen.insert(f.id.clone()) {
-                    holds.push(f);
+            let find = self.to_find(one, std::slice::from_ref(account))?;
+            let mut finds = Vec::new();
+            if !whole.is_empty() {
+                finds.push(Find {
+                    within: Some(whole.clone()),
+                    ..find.clone()
+                });
+            }
+            if !headers_only.is_empty() {
+                finds.push(Find {
+                    text: None,
+                    attachments: None,
+                    within: Some(headers_only.clone()),
+                    ..find
+                });
+            }
+            for find in finds {
+                for f in self.store.find_messages(&find)? {
+                    if seen.insert(f.id.clone()) {
+                        holds.push(f);
+                    }
                 }
             }
         }

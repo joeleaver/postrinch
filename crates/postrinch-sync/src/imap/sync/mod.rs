@@ -11,10 +11,12 @@
 //! over SMTP, filed in Sent, and drafts kept in Drafts ([`send`]).
 //!
 //! Connections are few and kept: per account, one for passes and
-//! backfill, one for what the person opens and one for outgoing mail,
-//! each reused while the server keeps it open (Gmail allows about 15 at
-//! once per account), and one that IDLEs on the inbox where the server
-//! offers it ([`idle`]).
+//! backfill, one for what the person opens, one for searching the server
+//! ([`search`]) and one for outgoing mail, each reused while the server
+//! keeps it open (Gmail allows about 15 at once per account), and one that
+//! IDLEs on the inbox where the server offers it ([`idle`]). A server that
+//! allows fewer turns one away when it is opened; the IDLE connection then
+//! gives way ([`ImapSync::open`]).
 
 mod account_settings;
 mod accounts;
@@ -42,12 +44,14 @@ mod renames;
 mod search;
 mod search_folders;
 mod search_keys;
+mod search_page;
 mod send;
 mod uids;
 mod utf7;
 mod wire;
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -80,6 +84,12 @@ struct Lanes {
     sync: Slot,
     /// Messages the person opens, so they never wait behind a pass.
     reader: Slot,
+    /// Searching the server, so neither a pass nor opening a message waits
+    /// behind a search, however long it takes.
+    search: Slot,
+    /// How many searches of the account began: a search stops once a
+    /// newer one began ([`search`]).
+    searches: Arc<AtomicU64>,
     /// Filing sent mail and keeping drafts ([`send`]), so they never
     /// wait behind a pass either.
     outgoing: Slot,
@@ -107,6 +117,7 @@ impl Held {
 enum Lane {
     Sync,
     Reader,
+    Search,
     Outgoing,
 }
 
@@ -203,7 +214,7 @@ impl ImapSync {
             .unwrap_or_else(|e| e.into_inner())
             .remove(&account.key());
         let Some(lanes) = lanes else { return };
-        for slot in [lanes.sync, lanes.reader, lanes.outgoing] {
+        for slot in [lanes.sync, lanes.reader, lanes.search, lanes.outgoing] {
             if let Some(conn) = slot.lock().await.take()
                 && let Err(e) = conn.into_session().logout().await
             {
@@ -244,7 +255,8 @@ impl ImapSync {
     }
 
     /// Runs `work` over one of the account's connections ([`Self::hold`]),
-    /// keeping the connection only when the work succeeded.
+    /// keeping the connection only when the work succeeded, or stopped
+    /// between commands for a newer search ([`SyncError::SearchSuperseded`]).
     async fn over<T>(
         &self,
         account: &EmailAddress,
@@ -253,10 +265,16 @@ impl ImapSync {
     ) -> SyncResult<T> {
         let mut held = self.hold(account, lane).await?;
         let result = work(&mut held.conn).await;
-        if result.is_ok() {
+        if matches!(result, Ok(_) | Err(SyncError::SearchSuperseded)) {
             held.keep();
         }
         result
+    }
+
+    /// The count of the account's searches begun ([`Lanes::searches`]).
+    fn searches(&self, account: &EmailAddress) -> Arc<AtomicU64> {
+        let mut lanes = self.lanes.lock().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(&lanes.entry(account.key()).or_default().searches)
     }
 
     /// The lock an account's deliveries take turns on.
@@ -271,6 +289,7 @@ impl ImapSync {
         match lane {
             Lane::Sync => Arc::clone(&lanes.sync),
             Lane::Reader => Arc::clone(&lanes.reader),
+            Lane::Search => Arc::clone(&lanes.search),
             Lane::Outgoing => Arc::clone(&lanes.outgoing),
         }
     }
