@@ -16,6 +16,7 @@ use crate::add_account::{AddForm, Kind, ServerForm, Step, Way};
 use crate::add_account_flow::{Outcome, look_up, outcome};
 use crate::add_account_run_end::RunEnd;
 use crate::add_account_runs::{Answer, Run, cancel_browser, done_text, keep_canceller};
+use crate::import_thunderbird::{Import, Listing};
 use crate::state::{SettingsSection, State, View};
 
 /// How an add signs in, once the form is checked.
@@ -47,6 +48,11 @@ pub struct AddUi {
     /// The addresses an add or change of servers is under way for, the
     /// dialog open on it or not: no second one starts for them.
     pub under_way: Signal<Vec<EmailAddress>>,
+    /// What Thunderbird on this computer has, once looked at; none when
+    /// it has no profiles here (and the chooser offers no import).
+    pub thunderbird: Signal<Option<Listing>>,
+    /// The import from Thunderbird under way in the dialog, if one is.
+    pub import: Signal<Option<Import>>,
 }
 
 impl AddUi {
@@ -61,14 +67,19 @@ impl AddUi {
             generation: Signal::new(0),
             changing: Signal::new(None),
             under_way: Signal::new(Vec::new()),
+            thunderbird: Signal::new(None),
+            import: Signal::new(None),
         }
     }
 
-    /// Opens the dialog on the chooser.
+    /// Opens the dialog on the chooser, and looks at Thunderbird's
+    /// profiles again for its import.
     pub fn open(self) {
         self.changing.set(None);
+        self.import.set(None);
         self.form.set(AddForm::new(Kind::Other));
         self.go(Step::Choose);
+        self.find_thunderbird();
     }
 
     /// "Server settings…" on an IMAP account: the servers panel, filled
@@ -147,6 +158,7 @@ impl AddUi {
         cancel_browser();
         self.generation.update(|n| *n += 1);
         self.form.update(AddForm::forget_passwords);
+        self.import.set(None);
         self.step.set(None);
         self.error.set(None);
     }
@@ -308,7 +320,7 @@ impl AddUi {
         } else {
             Step::Servers
         };
-        self.go(back);
+        self.go(self.import_step(back));
     }
 
     /// "Add as a Google account" on Google's mail: Google's own sign-in,
@@ -350,6 +362,10 @@ impl AddUi {
     fn finish(self, state: State, run: &Run, done: Outcome) {
         match done {
             Outcome::Done(account) => {
+                // An imported account goes on to the next one's turn.
+                if self.imported(&account.address) {
+                    return;
+                }
                 self.close();
                 // The account's detail, wherever the dialog was opened.
                 state.view.set(View::Settings);
@@ -366,11 +382,11 @@ impl AddUi {
                 if step == Step::Servers && run.from != Step::Servers {
                     self.servers(run.from);
                 } else {
-                    self.go(step);
+                    self.go(self.import_step(step));
                 }
                 self.error.set(Some(error));
             }
-            Outcome::Cancelled => self.go(run.from),
+            Outcome::Cancelled => self.go(self.import_step(run.from)),
         }
     }
 

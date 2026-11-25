@@ -16,6 +16,9 @@ pub enum Kind {
     Other,
     /// Outlook.com, Hotmail or Microsoft 365: Microsoft's sign-in.
     Microsoft,
+    /// An account imported from Thunderbird: its servers from there, its
+    /// sign-in Postrinch's (`import_thunderbird`).
+    Thunderbird,
 }
 
 /// Where the dialog is.
@@ -37,6 +40,12 @@ pub enum Step {
     Browser,
     /// Both servers being checked.
     Checking,
+    /// The accounts found in Thunderbird, to pick from.
+    ImportList,
+    /// One picked account's sign-in, with Skip and Stop importing.
+    ImportSignIn,
+    /// Which picked accounts were added and which were not.
+    ImportDone,
 }
 
 /// One server as the form holds it: the port as typed.
@@ -81,8 +90,12 @@ impl ServerForm {
         })
     }
 
-    /// "imap.example.org · 993 · TLS", as the found box shows it.
+    /// "imap.example.org · 993 · TLS", as the found box shows it, or "Not
+    /// set" when there is no server yet (an imported account without one).
     pub fn line(&self) -> String {
+        if self.host.trim().is_empty() {
+            return "Not set".to_owned();
+        }
         format!(
             "{} · {} · {}",
             self.host.trim(),

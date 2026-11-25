@@ -2,6 +2,8 @@
 
 mod about;
 mod add_account;
+mod add_account_choose;
+mod add_account_import;
 mod add_account_servers;
 mod agent_dialogs;
 mod agents_settings;
@@ -146,7 +148,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {compose::CSS} }
                 style { {search::CSS} }
                 style { {outgoing::CSS} }
-                style { {about::CSS} {add_account::CSS} {add_account_servers::CSS} {imap_account::CSS} }
+                style { {about::CSS} {add_account::CSS} {add_account_import::CSS} {add_account_servers::CSS} {imap_account::CSS} }
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {share_card::CSS} {compose_files::CSS} {label_new::CSS} }

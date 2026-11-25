@@ -325,7 +325,7 @@ const fromThunderbird = '<div class="hint" style="margin-top:4px">From Thunderbi
 Object.assign(states, {
   'import-list': {
     label: 'T1 · From Thunderbird',
-    note: 'Every account in every Thunderbird profile is listed, under its profile\'s name when there is more than one. The ones Postrinch can add are ticked. Nothing in Thunderbird is changed.',
+    note: 'Every account in every Thunderbird profile is listed, under its profile\'s name when there is more than one. The ones Postrinch can add are ticked. Those it cannot are shown, each saying why: already in Postrinch, listed in another profile, POP, newsgroups, feeds, Local Folders, or Microsoft with its sign-in not set up. Only profiles.ini, prefs.js and user.js are read; passwords stay in Thunderbird, and nothing in Thunderbird is changed.',
     dialog: `
       <h2>Import from Thunderbird</h2><p class="sub">Accounts found in Thunderbird on this computer.</p>
       <div class="profile">Profile “default-release”</div>
@@ -353,7 +353,7 @@ Object.assign(states, {
   },
   'import-signin-2': {
     label: 'T2b · 2 of 3, Google',
-    note: 'A Gmail account in Thunderbird comes in as a Google account, with Google\'s own sign-in. Here the person skips it (part of the same example run).',
+    note: 'A Gmail account in Thunderbird comes in as a Google account, with Google\'s own sign-in. Signing in hands it to the browser, whose notice says how it went, and the next account comes up meanwhile; the summary then says it is signing in with Google. Here the person skips it (part of the same example run).',
     dialog: `
       ${importStep(2, 'ada.lovelace@gmail.com')}
       <div class="found"><div class="row"><span class="who">Google</span></div>
@@ -405,7 +405,7 @@ Object.assign(states, {
         <li><span class="i" style="color:var(--faint)">–</span><span style="color:var(--muted)"><b>ada.lovelace@gmail.com</b> · not added</span></li>
         <li><span class="i" style="color:var(--faint)">–</span><span style="color:var(--muted)"><b>ada@outlook.com</b> · not added</span></li>
       </ul>
-      <p class="hint">Accounts not added stay in Import from Thunderbird, under Add account….</p>
+      <p class="hint">Accounts not added can be imported later: Account › Add account… › Import from Thunderbird.</p>
       <div class="actions"><button class="btn filled">Done</button></div>`,
     detail: () => imapDetail('ok'), added: 'Syncing: 1,200 of 4,210',
   },
