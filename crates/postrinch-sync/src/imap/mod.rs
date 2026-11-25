@@ -1,9 +1,10 @@
 //! IMAP and SMTP accounts (docs/imap.md). So far: how a message, a thread
 //! and a user folder are named; the account's secret; and connecting and
 //! signing in to both servers ([`ImapSession`], [`SmtpConnection`]), which
-//! the add-account dialog's check uses ([`check_account`]); and OAuth
+//! the add-account dialog's check uses ([`check_account`]); OAuth
 //! sign-in with Google and Microsoft, and its access tokens
-//! ([`ImapOAuth`]).
+//! ([`ImapOAuth`]); sync, and sending over SMTP with Sent and Drafts
+//! ([`ImapSync`]).
 
 mod auth;
 mod capabilities;
@@ -34,7 +35,7 @@ pub use reply::ImapStream;
 pub use secret::{ImapSecret, ImapSecrets};
 pub use session::ImapSession;
 pub use smtp::SmtpConnection;
-pub use sync::ImapSync;
+pub use sync::{ImapSync, SentLookup};
 pub use threading::{Own, thread_for};
 pub use tls::{Timeouts, TlsConfig};
 pub use tokens::{AccessTokens, TokenFuture};

@@ -96,6 +96,9 @@ pub struct SmtpConfig {
     mechanisms: BTreeSet<Mechanism>,
     users: Vec<SmtpUser>,
     challenges_again: bool,
+    max_recipients: Option<usize>,
+    /// The answer to a RCPT beyond `max_recipients`.
+    too_many: (u16, String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,6 +118,8 @@ impl Default for SmtpConfig {
             mechanisms: Mechanism::DEFAULT.into_iter().collect(),
             users: Vec::new(),
             challenges_again: false,
+            max_recipients: None,
+            too_many: (452, "4.5.3 Too many recipients".into()),
         }
     }
 }
@@ -194,29 +199,65 @@ impl SmtpConfig {
         self.max_size = bytes;
         self
     }
+
+    /// Takes at most `count` recipients in one transaction, answering
+    /// any RCPT beyond them `452 4.5.3 Too many recipients` (RFC 5321
+    /// 4.5.3.1.10). By default there is no limit.
+    pub fn max_recipients(mut self, count: usize) -> Self {
+        self.max_recipients = Some(count);
+        self
+    }
+
+    /// What a RCPT beyond [`SmtpConfig::max_recipients`] is answered, in
+    /// place of `452 4.5.3 Too many recipients`: as servers that answer
+    /// it without an enhanced code, or with 552 (RFC 5321 4.5.3.1.10).
+    pub fn too_many_recipients_answer(mut self, code: u16, text: &str) -> Self {
+        self.too_many = (code, text.to_string());
+        self
+    }
 }
 
 #[derive(Debug)]
 struct PendingFault {
     stage: SmtpStage,
+    /// How many submissions reach `stage` unharmed first.
+    skip: usize,
     remaining: usize,
     fault: SmtpFault,
 }
+
+/// What a test has done with each message the server accepts.
+type OnAccept = Arc<dyn Fn(&ReceivedMessage) + Send + Sync>;
 
 pub(crate) struct SmtpState {
     config: SmtpConfig,
     faults: Vec<PendingFault>,
     messages: Vec<ReceivedMessage>,
     log: Vec<String>,
+    on_accept: Option<OnAccept>,
+    /// Recipients answered so at RCPT, by address (ASCII case ignored).
+    recipient_answers: Vec<(String, u16, String)>,
 }
 
 impl SmtpState {
+    /// How RCPT TO `address` is answered when the test said so.
+    fn recipient_answer(&self, address: &str) -> Option<(u16, String)> {
+        self.recipient_answers
+            .iter()
+            .find(|(a, _, _)| a.eq_ignore_ascii_case(address))
+            .map(|(_, code, text)| (*code, text.clone()))
+    }
+
     fn take_fault(&mut self, stage: SmtpStage) -> Option<SmtpFault> {
         let i = self
             .faults
             .iter()
             .position(|f| f.stage == stage && f.remaining > 0)?;
         let pending = &mut self.faults[i];
+        if pending.skip > 0 {
+            pending.skip -= 1;
+            return None;
+        }
         pending.remaining -= 1;
         let fault = pending.fault.clone();
         if pending.remaining == 0 {
@@ -251,6 +292,19 @@ impl SmtpShared {
             .lock()
             .expect("a session panicked while changing the fake SMTP server's state")
     }
+
+    /// Keeps an accepted message, then hands it to the test's hook (with
+    /// the state unlocked, so the hook may use the server).
+    fn accept(&self, message: ReceivedMessage) {
+        let hook = {
+            let mut state = self.lock();
+            state.messages.push(message.clone());
+            state.on_accept.clone()
+        };
+        if let Some(hook) = hook {
+            hook(&message);
+        }
+    }
 }
 
 /// A running fake SMTP server. Dropping it stops the server and every
@@ -284,6 +338,8 @@ impl SmtpServer {
                 faults: Vec::new(),
                 messages: Vec::new(),
                 log: Vec::new(),
+                on_accept: None,
+                recipient_answers: Vec::new(),
             }),
             acceptor: certificate.acceptor()?,
         });
@@ -333,6 +389,15 @@ impl SmtpServer {
         self.shared.lock().messages.clone()
     }
 
+    /// Calls `hook` with each message the server accepts from now on,
+    /// before it answers the data (also for
+    /// [`SmtpFault::StoreThenDisconnect`]): to play a provider that files
+    /// sent mail in Sent itself, by appending it there on the fake IMAP
+    /// server.
+    pub fn on_accept(&self, hook: impl Fn(&ReceivedMessage) + Send + Sync + 'static) {
+        self.shared.lock().on_accept = Some(Arc::new(hook));
+    }
+
     /// Makes the next `times` submissions reaching `stage` fail as `fault`
     /// says.
     ///
@@ -341,15 +406,49 @@ impl SmtpServer {
     /// If `fault` is [`SmtpFault::StoreThenDisconnect`] and `stage` is not
     /// [`SmtpStage::Data`]: only DATA has a message to store.
     pub fn fail_next(&self, stage: SmtpStage, times: usize, fault: SmtpFault) {
+        self.fail_after(stage, 0, times, fault);
+    }
+
+    /// As [`SmtpServer::fail_next`], once `skip` submissions have reached
+    /// `stage` unharmed: `fail_after(SmtpStage::Mail, 1, 1, ...)` fails
+    /// the second MAIL only.
+    ///
+    /// # Panics
+    ///
+    /// As [`SmtpServer::fail_next`].
+    pub fn fail_after(&self, stage: SmtpStage, skip: usize, times: usize, fault: SmtpFault) {
         assert!(
             stage == SmtpStage::Data || fault != SmtpFault::StoreThenDisconnect,
             "StoreThenDisconnect only applies at SmtpStage::Data"
         );
         self.shared.lock().faults.push(PendingFault {
             stage,
+            skip,
             remaining: times,
             fault,
         });
+    }
+
+    /// From now on answers RCPT TO `address` with this code and text
+    /// (`452 4.2.2 Mailbox full`), without taking the recipient, until
+    /// [`SmtpServer::take_recipient`]; the transaction goes on for its
+    /// other recipients.
+    pub fn answer_recipient(&self, address: &str, code: u16, text: &str) {
+        let mut state = self.shared.lock();
+        state
+            .recipient_answers
+            .retain(|(a, _, _)| !a.eq_ignore_ascii_case(address));
+        state
+            .recipient_answers
+            .push((address.to_string(), code, text.to_string()));
+    }
+
+    /// Takes `address` at RCPT again, as by default.
+    pub fn take_recipient(&self, address: &str) {
+        self.shared
+            .lock()
+            .recipient_answers
+            .retain(|(a, _, _)| !a.eq_ignore_ascii_case(address));
     }
 
     /// Every command received so far, in order: the verb and its

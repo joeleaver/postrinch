@@ -16,6 +16,8 @@ mod calendars;
 mod codec;
 mod duplicates;
 mod error;
+#[cfg(feature = "faults")]
+mod faults;
 mod find;
 mod format;
 mod imap_state;
@@ -27,8 +29,10 @@ mod objects;
 mod outbox;
 mod outbox_cache;
 mod outgoing;
+mod outgoing_put_off;
 mod people;
 mod rules;
+mod sent_filing;
 mod threads;
 mod upkeep;
 mod views;
@@ -45,8 +49,10 @@ pub use error::{StoreError, StoreResult};
 pub use find::{Find, Found};
 pub use mailboxes::{LabelStats, MessageEntry, ThreadEntry};
 pub use outbox::OutboxEntry;
-pub use outgoing::{Outgoing, OutgoingKind};
+pub use outgoing::{Outgoing, OutgoingKind, SendStage};
+pub use outgoing_put_off::PutOff;
 pub use people::PersonEntry;
+pub use sent_filing::SentBackOff;
 
 /// Label stats by account key, each with the write count it was read at.
 /// Undownloaded messages by account key, and when they were counted.
@@ -74,6 +80,9 @@ pub struct Store {
     thread_lock: Arc<Mutex<()>>,
     /// Held while an account's rules are read and written back.
     rules_lock: Arc<Mutex<()>>,
+    /// Held while an account's IMAP settings are written, or read and
+    /// written back (sent_filing.rs).
+    account_lock: Arc<Mutex<()>>,
     /// How many writes have gone through since the store opened.
     writes: Arc<AtomicU64>,
     /// Each account's label stats, with [`Store::writes`] as it was when
@@ -82,6 +91,9 @@ pub struct Store {
     /// How many messages each account has not downloaded, and when that
     /// was counted (see backfill.rs).
     undownloaded: Arc<Mutex<Option<KeptCounts>>>,
+    /// Write failures a test programmed (faults.rs).
+    #[cfg(feature = "faults")]
+    faults: Arc<faults::Faults>,
 }
 
 impl Store {

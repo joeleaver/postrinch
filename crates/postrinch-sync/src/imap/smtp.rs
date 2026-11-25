@@ -74,6 +74,11 @@ impl SmtpConnection {
         &mut self.connection
     }
 
+    /// The server this connection is with.
+    pub(crate) fn server(&self) -> &Server {
+        &self.server
+    }
+
     /// Says QUIT and closes the connection.
     pub async fn quit(mut self) -> SyncResult<()> {
         let quit = self.connection.quit().await;
@@ -258,7 +263,7 @@ fn mechanisms(ehlo: &Response) -> Vec<String> {
 
 /// The server's words in a lettre error, less any enhanced status code
 /// (`5.7.8 Authentication credentials invalid`).
-fn reply_text(error: &lettre::transport::smtp::Error) -> String {
+pub(super) fn reply_text(error: &lettre::transport::smtp::Error) -> String {
     use std::error::Error;
     let text = error
         .source()
@@ -268,6 +273,25 @@ fn reply_text(error: &lettre::transport::smtp::Error) -> String {
         Some((first, rest)) if is_enhanced_code(first) => rest.to_owned(),
         _ => words.to_owned(),
     }
+}
+
+/// The enhanced status code (RFC 3463) the server's words in a lettre
+/// error begin with, as `[4, 2, 2]` for `4.2.2 Mailbox full`.
+pub(super) fn enhanced_code(error: &lettre::transport::smtp::Error) -> Option<[u16; 3]> {
+    use std::error::Error;
+    let text = error
+        .source()
+        .map_or_else(|| error.to_string(), |s| s.to_string());
+    let first = text.split_whitespace().next()?;
+    if !is_enhanced_code(first) {
+        return None;
+    }
+    let mut parts = first.split('.').map(str::parse::<u16>);
+    Some([
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+    ])
 }
 
 /// RFC 3463: `class.subject.detail`, as `5.7.8`.
@@ -306,7 +330,7 @@ fn refusal(server: &Server, error: &lettre::transport::smtp::Error) -> SyncError
 /// temporary reason`, RFC 3207 4) or AUTH alike. None of them is the
 /// credential's fault, so none is retried with a fresh token. (AUTH's 432
 /// is the person's to act on; [`refusal`] takes it first.)
-fn server_error(server: &Server, error: &lettre::transport::smtp::Error) -> SyncError {
+pub(super) fn server_error(server: &Server, error: &lettre::transport::smtp::Error) -> SyncError {
     if error.is_tls() {
         return SyncError::Tls {
             server: describe(server),
@@ -329,7 +353,7 @@ fn server_error(server: &Server, error: &lettre::transport::smtp::Error) -> Sync
 
 /// A failure while connecting: an answer from the server is its own; a
 /// failure to reach it says so.
-fn connect_error(server: &Server, error: lettre::transport::smtp::Error) -> SyncError {
+pub(super) fn connect_error(server: &Server, error: lettre::transport::smtp::Error) -> SyncError {
     if error.status().is_some() || error.is_tls() || error.is_response() {
         return server_error(server, &error);
     }

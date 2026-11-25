@@ -1,4 +1,4 @@
-use postrinch_model::{Account, AccountState, EmailAddress, Provider};
+use postrinch_model::{Account, AccountState, EmailAddress, ImapSettings, Provider};
 
 use crate::codec::{Fields, FieldsBuilder};
 use crate::{Store, StoreError, StoreResult};
@@ -40,6 +40,7 @@ impl Store {
     /// Add an account, or replace what is stored about it. Its labels,
     /// messages and sync position are kept.
     pub fn put_account(&self, account: &Account) -> StoreResult<()> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
         let key = account.address.key();
         let fields = || {
             FieldsBuilder::new()
@@ -78,6 +79,21 @@ impl Store {
     ) -> StoreResult<()> {
         let id = self.account_id(address)?;
         self.db_update(TYPE, id, FieldsBuilder::new().json("state", state).build())?;
+        Ok(())
+    }
+
+    /// Replace an IMAP account's settings, and nothing else about it.
+    /// Sending changes one of them by itself with
+    /// [`Store::sent_copy_filed`] and [`Store::server_files_sent`].
+    pub fn set_imap_settings(
+        &self,
+        address: &EmailAddress,
+        settings: &ImapSettings,
+    ) -> StoreResult<()> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let id = self.account_id(address)?;
+        let fields = FieldsBuilder::new().json("imap", settings).build();
+        self.db_update(TYPE, id, fields)?;
         Ok(())
     }
 
@@ -178,6 +194,38 @@ mod tests {
             store.sync_cursor(&address).unwrap().as_deref(),
             Some("12345")
         );
+    }
+
+    #[test]
+    fn imap_settings_change_alone() {
+        use postrinch_model::{FolderRoles, Security, Server, SignInMethod};
+
+        let (_dir, store) = store();
+        let address = EmailAddress::parse("ada@example.org").unwrap();
+        let server = |host: &str, port| Server {
+            host: host.into(),
+            port,
+            security: Security::Tls,
+            username: "ada".into(),
+        };
+        let mut settings = ImapSettings {
+            imap: server("imap.example.org", 993),
+            smtp: server("smtp.example.org", 465),
+            sign_in: SignInMethod::Password,
+            roles: FolderRoles::default(),
+            server_files_sent: true,
+        };
+        let mut account = Account::new(address.clone(), Provider::Imap);
+        account.display_name = Some("Ada".into());
+        account.imap = Some(settings.clone());
+        store.put_account(&account).unwrap();
+        store.set_sync_cursor(&address, Some("7")).unwrap();
+
+        settings.server_files_sent = false;
+        store.set_imap_settings(&address, &settings).unwrap();
+        account.imap = Some(settings);
+        assert_eq!(store.account(&address).unwrap(), Some(account));
+        assert_eq!(store.sync_cursor(&address).unwrap().as_deref(), Some("7"));
     }
 
     #[test]

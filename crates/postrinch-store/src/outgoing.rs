@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::codec::{Fields, FieldsBuilder};
 use crate::keys::scoped;
-use crate::{Store, StoreResult};
+use crate::{PutOff, Store, StoreResult};
 
 pub(crate) const TYPE: &str = "Outgoing";
 
@@ -27,6 +27,25 @@ pub enum OutgoingKind {
     Keep,
     /// An agent wrote it: show it to the person, who may send it.
     Proposed,
+}
+
+/// How far sending a message over SMTP got (IMAP accounts), so that a
+/// message goes once: what is left after an attempt is decided by where
+/// it stopped (docs/imap.md, "Writing and sending").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SendStage {
+    /// Not sent: the next attempt sends it.
+    #[default]
+    Queued,
+    /// Its data reached the server and no answer came: it may have gone.
+    /// The next attempt looks for it in Sent rather than send it; when
+    /// it is also `refused`, it was not found there and waits for the
+    /// person (Send again, or Discard).
+    DataSent,
+    /// The server took it. What is left is filing it in Sent and
+    /// deleting the draft it came from; it is never sent again.
+    Delivered,
 }
 
 /// One piece of outgoing mail.
@@ -45,6 +64,20 @@ pub struct Outgoing {
     /// Whether the provider refused it for good: it waits for the person
     /// to change it, and is not tried again.
     pub refused: bool,
+    /// How far sending it got; always [`SendStage::Queued`] for Google
+    /// accounts.
+    pub stage: SendStage,
+    /// The recipients the server took it for in earlier transactions,
+    /// when it was sent in parts because the server takes only so many
+    /// recipients at once: it never goes to them again.
+    pub delivered_to: Vec<EmailAddress>,
+    /// While it is [`SendStage::DataSent`]: the recipients of the
+    /// transaction whose data went without an answer.
+    pub sending_to: Vec<EmailAddress>,
+    /// The recipients the server put off on earlier attempts (a 4xx at
+    /// RCPT for one recipient), each as last put off; it went to the
+    /// others. Forgotten when the person sends it again.
+    pub put_off: Vec<PutOff>,
 }
 
 impl Store {
@@ -113,6 +146,67 @@ impl Store {
         self.db_update(TYPE, id, fields.build())
     }
 
+    /// Record how far sending it got.
+    pub fn outgoing_stage(&self, id: u64, stage: SendStage) -> StoreResult<()> {
+        let fields = FieldsBuilder::new().json("stage", &stage);
+        self.db_update(TYPE, id, fields.build())
+    }
+
+    /// Its data is about to go to `to`: [`SendStage::DataSent`], for
+    /// them.
+    pub fn outgoing_sending(&self, id: u64, to: &[EmailAddress]) -> StoreResult<()> {
+        let fields = FieldsBuilder::new()
+            .json("stage", &SendStage::DataSent)
+            .json("sending_to", &to);
+        self.db_update(TYPE, id, fields.build())
+    }
+
+    /// The server took it for `delivered` (everyone it went to so far),
+    /// in one write with how far sending it got now: `stage` is
+    /// [`SendStage::Queued`] while some recipients are left,
+    /// [`SendStage::Delivered`] once none are.
+    pub fn outgoing_delivered(
+        &self,
+        id: u64,
+        delivered: &[EmailAddress],
+        stage: SendStage,
+    ) -> StoreResult<()> {
+        let fields = FieldsBuilder::new()
+            .json("stage", &stage)
+            .json("delivered_to", &delivered)
+            .null("sending_to");
+        self.db_update(TYPE, id, fields.build())
+    }
+
+    /// An attempt stopped before its data went: [`SendStage::Queued`],
+    /// keeping whom earlier transactions delivered it to.
+    pub fn outgoing_not_sent(&self, id: u64) -> StoreResult<()> {
+        let fields = FieldsBuilder::new()
+            .json("stage", &SendStage::Queued)
+            .null("sending_to");
+        self.db_update(TYPE, id, fields.build())
+    }
+
+    /// The person asked for mail waiting for them to be tried again: its
+    /// error and the recipients put off are forgotten and, if it may have gone, it is queued as new,
+    /// for everyone earlier transactions did not deliver it to. Mail the
+    /// server took stays [`SendStage::Delivered`]: only filing it is
+    /// tried again, as it is never sent twice.
+    pub fn outgoing_send_again(&self, id: u64) -> StoreResult<()> {
+        let stage = decode(&self.get(TYPE, id)?)?.stage;
+        let stage = match stage {
+            SendStage::Delivered => SendStage::Delivered,
+            SendStage::Queued | SendStage::DataSent => SendStage::Queued,
+        };
+        let fields = FieldsBuilder::new()
+            .json("stage", &stage)
+            .null("sending_to")
+            .null("put_off")
+            .null("error")
+            .bool("refused", false);
+        self.db_update(TYPE, id, fields.build())
+    }
+
     fn next_outgoing_seq(&self) -> StoreResult<u64> {
         Ok(self
             .outgoing()?
@@ -123,7 +217,7 @@ impl Store {
     }
 }
 
-fn decode(fields: &Fields) -> StoreResult<Outgoing> {
+pub(crate) fn decode(fields: &Fields) -> StoreResult<Outgoing> {
     Ok(Outgoing {
         id: fields.id(),
         kind: fields.json("kind")?,
@@ -133,6 +227,10 @@ fn decode(fields: &Fields) -> StoreResult<Outgoing> {
         attempts: fields.u32("attempts")?,
         error: fields.opt_str("error")?,
         refused: fields.bool("refused")?,
+        stage: fields.opt_json("stage")?.unwrap_or_default(),
+        delivered_to: fields.opt_json("delivered_to")?.unwrap_or_default(),
+        sending_to: fields.opt_json("sending_to")?.unwrap_or_default(),
+        put_off: fields.opt_json("put_off")?.unwrap_or_default(),
     })
 }
 
@@ -176,6 +274,74 @@ mod tests {
         assert_eq!(
             (failed.attempts, failed.error.as_deref(), failed.refused),
             (1, Some("offline"), false)
+        );
+        assert_eq!(
+            failed.stage,
+            SendStage::Queued,
+            "queued until a send says otherwise"
+        );
+        store.outgoing_stage(first, SendStage::DataSent).unwrap();
+        store
+            .outgoing_failed(first, "it may have gone", true)
+            .unwrap();
+        let doubtful = &store.outgoing_for(&me).unwrap()[0];
+        assert_eq!(
+            (doubtful.stage, doubtful.refused),
+            (SendStage::DataSent, true)
+        );
+        store.outgoing_send_again(first).unwrap();
+        let again = &store.outgoing_for(&me).unwrap()[0];
+        assert_eq!(
+            (again.stage, again.refused, again.error.as_deref()),
+            (SendStage::Queued, false, None)
+        );
+        // Sent in parts: whom each part went to is kept.
+        let (ada, bob) = (draft.to[0].address.clone(), me.clone());
+        store
+            .outgoing_sending(first, std::slice::from_ref(&ada))
+            .unwrap();
+        let sending = &store.outgoing_for(&me).unwrap()[0];
+        assert_eq!(
+            (sending.stage, sending.sending_to.clone()),
+            (SendStage::DataSent, vec![ada.clone()])
+        );
+        store
+            .outgoing_delivered(first, std::slice::from_ref(&ada), SendStage::Queued)
+            .unwrap();
+        store
+            .outgoing_sending(first, std::slice::from_ref(&bob))
+            .unwrap();
+        store.outgoing_send_again(first).unwrap();
+        let parted = &store.outgoing_for(&me).unwrap()[0];
+        assert_eq!(
+            (
+                parted.stage,
+                parted.delivered_to.clone(),
+                parted.sending_to.clone()
+            ),
+            (SendStage::Queued, vec![ada.clone()], vec![])
+        );
+        store.outgoing_sending(first, &[bob]).unwrap();
+        store.outgoing_not_sent(first).unwrap();
+        let stopped = &store.outgoing_for(&me).unwrap()[0];
+        assert_eq!(
+            (
+                stopped.stage,
+                stopped.delivered_to.clone(),
+                stopped.sending_to.is_empty()
+            ),
+            (SendStage::Queued, vec![ada], true)
+        );
+        store.outgoing_stage(first, SendStage::Delivered).unwrap();
+        store
+            .outgoing_failed(first, "Sent would not keep a copy", true)
+            .unwrap();
+        store.outgoing_send_again(first).unwrap();
+        let delivered = &store.outgoing_for(&me).unwrap()[0];
+        assert_eq!(
+            (delivered.stage, delivered.refused),
+            (SendStage::Delivered, false),
+            "what went is never sent again"
         );
         store.outgoing_done(first).unwrap();
         assert_eq!(

@@ -9,22 +9,27 @@
 //! while the server keeps answering, and a server that stops answering
 //! cannot hang the account.
 //!
-//! A `NO` saying the server is busy ([`busy_after_sign_in`]) ends the
-//! pass when it is the account's ([`SyncError::Busy`]), and only the
-//! folder when it is the folder's ([`FolderError::Busy`]): the commands
-//! sent in a folder return a [`FolderResult`].
+//! A `NO` saying the server is busy ([`busy`]) ends the pass when it is
+//! the account's ([`SyncError::Busy`]), and only the folder when it is
+//! the folder's ([`FolderError::Busy`]): the commands sent in a folder
+//! return a [`FolderResult`].
+
+use std::time::Duration;
 
 use async_imap::imap_proto::{MailboxDatum, Response, ResponseCode, Status};
 use postrinch_model::Server;
+use tokio::io::AsyncWriteExt;
 
+pub(super) use super::answers::Completed;
+use super::answers::busy;
 use super::fetch::Collector;
 pub(super) use super::fetch::{FetchReply, Fetched};
 use super::folder_error::{FolderError, FolderResult};
 use super::names::Command;
 pub(super) use super::uids::uid_set;
 use crate::imap::connect::{describe, within};
-use crate::imap::refusal::{BusyScope, busy_after_sign_in};
-use crate::imap::reply::Tagged;
+use crate::imap::refusal::BusyScope;
+use crate::imap::reply::ImapStream;
 use crate::imap::session::{ImapSession, imap_error};
 use crate::{SyncError, SyncResult};
 
@@ -47,8 +52,8 @@ pub(super) struct Selected {
 }
 
 /// How a command ended, short of an error.
-enum Done {
-    Ok,
+pub(super) enum Done {
+    Ok(Completed),
     No(Refusal),
     /// A `NO` saying the server is busy for the folder the command was
     /// in ([`BusyScope::Folder`]), with its text.
@@ -57,7 +62,7 @@ enum Done {
 
 impl Done {
     /// A folder's busy answer as the folder's error; the rest as it is.
-    fn in_folder(self) -> FolderResult<Self> {
+    pub(super) fn in_folder(self) -> FolderResult<Self> {
         match self {
             Self::FolderBusy(text) => Err(FolderError::Busy(text)),
             done => Ok(done),
@@ -121,7 +126,7 @@ impl Conn {
             .command("enabling QRESYNC", &enable, |_| Ok(()))
             .await?;
         match done {
-            Done::Ok => self.qresync = true,
+            Done::Ok(_) => self.qresync = true,
             // A server refusing it is read the CONDSTORE way.
             Done::No(_) => {}
             // ENABLE is about the connection, not a folder.
@@ -278,8 +283,9 @@ impl Conn {
 
     /// Sends a command and reads every response up to its tagged one,
     /// handing each untagged one to `each`. A literal the server must
-    /// agree to first (without LITERAL+) is sent after its `+`.
-    async fn command(
+    /// agree to first (without LITERAL+) is sent after its `+`; a literal
+    /// may take longer to send than a command ([`for_bytes`]).
+    pub(super) async fn command(
         &mut self,
         what: &str,
         command: &Command,
@@ -288,18 +294,21 @@ impl Conn {
         let server = self.session.server().clone();
         let limit = self.session.connector().timeouts().command;
         let capabilities = self.session.capabilities();
-        let lines = command.lines(capabilities.has("LITERAL+"), capabilities.has("LITERAL-"));
+        let wire = command.wire(capabilities.has("LITERAL+"), capabilities.has("LITERAL-"));
         let verb = command.verb().to_owned();
         let session = self.session.inner();
-        let (first, rest) = lines.split_first().expect("a command has a line");
         let tag = within(limit, &server, what, async {
             session
-                .run_command(first)
+                .run_command(&wire.first)
                 .await
                 .map_err(|e| imap_error(&server, e))
         })
         .await?;
-        let mut rest = rest.iter();
+        let mut rest = wire.rest.into_iter().peekable();
+        // Lines after a non-synchronizing literal go at once.
+        while let Some(line) = rest.next_if(|l| !l.wait) {
+            write_line(session, &server, limit, what, &line.bytes).await?;
+        }
         loop {
             let read = within(limit, &server, what, async {
                 Ok(session.read_response().await?)
@@ -319,7 +328,7 @@ impl Conn {
                 } if *done == tag => {
                     let text = outcome.information.as_deref().unwrap_or("").to_owned();
                     return match status {
-                        Status::Ok => Ok(Done::Ok),
+                        Status::Ok => Ok(Done::Ok(Completed::of(outcome.code.as_ref()))),
                         Status::No => match busy(outcome.code.as_ref(), &text) {
                             Some(BusyScope::Account) => Err(SyncError::Busy {
                                 service: "IMAP",
@@ -351,13 +360,10 @@ impl Conn {
                             &format!("{verb}: the server asked for more than was sent"),
                         ));
                     };
-                    within(limit, &server, what, async {
-                        session
-                            .run_command_untagged(line)
-                            .await
-                            .map_err(|e| imap_error(&server, e))
-                    })
-                    .await?;
+                    write_line(session, &server, limit, what, &line.bytes).await?;
+                    while let Some(line) = rest.next_if(|l| !l.wait) {
+                        write_line(session, &server, limit, what, &line.bytes).await?;
+                    }
                 }
                 other => each(other)?,
             }
@@ -373,26 +379,38 @@ impl Conn {
     }
 }
 
+/// Writes one line of a command after its first (a literal and what
+/// follows it) and its CRLF, straight to the connection: async-imap sends
+/// only text, and a literal may be any bytes.
+async fn write_line(
+    session: &mut async_imap::Session<ImapStream>,
+    server: &Server,
+    limit: Duration,
+    what: &str,
+    bytes: &[u8],
+) -> SyncResult<()> {
+    let stream = session.get_mut();
+    within(for_bytes(limit, bytes.len()), server, what, async {
+        stream.write_all(bytes).await?;
+        stream.write_all(b"\r\n").await?;
+        stream.flush().await?;
+        Ok(())
+    })
+    .await
+}
+
+/// The time allowed to send `len` bytes: the command timeout, and a
+/// second more for every 64 KiB, so a large message on a slow link is not
+/// cut off while it is still going (25 MB takes up to about 7 minutes).
+pub(crate) fn for_bytes(limit: Duration, len: usize) -> Duration {
+    limit + Duration::from_secs((len / 65_536) as u64)
+}
+
 fn server_error(server: &Server, message: &str) -> SyncError {
     SyncError::Server {
         service: "IMAP",
         server: describe(server),
         message: message.to_owned(),
-    }
-}
-
-/// Whether a tagged `NO` says the server is busy, and for what
-/// ([`busy_after_sign_in`]). imap-proto takes `[ALERT]` out of the text;
-/// codes it does not know (RFC 5530's among them) stay at the start of
-/// the text.
-fn busy(code: Option<&ResponseCode<'_>>, text: &str) -> Option<BusyScope> {
-    match code {
-        Some(ResponseCode::Alert) => busy_after_sign_in(Some("ALERT"), text),
-        Some(_) => None,
-        None => {
-            let parsed = Tagged::parse_text(text);
-            busy_after_sign_in(parsed.code.as_deref(), &parsed.text)
-        }
     }
 }
 
@@ -409,37 +427,6 @@ fn mailbox_id_of(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn busy_refusals_are_told_from_partial_ones() {
-        use BusyScope::{Account, Folder};
-        let busy_ones = [
-            (None, "[UNAVAILABLE] Try later", Folder),
-            (None, "[INUSE] Locked", Folder),
-            (
-                Some(ResponseCode::Alert),
-                "Account exceeded command or bandwidth limits. (Failure)",
-                Account,
-            ),
-            (
-                None,
-                "Too many simultaneous connections. (Failure)",
-                Account,
-            ),
-        ];
-        for (code, text, scope) in busy_ones {
-            assert_eq!(busy(code.as_ref(), text), Some(scope), "{text}");
-        }
-        let partial = [
-            (None, "Some messages could not be FETCHed (Failure)"),
-            (None, "[SERVERBUG] Internal error occurred"),
-            (None, "[LIMIT] Too many UIDs"),
-            (Some(ResponseCode::Alert), "Mailbox is broken"),
-        ];
-        for (code, text) in partial {
-            assert_eq!(busy(code.as_ref(), text), None, "{text}");
-        }
-    }
 
     #[test]
     fn mailbox_ids_are_read_from_the_text() {

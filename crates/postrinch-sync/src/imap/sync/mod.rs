@@ -7,10 +7,15 @@
 //! headers, newest first, and [`ImapSync::backfill`] downloads the bodies
 //! after; [`ImapSync::download_now`] fetches the ones the person opens.
 //!
+//! [`ImapSync::send_outgoing`] delivers the mail written here: messages
+//! over SMTP, filed in Sent, and drafts kept in Drafts ([`send`]).
+//!
 //! Connections are few and kept: per account, one for passes and
-//! backfill, one for what the person opens, each reused while the server
-//! keeps it open (Gmail allows about 15 at once per account).
+//! backfill, one for what the person opens and one for outgoing mail,
+//! each reused while the server keeps it open (Gmail allows about 15 at
+//! once per account).
 
+mod answers;
 mod bodies;
 mod cursor;
 mod fetch;
@@ -24,6 +29,7 @@ mod places;
 mod read;
 mod reads;
 mod renames;
+mod send;
 mod uids;
 mod utf7;
 mod wire;
@@ -35,6 +41,7 @@ use postrinch_model::{AccountState, EmailAddress, ImapSettings};
 use postrinch_store::{Store, StoreResult};
 use tokio::sync::Mutex as AsyncMutex;
 
+pub use self::send::SentLookup;
 use self::wire::Conn;
 use super::{AccessTokens, Connector, ImapSecrets, ImapSession};
 use crate::google::{ProgressFn, SyncReport};
@@ -50,6 +57,12 @@ struct Lanes {
     sync: Slot,
     /// Messages the person opens, so they never wait behind a pass.
     reader: Slot,
+    /// Filing sent mail and keeping drafts ([`send`]), so they never
+    /// wait behind a pass either.
+    outgoing: Slot,
+    /// Held while the account's outgoing mail is delivered, so two
+    /// deliveries never take the same message ([`send`]).
+    sending: Arc<AsyncMutex<()>>,
 }
 
 /// A connection taken from its slot while a call uses it.
@@ -71,6 +84,7 @@ impl Held {
 enum Lane {
     Sync,
     Reader,
+    Outgoing,
 }
 
 /// IMAP sync into the store, for every IMAP account. Cheap to clone.
@@ -81,6 +95,7 @@ pub struct ImapSync {
     secrets: ImapSecrets,
     tokens: Arc<dyn AccessTokens>,
     lanes: Arc<Mutex<HashMap<String, Lanes>>>,
+    sent_lookup: SentLookup,
 }
 
 impl ImapSync {
@@ -98,7 +113,15 @@ impl ImapSync {
             secrets,
             tokens,
             lanes: Arc::default(),
+            sent_lookup: SentLookup::default(),
         }
+    }
+
+    /// Looks for sent mail in Sent as `lookup` says, in place of the
+    /// default waits (for tests).
+    pub fn with_sent_lookup(mut self, lookup: SentLookup) -> Self {
+        self.sent_lookup = lookup;
+        self
     }
 
     /// Brings the store up to date with the account: its folders as
@@ -135,7 +158,7 @@ impl ImapSync {
             .unwrap_or_else(|e| e.into_inner())
             .remove(&account.key());
         let Some(lanes) = lanes else { return };
-        for slot in [lanes.sync, lanes.reader] {
+        for slot in [lanes.sync, lanes.reader, lanes.outgoing] {
             if let Some(conn) = slot.lock().await.take()
                 && let Err(e) = conn.into_session().logout().await
             {
@@ -191,12 +214,19 @@ impl ImapSync {
         result
     }
 
+    /// The lock an account's deliveries take turns on.
+    fn sending(&self, account: &EmailAddress) -> Arc<AsyncMutex<()>> {
+        let mut lanes = self.lanes.lock().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(&lanes.entry(account.key()).or_default().sending)
+    }
+
     fn slot(&self, account: &EmailAddress, lane: Lane) -> Slot {
         let mut lanes = self.lanes.lock().unwrap_or_else(|e| e.into_inner());
         let lanes = lanes.entry(account.key()).or_default();
         match lane {
             Lane::Sync => Arc::clone(&lanes.sync),
             Lane::Reader => Arc::clone(&lanes.reader),
+            Lane::Outgoing => Arc::clone(&lanes.outgoing),
         }
     }
 
