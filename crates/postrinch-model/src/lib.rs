@@ -31,7 +31,7 @@ pub use draft::{
     format_mailboxes, parse_mailboxes,
 };
 pub use imap::{FolderRoles, ImapSettings, Security, Server, SignInMethod};
-pub use imap_state::{FolderRole, ImapFolder, ImapPlace, ImapUnplacedCopy};
+pub use imap_state::{FolderRole, ImapCopyAttempt, ImapFolder, ImapPlace};
 pub use label::{Label, LabelColor, LabelKind, LabelPrefs, LabelVisibility, SystemLabel};
 pub use message::{AttachmentInfo, Flags, Message, MessageHeaders, ProviderMessageId};
 pub use thread::{ProviderThreadId, ThreadSummary, answered, is_draft};

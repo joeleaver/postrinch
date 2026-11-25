@@ -62,7 +62,7 @@ fn gmail() -> Folders {
     Folders::new(stored, &listed, true)
 }
 
-/// A plan for a message with no copy whose UID is not known.
+/// A plan for a message with no copy asked for and not yet seen made.
 fn plan_kept(places: &[ImapPlace], change: &MessageChange, folders: &Folders) -> Planned {
     plan(places, &[], change, folders)
 }
@@ -355,24 +355,29 @@ fn with_trash(mut f: Folders) -> Folders {
 }
 
 #[test]
-fn a_copy_whose_uid_is_unknown_is_not_made_again_and_holds_other_changes() {
+fn a_copy_asked_for_is_not_made_again_and_counts_for_nothing_else() {
     let places = [at("INBOX", 1)];
-    let unplaced = [WORK.to_owned()];
+    let attempted = [WORK.to_owned()];
     let again = plan(
         &places,
-        &unplaced,
+        &attempted,
         &MessageChange::add_label(WORK),
         &folders(true),
     );
     assert_eq!(ops(again), []);
-    for change in [
-        MessageChange::read(),
-        MessageChange::remove_label("INBOX"),
-        MessageChange::add_label("TRASH"),
-    ] {
-        let waits = plan(&places, &unplaced, &change, &folders(true));
-        assert!(matches!(waits, Planned::Waits(_)), "{change:?}: {waits:?}");
-    }
+    // Archiving still moves the inbox copy: the copy asked for in Work is
+    // not counted as keeping the message.
+    let archived = plan(
+        &places,
+        &attempted,
+        &MessageChange::remove_label("INBOX"),
+        &folders(true),
+    );
+    assert!(
+        ops(archived)
+            .iter()
+            .any(|op| matches!(op, Op::Move { to, .. } if to == ARCHIVE)),
+    );
 }
 
 #[test]

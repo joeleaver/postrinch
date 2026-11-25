@@ -5,9 +5,9 @@ mod common;
 
 use common::{address, message};
 use postrinch_model::{
-    Account, EmailAddress, FolderRole, FolderRoles, ImapFolder, ImapPlace, ImapSettings,
-    ImapUnplacedCopy, Label, LabelKind, Provider, ProviderMessageId, Security, Server,
-    SignInMethod, SystemLabel,
+    Account, EmailAddress, FolderRole, FolderRoles, ImapCopyAttempt, ImapFolder, ImapPlace,
+    ImapSettings, Label, LabelKind, Provider, ProviderMessageId, Security, Server, SignInMethod,
+    SystemLabel,
 };
 use postrinch_store::{Store, StoreError};
 
@@ -288,42 +288,48 @@ fn removing_the_account_removes_its_folders_and_places() {
     Store::open(dir.path()).unwrap();
 }
 
-fn unplaced(folder: &str, message: &str) -> ImapUnplacedCopy {
-    ImapUnplacedCopy {
+fn attempt(folder: &str, message: &str) -> ImapCopyAttempt {
+    ImapCopyAttempt {
         folder: folder.into(),
         message: ProviderMessageId(message.into()),
         uidvalidity: 3,
         uidnext: 20,
-        read_uidvalidity: 3,
-        pass: 7,
     }
 }
 
-#[test]
-fn unplaced_copies_are_kept_per_folder_and_go_with_it() {
-    let (dir, store, me) = setup();
-    let m1 = ProviderMessageId("m1".into());
-    let receipts = unplaced("f0123456789ab", "m1");
-    store.put_imap_unplaced_copy(&me, &receipts).unwrap();
-    store
-        .put_imap_unplaced_copy(&me, &unplaced("INBOX", "m1"))
-        .unwrap();
-    assert_eq!(
-        store.imap_unplaced_copy(&me, "f0123456789ab", &m1).unwrap(),
-        Some(receipts)
-    );
-    let missing = store.put_imap_unplaced_copy(&me, &unplaced("f000000000000", "m1"));
-    assert!(matches!(missing, Err(StoreError::UnknownImapFolder { .. })));
-    let mut kept: Vec<String> = store
-        .imap_unplaced_copies(&me, &m1)
+/// The folders of a message's attempts, sorted.
+fn attempted(store: &Store, me: &EmailAddress, message: &ProviderMessageId) -> Vec<String> {
+    let mut folders: Vec<String> = store
+        .imap_copy_attempts(me, message)
         .unwrap()
         .into_iter()
-        .map(|c| c.folder)
+        .map(|a| a.folder)
         .collect();
-    kept.sort();
-    assert_eq!(kept, ["INBOX", "f0123456789ab"]);
-    store.remove_imap_unplaced_copy(&me, "INBOX", &m1).unwrap();
-    assert_eq!(store.imap_unplaced_copy(&me, "INBOX", &m1).unwrap(), None);
+    folders.sort();
+    folders
+}
+
+#[test]
+fn copy_attempts_are_kept_per_folder_and_go_with_it() {
+    let (dir, store, me) = setup();
+    let m1 = ProviderMessageId("m1".into());
+    let receipts = attempt("f0123456789ab", "m1");
+    store.put_imap_copy_attempt(&me, &receipts).unwrap();
+    store
+        .put_imap_copy_attempt(&me, &attempt("INBOX", "m1"))
+        .unwrap();
+    // Written again, it replaces the one kept.
+    let later = ImapCopyAttempt {
+        uidnext: 25,
+        ..receipts.clone()
+    };
+    store.put_imap_copy_attempt(&me, &later).unwrap();
+    let kept = store.imap_copy_attempts(&me, &m1).unwrap();
+    assert!(kept.contains(&later) && kept.len() == 2, "{kept:?}");
+    let missing = store.put_imap_copy_attempt(&me, &attempt("f000000000000", "m1"));
+    assert!(matches!(missing, Err(StoreError::UnknownImapFolder { .. })));
+    store.remove_imap_copy_attempt(&me, "INBOX", &m1).unwrap();
+    assert_eq!(attempted(&store, &me, &m1), ["f0123456789ab"]);
     // Removing the folder's label removes them.
     store
         .put_label(
@@ -332,45 +338,7 @@ fn unplaced_copies_are_kept_per_folder_and_go_with_it() {
         )
         .unwrap();
     store.remove_label(&me, "f0123456789ab").unwrap();
-    assert_eq!(
-        store.imap_unplaced_copy(&me, "f0123456789ab", &m1).unwrap(),
-        None
-    );
+    assert!(attempted(&store, &me, &m1).is_empty());
     drop(store);
     Store::open(dir.path()).unwrap();
-}
-
-#[test]
-fn an_unplaced_copy_waits_until_sync_reads_past_it() {
-    let copy = unplaced("INBOX", "m1");
-    let mut read = ImapFolder::new("INBOX", "INBOX");
-    read.uidvalidity = 3;
-    read.uidnext = 20;
-    assert!(copy.waits(&read, 7), "not read past it yet");
-    read.uidnext = 21;
-    assert!(!copy.waits(&read, 7), "read past it");
-    let never_read = ImapUnplacedCopy {
-        read_uidvalidity: 0,
-        ..copy.clone()
-    };
-    read.uidvalidity = 0;
-    assert!(never_read.waits(&read, 0), "the folder not read yet");
-    read.uidvalidity = 9;
-    assert!(
-        !copy.waits(&read, 7),
-        "the folder read again at another UIDVALIDITY"
-    );
-}
-
-#[test]
-fn an_unplaced_copy_stops_waiting_once_a_later_pass_reads_its_folder_whole() {
-    // The command copied nothing (its source was gone), so the folder's
-    // UIDNEXT never moves past the copy's: a pass after the copy that
-    // reads the folder whole is what says there is none.
-    let copy = unplaced("INBOX", "m1");
-    let mut read = ImapFolder::new("INBOX", "INBOX");
-    read.uidvalidity = 3;
-    read.uidnext = 20;
-    assert!(copy.waits(&read, 7), "read whole only before the copy");
-    assert!(!copy.waits(&read, 8), "read whole by a pass after it");
 }

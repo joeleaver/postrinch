@@ -214,11 +214,10 @@ async fn deleting_a_label_again_copies_nothing_twice() {
     f.sync().await;
     put(&f, "new@x", &["Work"]);
     // Where the copies went is not found (the server will not list the
-    // archive's new mail), and the folder is not deleted the first time.
+    // archive's new mail), so the folder is not deleted the first time; the
+    // second finds them in the archive and copies nothing.
     f.server
         .fail_next_matching("UID FETCH", ":*", 1, ImapFault::No("Not now".into()));
-    f.server
-        .fail_next("DELETE", 1, ImapFault::No("Not now".into()));
     let work = f.label_id("Work");
     let first = f.sync.delete_label(&f.me, &work).await;
     assert!(matches!(first, Err(SyncError::Server { .. })), "{first:?}");

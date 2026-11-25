@@ -1,26 +1,24 @@
 //! Asking the server whether the copies kept are still there, before a
-//! change or a label's deletion counts on them (docs/imap.md, "Changing
-//! mail").
+//! change or a label's deletion counts on them (docs/imap.md, "Keeping
+//! every message safe").
 //!
 //! The store's copies are what the last sync read: another client may
 //! have deleted one since, or the folder's UIDVALIDITY may have changed,
 //! so its UIDs name other messages now. So every copy of a message whose
-//! change deletes copies is looked for on the server first, the ones its
-//! change moves or copies from among them: in its folder, at the folder's
-//! UIDVALIDITY now, not marked `\Deleted`. Copies found gone are
-//! forgotten and the message's change planned again from the rest, so a
-//! move or a copy is made from a copy that is there, never from one that
-//! is gone (a command on a UID that is gone does nothing, and the delete
-//! after it would take the last real copy). A message whose change only
-//! deletes copies keeps one the server is seen to have, or, when none is,
-//! a copy moves where a message in no folder goes instead, so the message
-//! is never lost. A change that moves or copies one deletes only once the
-//! server says the copy was made ([`super::apply`]). The checks are one
-//! `UID SEARCH` per folder for every message of the change at once.
+//! change copies, moves or deletes anything is looked for on the server
+//! first: in its folder, at the folder's UIDVALIDITY now, not marked
+//! `\Deleted`. Copies found gone are forgotten and the message's change
+//! planned again from the rest, so a copy or a move is made from a copy
+//! that is there, never from one that is gone (a command on a UID that is
+//! gone does nothing). The copies found that the change leaves in place
+//! are what lets its deletes go ([`super::apply`]); a message whose
+//! change only deletes and that keeps none has a copy moved where a
+//! message in no folder goes instead, so it is never lost. The checks are
+//! one `UID SEARCH` per folder for every message of the change at once.
 
 use std::collections::{BTreeMap, HashSet};
 
-use postrinch_model::{EmailAddress, ImapPlace, MessageChange};
+use postrinch_model::{EmailAddress, ImapPlace, MessageChange, ProviderMessageId};
 
 use super::super::ImapSync;
 use super::apply::{Exec, uids};
@@ -56,13 +54,13 @@ fn transfers(ops: &[Op]) -> bool {
 }
 
 impl ImapSync {
-    /// Makes sure each message whose ops delete copies does so from what
-    /// the server has, as the module says: its change planned again
-    /// without the copies found gone, and, where it only deletes, one
-    /// copy the server is seen to have kept; one that would keep none has
-    /// a copy moved where a message in no folder goes instead (the
+    /// Makes sure each message whose ops copy, move or delete do so from
+    /// what the server has, as the module says, and returns the messages
+    /// that keep a copy the server was seen to have, which the change
+    /// leaves in place. A message whose change only deletes and that keeps
+    /// none has a copy moved where a message in no folder goes instead (the
     /// archive, or from Trash or Junk the inbox), or, where that is the
-    /// folder it is in, keeps the copies and is refused.
+    /// folder it is in, keeps its copies and is refused.
     pub(super) async fn keep_one_copy(
         &self,
         exec: &mut Exec<'_>,
@@ -71,12 +69,13 @@ impl ImapSync {
         (held, change): (&[Held], &MessageChange),
         planned: &mut [Vec<Op>],
         verdict: &mut Verdict,
-    ) -> Outcome<()> {
+    ) -> Outcome<HashSet<ProviderMessageId>> {
         let at_risk: Vec<usize> = (0..planned.len())
-            .filter(|&i| deletes(&planned[i]))
+            .filter(|&i| deletes(&planned[i]) || transfers(&planned[i]))
             .collect();
+        let mut anchored = HashSet::new();
         if at_risk.is_empty() {
-            return Ok(());
+            return Ok(anchored);
         }
         let all: Vec<ImapPlace> = at_risk
             .iter()
@@ -92,25 +91,24 @@ impl ImapSync {
                     .filter(|p| !checked.gone.contains(&where_of(p)))
                     .cloned()
                     .collect(),
-                unplaced: held[i].unplaced.clone(),
+                attempted: held[i].attempted.clone(),
             };
             if left.places.len() < held[i].places.len() {
                 planned[i] = self
                     .plan_one(exec.conn, account, folders, &left, change, verdict)
                     .await?;
             }
-            let ops = &planned[i];
-            let keeps = !deletes(ops)
-                || transfers(ops)
-                || kept(&left.places, ops, folders)
-                    .into_iter()
-                    .any(|p| checked.there.contains(&where_of(p)));
-            if !keeps {
+            let kept = kept(&left.places, &planned[i], folders)
+                .into_iter()
+                .find(|p| checked.there.contains(&where_of(p)));
+            if let Some(kept) = kept {
+                anchored.insert(kept.message.clone());
+            } else if deletes(&planned[i]) && !transfers(&planned[i]) {
                 self.file_instead(exec, account, folders, &mut planned[i], verdict)
                     .await?;
             }
         }
-        Ok(())
+        Ok(anchored)
     }
 
     /// One message's first delete made a move where a message in no folder

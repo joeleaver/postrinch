@@ -7,6 +7,7 @@ mod changes_fallbacks;
 mod changes_keeping;
 mod changes_labels;
 mod changes_refusals;
+mod changes_safety;
 mod changes_stale;
 mod changes_support;
 mod changes_waiting;

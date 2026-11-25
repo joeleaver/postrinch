@@ -2,8 +2,9 @@
 //! deletes a message's other copies never moves or copies from one of
 //! those (the command would do nothing, and the deletes would take the
 //! last real copy), and deletes only once the server says the copy it
-//! counts on was made. A copy made from one that is gone leaves nothing
-//! waiting for sync for ever.
+//! counts on was made. A label added from one that is gone is copied from
+//! one that is there, and a copy not found is looked for again, never made
+//! twice.
 
 use chrono::DateTime;
 use postrinch_mailtest::{Extension, ImapFault};
@@ -117,33 +118,38 @@ async fn source_gone() -> Fixture {
 }
 
 #[tokio::test]
-async fn a_copy_of_a_copy_that_is_gone_holds_nothing_back() {
+async fn a_label_added_from_a_copy_that_is_gone_is_copied_from_one_there() {
     let f = source_gone().await;
     record(&f, &["a@x"], MessageChange::add_label(f.label_id("Home")));
     record(&f, &["a@x"], MessageChange::starred(true));
     let report = f.sync.send_outbox(&f.me).await.unwrap();
     assert_eq!((report.sent, report.refused.len()), (2, 0));
-    assert_eq!(count(&f, "Home"), 0, "nothing was there to copy");
+    assert_eq!(count(&f, "Home"), 1, "copied from the inbox's copy");
+    assert!(all_have(&f, "Home", "\\Flagged"));
     assert!(all_have(&f, "INBOX", "\\Flagged"));
+    let mut labels = vec!["INBOX".to_owned(), f.label_id("Home")];
+    labels.sort();
+    assert_eq!(f.labels("a@x"), labels, "the label stays");
+    sync_agrees(&f).await;
 }
 
 #[tokio::test]
-async fn a_copy_not_found_stops_waiting_once_sync_has_read_its_folder() {
+async fn a_copy_not_found_is_looked_for_again_on_the_next_send() {
     let f = source_gone().await;
     // The server would not list Home's new mail, so whether the copy was
-    // made is not known: it waits for sync.
+    // made is not known: the change is tried again.
     f.server
         .fail_next_matching("UID FETCH", ":*", 1, ImapFault::No("Not now".into()));
-    let added = change(&f, &["a@x"], MessageChange::add_label(f.label_id("Home"))).await;
-    assert_eq!(added.sent, 1);
+    record(&f, &["a@x"], MessageChange::add_label(f.label_id("Home")));
     record(&f, &["a@x"], MessageChange::starred(true));
-    let waits = f.sync.send_outbox(&f.me).await;
-    assert!(matches!(waits, Err(SyncError::Server { .. })), "{waits:?}");
-    // Sync reads Home whole and finds no copy there: none is coming.
-    f.sync().await;
+    let first = f.sync.send_outbox(&f.me).await;
+    assert!(matches!(first, Err(SyncError::Server { .. })), "{first:?}");
+    assert_eq!(count(&f, "Home"), 1);
+    // Sent again, the copy is found in Home, not made twice.
     let report = f.sync.send_outbox(&f.me).await.unwrap();
-    assert_eq!((report.sent, report.refused.len()), (1, 0));
-    assert_eq!(count(&f, "Home"), 0);
+    assert_eq!((report.sent, report.refused.len()), (2, 0));
+    assert_eq!(count(&f, "Home"), 1, "not copied twice");
+    assert!(all_have(&f, "Home", "\\Flagged"));
     assert!(all_have(&f, "INBOX", "\\Flagged"));
     sync_agrees(&f).await;
 }

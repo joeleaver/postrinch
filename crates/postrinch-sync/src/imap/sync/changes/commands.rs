@@ -162,7 +162,9 @@ impl Conn {
     }
 
     /// `STATUS <folder> (UIDVALIDITY UIDNEXT)`: where the next copy made
-    /// in a folder will be. `None` when the server will not say.
+    /// in a folder will be. `None` when the server answers without them; a
+    /// refusal is judged by its code, as for any command (a folder gone is
+    /// refused for good).
     pub(super) async fn uid_next(&mut self, name: &str) -> Outcome<Option<(u32, u32)>> {
         let Some(command) =
             Command::with_mailbox("STATUS", name).map(|c| c.then(" (UIDVALIDITY UIDNEXT)"))
@@ -170,8 +172,9 @@ impl Conn {
             return Ok(None);
         };
         let (mut validity, mut next) = (None, None);
+        let what = format!("asking where new mail goes in {}", shown(name));
         let done = self
-            .command("asking where new mail goes", &command, |response| {
+            .command(&what, &command, |response| {
                 if let Response::MailboxData(MailboxDatum::Status { status, .. }) = response {
                     for attribute in status {
                         match attribute {
@@ -184,10 +187,8 @@ impl Conn {
                 Ok(())
             })
             .await?;
-        Ok(match done {
-            Done::Ok(_) => validity.zip(next),
-            Done::No(_) | Done::FolderBusy(_) => None,
-        })
+        self.ended(&what, done)?;
+        Ok(validity.zip(next))
     }
 
     /// The flags, dates and headers of the selected folder's copies from

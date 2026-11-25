@@ -2,14 +2,17 @@
 //! [`super::change`]) folder by folder, many UIDs to a command, in phases:
 //! flags, then copies, then moves ([`super::transfer`]), then deletes, so
 //! a copy carries the flags just set and is made before its source moves.
-//! Deletes go only when nothing before them waited: a copy skipped because
-//! its folder changed on the server may be the one the delete counted on.
-//! And a message's deletes go only once each copy its change made or
-//! moved is known to have been made (`COPYUID`, or found by its
-//! `Message-ID`): a `UID MOVE` or `UID COPY` of a UID another client has
-//! just expunged answers `OK` and does nothing, and the deletes after it
-//! would take the last real copy. Otherwise they wait, and the change,
-//! sent again, is planned from what the server then has.
+//! A move without `MOVE` is a copy and a delete of its source.
+//!
+//! A message's copies are deleted only when it keeps a copy the server
+//! confirmed in this run (docs/imap.md, "Keeping every message safe"):
+//! one found by the search before the change ([`super::verify`]) that no
+//! op of it moves or deletes, or one a copy or move of it made and the
+//! server confirmed. Otherwise the deletes stay and the change waits, or
+//! is refused when nothing could ever confirm the copy (a message without
+//! a `Message-ID`, on a server without UIDPLUS). A copy the server made
+//! none of (its source went between the search and the command) leaves
+//! the change waiting too, to be planned again from a copy that is there.
 //!
 //! Removing copies is [`super::expunge`]'s: `\Deleted` and an expunge.
 
@@ -20,6 +23,8 @@ use postrinch_model::{EmailAddress, ImapPlace, ProviderMessageId};
 use super::super::ImapSync;
 use super::super::names::Command;
 use super::super::wire::Conn;
+use super::attempts::Made;
+use super::change::Verdict;
 use super::commands::{CHUNK, shown};
 use super::failure::{Failure, Outcome};
 use super::plan::{Folders, Op};
@@ -134,8 +139,10 @@ pub(super) fn uids(places: &[ImapPlace]) -> Vec<u32> {
 }
 
 /// One entry's ops, grouped by folder.
-#[derive(Default)]
 pub(super) struct Grouped {
+    /// Whether the server offers `MOVE`; without it a move is a copy and
+    /// a delete.
+    has_move: bool,
     flags: BTreeMap<(String, &'static str, bool), Vec<ImapPlace>>,
     copies: BTreeMap<(String, String), Vec<ImapPlace>>,
     moves: BTreeMap<(String, String), Vec<ImapPlace>>,
@@ -143,8 +150,25 @@ pub(super) struct Grouped {
 }
 
 impl Grouped {
+    pub(super) fn new(has_move: bool) -> Self {
+        Self {
+            has_move,
+            flags: BTreeMap::new(),
+            copies: BTreeMap::new(),
+            moves: BTreeMap::new(),
+            deletes: BTreeMap::new(),
+        }
+    }
+
     pub(super) fn add(&mut self, op: Op) {
         match op {
+            Op::Move { from, to } if !self.has_move => {
+                self.add(Op::Copy {
+                    from: from.clone(),
+                    to,
+                });
+                self.add(Op::Delete { place: from });
+            }
             Op::Flag { place, flag, add } => self
                 .flags
                 .entry((place.folder.clone(), flag, add))
@@ -170,39 +194,62 @@ impl Grouped {
 }
 
 impl ImapSync {
-    /// Carries out the ops, phase by phase.
+    /// Carries out the ops, phase by phase; `anchored`, the messages that
+    /// keep a copy the search found and no op moves or deletes.
     pub(super) async fn run(
         &self,
         exec: &mut Exec<'_>,
         account: &EmailAddress,
         folders: &Folders,
         grouped: Grouped,
+        (anchored, verdict): (&HashSet<ProviderMessageId>, &mut Verdict),
     ) -> Outcome<()> {
         for ((label, flag, add), places) in grouped.flags {
             self.flag(exec, account, folders, (&label, flag, add), places)
                 .await?;
         }
-        let mut unconfirmed: HashSet<ProviderMessageId> = HashSet::new();
+        if !exec.uidplus {
+            // Nothing is copied where the deletes after it could not go.
+            for (label, places) in &grouped.deletes {
+                let name = known(folders, label)?.name.clone();
+                let validity = exec.open(folders, label).await?;
+                let ours: Vec<u32> = places
+                    .iter()
+                    .filter(|p| p.uidvalidity == validity)
+                    .map(|p| p.uid)
+                    .collect();
+                self.plain_expunge(exec, account, &ours, &name).await?;
+            }
+        }
+        let mut made = Made::default();
         let transfers = (grouped.copies.into_iter().map(|t| (t, false)))
             .chain(grouped.moves.into_iter().map(|t| (t, true)));
         for (((from, to), places), moving) in transfers {
-            let messages: Vec<ProviderMessageId> =
-                places.iter().map(|p| p.message.clone()).collect();
-            let landed = self
+            let one = self
                 .transfer(exec, account, folders, (&from, &to), places, moving)
                 .await?;
-            unconfirmed.extend(messages.into_iter().filter(|m| !landed.contains(m)));
+            made.add(one);
         }
-        if exec.waits.is_some() {
-            return Ok(());
+        if !made.not_made.is_empty() {
+            verdict.waits.get_or_insert(
+                "the server made no copy of a message, as the copy it was made from had \
+                 just gone; the change is tried again from a copy that is there"
+                    .to_owned(),
+            );
         }
         for (label, places) in grouped.deletes {
             let (go, stay): (Vec<ImapPlace>, Vec<ImapPlace>) = places
                 .into_iter()
-                .partition(|p| !unconfirmed.contains(&p.message));
-            if !stay.is_empty() {
-                exec.wait_for(
-                    "the server did not say a copy of a message was made, so its other \
+                .partition(|p| anchored.contains(&p.message) || made.landed.contains(&p.message));
+            if stay.iter().any(|p| made.unknown.contains(&p.message)) {
+                verdict.refused.get_or_insert(
+                    "the server does not say where it puts a copy, and a message has no \
+                     Message-ID to find its copy by, so its other copies stay"
+                        .to_owned(),
+                );
+            } else if !stay.is_empty() {
+                verdict.waits.get_or_insert(
+                    "the server did not confirm a copy of a message was made, so its other \
                      copies stay; the change is tried again"
                         .to_owned(),
                 );
@@ -248,10 +295,6 @@ impl ImapSync {
         let places = exec.current(folders, validity, places);
         if places.is_empty() {
             return Ok(());
-        }
-        if !exec.uidplus {
-            self.plain_expunge(exec, account, &uids(&places), &name)
-                .await?;
         }
         if self.remove(exec, account, &name, &places).await? {
             self.forget_copies(account, &places).await?;

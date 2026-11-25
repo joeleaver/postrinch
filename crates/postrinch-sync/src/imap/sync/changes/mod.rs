@@ -19,6 +19,7 @@
 //! the outbox goes on.
 
 mod apply;
+mod attempts;
 mod change;
 mod commands;
 mod drop_label;

@@ -23,10 +23,9 @@
 //! copy to a real archive folder; and mail is never filed in one (a label
 //! kept from before the folder became a view): that change is refused.
 //!
-//! A message with a copy just made whose UID is not known yet
-//! ([`postrinch_model::ImapUnplacedCopy`]) takes only labels added until sync finds that
-//! copy: anything else waits, as the copy could be neither changed nor
-//! counted.
+//! A copy asked for and not yet confirmed or ruled out (an
+//! [`postrinch_model::ImapCopyAttempt`]) is not made again: its folder
+//! counts as having the message for labels added, and for nothing else.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -152,8 +151,6 @@ pub(super) enum Planned {
     /// Removing the message's last folder files it in the archive, and
     /// the account has no archive folder yet.
     NeedsArchive,
-    /// The change waits for sync, for this reason.
-    Waits(String),
 }
 
 fn inbox() -> &'static str {
@@ -185,23 +182,14 @@ fn each_once(labels: &[String]) -> Vec<&str> {
 }
 
 /// What to do to a message's copies (`places`, as kept) for `change`;
-/// `unplaced`, the label ids of the folders where a copy was made whose
-/// UID is not known yet.
+/// `attempted`, the label ids of the folders a copy of it was asked for in
+/// and not yet confirmed or ruled out.
 pub(super) fn plan(
     places: &[ImapPlace],
-    unplaced: &[String],
+    attempted: &[String],
     change: &MessageChange,
     folders: &Folders,
 ) -> Planned {
-    if let Some(label) = unplaced.first()
-        && !only_adds(change)
-    {
-        let name = folders.get(label).map_or("", |f| f.name.as_str());
-        return Planned::Waits(format!(
-            "a copy of a message was just made in {} and waits for sync to find it",
-            shown(name)
-        ));
-    }
     let live: Vec<&ImapPlace> = places.iter().filter(|p| counted(p, folders)).collect();
     if live.is_empty() {
         return Planned::Ops(Vec::new());
@@ -243,7 +231,7 @@ pub(super) fn plan(
         .find(|b| adds.contains(b));
     match bin {
         Some(bin) => into_bin(&live, bin, folders, &mut ops),
-        None => match relabel(&live, unplaced, &adds, &removes, folders, &mut ops) {
+        None => match relabel(&live, attempted, &adds, &removes, folders, &mut ops) {
             Ok(()) => {}
             Err(other) => return other,
         },
@@ -282,14 +270,14 @@ fn into_bin(live: &[&ImapPlace], bin: &str, folders: &Folders, ops: &mut Vec<Op>
 /// where the message is kept when it is in no folder.
 fn relabel(
     live: &[&ImapPlace],
-    unplaced: &[String],
+    attempted: &[String],
     adds: &[&str],
     removes: &[&str],
     folders: &Folders,
     ops: &mut Vec<Op>,
 ) -> Result<(), Planned> {
     let have: BTreeSet<&str> = live.iter().map(|p| p.folder.as_str()).collect();
-    let made = |a: &&str| have.contains(a) || unplaced.iter().any(|u| u == a);
+    let made = |a: &&str| have.contains(a) || attempted.iter().any(|u| u == a);
     let mut to_add: Vec<&str> = adds.iter().copied().filter(|a| !made(a)).collect();
     let to_remove: Vec<&str> = removes
         .iter()
@@ -363,14 +351,6 @@ fn relabel(
         );
     }
     Ok(())
-}
-
-/// Whether a change only adds labels (none of them Trash or Junk).
-fn only_adds(change: &MessageChange) -> bool {
-    change.unread.is_none()
-        && change.starred.is_none()
-        && change.remove_labels.is_empty()
-        && !change.add_labels.iter().any(|l| is_bin(l))
 }
 
 /// The copies `ops` leave where they are: counted ones neither moved nor

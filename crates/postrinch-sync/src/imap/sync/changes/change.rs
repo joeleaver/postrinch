@@ -1,17 +1,17 @@
-//! One outbox entry made on the server: each message's change planned
-//! from its copies as kept ([`super::plan`]), the copies a delete counts on
-//! checked on the server ([`super::verify`]), then the ops carried out
-//! ([`super::apply`]) and the messages brought in step with their copies,
-//! whatever happened.
+//! One outbox entry made on the server: the copies earlier sends asked for
+//! and did not see made settled ([`super::attempts`]), each message's
+//! change planned from its copies as kept ([`super::plan`]), the copies it
+//! copies, moves or deletes from looked for on the server
+//! ([`super::verify`]), then the ops carried out ([`super::apply`]) and the
+//! messages brought in step with their copies, whatever happened.
 
 use postrinch_model::{EmailAddress, ImapPlace, MessageChange, ProviderMessageId};
 use postrinch_store::{OutboxEntry, Store};
 
 use super::super::ImapSync;
-use super::super::cursor;
-use super::super::reads::STUCK_AFTER;
 use super::super::wire::Conn;
 use super::apply::{Exec, Grouped};
+use super::attempts::attempts;
 use super::failure::{Failure, Outcome};
 use super::plan::{Folders, Op, Planned, plan};
 use super::record;
@@ -20,9 +20,10 @@ use crate::SyncResult;
 /// One message's copies as kept.
 pub(super) struct Held {
     pub places: Vec<ImapPlace>,
-    /// The label ids of the folders where a copy of it was made whose UID
-    /// is not known yet, and that sync has not read past since.
-    pub unplaced: Vec<String>,
+    /// The label ids of the folders a copy of it was asked for in and not
+    /// yet seen made or known not to be ([`super::attempts`]): not made
+    /// again, and counted for nothing else.
+    pub attempted: Vec<String>,
 }
 
 /// Why part of a change is not made: refused for good, or waiting. The
@@ -33,38 +34,19 @@ pub(super) struct Verdict {
     pub waits: Option<String>,
 }
 
-/// A message's copies as kept, forgetting each copy whose UID was not
-/// known once sync is past it: a pass after it read its folder whole, or
-/// read the folder past its UIDNEXT, or the folder has gone unread
-/// [`STUCK_AFTER`] passes in a row (as removals stop waiting for such a
-/// folder), so none waits for ever.
+/// A message's copies as kept, with the folders a copy of it was asked for
+/// in.
 pub(super) fn held(
     store: &Store,
     account: &EmailAddress,
     message: &ProviderMessageId,
 ) -> SyncResult<Held> {
+    let attempted = attempts(store, account, message)?
+        .into_iter()
+        .map(|a| a.folder)
+        .collect();
     let places = store.imap_message_places(account, message)?;
-    let mut unplaced = Vec::new();
-    let copies = store.imap_unplaced_copies(account, message)?;
-    if copies.is_empty() {
-        return Ok(Held { places, unplaced });
-    }
-    let passes = cursor::read(store, account)?;
-    for copy in copies {
-        let read = passes
-            .folders
-            .get(&copy.folder)
-            .copied()
-            .unwrap_or_default();
-        let stuck = read.failing >= STUCK_AFTER;
-        match store.imap_folder(account, &copy.folder)? {
-            Some(folder) if !stuck && copy.waits(&folder, read.whole) => {
-                unplaced.push(copy.folder);
-            }
-            _ => store.remove_imap_unplaced_copy(account, &copy.folder, message)?,
-        }
-    }
-    Ok(Held { places, unplaced })
+    Ok(Held { places, attempted })
 }
 
 impl ImapSync {
@@ -79,6 +61,9 @@ impl ImapSync {
         folders: &mut Folders,
         entry: &OutboxEntry,
     ) -> Outcome<()> {
+        let mut exec = Exec::new(conn);
+        self.settle_attempts(&mut exec, account, folders, &entry.messages)
+            .await?;
         let (a, ids) = (account.clone(), entry.messages.clone());
         let held: Vec<Held> = self
             .blocking(move |s| ids.iter().map(|id| held(s, &a, id)).collect())
@@ -87,11 +72,17 @@ impl ImapSync {
         let mut verdict = Verdict::default();
         for copies in &held {
             let ops = self
-                .plan_one(conn, account, folders, copies, &entry.change, &mut verdict)
+                .plan_one(
+                    exec.conn,
+                    account,
+                    folders,
+                    copies,
+                    &entry.change,
+                    &mut verdict,
+                )
                 .await?;
             planned.push(ops);
         }
-        let mut exec = Exec::new(conn);
         let done = self
             .carry_out(
                 &mut exec,
@@ -130,10 +121,10 @@ impl ImapSync {
         change: &MessageChange,
         verdict: &mut Verdict,
     ) -> Outcome<Vec<Op>> {
-        let mut one = plan(&copies.places, &copies.unplaced, change, folders);
+        let mut one = plan(&copies.places, &copies.attempted, change, folders);
         if one == Planned::NeedsArchive {
             self.make_archive(conn, account, folders).await?;
-            one = plan(&copies.places, &copies.unplaced, change, folders);
+            one = plan(&copies.places, &copies.attempted, change, folders);
         }
         Ok(match one {
             Planned::Ops(ops) => ops,
@@ -147,15 +138,11 @@ impl ImapSync {
                     .get_or_insert("the account has no archive folder".to_owned());
                 Vec::new()
             }
-            Planned::Waits(reason) => {
-                verdict.waits.get_or_insert(reason);
-                Vec::new()
-            }
         })
     }
 
-    /// The planned ops, once each message's deletes are known to leave a
-    /// copy on the server.
+    /// The planned ops, from copies the server is seen to have, each
+    /// message's deletes going only where it keeps a confirmed copy.
     async fn carry_out(
         &self,
         exec: &mut Exec<'_>,
@@ -165,17 +152,19 @@ impl ImapSync {
         mut planned: Vec<Vec<Op>>,
         verdict: &mut Verdict,
     ) -> Outcome<()> {
-        self.keep_one_copy(
-            exec,
-            account,
-            folders,
-            (held, change),
-            &mut planned,
-            verdict,
-        )
-        .await?;
-        let mut grouped = Grouped::default();
+        let anchored = self
+            .keep_one_copy(
+                exec,
+                account,
+                folders,
+                (held, change),
+                &mut planned,
+                verdict,
+            )
+            .await?;
+        let mut grouped = Grouped::new(exec.has_move);
         planned.into_iter().flatten().for_each(|op| grouped.add(op));
-        self.run(exec, account, folders, grouped).await
+        self.run(exec, account, folders, grouped, (&anchored, verdict))
+            .await
     }
 }

@@ -1,8 +1,8 @@
 //! Changes that wait: for sync to read a folder, for other mail to go, or
 //! for the server. Waiting is never counted as a failed send, so a change
 //! that waits is never given up on; it holds back only the later changes
-//! to its messages; and a copy whose UID the server did not say is not
-//! made again while it waits for sync. Other mail another client leaves
+//! to its messages; and a copy whose UID the server did not say is looked
+//! for again, not made again. Other mail another client leaves
 //! marked deleted holds a change back only until sync has seen it.
 
 use postrinch_mailtest::{Extension, ImapFault};
@@ -69,7 +69,7 @@ async fn waiting_for_the_server_is_not_counted_against_a_change() {
 }
 
 #[tokio::test]
-async fn a_copy_not_found_is_not_made_again_before_sync_finds_it() {
+async fn a_copy_not_found_is_found_on_the_next_send_not_made_again() {
     let f = fixture_without(&[Extension::Uidplus]).await;
     f.user.create_standard_folders().unwrap();
     for folder in ["Work", "Home", "Other"] {
@@ -96,14 +96,8 @@ async fn a_copy_not_found_is_not_made_again_before_sync_finds_it() {
         (count(&f, "Home"), count(&f, "Work"), count(&f, "Other")),
         (0, 1, 1)
     );
-    // Sent again before sync has read Work, it waits rather than copying
-    // the message into Work again.
-    let again = f.sync.send_outbox(&f.me).await;
-    assert!(matches!(again, Err(SyncError::Server { .. })), "{again:?}");
-    assert_eq!(count(&f, "Work"), 1, "not copied twice");
-    assert_eq!(f.sync.waiting(&f.me).await.unwrap(), 1);
-    // Once sync has found it, the rest goes.
-    f.sync().await;
+    // Sent again, without waiting for sync, the copy is found in Work, not
+    // made again, and the rest goes.
     let report = f.sync.send_outbox(&f.me).await.unwrap();
     assert_eq!((report.sent, report.refused.len()), (1, 0));
     assert_eq!(

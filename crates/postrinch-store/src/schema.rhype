@@ -248,7 +248,7 @@ type ImapFolder {
     // RFC 8474 MAILBOXID, or null where the server has none.
     mailbox_id: String
     places: [ImapPlace] @inverse(ImapPlace.folder)
-    unplaced: [ImapUnplacedCopy] @inverse(ImapUnplacedCopy.folder)
+    attempts: [ImapCopyAttempt] @inverse(ImapCopyAttempt.folder)
 }
 
 // One copy of a message on an IMAP server: a UID in a folder
@@ -274,11 +274,11 @@ type ImapPlace {
     arrived: DateTime
 }
 
-// A copy a change made whose UID the server did not say (no UIDPLUS)
-// (imap_unplaced.rs): it stands for the copy until sync has read the folder
-// past it. Its one to-one relation is its folder, so removing the folder,
-// or the account, removes it.
-type ImapUnplacedCopy {
+// A COPY or MOVE of a message into a folder whose copy the server has not
+// been seen to make (imap_attempts.rs): it stops the copy being made twice,
+// and is never counted as a copy. Its one to-one relation is its folder, so
+// removing the folder, or the account, removes it.
+type ImapCopyAttempt {
     // "<folder key>\u001f<message provider id>".
     key: String @unique
     folder: ImapFolder @on_delete(cascade)
@@ -287,11 +287,7 @@ type ImapUnplacedCopy {
     // a message's.
     message: String @indexed
     // The folder's UIDVALIDITY and UIDNEXT on the server just before the
-    // copy was made.
+    // command.
     uidvalidity: u32
     uidnext: u32
-    // The folder's UIDVALIDITY as sync had read it then.
-    read_uidvalidity: u32
-    // The number of the last sync pass then.
-    pass: u64
 }

@@ -1,12 +1,13 @@
 //! The account's sync cursor: what IMAP sync keeps between passes beyond
 //! each folder's own state. It is small JSON in the account's record:
-//! what is pending ([`super::pending`]), and how each folder was read
-//! ([`super::reads`]). Each part stays bounded: pending messages are
-//! resolved as folders are read, folders that went are dropped, and a
-//! message the server will not answer for is given up on after a few
-//! passes.
+//! what is pending ([`super::pending`]), how each folder was read
+//! ([`super::reads`]), and the copies changes left marked `\Deleted`
+//! ([`super::changes`]). Each part stays bounded: pending messages are
+//! resolved as folders are read, folders that went are dropped, a message
+//! the server will not answer for is given up on after a few passes, and
+//! marked copies are dropped once they are no longer marked.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use postrinch_model::EmailAddress;
 use postrinch_store::Store;
@@ -34,6 +35,11 @@ pub(super) struct Cursor {
     /// no headers for.
     #[serde(default)]
     pub silent: BTreeMap<String, Silent>,
+    /// Per folder (by label id), the copies a change marked `\Deleted` and
+    /// left unexpunged, as another client's marked mail was there
+    /// (docs/imap.md, "Keeping every message safe").
+    #[serde(default)]
+    pub marked: BTreeMap<String, Marked>,
 }
 
 /// How a folder was read over the passes.
@@ -55,6 +61,14 @@ pub(super) struct Silent {
     pub uidvalidity: u32,
     /// Each UID, with how many passes it went unanswered in.
     pub tries: BTreeMap<u32, u32>,
+}
+
+/// The copies of one folder a change left marked `\Deleted`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct Marked {
+    /// The folder's UIDVALIDITY the UIDs belong to.
+    pub uidvalidity: u32,
+    pub uids: BTreeSet<u32>,
 }
 
 pub(super) fn read(store: &Store, account: &EmailAddress) -> SyncResult<Cursor> {

@@ -56,6 +56,13 @@ pub fn message_id(account: &EmailAddress, header_message_id: &str) -> ProviderMe
     ProviderMessageId(format!("m{hash}"))
 }
 
+/// Whether a message's id comes from its `Message-ID` header
+/// ([`message_id`]), so a copy of it can be found by that header; one
+/// named by its place ([`message_id_without_header`]) cannot.
+pub fn named_by_message_id(id: &ProviderMessageId) -> bool {
+    id.0.starts_with('m')
+}
+
 /// The provider id of a message without a `Message-ID` header (rare: some
 /// automated mail), from the one copy it was found as: `u` and a hash of
 /// the folder's label id, its UIDVALIDITY and the UID. Moving such a

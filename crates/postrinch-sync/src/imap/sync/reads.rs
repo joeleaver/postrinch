@@ -69,6 +69,7 @@ pub(super) fn settle(
     cursor::update(store, account, |c| {
         c.folders.retain(|id, _| known.contains(id));
         c.silent.retain(|id, _| known.contains(id));
+        c.marked.retain(|id, _| known.contains(id));
         for id in unread {
             note_in(c, id, pass, false);
         }

@@ -11,8 +11,8 @@
 //!   change the server will never take cannot hold every later one back
 //!   for ever.
 //! - **Waits**: the change waits for something that comes in time: sync
-//!   to read a folder that changed (its UIDVALIDITY, or a copy whose UID
-//!   is not known yet), a copy the server did not confirm, or other mail
+//!   to read a folder whose UIDVALIDITY changed, the next send to look
+//!   again for a copy the server did not confirm or make, or other mail
 //!   marked deleted to go before a plain `EXPUNGE` (until sync has seen
 //!   it). Tried again however long it takes, holding back only the later
 //!   changes to its messages.

@@ -29,7 +29,7 @@ pub use capabilities::Capabilities;
 pub use check::{AccountCheck, CheckFailure, check_account};
 pub use connect::Connector;
 pub use folders::{ListedFolder, SpecialUse};
-pub use ids::{message_id, message_id_without_header, mint_folder_label_id};
+pub use ids::{message_id, message_id_without_header, mint_folder_label_id, named_by_message_id};
 pub use oauth::{ImapOAuth, MicrosoftClient, OAuthClients, OAuthProvider, OAuthSignIn};
 pub use reply::ImapStream;
 pub use secret::{ImapSecret, ImapSecrets};
