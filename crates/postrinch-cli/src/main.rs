@@ -1,9 +1,12 @@
-//! `postrinch`: add Google accounts, sync them, and search the mail, from a
-//! terminal. The window will do all of this; until it exists this is how a
-//! person or a script drives Postrinch.
+//! `postrinch`: add Google and IMAP accounts, sync them, and search the
+//! mail, from a terminal. The window will do all of this; until it exists
+//! this is how a person or a script drives Postrinch.
 
+mod accounts;
+mod add_imap;
 mod agent;
 mod commands;
+mod context;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -33,6 +36,11 @@ struct Cli {
 enum Command {
     /// List the accounts and whether each is signed in.
     Accounts,
+    /// Add an IMAP account, or change one's servers or password: the
+    /// servers from the options or discovery, the password from standard
+    /// input or a prompt (never an argument), or --oauth to sign in in the
+    /// browser. Both servers are checked before anything is kept.
+    AddImap(add_imap::AddImapArgs),
     /// Add a Google account: sign in in the browser.
     AddGoogle,
     /// Sign an account in again.

@@ -6,11 +6,33 @@
 use jiff::civil::{Date, DateTime, Time};
 use jiff::tz::TimeZone;
 use postrinch_commands::{Commands, Happening, Hours};
-use postrinch_model::{Answer, EventWhen, Mailbox, Timestamp};
+use postrinch_model::{Answer, EmailAddress, EventWhen, Mailbox, Timestamp};
 use serde_json::{Value, json};
 
 use crate::views::say;
 use crate::wire::Call;
+
+/// Refuses a calendar call that names an account with no calendars (an
+/// IMAP account: calendars are Google accounts' only), in a sentence
+/// saying so. A call naming no account (every account's events) reads
+/// the calendars there are.
+pub(crate) fn check_accounts(commands: &Commands, call: &Call) -> Result<(), String> {
+    let named: Vec<&EmailAddress> = match call {
+        Call::Events { accounts, .. } | Call::FreeTime { accounts, .. } => {
+            accounts.iter().collect()
+        }
+        Call::AnswerInvitation { account, .. }
+        | Call::SaveEvent { account, .. }
+        | Call::DeleteEvent { account, .. }
+        | Call::AnswerEvent { account, .. }
+        | Call::CalendarShares { account, .. }
+        | Call::AddCalendar { account, .. } => vec![account],
+        _ => Vec::new(),
+    };
+    named
+        .into_iter()
+        .try_for_each(|a| commands.check_calendars(a).map_err(say))
+}
 
 pub(crate) fn run(commands: &Commands, call: Call, agent: &str) -> Result<Value, String> {
     match call {

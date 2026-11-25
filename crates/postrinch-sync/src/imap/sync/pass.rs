@@ -36,7 +36,7 @@ use super::names::sendable;
 use super::wire::Conn;
 use super::{changes, pending, reads};
 use crate::SyncResult;
-use crate::google::{Phase, Progress, ProgressFn, SyncReport};
+use crate::{Phase, Progress, ProgressFn, SyncReport};
 
 impl ImapSync {
     pub(super) async fn pass(

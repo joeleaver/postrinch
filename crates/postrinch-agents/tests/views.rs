@@ -98,7 +98,7 @@ fn an_agent_sees_and_changes_views_of_its_own_accounts() {
         agents_path,
         postrinch_agents::serve::Hooks {
             on_change: Arc::new(move |c: &Changed| seen.lock().unwrap().push(c.clone())),
-            gmail: None,
+            remote: None,
         },
     )
     .unwrap();
@@ -194,7 +194,7 @@ fn an_agent_changes_one_message_of_a_conversation() {
         agents_path,
         postrinch_agents::serve::Hooks {
             on_change: Arc::new(|_: &Changed| {}),
-            gmail: None,
+            remote: None,
         },
     )
     .unwrap();

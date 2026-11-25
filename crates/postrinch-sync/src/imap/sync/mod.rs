@@ -15,6 +15,7 @@
 //! each reused while the server keeps it open (Gmail allows about 15 at
 //! once per account).
 
+mod accounts;
 mod answers;
 mod bodies;
 mod changes;
@@ -43,10 +44,11 @@ use postrinch_model::{AccountState, EmailAddress, ImapSettings};
 use postrinch_store::{Store, StoreResult};
 use tokio::sync::Mutex as AsyncMutex;
 
+pub use self::accounts::{Added, NewImapAccount, NewSignIn, OpenBrowser};
 pub use self::send::SentLookup;
 use self::wire::Conn;
 use super::{AccessTokens, Connector, ImapSecrets, ImapSession};
-use crate::google::{ProgressFn, SyncReport};
+use crate::{ProgressFn, SyncReport};
 use crate::{SyncError, SyncResult};
 
 /// A connection slot, kept between calls.

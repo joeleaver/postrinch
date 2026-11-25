@@ -277,16 +277,10 @@ impl State {
         let (editing, revision) = (self.calendar.editing, self.revision);
         let here = crate::actions::commands().map(|c| (*c).clone());
         std::thread::spawn(move || {
-            let sync = handle.sync_engine();
-            let done = match &form.event {
-                Some(id) => handle
-                    .runtime
-                    .block_on(sync.change_event(&form.account, id, &draft)),
-                None => handle
-                    .runtime
-                    .block_on(sync.create_event(&form.account, &draft))
-                    .map(drop),
-            };
+            let done = handle.on_calendar(&form.account, async |sync| match &form.event {
+                Some(id) => sync.change_event(&form.account, id, &draft).await,
+                None => sync.create_event(&form.account, &draft).await.map(drop),
+            });
             match done {
                 Ok(()) => {
                     if let (Some(p), Some(here)) = (&form.proposal, &here)
@@ -328,13 +322,10 @@ impl State {
         });
         let tell = organizes && !open.event.attendees.is_empty();
         std::thread::spawn(move || {
-            let sync = handle.sync_engine();
-            let done = handle.runtime.block_on(sync.delete_event(
-                &open.account,
-                &open.event.calendar,
-                &open.event.id,
-                tell,
-            ));
+            let done = handle.on_calendar(&open.account, async |sync| {
+                sync.delete_event(&open.account, &open.event.calendar, &open.event.id, tell)
+                    .await
+            });
             match done {
                 Ok(()) => {
                     if let Some(here) = &here {

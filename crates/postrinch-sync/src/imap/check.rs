@@ -51,6 +51,33 @@ pub enum CheckFailure {
     Server(String),
 }
 
+impl std::fmt::Display for CheckFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unreachable(detail) => write!(f, "could not be reached: {detail}"),
+            Self::Tls(detail) => write!(f, "the secure connection failed: {detail}"),
+            Self::Insecure => f.write_str("it offers no encryption, so no password was sent"),
+            Self::SignIn(reason) => write!(f, "it refused the sign-in: {reason}"),
+            Self::Busy(message) => write!(f, "it is busy; try again later: {message}"),
+            Self::Server(message) => write!(f, "it answered: {message}"),
+        }
+    }
+}
+
+impl std::fmt::Display for AccountCheck {
+    /// Each server's outcome on a line of its own.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.imap {
+            Ok(folders) => writeln!(f, "IMAP: signed in, {} folders", folders.len())?,
+            Err(failure) => writeln!(f, "IMAP: {failure}")?,
+        }
+        match &self.smtp {
+            Ok(()) => write!(f, "SMTP: signed in"),
+            Err(failure) => write!(f, "SMTP: {failure}"),
+        }
+    }
+}
+
 impl From<SyncError> for CheckFailure {
     fn from(error: SyncError) -> Self {
         match error {

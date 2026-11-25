@@ -99,6 +99,20 @@ impl Built {
 }
 
 impl ImapSync {
+    /// How much of the account's mail waits to be delivered: what
+    /// [`Self::send_outgoing`] would try now (not what waits for the
+    /// person, nor an agent's proposal).
+    pub async fn outgoing_waiting(&self, account: &EmailAddress) -> SyncResult<usize> {
+        let owner = account.clone();
+        self.with_store(move |s| {
+            Ok(s.outgoing_for(&owner)?
+                .iter()
+                .filter(|o| !o.refused && o.kind != OutgoingKind::Proposed)
+                .count())
+        })
+        .await
+    }
+
     /// Delivers the account's waiting mail, oldest first: messages are
     /// sent, drafts kept. Mail refused for good, or that may have gone,
     /// is marked so and waits for the person; any other failure stops

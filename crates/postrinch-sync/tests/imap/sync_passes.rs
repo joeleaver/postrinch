@@ -87,7 +87,7 @@ async fn an_interrupted_pass_keeps_pending_messages() {
     let (f, work) = moved_from_the_inbox_to_work().await;
     f.server
         .fail_next_matching("SELECT", "\"Work\"", 1, ImapFault::DisconnectBefore);
-    let quiet: postrinch_sync::google::ProgressFn = std::sync::Arc::new(|_| {});
+    let quiet: postrinch_sync::ProgressFn = std::sync::Arc::new(|_| {});
     let cut = f.sync.sync(&f.me, quiet).await;
     assert!(cut.is_err(), "the pass was cut short: {cut:?}");
     let moved = f.message("mv@x").expect("kept after a pass cut short");

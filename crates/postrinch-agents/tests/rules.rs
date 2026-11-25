@@ -37,10 +37,10 @@ fn add_account(store: &Store, account: &EmailAddress) {
         .unwrap();
 }
 
-/// Gmail's label calls, answered by putting the label in the store.
-struct FakeGmail(Store);
+/// The provider's label calls, answered by putting the label in the store.
+struct FakeRemote(Store);
 
-impl postrinch_agents::Gmail for FakeGmail {
+impl postrinch_agents::Remote for FakeRemote {
     fn create_label(&self, account: &EmailAddress, name: &str) -> Result<String, String> {
         let id = format!("Label_{}", name.len());
         self.0
@@ -120,7 +120,7 @@ fn an_agent_makes_rules_and_proposes_the_ones_that_send() {
         agents_path,
         postrinch_agents::serve::Hooks {
             on_change: Arc::new(move |c: &Changed| seen.lock().unwrap().push(c.clone())),
-            gmail: Some(Arc::new(FakeGmail(store.clone()))),
+            remote: Some(Arc::new(FakeRemote(store.clone()))),
         },
     )
     .unwrap();
@@ -292,7 +292,7 @@ fn an_agent_makes_labels_and_runs_rules_over_old_mail() {
         agents_path,
         postrinch_agents::serve::Hooks {
             on_change: Arc::new(|_: &Changed| {}),
-            gmail: Some(Arc::new(FakeGmail(store.clone()))),
+            remote: Some(Arc::new(FakeRemote(store.clone()))),
         },
     )
     .unwrap();

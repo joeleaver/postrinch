@@ -105,8 +105,9 @@ impl State {
         run(
             handle,
             move |h| {
-                h.runtime
-                    .block_on(h.sync_engine().calendar_shares(&account, &calendar))
+                h.on_calendar(&account, async |sync| {
+                    sync.calendar_shares(&account, &calendar).await
+                })
             },
             move |got| {
                 let got = match got {
@@ -140,12 +141,10 @@ impl State {
         let role = panel.role.get();
         self.change_sharing(
             move |h, account, calendar| {
-                h.runtime
-                    .block_on(
-                        h.sync_engine()
-                            .share_calendar(account, calendar, &who, role),
-                    )
-                    .map(|_| ())
+                h.on_calendar(account, async |sync| {
+                    sync.share_calendar(account, calendar, &who, role).await
+                })
+                .map(|_| ())
             },
             true,
         );
@@ -158,12 +157,11 @@ impl State {
         }
         self.change_sharing(
             move |h, account, calendar| {
-                h.runtime
-                    .block_on(
-                        h.sync_engine()
-                            .share_calendar(account, calendar, &share.who, role),
-                    )
-                    .map(|_| ())
+                h.on_calendar(account, async |sync| {
+                    sync.share_calendar(account, calendar, &share.who, role)
+                        .await
+                })
+                .map(|_| ())
             },
             false,
         );
@@ -173,10 +171,9 @@ impl State {
     pub fn stop_share(self, share: CalendarShare) {
         self.change_sharing(
             move |h, account, calendar| {
-                h.runtime.block_on(
-                    h.sync_engine()
-                        .unshare_calendar(account, calendar, &share.rule),
-                )
+                h.on_calendar(account, async |sync| {
+                    sync.unshare_calendar(account, calendar, &share.rule).await
+                })
             },
             false,
         );
@@ -233,8 +230,9 @@ impl State {
         run(
             handle,
             move |h| {
-                h.runtime
-                    .block_on(h.sync_engine().remove_shared_calendar(&account, &calendar))
+                h.on_calendar(&account, async |sync| {
+                    sync.remove_shared_calendar(&account, &calendar).await
+                })
             },
             move |done| {
                 panel.busy.send(false);

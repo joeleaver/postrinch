@@ -72,10 +72,10 @@ impl State {
         set(id.to_owned(), ShareState::Adding);
         let (account, id, revision) = (account.clone(), id.to_owned(), self.revision);
         std::thread::spawn(move || {
-            let sync = handle.sync_engine();
-            let done = handle
-                .runtime
-                .block_on(sync.add_shared_calendar(&account, &shared.calendar.id));
+            let done = handle.on_calendar(&account, async |sync| {
+                sync.add_shared_calendar(&account, &shared.calendar.id)
+                    .await
+            });
             match done {
                 Ok(info) => {
                     set(id, ShareState::Added(info.name));

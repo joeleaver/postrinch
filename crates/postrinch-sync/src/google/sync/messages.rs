@@ -9,10 +9,11 @@ use postrinch_store::{Store, StoreError};
 use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 
-use super::{CONCURRENT_FETCHES, GmailSync, Phase, Progress, ProgressFn, SyncReport};
+use super::{CONCURRENT_FETCHES, GmailSync};
 use crate::google::api::{MetadataMessage, MinimalMessage, Priority, RawMessage};
 use crate::google::labels::split_label_ids;
 use crate::{Envelope, SyncError, SyncResult, parse_headers, parse_message};
+use crate::{Phase, Progress, ProgressFn, SyncReport};
 
 /// What became of one message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

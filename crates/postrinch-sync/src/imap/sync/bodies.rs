@@ -11,8 +11,8 @@ use super::folder_error::{FolderError, FolderResult};
 use super::places::first_copy;
 use super::wire::{Conn, Fetched, uid_set};
 use super::{ImapSync, Lane};
-use crate::google::{Phase, Progress, ProgressFn, SyncReport};
 use crate::{Envelope, SyncResult, parse_message};
+use crate::{Phase, Progress, ProgressFn, SyncReport};
 
 /// How many messages are downloaded per command, and per hold of the
 /// account's sync connection, so a pass waits for at most one batch.

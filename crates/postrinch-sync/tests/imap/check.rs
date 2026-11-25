@@ -15,9 +15,9 @@ use crate::support::{
 };
 
 /// Both fakes, sharing one certificate so one connector trusts both.
-struct Fakes {
-    imap: ImapServer,
-    smtp: SmtpServer,
+pub struct Fakes {
+    pub imap: ImapServer,
+    pub smtp: SmtpServer,
 }
 
 impl Fakes {
@@ -30,7 +30,7 @@ impl Fakes {
         Self { imap, smtp }
     }
 
-    async fn with_passwords() -> Self {
+    pub async fn with_passwords() -> Self {
         Self::start(
             ImapConfig::new().user(USER, PASSWORD),
             SmtpConfig::new().user(USER, PASSWORD),
@@ -38,11 +38,11 @@ impl Fakes {
         .await
     }
 
-    fn imap_server(&self) -> Server {
+    pub fn imap_server(&self) -> Server {
         server(self.imap.tls_addr().unwrap(), Security::Tls)
     }
 
-    fn smtp_server(&self, security: Security) -> Server {
+    pub fn smtp_server(&self, security: Security) -> Server {
         let addr = match security {
             Security::Tls => self.smtp.tls_addr(),
             Security::StartTls => self.smtp.starttls_addr(),
@@ -51,7 +51,7 @@ impl Fakes {
     }
 
     /// Trusts both fakes' certificates.
-    fn connector(&self) -> Connector {
+    pub fn connector(&self) -> Connector {
         let roots = vec![
             self.imap.certificate().der().clone(),
             self.smtp.certificate().der().clone(),

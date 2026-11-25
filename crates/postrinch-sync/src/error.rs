@@ -40,6 +40,10 @@ pub enum SyncError {
         address: EmailAddress,
         existing: Provider,
     },
+    /// A calendar call for an IMAP account: calendars are Google
+    /// accounts' only (docs/imap.md, "The goal").
+    #[error("{address} is an IMAP account, and calendars are Google accounts' only")]
+    NoCalendars { address: EmailAddress },
     #[error("the keychain: {0}")]
     Keychain(String),
     #[error("network: {}", crate::google::error_chain(.0))]
@@ -78,9 +82,10 @@ pub enum SyncError {
     /// is down. Nothing is wrong with the credential, so the account is
     /// not asked to sign in and no fresh token is fetched; it is to be
     /// tried again later, as [`Backoff`](crate::Backoff) says (the IMAP
-    /// keep-in-sync loop, a later unit, must do so; today the account
-    /// check reports it as `CheckFailure::Busy`). The message is the
-    /// server's own sentence.
+    /// keep-in-sync and sending loops do, and send
+    /// [`SyncEvent::Busy`](crate::SyncEvent::Busy); the account check
+    /// reports it as `CheckFailure::Busy`). The message is the server's
+    /// own sentence.
     #[error("{service} server {server} is busy: {message}")]
     Busy {
         service: &'static str,

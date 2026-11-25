@@ -1,0 +1,211 @@
+//! Keeping IMAP accounts in sync through [`MailSync`]: a server that is
+//! busy is waited out with a growing wait, said with
+//! [`SyncEvent::Busy`], and never taken for a refused sign-in; a pass
+//! that signs in ends the wait; changes made here are sent when the loop
+//! is woken.
+
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use postrinch_mailtest::ImapFault;
+use postrinch_model::MessageChange;
+use postrinch_sync::{KeepOptions, MailSync, SyncEvent};
+use tokio::sync::Notify;
+
+use super::changes_support::record;
+use super::sync_support::{Fixture, fixture, mail};
+
+/// Gmail's answer to any command once the account's daily limit is hit.
+const BANDWIDTH: &str = "[ALERT] Account exceeded command or bandwidth limits. (Failure)";
+
+const FAST: KeepOptions = KeepOptions {
+    interval: Duration::from_secs(3600),
+    retry: Duration::from_millis(50),
+};
+
+const FIRST: Duration = Duration::from_millis(100);
+
+/// Whether a wait is one of the first step's: between half of [`FIRST`]
+/// and the whole of it.
+fn first_step(wait: Duration) -> bool {
+    wait >= FIRST / 2 && wait < FIRST
+}
+
+/// The façade over the fixture's IMAP account alone (no Google sign-in
+/// in this copy), waiting out a busy server from [`FIRST`].
+fn mail_sync(f: &Fixture) -> MailSync {
+    MailSync::new(f.store.clone(), None, f.sync.clone()).with_busy_backoff(FIRST, FIRST * 8)
+}
+
+type Events = Arc<Mutex<Vec<SyncEvent>>>;
+
+fn recorder() -> (Events, postrinch_sync::SyncEventFn) {
+    let events: Events = Arc::default();
+    let log = events.clone();
+    (events, Arc::new(move |e| log.lock().unwrap().push(e)))
+}
+
+/// What happened, by kind, progress left out.
+fn kinds(events: &Events) -> Vec<&'static str> {
+    events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            SyncEvent::Started { .. } => Some("started"),
+            SyncEvent::Progress { .. } => None,
+            SyncEvent::Synced { .. } => Some("synced"),
+            SyncEvent::Done { .. } => Some("done"),
+            SyncEvent::Failed { .. } => Some("failed"),
+            SyncEvent::NeedsSignIn { .. } => Some("needs sign-in"),
+            SyncEvent::Busy { .. } => Some("busy"),
+            SyncEvent::Sent { .. } => Some("sent"),
+            SyncEvent::SendFailed { .. } => Some("send failed"),
+        })
+        .collect()
+}
+
+fn busy_waits(events: &Events) -> Vec<(Duration, String)> {
+    events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            SyncEvent::Busy {
+                retry_in, message, ..
+            } => Some((*retry_in, message.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Waits (up to 10 s) until `done` says the events are as wanted.
+async fn until(events: &Events, done: impl Fn(&[&'static str]) -> bool) {
+    let waited = tokio::time::timeout(Duration::from_secs(10), async {
+        while !done(&kinds(events)) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(waited.is_ok(), "gave up waiting: {:?}", kinds(events));
+}
+
+#[tokio::test]
+async fn a_busy_server_is_waited_out_longer_each_time_and_never_needs_sign_in() {
+    let f = fixture().await;
+    f.user.append("INBOX", mail(Some("a@x"), "A", "")).unwrap();
+    f.server
+        .fail_next("UID FETCH", 2, ImapFault::No(BANDWIDTH.into()));
+    let sync = mail_sync(&f);
+    let (events, log) = recorder();
+    let wake = Arc::new(Notify::new());
+    let keeping = sync.keep_in_sync(FAST, log, wake.clone());
+    let watched = async {
+        until(&events, |k| k.contains(&"done")).await;
+        assert_eq!(
+            kinds(&events),
+            [
+                "started", "busy", "started", "busy", "started", "synced", "done"
+            ]
+        );
+        let waits = busy_waits(&events);
+        // Each wait is between half and the whole of its step (jitter):
+        // the first step is FIRST, the next twice that.
+        assert!(first_step(waits[0].0), "the backoff's first: {waits:?}");
+        assert!(
+            waits[1].0 >= FIRST && waits[1].0 < FIRST * 2,
+            "it grows: {waits:?}"
+        );
+        assert!(waits[0].1.contains("bandwidth"), "in the server's words");
+        // A pass that signed in ended the wait: the next busy answer
+        // waits the first wait again.
+        f.server
+            .fail_next("UID FETCH", 1, ImapFault::No(BANDWIDTH.into()));
+        f.user.append("INBOX", mail(Some("b@x"), "B", "")).unwrap();
+        wake.notify_one();
+        until(&events, |k| k.iter().filter(|e| **e == "done").count() == 2).await;
+        let again = busy_waits(&events)[2].0;
+        assert!(first_step(again), "the wait starts again: {again:?}");
+    };
+    tokio::select! {
+        () = keeping => panic!("the loop ended"),
+        () = watched => {}
+    }
+    assert!(!kinds(&events).contains(&"needs sign-in"));
+    let account = f.store.account(&f.me).unwrap().unwrap();
+    assert!(account.is_active(), "still signed in: {:?}", account.state);
+    assert!(f.message("b@x").is_some());
+}
+
+#[tokio::test]
+async fn a_wake_does_not_cut_a_busy_wait_short() {
+    let f = fixture().await;
+    f.user.append("INBOX", mail(Some("a@x"), "A", "")).unwrap();
+    f.server
+        .fail_next("UID FETCH", 1, ImapFault::No(BANDWIDTH.into()));
+    let sync = MailSync::new(f.store.clone(), None, f.sync.clone())
+        .with_busy_backoff(Duration::from_secs(3600), Duration::from_secs(3600));
+    let (events, log) = recorder();
+    let wake = Arc::new(Notify::new());
+    let keeping = sync.keep_in_sync(FAST, log, wake.clone());
+    let watched = async {
+        until(&events, |k| k.contains(&"busy")).await;
+        let logins = f.server.command_count("LOGIN");
+        for _ in 0..3 {
+            wake.notify_one();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert_eq!(kinds(&events), ["started", "busy"]);
+        assert_eq!(f.server.command_count("LOGIN"), logins, "nothing asked");
+    };
+    tokio::select! {
+        () = keeping => panic!("the loop ended"),
+        () = watched => {}
+    }
+}
+
+#[tokio::test]
+async fn a_change_made_here_is_sent_when_woken() {
+    let f = fixture().await;
+    f.user.append("INBOX", mail(Some("a@x"), "A", "")).unwrap();
+    f.sync().await;
+    let sync = mail_sync(&f);
+    let (events, log) = recorder();
+    let wake = Arc::new(Notify::new());
+    let sending = sync.keep_sending(FAST, log, wake.clone());
+    let watched = async {
+        // Nothing waits: the loop waits to be woken.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(kinds(&events).is_empty(), "{:?}", kinds(&events));
+        record(&f, &["a@x"], MessageChange::starred(true));
+        wake.notify_one();
+        until(&events, |k| k.contains(&"sent")).await;
+    };
+    tokio::select! {
+        () = sending => panic!("the loop ended"),
+        () = watched => {}
+    }
+    assert!(f.user.messages("INBOX").unwrap()[0].has_flag("\\Flagged"));
+    assert_eq!(sync.waiting(&f.me).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn a_busy_server_holds_changes_back_without_losing_them() {
+    let f = fixture().await;
+    f.user.append("INBOX", mail(Some("a@x"), "A", "")).unwrap();
+    f.sync().await;
+    record(&f, &["a@x"], MessageChange::starred(true));
+    f.server
+        .fail_next("UID STORE", 1, ImapFault::No(BANDWIDTH.into()));
+    let sync = mail_sync(&f);
+    let (events, log) = recorder();
+    let sending = sync.keep_sending(FAST, log, Arc::new(Notify::new()));
+    let watched = until(&events, |k| k.contains(&"sent"));
+    tokio::select! {
+        () = sending => panic!("the loop ended"),
+        () = watched => {}
+    }
+    let kinds = kinds(&events);
+    assert_eq!(kinds, ["busy", "sent"], "waited out, then sent");
+    assert!(f.user.messages("INBOX").unwrap()[0].has_flag("\\Flagged"));
+}

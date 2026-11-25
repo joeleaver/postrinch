@@ -157,11 +157,9 @@ impl State {
         let here = commands().map(|c| (*c).clone());
         let (account, id) = (account.clone(), id.to_owned());
         std::thread::spawn(move || {
-            let sync = handle.sync_engine();
-            let done =
-                handle
-                    .runtime
-                    .block_on(sync.answer_invitation(&account, &invitation, answer));
+            let done = handle.on_calendar(&account, async |sync| {
+                sync.answer_invitation(&account, &invitation, answer).await
+            });
             let (lookup, trouble) = match done {
                 Ok(Answered::Done(event)) => {
                     // Given: an agent's answer waiting for it is settled.
@@ -243,11 +241,9 @@ impl State {
 }
 
 fn look_up(handle: &SyncHandle, account: &EmailAddress, invitation: &Invitation) -> Lookup {
-    let sync = handle.sync_engine();
-    match handle
-        .runtime
-        .block_on(sync.invitation_event(account, invitation))
-    {
+    match handle.on_calendar(account, async |sync| {
+        sync.invitation_event(account, invitation).await
+    }) {
         Ok(Some(event)) => Lookup::Found(event),
         Ok(None) => Lookup::NotInCalendar,
         Err(e) => {

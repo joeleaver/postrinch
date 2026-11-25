@@ -16,7 +16,7 @@ use postrinch_model::{
 };
 use postrinch_store::{Outgoing, OutgoingKind, SentBackOff, Store};
 use postrinch_sync::MemorySecrets;
-use postrinch_sync::google::ProgressFn;
+use postrinch_sync::ProgressFn;
 use postrinch_sync::imap::{
     Connector, ImapSecret, ImapSecrets, ImapSync, SentLookup, Timeouts, TlsConfig, message_id,
 };

@@ -48,15 +48,15 @@ Planned crates (a Cargo workspace, names provisional):
 |---|---|
 | `postrinch-model` | Accounts, messages, threads, labels/folders, views; no I/O. |
 | `postrinch-store` | The rhypedb schema and every read and write of it; full-text and vector indexing; embeddings in the background. |
-| `postrinch-sync` | Google sign-in and Gmail sync (built); IMAP/SMTP and the outbox to come. A provider trait arrives with the second provider, shaped by both. |
-| `postrinch-cli` | `postrinch-cli`: add accounts, sync, search, show a message. For development and scripts. |
+| `postrinch-sync` | Sync for every account through the `MailSync` façade, which sends each call to the account's provider: Google sign-in and Gmail sync, and IMAP/SMTP (docs/imap.md). |
+| `postrinch-cli` | `postrinch-cli`: add accounts (`add-google`, `add-imap`), sync, search, show a message. For development and scripts. |
 | `postrinch-render` | MIME to displayable parts; HTML parse and sanitize; remote content policy; handing a document to rinch. |
 | `postrinch-commands` | The command layer: every action, its arguments, its result, and whether it needs the person's confirmation. |
 | `postrinch-agents` | Agents: the agents file (keys and reach), the wire format between the bridge and the app, the app's listener, the bridge's client, and what each call answers. |
 | `postrinch-mcp` | The MCP server agents launch over stdio (rmcp); each tool is one call to the running app. |
 | `postrinch-update` | The home-folder install (`postrinch --install`) and keeping it current: the release check, signature, staging, and the swap on restart. No UI. |
 | `postrinch-log` | How the three programs filter their logs: `RUST_LOG` or each one's default, with the mail protocol libraries (which log passwords, tokens and mail) capped at info whatever `RUST_LOG` says. |
-| `postrinch` | The rinch app: the window over the command layer, with sync running in the background (`GmailSync::keep_in_sync`). Its `debug` feature turns on rinch's debug server for tools; it is never on in a build for use, because it shows the window, mail included, to any local process. |
+| `postrinch` | The rinch app: the window over the command layer, with sync running in the background (`MailSync::keep_in_sync` and `keep_sending`). Its `debug` feature turns on rinch's debug server for tools; it is never on in a build for use, because it shows the window, mail included, to any local process. |
 
 ## Decisions so far
 

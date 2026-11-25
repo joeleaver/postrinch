@@ -74,7 +74,14 @@ pub fn account_color(index: usize) -> &'static str {
 pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle {
     let commands = Rc::new(Commands::new(store.clone()));
     let sync = match sync::start(store, state.sync, state.revision) {
-        Ok(handle) => Some(handle),
+        Ok((handle, google_off)) => {
+            // IMAP accounts sync all the same.
+            if let Some(off) = google_off {
+                tracing::warn!("{} ({})", off.said, off.detail);
+                state.sync_off.set(Some(off.said.to_owned()));
+            }
+            Some(handle)
+        }
         Err(off) => {
             tracing::error!("{} ({})", off.said, off.detail);
             state.sync_off.set(Some(off.said.to_owned()));

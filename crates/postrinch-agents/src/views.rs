@@ -16,8 +16,8 @@ use postrinch_model::{
 use serde_json::{Value, json};
 
 use crate::change;
-use crate::gmail::{self, Gmail};
 use crate::registry::Agents;
+use crate::remote::{self, Remote};
 use crate::serve::OnChange;
 use crate::wire::{Call, ProposedFile};
 use crate::{views_rules, views_saved};
@@ -29,7 +29,7 @@ const BODY_CHARS: usize = 100_000;
 pub(crate) struct Asker<'a> {
     pub agent: &'a str,
     pub agents: &'a Agents,
-    pub gmail: Option<&'a dyn Gmail>,
+    pub remote: Option<&'a dyn Remote>,
     /// To tell the window about changes that finish after the answer.
     pub on_change: &'a OnChange,
 }
@@ -51,15 +51,20 @@ pub(crate) fn run(commands: &Commands, call: Call, asker: &Asker) -> Result<Valu
         Call::Calendars
         | Call::Events { .. }
         | Call::FreeTime { .. }
-        | Call::AnswerInvitation { .. } => crate::calendar::run(commands, call, agent),
+        | Call::AnswerInvitation { .. } => {
+            crate::calendar::check_accounts(commands, &call)?;
+            crate::calendar::run(commands, call, agent)
+        }
         Call::SaveEvent { .. } | Call::DeleteEvent { .. } | Call::AnswerEvent { .. } => {
-            crate::calendar_write::run(commands, call, agent, asker.gmail)
+            crate::calendar::check_accounts(commands, &call)?;
+            crate::calendar_write::run(commands, call, agent, asker.remote)
         }
         Call::CalendarShares { .. } | Call::AddCalendar { .. } => {
-            crate::calendar_share::run(commands, call, asker.gmail)
+            crate::calendar::check_accounts(commands, &call)?;
+            crate::calendar_share::run(commands, call, asker.remote)
         }
         Call::CreateLabel { .. } | Call::RenameLabel { .. } | Call::DeleteLabel { .. } => {
-            gmail::run(commands, call, asker.gmail)
+            remote::run(commands, call, asker.remote)
         }
         Call::Accounts => {
             let accounts = commands.accounts().map_err(say)?;

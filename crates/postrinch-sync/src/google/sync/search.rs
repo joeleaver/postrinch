@@ -6,8 +6,9 @@ use std::sync::Arc;
 use postrinch_model::{EmailAddress, ProviderMessageId};
 use tokio::sync::RwLock;
 
-use super::{GmailSync, Phase, ProgressFn, SyncReport};
+use super::GmailSync;
 use crate::SyncResult;
+use crate::{Phase, ProgressFn, SyncReport};
 
 impl GmailSync {
     /// The ids of up to `max` messages Gmail finds for `query` (Gmail's

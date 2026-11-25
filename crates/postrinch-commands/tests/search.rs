@@ -222,3 +222,35 @@ fn gmail_is_asked_only_for_words_in_mail_not_downloaded() {
     assert_eq!(rows[0].summary.id.0, "t2");
     assert!(rows[0].remote);
 }
+
+#[test]
+fn an_imap_accounts_server_is_not_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let ada = address("ada@example.org");
+    store
+        .put_account(&Account::new(ada.clone(), Provider::Imap))
+        .unwrap();
+    store
+        .put_label(
+            &ada,
+            &Label::new("INBOX", "Inbox", LabelKind::System(SystemLabel::Inbox)),
+        )
+        .unwrap();
+    let headers_only = Mail {
+        id: "i1",
+        thread: "t1",
+        at: 100,
+        from: "mary@rota.org",
+        subject: "Rota",
+        body: None,
+        labels: &["INBOX"],
+        unread: false,
+    };
+    store
+        .put_message(&message(&ada, &headers_only), None)
+        .unwrap();
+    let results = Commands::new(store).search("thursday", 10).unwrap();
+    assert!(results.threads.is_empty());
+    assert!(results.remote.is_none(), "{:?}", results.remote);
+}

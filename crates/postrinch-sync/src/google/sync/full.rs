@@ -6,9 +6,10 @@ use std::sync::Arc;
 use postrinch_model::EmailAddress;
 use tokio::sync::RwLock;
 
-use super::{GmailSync, Phase, Progress, ProgressFn, SyncReport};
+use super::GmailSync;
 use crate::SyncResult;
 use crate::google::api::Priority;
+use crate::{Phase, Progress, ProgressFn, SyncReport};
 
 /// How many of the newest messages a full sync downloads whole rather than
 /// by their headers, so recent mail can be read at once.

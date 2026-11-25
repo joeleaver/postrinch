@@ -223,13 +223,53 @@ async fn another_bad_after_sign_in_is_the_servers() {
         matches!(result, Err(SyncError::Server { .. })),
         "{result:?}"
     );
-    // A NO naming a limit is not what Microsoft sends there: not read.
-    fake.fail_next("CAPABILITY", 1, ImapFault::No(NOT_CONNECTED.into()));
+    // A NO with no code and other words refuses the command.
+    fake.fail_next("CAPABILITY", 1, ImapFault::No("Not today".into()));
     let result = open(&settings, &connector).await;
     assert!(
         matches!(result, Err(SyncError::Server { .. })),
         "{result:?}"
     );
+    // As does a NO with a code that is not "not now".
+    fake.fail_next("LIST", 1, ImapFault::No("[SERVERBUG] Oops".into()));
+    let mut session = open(&settings, &connector).await.unwrap();
+    let result = session.list_folders().await;
+    assert!(
+        matches!(result, Err(SyncError::Server { .. })),
+        "{result:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_no_saying_not_now_after_sign_in_is_busy() {
+    let answers = [
+        ("[UNAVAILABLE] Backend down", "Backend down"),
+        ("[INUSE] Try again", "Try again"),
+        ("[LIMIT] Too many connections", "Too many connections"),
+        (NOT_CONNECTED, NOT_CONNECTED),
+        (
+            "[ALERT] Account exceeded command or bandwidth limits.",
+            "Account exceeded command or bandwidth limits.",
+        ),
+    ];
+    for (answer, words) in answers {
+        let (fake, settings, connector) = password_fake(ImapConfig::new(), Security::Tls).await;
+        // To the CAPABILITY that follows the sign-in.
+        fake.fail_next("CAPABILITY", 1, ImapFault::No(answer.into()));
+        assert_eq!(
+            busy_message(open(&settings, &connector).await, "IMAP"),
+            words,
+            "CAPABILITY {answer}"
+        );
+        // To the first LIST.
+        let mut session = open(&settings, &connector).await.unwrap();
+        fake.fail_next("LIST", 1, ImapFault::No(answer.into()));
+        assert_eq!(
+            busy_message(session.list_folders().await, "IMAP"),
+            words,
+            "LIST {answer}"
+        );
+    }
 }
 
 #[tokio::test]

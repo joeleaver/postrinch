@@ -258,7 +258,7 @@ async fn a_refused_password_marks_the_account() {
 async fn the_calls_can_run_on_any_thread() {
     fn send<T: Send>(_: &T) {}
     let f = fixture().await;
-    let quiet: postrinch_sync::google::ProgressFn = std::sync::Arc::new(|_| {});
+    let quiet: postrinch_sync::ProgressFn = std::sync::Arc::new(|_| {});
     send(&f.sync.sync(&f.me, quiet.clone()));
     send(&f.sync.backfill(&f.me, quiet));
     send(&f.sync.download_now(&f.me, Vec::new()));

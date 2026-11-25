@@ -7,7 +7,7 @@ mod common;
 
 use common::*;
 use postrinch_model::{Account, AccountState, EmailAddress, Provider, SignInReason};
-use postrinch_sync::google::{KeepOptions, SyncEvent};
+use postrinch_sync::{KeepOptions, SyncEvent};
 use serde_json::json;
 use tokio::sync::Notify;
 use wiremock::matchers::{method, path};

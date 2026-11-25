@@ -31,8 +31,8 @@ use super::pending;
 use super::places::{self, Applied, FlagChange};
 use super::uids::UidSet;
 use super::wire::{Conn, Selected, uid_set};
+use crate::SyncReport;
 use crate::SyncResult;
-use crate::google::SyncReport;
 
 /// How many UIDs' flags are asked for at once when a folder's flags are
 /// read whole (without CONDSTORE, or when it is read from the start).

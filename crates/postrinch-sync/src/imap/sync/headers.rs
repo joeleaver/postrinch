@@ -11,7 +11,7 @@ use super::places::{self, Folder, Stored};
 use super::reads::SILENT_TRIES;
 use super::wire::{Conn, Fetched, uid_set};
 use crate::SyncResult;
-use crate::google::{Phase, Progress, ProgressFn, SyncReport};
+use crate::{Phase, Progress, ProgressFn, SyncReport};
 
 /// How many messages' headers are asked for at once.
 const HEADER_BATCH: usize = 100;

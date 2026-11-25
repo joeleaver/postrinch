@@ -14,8 +14,8 @@ use std::thread;
 use postrinch_commands::Commands;
 use serde::Serialize;
 
-use crate::gmail::Gmail;
 use crate::registry::{Agent, Agents, Reach};
+use crate::remote::Remote;
 use crate::views;
 use crate::wire::{Changed, Greeting, Hello, MAX_LINE, Outcome, Request, Response};
 
@@ -23,12 +23,12 @@ use crate::wire::{Changed, Greeting, Hello, MAX_LINE, Outcome, Request, Response
 /// sync sends it.
 pub type OnChange = Arc<dyn Fn(&Changed) + Send + Sync>;
 
-/// What the app gives the server: told of changes, and Gmail's own calls
-/// when sync runs.
+/// What the app gives the server: told of changes, and the providers' own
+/// calls ([`Remote`]) when sync runs.
 #[derive(Clone)]
 pub struct Hooks {
     pub on_change: OnChange,
-    pub gmail: Option<Arc<dyn Gmail>>,
+    pub remote: Option<Arc<dyn Remote>>,
 }
 
 /// Listen at `addr` (see [`crate::wire::addr`]) in the background.
@@ -169,7 +169,7 @@ impl Link {
         let asker = views::Asker {
             agent: &agent.name,
             agents,
-            gmail: self.hooks.gmail.as_deref(),
+            remote: self.hooks.remote.as_deref(),
             on_change: &self.hooks.on_change,
         };
         match views::run(&commands, call, &asker) {
