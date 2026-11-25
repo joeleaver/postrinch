@@ -11,7 +11,11 @@
 //! Every key asks for at least what the query asks: a term IMAP cannot
 //! say exactly is said more loosely (a date a day or two wider) or left
 //! out, and the command layer checks what is found against the whole
-//! query again before it is shown. The one exception is a term neither
+//! query again before it is shown. So there is no `NOT`: a server matches
+//! strings its own way (Dovecot folds accents, `TEXT` matches a part of a
+//! word), and a key that leaves mail out by its match could drop mail
+//! search here keeps (`-from:jose` and "José"). What is left out
+//! (`-word`, `-from:`, `-to:`) is left to that check alone. The one exception is a term neither
 //! the server nor the headers here can check (`has:attachment`), which
 //! the alternative names in [`ImapAlternative::inexact`]: only Gmail's
 //! own language (`X-GM-RAW`) can ask it, and other servers refuse the
@@ -43,7 +47,6 @@ pub enum SearchKey {
     Larger(u64),
     /// `SMALLER`: fewer than this many bytes.
     Smaller(u64),
-    Not(Box<SearchKey>),
     Or(Box<SearchKey>, Box<SearchKey>),
     /// Every key holds; none is every message (`ALL`).
     All(Vec<SearchKey>),
@@ -53,11 +56,6 @@ impl SearchKey {
     /// Either of two keys.
     pub fn either(a: SearchKey, b: SearchKey) -> Self {
         Self::Or(Box::new(a), Box::new(b))
-    }
-
-    /// Not the key.
-    pub fn negated(key: SearchKey) -> Self {
-        Self::Not(Box::new(key))
     }
 
     /// Any of these keys, as nested `OR`s; `None` for none.

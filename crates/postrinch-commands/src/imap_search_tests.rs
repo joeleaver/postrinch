@@ -1,6 +1,6 @@
 //! The search language as IMAP `SEARCH` keys: every operator, dates,
-//! text that is not ASCII, `OR` and leaving out, and the terms IMAP
-//! cannot ask.
+//! text that is not ASCII, `OR`, what is left out (never asked), and the
+//! terms IMAP cannot ask.
 
 use jiff::tz::TimeZone;
 use postrinch_model::{Day, Label, LabelKind, SearchKey, SystemLabel, Timestamp};
@@ -114,14 +114,21 @@ fn people_and_subject() {
 }
 
 #[test]
-fn leaving_out_people_nests_not_over_or() {
+fn people_left_out_are_left_to_the_check() {
+    // NOT FROM would leave out what the server matches, its own way (a
+    // server that folds accents leaves out "José" for `-from:jose`): no
+    // one left out is asked, whatever the operator.
+    for op in ["from", "to", "cc", "bcc"] {
+        assert_eq!(keys(&format!("rota -{op}:jose")), text("rota"), "-{op}:");
+        assert!(keys(&format!("-{op}:jose")).is_every(), "-{op}:");
+    }
     assert_eq!(
-        keys("rota -from:noreply -to:list@x.org"),
-        SearchKey::All(vec![
-            text("rota"),
-            SearchKey::negated(SearchKey::From("noreply".into())),
-            SearchKey::negated(any_recipient("list@x.org")),
-        ])
+        keys("rota from:ada -from:noreply -to:list@x.org"),
+        SearchKey::All(vec![text("rota"), SearchKey::From("ada".into())])
+    );
+    assert_eq!(
+        keys("to:mary -cc:list@x.org -bcc:jose"),
+        any_recipient("mary")
     );
 }
 
