@@ -47,7 +47,10 @@ pub enum SyncEvent {
     /// Its sign-in is fine, so it is not marked as needing to sign in; it
     /// is tried again after `retry_in`, which grows while the server stays
     /// busy ([`crate::Backoff`]). `message` is the server's own sentence.
-    /// The IMAP keep-in-sync loop sends it (docs/imap.md, "Sync").
+    /// The window already shows it, but nothing sends it yet: Gmail's API
+    /// sync has no such state, and the IMAP keep-in-sync loop that must
+    /// send it, with one `Backoff` per account and server, is a later
+    /// unit (IMAP 8; docs/imap.md, "Sync").
     Busy {
         account: EmailAddress,
         message: String,

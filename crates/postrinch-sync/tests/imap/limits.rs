@@ -1,17 +1,16 @@
-//! Telling a server's temporary limits from a refused sign-in, with the
-//! words Gmail and others really send: a limit is `SyncError::Busy`, never
-//! "needs to sign in", and an OAuth account gets no fresh token for it.
+//! Telling an IMAP server's temporary limits from a refused sign-in, with
+//! the words Gmail and others really send: a limit is `SyncError::Busy`,
+//! never "needs to sign in", and an OAuth account gets no fresh token for
+//! it. SMTP's are in `smtp_limits`.
 
-use postrinch_mailtest::{
-    ImapConfig, ImapFault, ImapServer, Mechanism, SmtpConfig, SmtpFault, SmtpServer, SmtpStage,
-};
-use postrinch_model::{Security, SignInMethod};
-use postrinch_sync::imap::{CheckFailure, ImapSecret, ImapSession, SmtpConnection};
+use postrinch_mailtest::{ImapConfig, ImapFault, ImapServer};
+use postrinch_model::{ImapSettings, Security, SignInMethod};
+use postrinch_sync::imap::{CheckFailure, Connector, ImapSecret, ImapSession, check_account};
 use postrinch_sync::{SyncError, SyncResult};
 
 use crate::support::{
-    PASSWORD, Tokens, USER, account, connector, microsoft, oauth_secret, rejected_detail, server,
-    settings,
+    PASSWORD, Tokens, USER, account, busy_message, connector, microsoft, oauth_secret,
+    rejected_detail, server, settings,
 };
 
 /// Gmail's temporary limits, as its IMAP server answers a sign-in.
@@ -44,18 +43,6 @@ const GMAIL_REFUSALS: [(&str, &str); 5] = [
         "Invalid credentials (Failure)",
     ),
 ];
-
-/// The words of a busy server, or a panic saying what came.
-fn busy_message<T: std::fmt::Debug>(result: SyncResult<T>, service: &str) -> String {
-    match result {
-        Err(SyncError::Busy {
-            service: s,
-            message,
-            ..
-        }) if s == service => message,
-        other => panic!("expected a busy {service} server, got {other:?}"),
-    }
-}
 
 /// The text after a `[CODE]`, as the person is shown it.
 fn words(answer: &str) -> &str {
@@ -170,98 +157,6 @@ async fn an_oauth_account_refused_gets_one_fresh_token_then_needs_sign_in() {
     }
 }
 
-/// Signs in to SMTP, the first AUTH answered `code text`: with a password
-/// (PLAIN), or with OAuth (XOAUTH2) and a good token every time.
-async fn smtp(
-    code: u16,
-    text: &str,
-    oauth: bool,
-) -> (SyncResult<SmtpConnection>, Tokens, SmtpServer) {
-    let config = if oauth {
-        SmtpConfig::new()
-            .oauth_token(USER, "good")
-            .mechanisms(&[Mechanism::XOAuth2])
-    } else {
-        SmtpConfig::new().user(USER, PASSWORD)
-    };
-    let fake = SmtpServer::start(config).await.unwrap();
-    let fault = SmtpFault::Reply {
-        code,
-        text: text.into(),
-    };
-    fake.fail_next(SmtpStage::Auth, 1, fault);
-    let smtp = server(fake.tls_addr().unwrap(), Security::Tls);
-    let connector = connector(fake.certificate());
-    let tokens = Tokens::new(&["good", "good"]);
-    let result = if oauth {
-        let settings = settings(smtp.clone(), smtp, microsoft());
-        SmtpConnection::open(&connector, &account(), &settings, &oauth_secret(), &tokens).await
-    } else {
-        let settings = settings(smtp.clone(), smtp, SignInMethod::Password);
-        let secret = ImapSecret::password(PASSWORD);
-        SmtpConnection::open(&connector, &account(), &settings, &secret, &tokens).await
-    };
-    (result, tokens, fake)
-}
-
-/// Gmail's SMTP answers that mean "later".
-const SMTP_LIMITS: [(u16, &str, &str); 3] = [
-    (
-        421,
-        "4.7.0 Try again later, closing connection. (AUTH)",
-        "Try again later, closing connection. (AUTH)",
-    ),
-    (
-        454,
-        "4.7.0 Too many login attempts, please try again later.",
-        "Too many login attempts, please try again later.",
-    ),
-    (
-        454,
-        "4.7.0 Cannot sign in due to a temporary system problem. Try again later.",
-        "Cannot sign in due to a temporary system problem. Try again later.",
-    ),
-];
-
-#[tokio::test]
-async fn smtp_4xx_at_sign_in_is_busy_and_gets_no_fresh_token() {
-    for oauth in [false, true] {
-        for (code, text, message) in SMTP_LIMITS {
-            let (result, tokens, fake) = smtp(code, text, oauth).await;
-            assert_eq!(busy_message(result, "SMTP"), message, "{code} {text}");
-            assert_eq!(fake.command_count("AUTH"), 1, "oauth {oauth}: {code}");
-            assert_eq!(tokens.invalidated(), 0, "oauth {oauth}: {code}");
-        }
-    }
-}
-
-#[tokio::test]
-async fn smtp_534_and_535_still_need_sign_in() {
-    let refusals = [
-        (
-            535,
-            "5.7.8 Username and Password not accepted.",
-            "Username and Password not accepted.",
-        ),
-        (
-            534,
-            "5.7.9 Application-specific password required.",
-            "Application-specific password required.",
-        ),
-    ];
-    for (code, text, detail) in refusals {
-        let (result, tokens, fake) = smtp(code, text, false).await;
-        assert_eq!(rejected_detail(result), detail, "{code}");
-        assert_eq!(fake.command_count("AUTH"), 1, "{code}");
-        assert_eq!(tokens.fetched(), 0, "{code}");
-    }
-    // With OAuth, a 535 gets the one fresh token, which the fake takes.
-    let (result, tokens, fake) = smtp(535, refusals[0].1, true).await;
-    result.unwrap().quit().await.unwrap();
-    assert_eq!(fake.command_count("AUTH"), 2);
-    assert_eq!((tokens.fetched(), tokens.invalidated()), (2, 1));
-}
-
 #[tokio::test]
 async fn a_busy_server_fails_the_check_as_busy_not_as_sign_in() {
     let (result, _fake) = imap_password(GMAIL_LIMITS[0], false).await;
@@ -270,4 +165,120 @@ async fn a_busy_server_fails_the_check_as_busy_not_as_sign_in() {
         failure,
         CheckFailure::Busy("Too many simultaneous connections. (Failure)".into())
     );
+}
+
+/// Microsoft 365's answer to the first command after a sign-in it took.
+const NOT_CONNECTED: &str = "User is authenticated but not connected.";
+
+/// A fake whose user signs in with a password, and settings and a
+/// connector for it over `security`.
+async fn password_fake(
+    config: ImapConfig,
+    security: Security,
+) -> (ImapServer, ImapSettings, Connector) {
+    let fake = ImapServer::start(config.user(USER, PASSWORD))
+        .await
+        .unwrap();
+    let addr = match security {
+        Security::Tls => fake.tls_addr(),
+        Security::StartTls => fake.starttls_addr(),
+    };
+    let imap = server(addr.unwrap(), security);
+    let settings = settings(imap.clone(), imap, SignInMethod::Password);
+    let connector = connector(fake.certificate());
+    (fake, settings, connector)
+}
+
+async fn open(settings: &ImapSettings, connector: &Connector) -> SyncResult<ImapSession> {
+    let secret = ImapSecret::password(PASSWORD);
+    ImapSession::open(connector, &account(), settings, &secret, &Tokens::none()).await
+}
+
+#[tokio::test]
+async fn a_bad_at_a_limit_after_sign_in_is_busy() {
+    // To the CAPABILITY that follows the sign-in.
+    let (fake, settings, connector) = password_fake(ImapConfig::new(), Security::Tls).await;
+    fake.fail_next("CAPABILITY", 1, ImapFault::Bad(NOT_CONNECTED.into()));
+    assert_eq!(
+        busy_message(open(&settings, &connector).await, "IMAP"),
+        NOT_CONNECTED
+    );
+    assert_eq!(fake.command_count("AUTHENTICATE"), 1);
+
+    // To the first LIST.
+    let mut session = open(&settings, &connector).await.unwrap();
+    fake.fail_next("LIST", 1, ImapFault::Bad(NOT_CONNECTED.into()));
+    assert_eq!(
+        busy_message(session.list_folders().await, "IMAP"),
+        NOT_CONNECTED
+    );
+}
+
+#[tokio::test]
+async fn another_bad_after_sign_in_is_the_servers() {
+    let (fake, settings, connector) = password_fake(ImapConfig::new(), Security::Tls).await;
+    fake.fail_next("CAPABILITY", 1, ImapFault::Bad("Unknown command".into()));
+    let result = open(&settings, &connector).await;
+    assert!(
+        matches!(result, Err(SyncError::Server { .. })),
+        "{result:?}"
+    );
+    // A NO naming a limit is not what Microsoft sends there: not read.
+    fake.fail_next("CAPABILITY", 1, ImapFault::No(NOT_CONNECTED.into()));
+    let result = open(&settings, &connector).await;
+    assert!(
+        matches!(result, Err(SyncError::Server { .. })),
+        "{result:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_check_reports_a_bad_after_sign_in_as_busy() {
+    for command in ["CAPABILITY", "LIST"] {
+        let (fake, settings, connector) = password_fake(ImapConfig::new(), Security::Tls).await;
+        fake.fail_next(command, 1, ImapFault::Bad(NOT_CONNECTED.into()));
+        let secret = ImapSecret::password(PASSWORD);
+        let check =
+            check_account(&connector, &account(), &settings, &secret, &Tokens::none()).await;
+        assert_eq!(
+            check.imap.unwrap_err(),
+            CheckFailure::Busy(NOT_CONNECTED.into()),
+            "{command}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_bye_greeting_at_a_limit_is_busy() {
+    let dovecot =
+        "Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)";
+    let cases = [
+        ("[UNAVAILABLE] Try again later", "Try again later"),
+        ("[INUSE] Mailbox in use", "Mailbox in use"),
+        (dovecot, dovecot),
+    ];
+    for security in [Security::Tls, Security::StartTls] {
+        for (bye, message) in cases {
+            let config = ImapConfig::new().starttls(true).greets_with_bye(bye);
+            let (fake, settings, connector) = password_fake(config, security).await;
+            let result = open(&settings, &connector).await;
+            assert_eq!(busy_message(result, "IMAP"), message, "{security:?}: {bye}");
+            assert_eq!(fake.command_count("AUTHENTICATE"), 0, "{bye}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn another_bye_greeting_is_the_servers() {
+    for bye in [
+        "Server shutting down",
+        "[SERVERBUG] Too many simultaneous connections",
+    ] {
+        let config = ImapConfig::new().greets_with_bye(bye);
+        let (_fake, settings, connector) = password_fake(config, Security::Tls).await;
+        match open(&settings, &connector).await {
+            Err(SyncError::Server { message, .. }) => assert!(bye.ends_with(&message), "{bye}"),
+            other => panic!("expected a server error, got {other:?}"),
+        }
+    }
 }

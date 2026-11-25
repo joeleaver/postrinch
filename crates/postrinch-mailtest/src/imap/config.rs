@@ -71,6 +71,7 @@ pub struct ImapConfig {
     pub(crate) mechanisms: BTreeSet<Mechanism>,
     pub(crate) users: Vec<UserConfig>,
     pub(crate) greets: bool,
+    pub(crate) bye_greeting: Option<String>,
     pub(crate) injects_after_starttls: bool,
 }
 
@@ -84,6 +85,7 @@ impl Default for ImapConfig {
             mechanisms: Mechanism::DEFAULT.into_iter().collect(),
             users: Vec::new(),
             greets: true,
+            bye_greeting: None,
             injects_after_starttls: false,
         }
     }
@@ -151,6 +153,16 @@ impl ImapConfig {
     /// leaves. For testing that clients time out rather than wait.
     pub fn greets(mut self, on: bool) -> Self {
         self.greets = on;
+        self
+    }
+
+    /// Greets every new connection with `* BYE <text>` and closes it, as
+    /// a server turning connections away does (RFC 9051 7.1.5): `text`
+    /// may start with a response code, as `[UNAVAILABLE] Try later`, and
+    /// Dovecot sends `Maximum number of connections from user+IP
+    /// exceeded` this way. Off by default.
+    pub fn greets_with_bye(mut self, text: &str) -> Self {
+        self.bye_greeting = Some(text.to_string());
         self
     }
 

@@ -111,6 +111,14 @@ impl Session {
             while self.conn.fill().await? {}
             return Ok(());
         }
+        let bye = self.shared.lock().config.bye_greeting.clone();
+        if let Some(text) = bye {
+            // Turned away before any command.
+            return self
+                .conn
+                .write_all(format!("* BYE {text}\r\n").as_bytes())
+                .await;
+        }
         let greeting = format!(
             "* OK [CAPABILITY {}] Fake IMAP ready\r\n",
             self.capabilities()

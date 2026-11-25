@@ -6,6 +6,10 @@
 //! or no code at all is read for its words, against
 //! [`TEMPORARY_LIMITS`]: providers put both real refusals and temporary
 //! limits under `[ALERT]`, and some send no code for either.
+//!
+//! The same limits turn up outside the answer to LOGIN or AUTHENTICATE:
+//! as a `BYE` instead of the greeting ([`is_busy_bye`]), and as a `BAD`
+//! to the first commands after signing in (`session.rs`).
 
 /// What a tagged NO to LOGIN or AUTHENTICATE means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,14 +79,16 @@ impl RefusalKind {
 ///   when sessions are opened and closed too fast, and gone a few minutes
 ///   later (Microsoft Q&A,
 ///   <https://learn.microsoft.com/en-us/answers/questions/5571236/user-is-authenticated-but-not-connected>).
-///   It mostly comes as a BAD to the first command after the sign-in,
-///   which the sync loop must treat the same way.
+///   It mostly comes as a BAD to the first command after a sign-in that
+///   succeeded, which `ImapSession` reads the same way.
 /// - Dovecot, "Maximum number of connections from user+IP exceeded"
 ///   (`mail_max_userip_connections`), and "Temporary authentication
 ///   failure." (its `AUTH_TEMP_FAILED_MSG`): current versions send them
 ///   with `[LIMIT]` or `[UNAVAILABLE]`, older ones as a bare NO (Debian
 ///   list, <https://lists.debian.org/debian-kde/2013/11/msg00024.html>;
-///   Dovecot `src/login-common/client-common-auth.c`).
+///   Dovecot `src/login-common/client-common-auth.c`). The connection
+///   limit also comes as a `BYE` in place of the greeting, when the
+///   connection is turned away before any command.
 ///
 /// Gmail's other `[ALERT]`s are real refusals and stay so: "Application-
 /// specific password required", "Please log in via your web browser",
@@ -101,6 +107,19 @@ pub(crate) const TEMPORARY_LIMITS: &[&str] = &[
 pub(crate) fn is_temporary_limit(text: &str) -> bool {
     let text = text.to_lowercase();
     TEMPORARY_LIMITS.iter().any(|phrase| text.contains(phrase))
+}
+
+/// Whether a `BYE` before signing in (in place of the greeting, or
+/// while CAPABILITY or STARTTLS was asked) turns the account away for
+/// now rather than saying the server failed: RFC 5530's "try again
+/// later" codes, or, with `[ALERT]` or no code, a known temporary limit.
+/// Any other code, or other words, is the server's.
+pub(crate) fn is_busy_bye(code: Option<&str>, text: &str) -> bool {
+    match code {
+        Some("UNAVAILABLE" | "INUSE" | "LIMIT") => true,
+        None | Some("ALERT") => is_temporary_limit(text),
+        Some(_) => false,
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +194,26 @@ mod tests {
         }
         assert_eq!(RefusalKind::of(None, "Invalid credentials"), Credential);
         assert_eq!(RefusalKind::of(None, ""), Credential);
+    }
+
+    #[test]
+    fn busy_byes() {
+        assert!(is_busy_bye(Some("UNAVAILABLE"), "Too busy"));
+        assert!(is_busy_bye(Some("INUSE"), ""));
+        assert!(is_busy_bye(Some("LIMIT"), "Try later"));
+        assert!(is_busy_bye(
+            None,
+            "Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)"
+        ));
+        assert!(is_busy_bye(
+            Some("ALERT"),
+            "Too many simultaneous connections"
+        ));
+        assert!(!is_busy_bye(None, "Server shutting down"));
+        assert!(!is_busy_bye(
+            Some("SERVERBUG"),
+            "Too many simultaneous connections"
+        ));
     }
 
     #[test]

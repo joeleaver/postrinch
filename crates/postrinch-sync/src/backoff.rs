@@ -12,15 +12,24 @@
 //! - **Bandwidth and command limits** (Gmail's "Account exceeded command
 //!   or bandwidth limits", `[LIMIT]`) can last hours: Google's limits are
 //!   per day and its suspension lifts when the period resets. Doubling
-//!   from 30 seconds reaches the cap in five tries (about 15 minutes in),
-//!   and from then on a try every 15 minutes costs one refused sign-in,
-//!   no more than 96 a day, while noticing within 15 minutes that the
-//!   limit lifted. Trying more often would add to the very count the
-//!   server is limiting.
+//!   from 30 seconds reaches the cap's step in five tries (about 15
+//!   minutes in). From then on each wait is 7.5 to 15 minutes (the
+//!   jitter below), so a day costs at most about 192 refused sign-ins,
+//!   about 128 on average (one per 11.25 minutes), while noticing within
+//!   15 minutes that the limit lifted. Trying more often would add to the
+//!   very count the server is limiting.
 //!
 //! The jitter ("equal jitter": each wait is between half and the whole of
 //! its step) keeps the clients of several accounts on one server, or one
 //! account's IMAP and SMTP, from all knocking at the same moment.
+//!
+//! Nothing uses it yet. The IMAP keep-in-sync loop, a later unit (IMAP
+//! 8), must keep one `Backoff` per account and server, take
+//! [`Backoff::next_delay`] on each
+//! [`SyncError::Busy`](crate::SyncError::Busy), [`Backoff::reset`] it on
+//! the next pass that signs in, and send
+//! [`SyncEvent::Busy`](crate::google::SyncEvent::Busy) with that wait
+//! (docs/imap.md, "Sync").
 
 use std::time::Duration;
 
