@@ -149,7 +149,7 @@ section.band + section.band { border-top: 1px solid var(--line); }
 .feature-wide .cols ul { padding-left: 20px; }
 
 /* Small feature cards */
-.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
 .card {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 20px 22px;
