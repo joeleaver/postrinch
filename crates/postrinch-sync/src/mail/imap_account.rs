@@ -17,8 +17,9 @@
 //! - Anything else is tried again after [`KeepOptions::retry`], as for
 //!   Google accounts ([`SyncEvent::Failed`], [`SyncEvent::SendFailed`]).
 //!
-//! Until IDLE tells of new mail at once (IMAP 11), the account is polled
-//! every [`KeepOptions::interval`]; a wake starts a pass at once.
+//! The account is polled every [`KeepOptions::interval`], or every
+//! [`crate::IdleOptions::interval`] while an IDLE on its inbox tells of
+//! news at once (`imap_idle`); a wake starts a pass at once.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,6 +27,7 @@ use std::time::Duration;
 use postrinch_model::EmailAddress;
 use tokio::sync::Notify;
 
+use super::imap_idle::Watching;
 use super::imap_keep::ImapKeeper;
 use crate::{KeepOptions, ProgressFn, SendReport, SyncError, SyncEvent};
 
@@ -51,17 +53,27 @@ enum Next {
 
 impl ImapKeeper {
     /// Syncs the account, then downloads the bodies the sync left, again
-    /// and again, until the account is removed or must sign in again.
+    /// and again, until the account is removed or must sign in again;
+    /// beside it, an IDLE on the inbox wakes it for news
+    /// ([`Self::keep_idling`]), and ends with it.
     pub(super) async fn keep_account_in_sync(&self, account: &EmailAddress, wake: Arc<Notify>) {
+        let watching = Watching::new();
+        tokio::select! {
+            () = self.sync_loop(account, &wake, &watching) => {}
+            () = self.keep_idling(account, &wake, &watching) => {}
+        }
+    }
+
+    async fn sync_loop(&self, account: &EmailAddress, wake: &Notify, watching: &Watching) {
         loop {
             if !self.still_kept(account).await {
                 return;
             }
             let next = match self.busy.remaining(account, IMAP) {
                 Some(wait) => Next::WaitOut(wait),
-                None => self.sync_pass(account).await,
+                None => self.sync_pass(account, watching).await,
             };
-            if !self.wait(next, &wake).await {
+            if !self.wait(next, wake).await {
                 return;
             }
         }
@@ -101,17 +113,20 @@ impl ImapKeeper {
     }
 
     /// One pass: sync, then backfill.
-    async fn sync_pass(&self, account: &EmailAddress) -> Next {
+    async fn sync_pass(&self, account: &EmailAddress, watching: &Watching) -> Next {
         self.emit(SyncEvent::Started {
             account: account.clone(),
         });
-        match self.sync_and_download(account).await {
+        watching.pass_began();
+        let result = self.sync_and_download(account).await;
+        watching.pass_ended(result.is_ok());
+        match result {
             Ok(downloaded) => {
                 self.emit(SyncEvent::Done {
                     account: account.clone(),
                     downloaded,
                 });
-                Next::Pause(self.options.interval)
+                Next::Pause(watching.interval(&self.options))
             }
             Err(e) => self.failed(account, e, |error, retry_in| SyncEvent::Failed {
                 account: account.clone(),

@@ -229,10 +229,12 @@ impl Conn {
         match done {
             Done::Ok(_) => Ok(()),
             Done::No(no) => Err(refusal(what, &no)),
+            // About the folder, never the connection count.
             Done::FolderBusy(message) => Err(Failure::Wait(crate::SyncError::Busy {
                 service: "IMAP",
                 server: self.describe(),
                 message,
+                connections: false,
             })),
         }
     }

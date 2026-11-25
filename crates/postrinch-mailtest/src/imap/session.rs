@@ -102,6 +102,7 @@ impl Session {
         // An I/O error ends the session as a closed connection would; the
         // test sees it from the client side.
         let _ = self.serve().await;
+        self.sign_out();
         self.conn.close().await;
     }
 
@@ -168,7 +169,7 @@ impl Session {
 
     /// Runs one command. `false` when the session must end.
     async fn handle(&mut self, command: Command, log: String) -> io::Result<bool> {
-        let (fault, hook) = {
+        let (fault, hook, hold) = {
             let mut state = self.shared.lock();
             let text = if command.name == "LOGIN" {
                 "LOGIN <credentials>".to_string()
@@ -177,12 +178,17 @@ impl Session {
             };
             let fault = state.take_fault(&command.name, &text);
             let hook = state.take_hook(&command.name, &text);
+            let hold = state.take_hold(&command.name, &text);
             state.log.push(LoggedCommand {
                 name: command.name.clone(),
                 text,
             });
-            (fault, hook)
+            (fault, hook, hold)
         };
+        // Let go, or dropped with the test's handle: either way, on.
+        if let Some(gate) = hold {
+            let _ = gate.await;
+        }
         if let Some(action) = hook {
             action();
         }
@@ -190,6 +196,7 @@ impl Session {
             Some(ImapFault::DisconnectBefore) => return Ok(false),
             Some(ImapFault::No(text)) => return self.finish(&command, Reply::No(text)).await,
             Some(ImapFault::Bad(text)) => return self.finish(&command, Reply::Bad(text)).await,
+            Some(ImapFault::Ok(text)) => return self.finish(&command, Reply::Ok(text)).await,
             Some(ImapFault::DisconnectAfter) | None => {}
         }
         let (reply, next) = self.dispatch(&command).await?;
@@ -257,6 +264,10 @@ impl Session {
         // Commands that talk to the client more than once, or end the session.
         match name {
             "LOGOUT" => {
+                // The session is over before it says so, as a server's
+                // is: a client that has seen the answer can sign in again
+                // in its place.
+                self.sign_out();
                 self.out.extend_from_slice(b"* BYE Logging out\r\n");
                 return Ok((Reply::Ok("LOGOUT completed".into()), Next::Close));
             }

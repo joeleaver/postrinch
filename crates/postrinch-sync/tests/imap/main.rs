@@ -20,6 +20,10 @@ mod check;
 #[path = "../common/mod.rs"]
 mod common;
 mod connect;
+mod idle;
+mod idle_gaps;
+mod idle_support;
+mod keep_support;
 mod limits;
 mod mail_keep;
 mod mail_routing;

@@ -4,16 +4,17 @@
 //! that signs in ends the wait, and so does adding the account again or
 //! removing it; changes made here are sent when the loop is woken.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use postrinch_mailtest::ImapFault;
 use postrinch_model::MessageChange;
-use postrinch_sync::{KeepOptions, MailSync, SyncEvent};
+use postrinch_sync::{IdleOptions, KeepOptions, MailSync};
 use tokio::sync::Notify;
 
 use super::add::{Adding, adding};
 use super::changes_support::record;
+use super::keep_support::{busy_waits, kinds, recorder, until, until_done};
 use super::support::{PASSWORD, USER, account};
 use super::sync_support::{Fixture, fixture, mail};
 
@@ -23,6 +24,7 @@ const BANDWIDTH: &str = "[ALERT] Account exceeded command or bandwidth limits. (
 const FAST: KeepOptions = KeepOptions {
     interval: Duration::from_secs(3600),
     retry: Duration::from_millis(50),
+    idle: IdleOptions::DEFAULT,
 };
 
 const FIRST: Duration = Duration::from_millis(100);
@@ -37,59 +39,6 @@ fn first_step(wait: Duration) -> bool {
 /// in this copy), waiting out a busy server from [`FIRST`].
 fn mail_sync(f: &Fixture) -> MailSync {
     MailSync::new(f.store.clone(), None, f.sync.clone()).with_busy_backoff(FIRST, FIRST * 8)
-}
-
-type Events = Arc<Mutex<Vec<SyncEvent>>>;
-
-fn recorder() -> (Events, postrinch_sync::SyncEventFn) {
-    let events: Events = Arc::default();
-    let log = events.clone();
-    (events, Arc::new(move |e| log.lock().unwrap().push(e)))
-}
-
-/// What happened, by kind, progress left out.
-fn kinds(events: &Events) -> Vec<&'static str> {
-    events
-        .lock()
-        .unwrap()
-        .iter()
-        .filter_map(|e| match e {
-            SyncEvent::Started { .. } => Some("started"),
-            SyncEvent::Progress { .. } => None,
-            SyncEvent::Synced { .. } => Some("synced"),
-            SyncEvent::Done { .. } => Some("done"),
-            SyncEvent::Failed { .. } => Some("failed"),
-            SyncEvent::NeedsSignIn { .. } => Some("needs sign-in"),
-            SyncEvent::Busy { .. } => Some("busy"),
-            SyncEvent::Sent { .. } => Some("sent"),
-            SyncEvent::SendFailed { .. } => Some("send failed"),
-        })
-        .collect()
-}
-
-fn busy_waits(events: &Events) -> Vec<(Duration, String)> {
-    events
-        .lock()
-        .unwrap()
-        .iter()
-        .filter_map(|e| match e {
-            SyncEvent::Busy {
-                retry_in, message, ..
-            } => Some((*retry_in, message.clone())),
-            _ => None,
-        })
-        .collect()
-}
-
-/// Waits (up to 10 s) until `done` says the events are as wanted.
-async fn until(events: &Events, done: impl Fn(&[&'static str]) -> bool) {
-    let waited = tokio::time::timeout(Duration::from_secs(10), async {
-        while !done(&kinds(events)) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await;
-    assert!(waited.is_ok(), "gave up waiting: {:?}", kinds(events));
 }
 
 #[tokio::test]
@@ -125,7 +74,7 @@ async fn a_busy_server_is_waited_out_longer_each_time_and_never_needs_sign_in() 
             .fail_next("UID FETCH", 1, ImapFault::No(BANDWIDTH.into()));
         f.user.append("INBOX", mail(Some("b@x"), "B", "")).unwrap();
         wake.notify_one();
-        until(&events, |k| k.iter().filter(|e| **e == "done").count() == 2).await;
+        until_done(&events, 2).await;
         let again = busy_waits(&events)[2].0;
         assert!(first_step(again), "the wait starts again: {again:?}");
     };

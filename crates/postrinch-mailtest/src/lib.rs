@@ -29,8 +29,8 @@ pub mod smtp;
 mod tls;
 
 pub use imap::{
-    Extension, FolderInfo, ImapConfig, ImapFault, ImapServer, MessageInfo, NewMessage, SpecialUse,
-    UserHandle,
+    Extension, FolderInfo, HeldCommand, ImapConfig, ImapFault, ImapServer, MessageInfo, NewMessage,
+    SpecialUse, UserHandle,
 };
 pub use sasl::Mechanism;
 pub use smtp::{ReceivedMessage, SmtpConfig, SmtpFault, SmtpServer, SmtpStage};

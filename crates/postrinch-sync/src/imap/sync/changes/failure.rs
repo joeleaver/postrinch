@@ -63,10 +63,13 @@ impl Failure {
     /// is waited out, as for the account.
     pub(super) fn in_folder(error: FolderError, server: String) -> Self {
         match error {
+            // A folder's busy answer is never about the connection count:
+            // that is the account's (`refusal::busy_after_sign_in`).
             FolderError::Busy(message) => Self::Wait(SyncError::Busy {
                 service: "IMAP",
                 server,
                 message,
+                connections: false,
             }),
             FolderError::Sync(e) => e.into(),
         }

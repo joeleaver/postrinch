@@ -8,7 +8,7 @@ use super::auth::{self, Signed};
 use super::capabilities::Capabilities;
 use super::connect::{Connector, describe};
 use super::folders::ListedFolder;
-use super::refusal::{is_busy, is_temporary_limit};
+use super::refusal::{is_busy, is_temporary_limit, names_connections};
 use super::reply::{ImapStream, Recorder, Status, Tagged};
 use super::secret::{ImapSecret, Service};
 use super::tokens::AccessTokens;
@@ -190,6 +190,7 @@ fn refused_after_sign_in(server: &Server, answer: Tagged) -> SyncError {
         return SyncError::Busy {
             service: "IMAP",
             server: describe(server),
+            connections: names_connections(answer.code.as_deref(), &answer.text),
             message: answer.text,
         };
     }

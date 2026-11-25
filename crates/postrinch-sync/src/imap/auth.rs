@@ -12,7 +12,7 @@
 use postrinch_model::{EmailAddress, Server, SignInReason};
 
 use super::connect::{Client, Connector, Greeted, describe};
-use super::refusal::{RefusalKind, is_temporary_limit};
+use super::refusal::{RefusalKind, is_temporary_limit, names_connections};
 use super::reply::{Recorder, Status, Tagged};
 use super::sasl::{self, Exchange, Mechanism};
 use super::secret::Credential;
@@ -131,10 +131,13 @@ impl Attempt<'_> {
         }
     }
 
-    fn busy(&self, message: String) -> SyncError {
+    /// The server busy, as `code` and `message` say: whether it is the
+    /// connection count ([`names_connections`]).
+    fn busy(&self, code: Option<&str>, message: String) -> SyncError {
         SyncError::Busy {
             service: "IMAP",
             server: describe(self.server),
+            connections: names_connections(code, &message),
             message,
         }
     }
@@ -201,13 +204,13 @@ impl Attempt<'_> {
                         Refused::Other(SyncError::NeedsSignIn(SignInReason::AdminPolicy { detail }))
                     }
                     // Nor lift a limit; asking again only adds to it.
-                    RefusalKind::Busy => Refused::Other(self.busy(detail)),
+                    RefusalKind::Busy => Refused::Other(self.busy(answer.code.as_deref(), detail)),
                     RefusalKind::Server => Refused::Other(self.error(detail)),
                 }
             }
             // Microsoft 365 answers BAD while it is shedding sessions.
             (Error::Bad(_), Some(answer)) if is_temporary_limit(&answer.text) => {
-                Refused::Other(self.busy(answer.text))
+                Refused::Other(self.busy(answer.code.as_deref(), answer.text))
             }
             (Error::No(_) | Error::Bad(_), answer) => Refused::Other(
                 self.error(answer.map_or_else(|| "sign-in refused".into(), |a| a.text)),

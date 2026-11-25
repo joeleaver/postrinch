@@ -73,11 +73,13 @@ pub type SyncEventFn = Arc<dyn Fn(SyncEvent) + Send + Sync>;
 #[derive(Debug, Clone, Copy)]
 pub struct KeepOptions {
     /// The pause between passes when every account succeeded. IMAP
-    /// accounts are polled this often too, until IDLE tells them of new
-    /// mail at once.
+    /// accounts are polled this often too while no IDLE watches their
+    /// inbox ([`IdleOptions::interval`] while one does).
     pub interval: Duration,
     /// The pause before the next pass when an account failed.
     pub retry: Duration,
+    /// How IMAP accounts IDLE on the inbox.
+    pub idle: IdleOptions,
 }
 
 impl Default for KeepOptions {
@@ -85,6 +87,51 @@ impl Default for KeepOptions {
         Self {
             interval: Duration::from_secs(60),
             retry: Duration::from_secs(20),
+            idle: IdleOptions::DEFAULT,
         }
+    }
+}
+
+/// How an IMAP account's IDLE connection watches its inbox (docs/imap.md,
+/// "Sync"). Every number is here so tests can make them short.
+#[derive(Debug, Clone, Copy)]
+pub struct IdleOptions {
+    /// How long one IDLE lasts before it is ended and begun again on the
+    /// same connection. RFC 2177 lets a server drop an IDLE after 29
+    /// minutes without a word; 25 keeps well clear of it.
+    pub restart: Duration,
+    /// How long after the first news the IDLE waits for the rest of a
+    /// burst (a message's `EXISTS` and its flags, a run of expunges)
+    /// before it wakes one pass for all of it.
+    pub settle: Duration,
+    /// The pause between passes while an IDLE watches the inbox, in
+    /// place of [`KeepOptions::interval`]: the inbox's news comes at
+    /// once, so passes are only for the other folders.
+    pub interval: Duration,
+    /// How long the IDLE connection gives way when the server says the
+    /// account has too many connections open: the account is polled
+    /// meanwhile, and its other connections are left alone.
+    pub give_way: Duration,
+    /// The first wait before connecting again after the connection was
+    /// lost or failed, doubling up to [`Self::reconnect_cap`]
+    /// ([`crate::Backoff`]).
+    pub reconnect: Duration,
+    pub reconnect_cap: Duration,
+}
+
+impl IdleOptions {
+    pub const DEFAULT: Self = Self {
+        restart: Duration::from_secs(25 * 60),
+        settle: Duration::from_secs(1),
+        interval: Duration::from_secs(5 * 60),
+        give_way: Duration::from_secs(30 * 60),
+        reconnect: crate::Backoff::FIRST,
+        reconnect_cap: crate::Backoff::CAP,
+    };
+}
+
+impl Default for IdleOptions {
+    fn default() -> Self {
+        Self::DEFAULT
     }
 }

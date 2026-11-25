@@ -95,6 +95,13 @@ pub enum SyncError {
         service: &'static str,
         server: String,
         message: String,
+        /// Whether the IMAP server said the account has too many
+        /// connections open (`[LIMIT]` at sign-in, or a known
+        /// connection limit's words: `imap::refusal::names_connections`).
+        /// An IMAP account's IDLE connection then gives way to the
+        /// others rather than waiting the account out (docs/imap.md,
+        /// "Sync"). Always `false` for SMTP.
+        connections: bool,
     },
     #[error("store: {0}")]
     Store(#[from] StoreError),

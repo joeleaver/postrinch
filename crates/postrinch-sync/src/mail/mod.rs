@@ -10,6 +10,7 @@
 //! busy server (`imap_keep`, and the IMAP engine's `BusyGate`).
 
 mod imap_account;
+mod imap_idle;
 mod imap_keep;
 mod keep;
 

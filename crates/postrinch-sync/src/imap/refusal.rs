@@ -111,6 +111,25 @@ pub(crate) fn is_temporary_limit(text: &str) -> bool {
     TEMPORARY_LIMITS.iter().any(|phrase| text.contains(phrase))
 }
 
+/// The [`TEMPORARY_LIMITS`] that are about how many connections the
+/// account has open, rather than what it did with them: a connection
+/// fewer lifts them.
+const CONNECTION_LIMITS: &[&str] = &[
+    "too many simultaneous connections",
+    "maximum number of connections from user+ip exceeded",
+];
+
+/// Whether a busy server's answer says the account has too many
+/// connections open: `[LIMIT]` (which is busy only at sign-in, where
+/// Dovecot sends it for its connection limit, [`RefusalKind::of`]), or a
+/// connection limit's words whatever the code. An account's IDLE
+/// connection, the one it can do without, then gives way
+/// (`mail::imap_idle`).
+pub(crate) fn names_connections(code: Option<&str>, text: &str) -> bool {
+    let text = text.to_lowercase();
+    code == Some("LIMIT") || CONNECTION_LIMITS.iter().any(|phrase| text.contains(phrase))
+}
+
 /// Whether a `BYE` before signing in (in place of the greeting, or
 /// while CAPABILITY or STARTTLS was asked) turns the account away for
 /// now rather than saying the server failed: RFC 5530's "try again
@@ -292,6 +311,34 @@ mod tests {
         ];
         for (code, text, scope) in cases {
             assert_eq!(busy_after_sign_in(code, text), scope, "{code:?} {text}");
+        }
+    }
+
+    #[test]
+    fn connection_limits_are_told_from_other_limits() {
+        assert!(names_connections(Some("LIMIT"), "Try later"));
+        assert!(names_connections(
+            Some("ALERT"),
+            "Too many simultaneous connections. (Failure)"
+        ));
+        assert!(names_connections(
+            None,
+            "Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)"
+        ));
+        assert!(!names_connections(
+            Some("ALERT"),
+            "Account exceeded command or bandwidth limits. (Failure)"
+        ));
+        assert!(!names_connections(
+            Some("UNAVAILABLE"),
+            "Temporary System Error"
+        ));
+        assert!(!names_connections(
+            None,
+            "Temporary authentication failure."
+        ));
+        for phrase in CONNECTION_LIMITS {
+            assert!(TEMPORARY_LIMITS.contains(phrase), "{phrase} is a limit");
         }
     }
 
