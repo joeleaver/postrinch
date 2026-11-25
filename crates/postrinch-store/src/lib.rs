@@ -16,6 +16,8 @@ mod calendars;
 mod codec;
 mod duplicates;
 mod error;
+#[cfg(feature = "faults")]
+mod faults;
 mod find;
 mod format;
 mod imap_state;
@@ -27,6 +29,7 @@ mod objects;
 mod outbox;
 mod outbox_cache;
 mod outgoing;
+mod outgoing_put_off;
 mod people;
 mod rules;
 mod sent_filing;
@@ -47,6 +50,7 @@ pub use find::{Find, Found};
 pub use mailboxes::{LabelStats, MessageEntry, ThreadEntry};
 pub use outbox::OutboxEntry;
 pub use outgoing::{Outgoing, OutgoingKind, SendStage};
+pub use outgoing_put_off::PutOff;
 pub use people::PersonEntry;
 
 /// Label stats by account key, each with the write count it was read at.
@@ -86,6 +90,9 @@ pub struct Store {
     /// How many messages each account has not downloaded, and when that
     /// was counted (see backfill.rs).
     undownloaded: Arc<Mutex<Option<KeptCounts>>>,
+    /// Write failures a test programmed (faults.rs).
+    #[cfg(feature = "faults")]
+    faults: Arc<faults::Faults>,
 }
 
 impl Store {

@@ -10,6 +10,14 @@
 //! Postrinch filed itself is then in Sent twice, and the setting comes
 //! back on.
 //!
+//! A provider that files sent mail, but only after the look gave up,
+//! shows it the same way, by the copy Postrinch filed after a miss. That
+//! is not a copy found in time, so the misses go on counting and the
+//! setting still goes off; and once a provider is known to file late, a
+//! second copy no longer turns the setting back on, as it would only
+//! bring back the wait and the duplicate. A copy found in time forgets
+//! it. Only copies under the folder's UIDVALIDITY now count.
+//!
 //! Each change reads the account as it is now and writes back only the
 //! setting and this state, under the account lock, so settings saved
 //! meanwhile (the person's, or another send's) are never reverted.
@@ -34,47 +42,69 @@ struct SentFiling {
     /// The last message Postrinch filed in Sent itself.
     #[serde(default)]
     filed: Option<ProviderMessageId>,
+    /// Whether `filed` was filed after a miss, while the setting was on:
+    /// a second copy of it is the provider filing late.
+    #[serde(default)]
+    after_miss: bool,
+    /// Whether the provider has been seen to file sent mail only after
+    /// the look gave up, and not in time since.
+    #[serde(default)]
+    late: bool,
 }
 
 impl Store {
     /// Whether the provider files sent mail in Sent itself, as the
     /// account's settings say now. First, when the last message Postrinch
     /// filed itself has two live copies in `sent` (the Sent folder's label
-    /// id, when sync keeps it), the provider filed it too: the setting is
-    /// turned (or kept) on and the misses forgotten.
+    /// id when sync keeps it, and its UIDVALIDITY now), the provider filed
+    /// it too. When Postrinch filed it after a miss, the provider files
+    /// late: that is remembered, and the misses go on. Otherwise the
+    /// setting is turned (or kept) on and the misses forgotten, unless
+    /// the provider is known to file late.
     pub fn server_files_sent(
         &self,
         address: &EmailAddress,
-        sent: Option<&str>,
+        sent: Option<(&str, u32)>,
     ) -> StoreResult<bool> {
         let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
         let (id, mut settings, mut filing) = self.sent_filing(address)?;
         let doubled = match (&filing.filed, sent) {
-            (Some(message), Some(sent)) => {
+            (Some(message), Some((sent, uidvalidity))) => {
                 let copies = self
                     .imap_message_places(address, message)?
                     .into_iter()
-                    .filter(|p| p.folder == sent && !p.flags.iter().any(|f| f == DELETED))
+                    .filter(|p| {
+                        p.folder == sent
+                            && p.uidvalidity == uidvalidity
+                            && !p.flags.iter().any(|f| f == DELETED)
+                    })
                     .count();
                 copies >= 2
             }
             _ => false,
         };
         if doubled {
-            settings.server_files_sent = true;
-            filing = SentFiling::default();
+            if filing.after_miss {
+                filing.late = true;
+            } else if !filing.late {
+                settings.server_files_sent = true;
+                filing.misses = 0;
+            }
+            filing.filed = None;
+            filing.after_miss = false;
             self.write_sent_filing(id, &settings, &filing)?;
         }
         Ok(settings.server_files_sent)
     }
 
-    /// A send found the provider's own copy in Sent: the misses start
-    /// again from none.
+    /// A send found the provider's own copy in Sent, in time: the misses
+    /// start again from none, and the provider no longer counts as late.
     pub fn sent_copy_found(&self, address: &EmailAddress) -> StoreResult<()> {
         let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
         let (id, settings, mut filing) = self.sent_filing(address)?;
-        if filing.misses != 0 {
+        if filing.misses != 0 || filing.late {
             filing.misses = 0;
+            filing.late = false;
             self.write_sent_filing(id, &settings, &filing)?;
         }
         Ok(())
@@ -94,6 +124,7 @@ impl Store {
         let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
         let (id, mut settings, mut filing) = self.sent_filing(address)?;
         filing.filed = Some(message.clone());
+        filing.after_miss = missed && settings.server_files_sent;
         let mut turned_off = false;
         if missed && settings.server_files_sent {
             filing.misses = filing.misses.saturating_add(1);

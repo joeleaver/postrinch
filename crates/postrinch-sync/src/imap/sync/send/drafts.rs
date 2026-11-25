@@ -118,11 +118,20 @@ impl ImapSync {
         }
         self.delete_replaced(conn, account, &drafts, built, replaced)
             .await?;
+        self.retire_superseded(replaced).await?;
         Ok(Delivery::Done)
     }
 
-    /// Deletes the drafts `replaced` names (never `built` itself), then
-    /// forgets the refused Keeps they superseded.
+    /// Forgets the refused Keeps `replaced` passed on the way: the draft
+    /// that replaced them was kept or sent, so they are out of date,
+    /// whether or not there was a Drafts folder to delete drafts from.
+    pub(super) async fn retire_superseded(&self, replaced: &Replaced) -> SyncResult<()> {
+        let superseded = replaced.superseded.clone();
+        self.with_store(move |s| superseded.iter().try_for_each(|id| s.outgoing_done(*id)))
+            .await
+    }
+
+    /// Deletes the drafts `replaced` names (never `built` itself).
     pub(super) async fn delete_replaced(
         &self,
         conn: &mut Conn,
@@ -137,9 +146,7 @@ impl ImapSync {
                     .await?;
             }
         }
-        let superseded = replaced.superseded.clone();
-        self.with_store(move |s| superseded.iter().try_for_each(|id| s.outgoing_done(*id)))
-            .await
+        Ok(())
     }
 
     /// Deletes the copies in Drafts of the draft `old`: those sync knows

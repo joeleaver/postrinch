@@ -5,7 +5,7 @@ use postrinch_mailtest::{SmtpFault, SmtpStage};
 use postrinch_store::{OutgoingKind, SendStage};
 use postrinch_sync::SyncError;
 
-use crate::send_support::{BCC, TO, header, reply, send_fixture};
+use crate::send_support::{BCC, SendFixture, TO, header, reply, send_fixture};
 
 /// The header block of a message.
 fn head(raw: &[u8]) -> String {
@@ -63,35 +63,33 @@ async fn a_server_that_files_sent_mail_is_not_given_a_second_copy() {
 
 #[tokio::test]
 async fn a_busy_server_before_the_data_is_tried_again() {
-    for stage in [SmtpStage::Mail, SmtpStage::Rcpt] {
-        let f = send_fixture(true, false).await;
-        f.queue(&f.draft("Thursday"), OutgoingKind::Send);
-        f.smtp
-            .fail_next(stage, 1, reply(451, "4.3.0 Try again later"));
-        let failed = f.sync.send_outgoing(&f.me).await;
-        assert!(
-            matches!(
-                failed,
-                Err(SyncError::Busy {
-                    service: "SMTP",
-                    ..
-                })
-            ),
-            "{stage:?}: {failed:?}"
-        );
-        let waiting = f.waiting();
-        assert_eq!(
-            (waiting.attempts, waiting.refused, waiting.stage),
-            (1, false, SendStage::Queued),
-            "{stage:?}"
-        );
-        assert!(f.smtp.messages().is_empty(), "{stage:?}");
-        assert!(f.folder("Sent").is_empty(), "{stage:?}");
+    // A 4xx at RCPT is one recipient's own (send_recipients.rs).
+    let f = send_fixture(true, false).await;
+    f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    f.smtp
+        .fail_next(SmtpStage::Mail, 1, reply(451, "4.3.0 Try again later"));
+    let failed = f.sync.send_outgoing(&f.me).await;
+    assert!(
+        matches!(
+            failed,
+            Err(SyncError::Busy {
+                service: "SMTP",
+                ..
+            })
+        ),
+        "{failed:?}"
+    );
+    let waiting = f.waiting();
+    assert_eq!(
+        (waiting.attempts, waiting.refused, waiting.stage),
+        (1, false, SendStage::Queued)
+    );
+    assert!(f.smtp.messages().is_empty());
+    assert!(f.folder("Sent").is_empty());
 
-        assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1, "{stage:?}");
-        assert_eq!(f.smtp.messages().len(), 1, "{stage:?}");
-        assert_eq!(f.folder("Sent").len(), 1, "{stage:?}");
-    }
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.smtp.messages().len(), 1);
+    assert_eq!(f.folder("Sent").len(), 1);
 }
 
 #[tokio::test]
@@ -243,4 +241,45 @@ async fn two_deliveries_at_once_send_a_message_once() {
     assert_eq!(f.smtp.messages().len(), 1, "sent once");
     assert_eq!(f.folder("Sent").len(), 1, "filed once");
     assert!(f.outgoing().is_empty());
+}
+
+/// Makes the next `times` writes of outgoing mail fail once the server
+/// has taken a message, before it answers.
+fn records_fail_after_acceptance(f: &SendFixture, times: usize) {
+    let store = f.store.clone();
+    f.smtp
+        .on_accept(move |_| store.fail_updates("Outgoing", times));
+}
+
+#[tokio::test]
+async fn a_delivery_recorded_only_when_tried_again_is_done_with() {
+    let f = send_fixture(true, false).await;
+    f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    records_fail_after_acceptance(&f, 1);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.smtp.messages().len(), 1);
+    assert_eq!(f.folder("Sent").len(), 1);
+    assert!(f.outgoing().is_empty());
+}
+
+#[tokio::test]
+async fn a_delivery_that_cannot_be_recorded_waits_for_the_person_with_a_warning() {
+    let f = send_fixture(true, false).await;
+    f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    // Every try at recording it fails.
+    records_fail_after_acceptance(&f, 3);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    let waiting = f.waiting();
+    assert_eq!(
+        (waiting.refused, waiting.stage),
+        (true, SendStage::DataSent)
+    );
+    let error = waiting.error.unwrap();
+    assert!(
+        error.contains("could not record") && error.contains(TO) && error.contains("second time"),
+        "{error}"
+    );
+    // Never sent again without the person.
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    assert_eq!(f.smtp.messages().len(), 1);
 }

@@ -143,6 +143,8 @@ impl Store {
     }
 
     pub(crate) fn db_update(&self, type_name: &str, id: u64, fields: FieldMap) -> StoreResult<()> {
+        #[cfg(feature = "faults")]
+        self.faults.check(type_name)?;
         self.retrying(|| self.db.update(type_name, id, fields.clone()).map(drop))
     }
 

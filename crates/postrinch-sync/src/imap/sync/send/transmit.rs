@@ -8,7 +8,13 @@
 //! is settled ([`ImapSync::settle`]) rather than sent again. A server
 //! that takes only so many recipients at once gets the message in parts,
 //! each recipient in one part only: whom a part went to is recorded
-//! before the next, so no attempt sends it to them again.
+//! before the next, so no attempt sends it to them again. A recipient the
+//! server puts off for now goes on a later attempt ([`super::put_off`]).
+//! Recording that the server took a part is tried again before giving
+//! up; if it still fails, the message waits for the person, warned that
+//! sending it again would send it twice.
+
+use std::time::Duration;
 
 use postrinch_model::{EmailAddress, ImapSettings};
 use postrinch_store::{Outgoing, SendStage};
@@ -28,15 +34,23 @@ enum Outcome {
     Taken,
     /// This transaction's data did not go: to try again.
     Stopped(SyncError),
-    /// The server took this transaction, but recording that failed. It
-    /// stays [`SendStage::DataSent`], so the next attempt settles it.
-    Unrecorded(SyncError),
+    /// The server took this transaction, for these recipients, but
+    /// recording that failed, tried again too. It stays
+    /// [`SendStage::DataSent`]: never sent again without the person.
+    Unrecorded(SyncError, Vec<EmailAddress>),
     /// The server refused it for good, in these words.
     Refused(String),
     /// This transaction's data went without an answer, saying why, to
     /// these recipients.
     Uncertain(String, Vec<EmailAddress>),
+    /// Everyone left has it but these, whom the server (described) put
+    /// off for now, in its words.
+    PutOff(String, Vec<(EmailAddress, String)>),
 }
+
+/// The pauses before recording that the server took a transaction is
+/// tried again: a failing disk may recover in a moment.
+const RECORD_PAUSES: [Duration; 2] = [Duration::from_millis(100), Duration::from_millis(500)];
 
 impl ImapSync {
     /// Sends `outgoing` (or finishes what an earlier attempt began) and
@@ -72,7 +86,7 @@ impl ImapSync {
                     Settled::Went => {
                         found = true;
                         delivered.extend(sending);
-                        self.delivered(id, &delivered, SendStage::Queued).await?;
+                        self.record_taken(id, &delivered, SendStage::Queued).await?;
                     }
                     Settled::Waits(delivery) => return Ok(delivery),
                 }
@@ -100,7 +114,19 @@ impl ImapSync {
                     self.with_store(move |s| s.outgoing_not_sent(id)).await?;
                     return Err(e);
                 }
-                Outcome::Unrecorded(e) => return Err(e),
+                Outcome::Unrecorded(e, to) => {
+                    tracing::warn!(
+                        "IMAP: {account}: the server took a message, but recording that \
+                         failed: {e}"
+                    );
+                    let rest = self::left(outgoing, &delivered);
+                    return Ok(Delivery::MayHaveGone(unrecorded(
+                        &delivered, &to, &rest, &e,
+                    )));
+                }
+                Outcome::PutOff(server, put_off) => {
+                    return self.put_off(id, &server, put_off, &delivered).await;
+                }
                 Outcome::Refused(why) => {
                     self.with_store(move |s| s.outgoing_not_sent(id)).await?;
                     return Ok(Delivery::Refused(partly(&delivered, &why)));
@@ -113,7 +139,7 @@ impl ImapSync {
                         Settled::Went => {
                             found = true;
                             delivered.extend(sending);
-                            self.delivered(id, &delivered, SendStage::Queued).await?;
+                            self.record_taken(id, &delivered, SendStage::Queued).await?;
                         }
                         Settled::Waits(delivery) => return Ok(delivery),
                     }
@@ -124,7 +150,9 @@ impl ImapSync {
 
     /// Sends `built` to `left` over one SMTP connection, a transaction at
     /// a time while the server takes only some of them, adding whom each
-    /// went to to `delivered` (and recording it).
+    /// went to to `delivered` (and recording it). Those the server puts
+    /// off are left out, and returned ([`Outcome::PutOff`]) once the rest
+    /// have it.
     async fn transactions(
         &self,
         account: &EmailAddress,
@@ -141,14 +169,23 @@ impl ImapSync {
             SmtpConnection::open(&self.connector, account, settings, &secret, tokens).await?;
         let server = crate::imap::connect::describe(smtp.server());
         let limit = self.connector.timeouts().command;
-        let mut rest = left;
+        let mut rest = left.to_vec();
+        let mut put_off = Vec::new();
         let outcome = loop {
-            let taken = match submit::begin(&mut smtp, limit, account, rest, &transmitted).await {
-                Ok(taken) => taken,
+            let envelope = match submit::begin(&mut smtp, limit, account, &rest, &transmitted).await
+            {
+                Ok(envelope) => envelope,
                 Err(stopped) => break Outcome::ended(stopped, Vec::new(), &server),
             };
-            let (to, after) = rest.split_at(taken);
-            let sending = to.to_vec();
+            put_off.extend(envelope.put_off);
+            rest = envelope.rest;
+            // None taken: every one left was put off (none taken and "too
+            // many" is an error).
+            if envelope.taken.is_empty() {
+                break Outcome::Taken;
+            }
+            let to = envelope.taken;
+            let sending = to.clone();
             if let Err(e) = self
                 .with_store(move |s| s.outgoing_sending(id, &sending))
                 .await
@@ -157,22 +194,25 @@ impl ImapSync {
             }
             match submit::data(&mut smtp, limit, &transmitted).await {
                 Submitted::Accepted => {
-                    delivered.extend_from_slice(to);
-                    let stage = if after.is_empty() {
+                    delivered.extend_from_slice(&to);
+                    let stage = if rest.is_empty() && put_off.is_empty() {
                         SendStage::Delivered
                     } else {
                         SendStage::Queued
                     };
-                    if let Err(e) = self.delivered(id, delivered, stage).await {
-                        break Outcome::Unrecorded(e);
+                    if let Err(e) = self.record_taken(id, delivered, stage).await {
+                        break Outcome::Unrecorded(e, to);
                     }
-                    if after.is_empty() {
+                    if rest.is_empty() {
                         break Outcome::Taken;
                     }
-                    rest = after;
                 }
-                other => break Outcome::ended(other, to.to_vec(), &server),
+                other => break Outcome::ended(other, to, &server),
             }
+        };
+        let outcome = match outcome {
+            Outcome::Taken if !put_off.is_empty() => Outcome::PutOff(server.clone(), put_off),
+            other => other,
         };
         if let Err(e) = smtp.quit().await {
             tracing::debug!("SMTP: leaving {server} failed: {e}");
@@ -181,6 +221,30 @@ impl ImapSync {
             tracing::warn!("SMTP: {server} gave no answer to a message from {account}: {detail}");
         }
         Ok(outcome)
+    }
+
+    /// Records whom the server took it for, and how far it got, trying
+    /// again after each of [`RECORD_PAUSES`]: what the server took must
+    /// not be forgotten, or it would be sent again.
+    async fn record_taken(
+        &self,
+        id: u64,
+        delivered: &[EmailAddress],
+        stage: SendStage,
+    ) -> SyncResult<()> {
+        let mut pauses = RECORD_PAUSES.iter();
+        loop {
+            match self.delivered(id, delivered, stage).await {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    let Some(pause) = pauses.next() else {
+                        return Err(e);
+                    };
+                    tracing::warn!("IMAP: recording a delivered message failed, again soon: {e}");
+                    tokio::time::sleep(*pause).await;
+                }
+            }
+        }
     }
 
     /// Records whom the server took it for, and how far it got.
@@ -226,8 +290,30 @@ fn left(outgoing: &Outgoing, delivered: &[EmailAddress]) -> Vec<EmailAddress> {
     recipients
 }
 
+/// What the person is told when the server took a transaction to `to`
+/// but recording that failed (`error`): it went to `delivered` (`to`
+/// among them), sending it again would send it to `to` twice, and it has
+/// not gone to `left`.
+fn unrecorded(
+    delivered: &[EmailAddress],
+    to: &[EmailAddress],
+    left: &[EmailAddress],
+    error: &SyncError,
+) -> String {
+    let mut why = format!(
+        "It went to {}, but Postrinch could not record that ({error}): sending it again \
+         would send it to {} a second time.",
+        list(delivered),
+        list(to)
+    );
+    if !left.is_empty() {
+        why.push_str(&format!(" It has not gone to {}.", list(left)));
+    }
+    why
+}
+
 /// `why` it stopped, saying whom it went to first, if anyone.
-fn partly(delivered: &[EmailAddress], why: &str) -> String {
+pub(super) fn partly(delivered: &[EmailAddress], why: &str) -> String {
     if delivered.is_empty() {
         return why.to_owned();
     }

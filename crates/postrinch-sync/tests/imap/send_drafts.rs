@@ -6,7 +6,9 @@ use postrinch_store::OutgoingKind;
 use postrinch_sync::imap::message_id;
 use postrinch_sync::outgoing_message_id;
 
-use crate::send_support::{SendFixture, header_of, message_id_header, send_fixture};
+use crate::send_support::{
+    SendFixture, header_of, message_id_header, send_fixture, send_fixture_without_drafts,
+};
 
 /// Keeps `subject` as a draft, in place of `replaces`.
 async fn keep(f: &SendFixture, subject: &str, replaces: Option<&str>) {
@@ -155,4 +157,27 @@ async fn sending_in_place_of_a_refused_keep_deletes_the_draft_before_it() {
     assert!(f.folder("Drafts").is_empty());
     assert_eq!(f.folder("Sent").len(), 1);
     assert!(f.outgoing().is_empty());
+}
+
+#[tokio::test]
+async fn sending_in_place_of_a_keep_refused_for_want_of_drafts_retires_it() {
+    let f = send_fixture_without_drafts().await;
+    f.queue(&f.draft("Thursday"), OutgoingKind::Keep);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    let refused = f.waiting();
+    assert!(refused.refused);
+    assert!(
+        refused
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("no Drafts folder")
+    );
+
+    let mut send = f.draft("Thursday, sent");
+    send.replaces = Some(message_id(&f.me, &outgoing_message_id(&refused)));
+    f.queue(&send, OutgoingKind::Send);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.folder("Sent").len(), 1);
+    assert!(f.outgoing().is_empty(), "the refused Keep is out of date");
 }

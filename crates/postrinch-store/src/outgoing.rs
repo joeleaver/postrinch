@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::codec::{Fields, FieldsBuilder};
 use crate::keys::scoped;
-use crate::{Store, StoreResult};
+use crate::{PutOff, Store, StoreResult};
 
 pub(crate) const TYPE: &str = "Outgoing";
 
@@ -74,6 +74,10 @@ pub struct Outgoing {
     /// While it is [`SendStage::DataSent`]: the recipients of the
     /// transaction whose data went without an answer.
     pub sending_to: Vec<EmailAddress>,
+    /// The recipients the server put off on earlier attempts (a 4xx at
+    /// RCPT for one recipient), each as last put off; it went to the
+    /// others. Forgotten when the person sends it again.
+    pub put_off: Vec<PutOff>,
 }
 
 impl Store {
@@ -184,7 +188,7 @@ impl Store {
     }
 
     /// The person asked for mail waiting for them to be tried again: its
-    /// error is forgotten and, if it may have gone, it is queued as new,
+    /// error and the recipients put off are forgotten and, if it may have gone, it is queued as new,
     /// for everyone earlier transactions did not deliver it to. Mail the
     /// server took stays [`SendStage::Delivered`]: only filing it is
     /// tried again, as it is never sent twice.
@@ -197,6 +201,7 @@ impl Store {
         let fields = FieldsBuilder::new()
             .json("stage", &stage)
             .null("sending_to")
+            .null("put_off")
             .null("error")
             .bool("refused", false);
         self.db_update(TYPE, id, fields.build())
@@ -212,7 +217,7 @@ impl Store {
     }
 }
 
-fn decode(fields: &Fields) -> StoreResult<Outgoing> {
+pub(crate) fn decode(fields: &Fields) -> StoreResult<Outgoing> {
     Ok(Outgoing {
         id: fields.id(),
         kind: fields.json("kind")?,
@@ -225,6 +230,7 @@ fn decode(fields: &Fields) -> StoreResult<Outgoing> {
         stage: fields.opt_json("stage")?.unwrap_or_default(),
         delivered_to: fields.opt_json("delivered_to")?.unwrap_or_default(),
         sending_to: fields.opt_json("sending_to")?.unwrap_or_default(),
+        put_off: fields.opt_json("put_off")?.unwrap_or_default(),
     })
 }
 

@@ -76,7 +76,7 @@ impl ImapSync {
                 let Some(sent) = sent else {
                     return Ok(false);
                 };
-                let files = self.files_sent(account, &sent).await?;
+                let files = self.files_sent(conn, account, &sent).await?;
                 look(conn, &sent, &built.header, self.sent_waits(files)).await
             })
             .await?;
@@ -118,6 +118,7 @@ impl ImapSync {
                 self.delete_replaced(conn, account, &drafts, built, replaced)
                     .await?;
             }
+            self.retire_superseded(replaced).await?;
             Ok(refused.map_or(Delivery::Done, Delivery::Refused))
         })
         .await
@@ -140,7 +141,7 @@ impl ImapSync {
             tracing::warn!("IMAP: {account} has no Sent folder: a sent message is not filed");
             return Ok(None);
         };
-        let files = self.files_sent(account, &sent).await?;
+        let files = self.files_sent(conn, account, &sent).await?;
         let look_first = files || filing == Filing::Again;
         if look_first && look(conn, &sent, &built.header, self.sent_waits(files)).await? {
             let a = account.clone();
@@ -180,11 +181,26 @@ impl ImapSync {
 
     /// Whether the provider files sent mail in `sent` itself, as the
     /// account's settings say now (turned back on first if it was seen
-    /// to).
-    async fn files_sent(&self, account: &EmailAddress, sent: &Target) -> SyncResult<bool> {
-        let (a, label) = (account.clone(), sent.label.clone());
-        self.with_store(move |s| s.server_files_sent(&a, label.as_deref()))
-            .await
+    /// to, by the copies kept under `sent`'s UIDVALIDITY now).
+    async fn files_sent(
+        &self,
+        conn: &mut Conn,
+        account: &EmailAddress,
+        sent: &Target,
+    ) -> SyncResult<bool> {
+        let kept = match &sent.label {
+            Some(label) => {
+                let uidvalidity = mailbox::examine(conn, &sent.name).await?.uidvalidity;
+                Some((label.clone(), uidvalidity))
+            }
+            None => None,
+        };
+        let a = account.clone();
+        self.with_store(move |s| {
+            let kept = kept.as_ref().map(|(label, v)| (label.as_str(), *v));
+            s.server_files_sent(&a, kept)
+        })
+        .await
     }
 }
 

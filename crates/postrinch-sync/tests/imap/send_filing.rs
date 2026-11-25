@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use postrinch_mailtest::ImapFault;
+use postrinch_mailtest::{ImapFault, NewMessage};
 use postrinch_model::DraftAttachment;
 use postrinch_store::{OutgoingKind, SendStage};
 use postrinch_sync::imap::message_id;
@@ -35,6 +35,44 @@ async fn a_provider_said_to_file_sent_mail_is_given_up_on_only_after_misses_in_a
     send(&f, "Four").await;
     assert_eq!(f.folder("Sent").len(), 4);
     assert_eq!(f.imap_commands("UID SEARCH"), searches);
+}
+
+/// Plays a provider that files the last message sent in Sent, but only
+/// now, after the send's look gave up; sync then sees it.
+async fn files_late(f: &SendFixture) {
+    let sent = f.smtp.messages().pop().expect("a message sent");
+    f.user
+        .append("Sent", NewMessage::new(sent.data).flags(&["\\Seen"]))
+        .unwrap();
+    f.sync().await;
+}
+
+#[tokio::test]
+async fn a_provider_that_files_sent_mail_only_after_the_look_is_given_up_on() {
+    let f = send_fixture(true, true).await;
+    for subject in ["One", "Two"] {
+        send(&f, subject).await;
+        files_late(&f).await;
+        assert!(f.settings().server_files_sent, "{subject}");
+    }
+    // The copies it filed late were Postrinch's own after a miss: they
+    // are not copies found in time, and the misses go on.
+    send(&f, "Three").await;
+    assert!(!f.settings().server_files_sent);
+    files_late(&f).await;
+
+    // Off, and known to file late: its second copies leave it off.
+    for subject in ["Four", "Five"] {
+        let searches = f.imap_commands("UID SEARCH");
+        send(&f, subject).await;
+        assert_eq!(
+            f.imap_commands("UID SEARCH"),
+            searches,
+            "{subject}: no wait"
+        );
+        files_late(&f).await;
+        assert!(!f.settings().server_files_sent, "{subject}");
+    }
 }
 
 #[tokio::test]

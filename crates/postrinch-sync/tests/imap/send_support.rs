@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use postrinch_mailtest::{
     Extension, ImapConfig, ImapServer, MessageInfo, NewMessage, SmtpConfig, SmtpFault, SmtpServer,
-    UserHandle,
+    SpecialUse, UserHandle,
 };
 use postrinch_model::{
     Account, Draft, EmailAddress, ImapSettings, Mailbox, Provider, ProviderMessageId, Security,
@@ -50,6 +50,26 @@ pub async fn send_fixture_with(
     server_files_sent: bool,
     smtp: SmtpConfig,
 ) -> SendFixture {
+    let folders = |user: &UserHandle| user.create_standard_folders().unwrap();
+    fixture(uidplus, server_files_sent, smtp, folders).await
+}
+
+/// As [`send_fixture`] (with UIDPLUS, the setting off), for an account
+/// with a Sent folder and no Drafts.
+pub async fn send_fixture_without_drafts() -> SendFixture {
+    let folders = |user: &UserHandle| {
+        user.create_special_folder("Sent", SpecialUse::Sent)
+            .unwrap();
+    };
+    fixture(true, false, SmtpConfig::new(), folders).await
+}
+
+async fn fixture(
+    uidplus: bool,
+    server_files_sent: bool,
+    smtp: SmtpConfig,
+    folders: impl FnOnce(&UserHandle),
+) -> SendFixture {
     let mut config = ImapConfig::new();
     if !uidplus {
         config = config.without(Extension::Uidplus);
@@ -59,7 +79,7 @@ pub async fn send_fixture_with(
         .unwrap();
     let smtp = SmtpServer::start(smtp.user(USER, PASSWORD)).await.unwrap();
     let user = imap.user(USER);
-    user.create_standard_folders().unwrap();
+    folders(&user);
     let me = account();
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();

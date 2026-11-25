@@ -65,6 +65,8 @@ pub(crate) fn open(root: &Path) -> StoreResult<Store> {
         writes: Arc::default(),
         stats: Arc::default(),
         undownloaded: Arc::default(),
+        #[cfg(feature = "faults")]
+        faults: Arc::default(),
     };
     let key = Value::String(INFO_KEY.into());
     match store.db.find_by_unique(INFO, "key", &key)? {

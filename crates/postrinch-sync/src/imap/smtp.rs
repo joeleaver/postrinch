@@ -275,6 +275,25 @@ pub(super) fn reply_text(error: &lettre::transport::smtp::Error) -> String {
     }
 }
 
+/// The enhanced status code (RFC 3463) the server's words in a lettre
+/// error begin with, as `[4, 2, 2]` for `4.2.2 Mailbox full`.
+pub(super) fn enhanced_code(error: &lettre::transport::smtp::Error) -> Option<[u16; 3]> {
+    use std::error::Error;
+    let text = error
+        .source()
+        .map_or_else(|| error.to_string(), |s| s.to_string());
+    let first = text.split_whitespace().next()?;
+    if !is_enhanced_code(first) {
+        return None;
+    }
+    let mut parts = first.split('.').map(str::parse::<u16>);
+    Some([
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+        parts.next()?.ok()?,
+    ])
+}
+
 /// RFC 3463: `class.subject.detail`, as `5.7.8`.
 fn is_enhanced_code(word: &str) -> bool {
     let parts: Vec<_> = word.split('.').collect();

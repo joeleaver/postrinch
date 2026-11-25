@@ -14,6 +14,7 @@
 
 mod drafts;
 mod mailbox;
+mod put_off;
 mod sent;
 mod submit;
 mod transmit;
@@ -59,8 +60,12 @@ enum Delivery {
     /// Refused for good, in these words: it waits for the person.
     Refused(String),
     /// Its data reached the server, no answer came, and it is not in
-    /// Sent: it waits for the person, who may send it again.
+    /// Sent (or the server took it and recording that failed): it waits
+    /// for the person, who may send it again.
     MayHaveGone(String),
+    /// It went to everyone but some recipients the server put off for
+    /// now (described in `why`): they are tried again later.
+    PutOff { server: String, why: String },
     /// Not the provider's (an agent's proposal).
     Skipped,
 }
@@ -94,7 +99,10 @@ impl ImapSync {
     /// is marked so and waits for the person; any other failure stops
     /// here, for the next call, and is returned (a server too busy is
     /// [`SyncError::Busy`]; a refused sign-in also marks the account as
-    /// needing to sign in). Returns how many were delivered.
+    /// needing to sign in). A message the server put some recipients off
+    /// for does not hold up the rest: once they are delivered, that is
+    /// returned as [`SyncError::Busy`], for the next call to try them
+    /// again. Returns how many were delivered.
     ///
     /// Calls for one account take turns, so a message never goes twice
     /// because two deliveries read it waiting at once.
@@ -104,6 +112,7 @@ impl ImapSync {
         let owner = account.clone();
         let waiting = self.with_store(move |s| s.outgoing_for(&owner)).await?;
         let mut delivered = 0;
+        let mut put_off = None;
         for outgoing in waiting.into_iter().filter(|o| !o.refused) {
             let id = outgoing.id;
             match self.deliver(account, &outgoing).await {
@@ -116,6 +125,19 @@ impl ImapSync {
                     self.with_store(move |s| s.outgoing_failed(id, &why, true))
                         .await?;
                 }
+                Ok(Delivery::PutOff { server, why }) => {
+                    tracing::info!("IMAP: {account}: outgoing mail is tried again later: {why}");
+                    self.with_store({
+                        let why = why.clone();
+                        move |s| s.outgoing_failed(id, &why, false)
+                    })
+                    .await?;
+                    put_off.get_or_insert(SyncError::Busy {
+                        service: "SMTP",
+                        server,
+                        message: why,
+                    });
+                }
                 Ok(Delivery::Skipped) => {}
                 Err(e) => {
                     let error = e.to_string();
@@ -127,7 +149,10 @@ impl ImapSync {
                 }
             }
         }
-        Ok(delivered)
+        match put_off {
+            Some(e) => Err(e),
+            None => Ok(delivered),
+        }
     }
 
     async fn deliver(&self, account: &EmailAddress, outgoing: &Outgoing) -> SyncResult<Delivery> {

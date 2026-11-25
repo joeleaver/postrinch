@@ -170,6 +170,9 @@ type Outgoing {
     delivered_to: Json
     // While `stage` is data_sent: the recipients that transaction was for.
     sending_to: Json
+    // The recipients (PutOff list) the server put off on earlier attempts
+    // (outgoing_put_off.rs); null for none.
+    put_off: Json
 }
 
 // One account's mail rules (postrinch-rules): `settings` as the account's

@@ -3,7 +3,9 @@
 //! with what each answer means for sending it again (docs/imap.md,
 //! "Writing and sending"). A server that takes only so many recipients at
 //! once says so at RCPT; [`begin`] then goes on with those it took, and
-//! the caller sends to the rest in another transaction.
+//! the caller sends to the rest in another transaction. One it puts off
+//! for now (a 4xx for one recipient, as a mailbox full) is left out of
+//! the transaction, for the caller to try again later.
 //!
 //! lettre's own `send` cannot be used: it reports every failure alike, and
 //! the one thing that matters here is whether the message may have
@@ -22,7 +24,7 @@ use super::super::wire::for_bytes;
 use crate::SyncError;
 use crate::imap::SmtpConnection;
 use crate::imap::connect::within;
-use crate::imap::smtp::{connect_error, reply_text};
+use crate::imap::smtp::{connect_error, enhanced_code, reply_text};
 
 /// How a submission ended.
 #[derive(Debug)]
@@ -40,26 +42,36 @@ pub(super) enum Submitted {
     Uncertain(String),
 }
 
-/// "Too many recipients" (RFC 5321 4.5.3.1.10), the answer to a RCPT
-/// beyond what the server takes in one transaction.
-const TOO_MANY_RECIPIENTS: u16 = 452;
+/// The recipients one transaction is for, as their RCPTs were answered.
+#[derive(Debug, Default)]
+pub(super) struct Envelope {
+    /// Those the server took, in order: the transaction is for them.
+    pub taken: Vec<EmailAddress>,
+    /// Those the server put off for now (a 4xx for them alone: their
+    /// mailbox full, say), with its words: to try again later.
+    pub put_off: Vec<(EmailAddress, String)>,
+    /// Those not yet asked for, the first of them answered "too many
+    /// recipients": for another transaction.
+    pub rest: Vec<EmailAddress>,
+}
 
-/// MAIL FROM `from`, RCPT TO each of `to`, DATA, up to the server's 354.
-/// Returns how many of `to`, from the first, the transaction is for: all
-/// of them, or fewer when the server answered a RCPT with "too many
-/// recipients" (452) after taking some, as RFC 5321 4.5.3.1.10 has a
-/// client then send to those and the rest in another transaction. `Err`
-/// is [`Submitted::Failed`] or [`Submitted::Refused`]: nothing has gone
-/// in this transaction. Any refused recipient refuses the message, naming
-/// the address, so this transaction never goes to some of its recipients
-/// only.
+/// MAIL FROM `from`, RCPT TO each of `to`, and, when the server took
+/// some of them, DATA, up to the server's 354. The [`Envelope`] says whom
+/// the transaction is for: the server may put some recipients off (a
+/// 4xx for one recipient), and may answer "too many recipients" (RFC 5321
+/// 4.5.3.1.10) after taking some, which has a client send to those and
+/// the rest in another transaction. With none taken, no DATA is sent.
+/// `Err` is [`Submitted::Failed`] or [`Submitted::Refused`]: nothing has
+/// gone in this transaction. Any refused recipient refuses the message,
+/// naming the address, so this transaction never goes to some of its
+/// recipients only.
 pub(super) async fn begin(
     smtp: &mut SmtpConnection,
     limit: Duration,
     from: &EmailAddress,
     to: &[EmailAddress],
     message: &[u8],
-) -> Result<usize, Submitted> {
+) -> Result<Envelope, Submitted> {
     let server = smtp.server().clone();
     let info = smtp.inner().server_info();
     let mut parameters = Vec::new();
@@ -84,21 +96,20 @@ pub(super) async fn begin(
     }
     let mail = Mail::new(Some(address(from)?), parameters);
     step(smtp, &server, limit, mail).await?;
-    let mut taken = 0;
-    for recipient in to {
-        match rcpt(smtp, &server, limit, recipient).await? {
-            Rcpt::Taken => taken += 1,
-            // None taken: the server can take nobody now, which is it
-            // busy (a 4xx), to try again later.
-            Rcpt::TooMany if taken == 0 => {
-                return Err(Submitted::Failed(SyncError::Busy {
-                    service: "SMTP",
-                    server: describe(&server),
-                    message: format!("{recipient}: too many recipients"),
-                }));
+    let mut envelope = Envelope::default();
+    for (at, recipient) in to.iter().enumerate() {
+        let some_taken = !envelope.taken.is_empty();
+        match rcpt(smtp, &server, limit, recipient, some_taken).await? {
+            Rcpt::Taken => envelope.taken.push(recipient.clone()),
+            Rcpt::PutOff(words) => envelope.put_off.push((recipient.clone(), words)),
+            Rcpt::TooMany => {
+                envelope.rest = to[at..].to_vec();
+                break;
             }
-            Rcpt::TooMany => break,
         }
+    }
+    if envelope.taken.is_empty() {
+        return Ok(envelope);
     }
     let answer = step(smtp, &server, limit, Data).await?;
     if !answer.has_code(354) {
@@ -108,7 +119,7 @@ pub(super) async fn begin(
             message: format!("DATA was answered {}", answer.code()),
         }));
     }
-    Ok(taken)
+    Ok(envelope)
 }
 
 /// Sends the message's data, after [`begin`].
@@ -154,18 +165,26 @@ pub(super) async fn data(smtp: &mut SmtpConnection, limit: Duration, message: &[
 }
 
 /// How the server answered one RCPT, short of refusing it.
+#[derive(Debug, PartialEq, Eq)]
 enum Rcpt {
     Taken,
+    /// A 4xx for this recipient alone, in the server's words: it is put
+    /// off, and the transaction goes on for the others.
+    PutOff(String),
     /// "Too many recipients": the transaction takes no more.
     TooMany,
 }
 
-/// RCPT TO `recipient`.
+/// RCPT TO `recipient`, after `some_taken` recipients were taken in this
+/// transaction. "Too many recipients" with none taken is the server
+/// taking nobody now: busy for a 4xx, to try again later, refused for a
+/// 5xx.
 async fn rcpt(
     smtp: &mut SmtpConnection,
     server: &Server,
     limit: Duration,
     recipient: &EmailAddress,
+    some_taken: bool,
 ) -> Result<Rcpt, Submitted> {
     let command = Command::new(address(recipient)?, Vec::new());
     let connection = smtp.inner();
@@ -173,11 +192,62 @@ async fn rcpt(
         Ok(connection.command(command).await)
     })
     .await;
-    match answered {
-        Ok(Ok(_)) => Ok(Rcpt::Taken),
-        Ok(Err(e)) if e.status().map(u16::from) == Some(TOO_MANY_RECIPIENTS) => Ok(Rcpt::TooMany),
-        Ok(Err(e)) => Err(refused_or_failed(server, e, Some(recipient))),
-        Err(e) => Err(Submitted::Failed(e)),
+    let error = match answered {
+        Ok(Ok(_)) => return Ok(Rcpt::Taken),
+        Ok(Err(e)) => e,
+        Err(e) => return Err(Submitted::Failed(e)),
+    };
+    let Some(code) = error.status().map(u16::from) else {
+        return Err(refused_or_failed(server, error, Some(recipient)));
+    };
+    match rcpt_answer(code, enhanced_code(&error), some_taken) {
+        RcptAnswer::TooMany if some_taken => Ok(Rcpt::TooMany),
+        RcptAnswer::TooMany if code < 500 => Err(Submitted::Failed(SyncError::Busy {
+            service: "SMTP",
+            server: describe(server),
+            message: format!("{recipient}: too many recipients"),
+        })),
+        RcptAnswer::PutOff => Ok(Rcpt::PutOff(reply_text(&error))),
+        RcptAnswer::TooMany | RcptAnswer::Other => {
+            Err(refused_or_failed(server, error, Some(recipient)))
+        }
+    }
+}
+
+/// What an answer to RCPT other than 2xx means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RcptAnswer {
+    /// "Too many recipients" (RFC 5321 4.5.3.1.10).
+    TooMany,
+    /// A temporary failure for this recipient alone.
+    PutOff,
+    /// Anything else: refused (5xx), or the connection closing (421).
+    Other,
+}
+
+/// Reads `code` (with its enhanced status code, RFC 3463), after
+/// `some_taken` recipients were taken in this transaction.
+///
+/// "Too many recipients" is the enhanced code X.5.3 ("too many
+/// recipients", RFC 3463 3.6), or 452 or 552 without an enhanced code
+/// once some recipients were taken (RFC 5321 4.5.3.1.10). A 452 with
+/// another enhanced code is about this recipient (4.2.2, its mailbox is
+/// full, as Gmail answers; 4.3.1, the server out of storage), and is put
+/// off like any other 4xx but 421, which closes the connection. A 552
+/// that is not "too many" is refused.
+fn rcpt_answer(code: u16, enhanced: Option<[u16; 3]>, some_taken: bool) -> RcptAnswer {
+    let class = code / 100;
+    let too_many = match enhanced {
+        Some([enhanced_class, 5, 3]) => enhanced_class == class,
+        Some(_) => false,
+        None => some_taken && matches!(code, 452 | 552),
+    };
+    if too_many {
+        RcptAnswer::TooMany
+    } else if class == 4 && code != 421 {
+        RcptAnswer::PutOff
+    } else {
+        RcptAnswer::Other
     }
 }
 
@@ -258,6 +328,40 @@ pub(super) fn without_bcc(raw: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn too_many_recipients_is_told_from_a_recipients_own_failure() {
+        use RcptAnswer::{Other, PutOff, TooMany};
+        let cases = [
+            // RFC 5321 4.5.3.1.10, with and without an enhanced code.
+            (452, Some([4, 5, 3]), true, TooMany),
+            (452, Some([4, 5, 3]), false, TooMany),
+            (452, None, true, TooMany),
+            (552, None, true, TooMany),
+            (552, Some([5, 5, 3]), false, TooMany),
+            (451, Some([4, 5, 3]), true, TooMany),
+            // The recipient's mailbox full (Gmail), the server out of
+            // storage: this recipient's own, put off.
+            (452, Some([4, 2, 2]), true, PutOff),
+            (452, Some([4, 3, 1]), true, PutOff),
+            (452, None, false, PutOff),
+            (450, Some([4, 2, 1]), false, PutOff),
+            (451, None, true, PutOff),
+            // A 552 that is not "too many" is refused.
+            (552, Some([5, 2, 2]), true, Other),
+            (552, None, false, Other),
+            (550, Some([5, 1, 1]), true, Other),
+            (421, None, true, Other),
+            (452, Some([5, 5, 3]), true, PutOff),
+        ];
+        for (code, enhanced, some_taken, meaning) in cases {
+            assert_eq!(
+                rcpt_answer(code, enhanced, some_taken),
+                meaning,
+                "{code} {enhanced:?} after some taken: {some_taken}"
+            );
+        }
+    }
 
     #[test]
     fn bcc_is_taken_out_of_the_header_only() {

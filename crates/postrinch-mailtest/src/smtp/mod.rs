@@ -97,6 +97,8 @@ pub struct SmtpConfig {
     users: Vec<SmtpUser>,
     challenges_again: bool,
     max_recipients: Option<usize>,
+    /// The answer to a RCPT beyond `max_recipients`.
+    too_many: (u16, String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +119,7 @@ impl Default for SmtpConfig {
             users: Vec::new(),
             challenges_again: false,
             max_recipients: None,
+            too_many: (452, "4.5.3 Too many recipients".into()),
         }
     }
 }
@@ -204,6 +207,14 @@ impl SmtpConfig {
         self.max_recipients = Some(count);
         self
     }
+
+    /// What a RCPT beyond [`SmtpConfig::max_recipients`] is answered, in
+    /// place of `452 4.5.3 Too many recipients`: as servers that answer
+    /// it without an enhanced code, or with 552 (RFC 5321 4.5.3.1.10).
+    pub fn too_many_recipients_answer(mut self, code: u16, text: &str) -> Self {
+        self.too_many = (code, text.to_string());
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -224,9 +235,19 @@ pub(crate) struct SmtpState {
     messages: Vec<ReceivedMessage>,
     log: Vec<String>,
     on_accept: Option<OnAccept>,
+    /// Recipients answered so at RCPT, by address (ASCII case ignored).
+    recipient_answers: Vec<(String, u16, String)>,
 }
 
 impl SmtpState {
+    /// How RCPT TO `address` is answered when the test said so.
+    fn recipient_answer(&self, address: &str) -> Option<(u16, String)> {
+        self.recipient_answers
+            .iter()
+            .find(|(a, _, _)| a.eq_ignore_ascii_case(address))
+            .map(|(_, code, text)| (*code, text.clone()))
+    }
+
     fn take_fault(&mut self, stage: SmtpStage) -> Option<SmtpFault> {
         let i = self
             .faults
@@ -318,6 +339,7 @@ impl SmtpServer {
                 messages: Vec::new(),
                 log: Vec::new(),
                 on_accept: None,
+                recipient_answers: Vec::new(),
             }),
             acceptor: certificate.acceptor()?,
         });
@@ -405,6 +427,28 @@ impl SmtpServer {
             remaining: times,
             fault,
         });
+    }
+
+    /// From now on answers RCPT TO `address` with this code and text
+    /// (`452 4.2.2 Mailbox full`), without taking the recipient, until
+    /// [`SmtpServer::take_recipient`]; the transaction goes on for its
+    /// other recipients.
+    pub fn answer_recipient(&self, address: &str, code: u16, text: &str) {
+        let mut state = self.shared.lock();
+        state
+            .recipient_answers
+            .retain(|(a, _, _)| !a.eq_ignore_ascii_case(address));
+        state
+            .recipient_answers
+            .push((address.to_string(), code, text.to_string()));
+    }
+
+    /// Takes `address` at RCPT again, as by default.
+    pub fn take_recipient(&self, address: &str) {
+        self.shared
+            .lock()
+            .recipient_answers
+            .retain(|(a, _, _)| !a.eq_ignore_ascii_case(address));
     }
 
     /// Every command received so far, in order: the verb and its
