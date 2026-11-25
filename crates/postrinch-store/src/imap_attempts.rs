@@ -84,6 +84,29 @@ impl Store {
             .collect()
     }
 
+    /// Every attempt kept to copy a message into the folder that is label
+    /// `folder`, in no particular order; none when the folder is not kept.
+    pub fn imap_folder_copy_attempts(
+        &self,
+        account: &EmailAddress,
+        folder: &str,
+    ) -> StoreResult<Vec<ImapCopyAttempt>> {
+        let Some(found) = self.find(FOLDER, "key", &scoped(account, folder))? else {
+            return Ok(Vec::new());
+        };
+        let prefix = scoped(account, "");
+        self.get_many(ATTEMPT, &self.links(FOLDER, found.id(), "attempts")?)?
+            .iter()
+            .map(|fields| {
+                let message = fields.str("message")?;
+                let message = message.strip_prefix(&prefix).ok_or_else(|| {
+                    StoreError::corrupt(ATTEMPT, fields.id(), "a message of another account")
+                })?;
+                decode(folder, &ProviderMessageId(message.to_owned()), fields)
+            })
+            .collect()
+    }
+
     /// Forget the attempt to copy `message` into the folder that is label
     /// `folder`: its copy was found, or is known not to have been made.
     pub fn remove_imap_copy_attempt(

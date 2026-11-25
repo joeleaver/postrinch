@@ -16,7 +16,7 @@
 //!
 //! Removing copies is [`super::expunge`]'s: `\Deleted` and an expunge.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use postrinch_model::{EmailAddress, ImapPlace, ProviderMessageId};
 
@@ -29,6 +29,11 @@ use super::commands::{CHUNK, shown};
 use super::failure::{Failure, Outcome};
 use super::plan::{Folders, Op};
 use super::record;
+use super::verify::{UNANSWERED, where_of};
+
+/// The messages that keep a copy the search found, which the change
+/// leaves in place, with that copy.
+pub(super) type Anchors = HashMap<ProviderMessageId, ImapPlace>;
 
 /// The connection as one change uses it: what it offers, which folder
 /// is selected, and what waits along the way.
@@ -73,6 +78,14 @@ impl<'c> Exec<'c> {
         let selected = self.conn.select_to_change(&folder.name).await?;
         self.selected = Some((label.to_owned(), selected.uidvalidity));
         Ok(selected.uidvalidity)
+    }
+
+    /// Selects the folder that is label `label` again, even when it is
+    /// selected, and returns its UIDVALIDITY now: for a folder another
+    /// client may have deleted and made again meanwhile.
+    pub(super) async fn reopen(&mut self, folders: &Folders, label: &str) -> Outcome<u32> {
+        self.selected = None;
+        self.open(folders, label).await
     }
 
     /// The label of the selected folder, if one is.
@@ -202,7 +215,7 @@ impl ImapSync {
         account: &EmailAddress,
         folders: &Folders,
         grouped: Grouped,
-        (anchored, verdict): (&HashSet<ProviderMessageId>, &mut Verdict),
+        (anchored, verdict): (&Anchors, &mut Verdict),
     ) -> Outcome<()> {
         for ((label, flag, add), places) in grouped.flags {
             self.flag(exec, account, folders, (&label, flag, add), places)
@@ -238,9 +251,9 @@ impl ImapSync {
             );
         }
         for (label, places) in grouped.deletes {
-            let (go, stay): (Vec<ImapPlace>, Vec<ImapPlace>) = places
-                .into_iter()
-                .partition(|p| anchored.contains(&p.message) || made.landed.contains(&p.message));
+            let (go, stay): (Vec<ImapPlace>, Vec<ImapPlace>) = places.into_iter().partition(|p| {
+                anchored.contains_key(&p.message) || made.landed.contains(&p.message)
+            });
             if stay.iter().any(|p| made.unknown.contains(&p.message)) {
                 verdict.refused.get_or_insert(
                     "the server does not say where it puts a copy, and a message has no \
@@ -254,11 +267,59 @@ impl ImapSync {
                         .to_owned(),
                 );
             }
+            let go = self
+                .still_anchored(exec, account, folders, go, (anchored, &made, verdict))
+                .await?;
             if !go.is_empty() {
                 self.delete(exec, account, folders, &label, go).await?;
             }
         }
         Ok(())
+    }
+
+    /// Of the copies `go` about to be deleted, those whose message still
+    /// keeps a copy: one this change made, or the one the search found
+    /// (`anchored`), searched for again now, just before the delete, as
+    /// another client may have deleted it since (docs/imap.md, "Keeping
+    /// every message safe"). The others stay, and the change waits.
+    async fn still_anchored(
+        &self,
+        exec: &mut Exec<'_>,
+        account: &EmailAddress,
+        folders: &Folders,
+        go: Vec<ImapPlace>,
+        (anchored, made, verdict): (&Anchors, &Made, &mut Verdict),
+    ) -> Outcome<Vec<ImapPlace>> {
+        let mut anchors: Vec<ImapPlace> = go
+            .iter()
+            .filter(|p| !made.landed.contains(&p.message))
+            .filter_map(|p| anchored.get(&p.message))
+            .cloned()
+            .collect();
+        if anchors.is_empty() {
+            return Ok(go);
+        }
+        anchors.sort_by_key(where_of);
+        anchors.dedup_by_key(|p| where_of(p));
+        let checked = self.still_there(exec, account, folders, anchors).await?;
+        let anchor = |p: &ImapPlace| anchored.get(&p.message).map(where_of);
+        let (go, stay): (Vec<ImapPlace>, Vec<ImapPlace>) = go.into_iter().partition(|p| {
+            made.landed.contains(&p.message)
+                || anchor(p).is_some_and(|a| checked.there.contains(&a))
+        });
+        if stay
+            .iter()
+            .any(|p| anchor(p).is_some_and(|a| checked.gone.contains(&a)))
+        {
+            verdict.waits.get_or_insert(
+                "a message's other copy went from the server as the change was made, so \
+                 the copy the change deletes stays; the change is tried again"
+                    .to_owned(),
+            );
+        } else if !stay.is_empty() {
+            verdict.waits.get_or_insert(UNANSWERED.to_owned());
+        }
+        Ok(go)
     }
 
     /// Sets (`add`) or clears `flag` on copies in the folder `label`.

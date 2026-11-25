@@ -381,6 +381,19 @@ fn a_copy_asked_for_is_not_made_again_and_counts_for_nothing_else() {
 }
 
 #[test]
+fn a_move_asked_for_is_not_made_again() {
+    let places = [at("INBOX", 1)];
+    for (to, change) in [
+        (ARCHIVE, MessageChange::remove_label("INBOX")),
+        ("TRASH", MessageChange::add_label("TRASH")),
+    ] {
+        let attempted = [to.to_owned()];
+        let again = plan(&places, &attempted, &change, &folders(true));
+        assert!(matches!(again, Planned::Refused(_)), "{to}: {again:?}");
+    }
+}
+
+#[test]
 fn kept_copies_are_those_neither_moved_nor_deleted() {
     let places = [at("INBOX", 1), at(WORK, 2), at(HOME, 3)];
     let got = ops(plan_kept(

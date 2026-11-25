@@ -42,7 +42,10 @@ pub(super) fn note(
     pass: u64,
     whole: bool,
 ) -> SyncResult<()> {
-    cursor::update(store, account, |c| note_in(c, label, pass, whole))
+    cursor::update(store, account, |c| {
+        note_in(c, label, pass, whole);
+        Ok(())
+    })
 }
 
 fn note_in(cursor: &mut Cursor, label: &str, pass: u64, whole: bool) {
@@ -73,7 +76,7 @@ pub(super) fn settle(
         for id in unread {
             note_in(c, id, pass, false);
         }
-        floor(c, known, pass)
+        Ok(floor(c, known, pass))
     })
 }
 
@@ -131,6 +134,7 @@ pub(super) fn keep_silent(
             c.silent
                 .insert(label.to_owned(), Silent { uidvalidity, tries });
         }
+        Ok(())
     })
 }
 

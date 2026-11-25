@@ -119,10 +119,11 @@ async fn copies_left_marked_are_expunged_once_the_other_mail_is_gone() {
     // That client expunges its own; ours stay marked.
     f.user.expunge("INBOX", b).unwrap();
     f.sync().await;
-    // The next delete there expunges ours left marked with it.
+    // The next send expunges ours left marked, before its own delete
+    // there expunges c@x.
     let report = change(&f, &["c@x"], archive()).await;
     assert_eq!((report.sent, report.refused.len()), (1, 0));
-    assert_eq!(f.server.command_count("EXPUNGE"), 1);
+    assert_eq!(f.server.command_count("EXPUNGE"), 2);
     assert_eq!((count(&f, "INBOX"), count(&f, "Archive")), (0, 2));
     sync_agrees(&f).await;
 }

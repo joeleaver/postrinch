@@ -231,3 +231,69 @@ async fn deleting_a_label_again_copies_nothing_twice() {
     }
     assert_eq!(f.message_count(), 2);
 }
+
+#[tokio::test]
+async fn deleting_a_label_waits_when_its_folder_is_made_again_while_its_mail_is_saved() {
+    let f = fixture_without(&[Extension::Uidplus]).await;
+    f.user.create_standard_folders().unwrap();
+    f.user.create_folder("Work").unwrap();
+    put(&f, "a@x", &["Work"]);
+    f.sync().await;
+    // Once a@x is copied, while the archive is listed for its copy, Work
+    // is made again by another client: new@x comes to have a@x's UID.
+    let user = f.user.clone();
+    f.server.on_next("SELECT", "\"Archive\"", move || {
+        let a = user.messages("Work").unwrap()[0].uid;
+        user.expunge("Work", a).unwrap();
+        user.append("Work", mail(Some("new@x"), "new@x", ""))
+            .unwrap();
+        user.set_uid_validity("Work", 99).unwrap();
+    });
+    let work = f.label_id("Work");
+    let waits = f.sync.delete_label(&f.me, &work).await;
+    assert!(matches!(waits, Err(SyncError::Server { .. })), "{waits:?}");
+    assert!(f.user.folder("Work").is_ok(), "the folder stays");
+    assert_eq!((count(&f, "Work"), count(&f, "Archive")), (1, 1));
+    // Once sync has read the folder again, new@x is saved too.
+    f.sync().await;
+    f.sync.delete_label(&f.me, &work).await.unwrap();
+    assert!(f.user.folder("Work").is_err());
+    assert_eq!(count(&f, "Archive"), 2);
+    f.sync().await;
+    for header in ["a@x", "new@x"] {
+        assert_eq!(f.labels(header), [f.label_id("Archive")], "{header}");
+    }
+}
+
+#[tokio::test]
+async fn a_label_with_folders_under_it_is_not_deleted() {
+    let f = fixture().await;
+    f.user.create_standard_folders().unwrap();
+    f.user.create_folder("Work").unwrap();
+    f.user.create_folder("Work/Old").unwrap();
+    put(&f, "a@x", &["Work"]);
+    put(&f, "b@x", &["Work/Old"]);
+    f.sync().await;
+    let refused = f.sync.delete_label(&f.me, &f.label_id("Work")).await;
+    let why = format!("{:?}", refused.unwrap_err());
+    assert!(
+        why.contains("under it") && why.contains("Work/Old"),
+        "{why}"
+    );
+    assert!(f.user.folder("Work").is_ok() && f.user.folder("Work/Old").is_ok());
+    assert_eq!(
+        (
+            count(&f, "Work"),
+            count(&f, "Work/Old"),
+            count(&f, "Archive")
+        ),
+        (1, 1, 0)
+    );
+    // The folder under it is a label of its own, and goes as one.
+    f.sync
+        .delete_label(&f.me, &f.label_id("Work/Old"))
+        .await
+        .unwrap();
+    assert!(f.user.folder("Work/Old").is_err());
+    assert_eq!(count(&f, "Archive"), 1);
+}

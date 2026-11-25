@@ -34,7 +34,7 @@ use super::folder_error::{FolderError, FolderResult};
 use super::folders::{GMAIL, Planned, plan, view_of_all};
 use super::names::sendable;
 use super::wire::Conn;
-use super::{pending, reads};
+use super::{changes, pending, reads};
 use crate::SyncResult;
 use crate::google::{Phase, Progress, ProgressFn, SyncReport};
 
@@ -249,5 +249,7 @@ fn finish(
     let mut known = unread.clone();
     known.extend(keep.iter().cloned());
     let floor = reads::settle(store, account, &known, &unread, pass)?;
-    pending::resolve(store, account, floor)
+    let removed = pending::resolve(store, account, floor)?;
+    changes::sweep_attempts(store, account)?;
+    Ok(removed)
 }

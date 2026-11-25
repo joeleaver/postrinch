@@ -72,26 +72,67 @@ pub(super) struct Marked {
 }
 
 pub(super) fn read(store: &Store, account: &EmailAddress) -> SyncResult<Cursor> {
-    match store.sync_cursor(account)? {
+    parse(account, store.sync_cursor(account)?)
+}
+
+fn parse(account: &EmailAddress, raw: Option<String>) -> SyncResult<Cursor> {
+    match raw {
         None => Ok(Cursor::default()),
         Some(raw) => serde_json::from_str(&raw)
             .map_err(|e| SyncError::Mime(format!("the IMAP sync cursor of {account}: {e}"))),
     }
 }
 
-pub(super) fn write(store: &Store, account: &EmailAddress, cursor: &Cursor) -> SyncResult<()> {
-    let raw = serde_json::to_string(cursor).map_err(|e| SyncError::Mime(e.to_string()))?;
-    Ok(store.set_sync_cursor(account, Some(&raw))?)
-}
-
-/// Reads the cursor, changes it and writes it back.
+/// Reads the cursor, changes it and writes it back, with no other update
+/// of it in between ([`Store::update_sync_cursor`]): the passes, the
+/// outbox and outgoing mail each change their part of it from their own
+/// connection, and none loses another's change. `change` may use the
+/// store, but must not update the cursor itself.
 pub(super) fn update<T>(
     store: &Store,
     account: &EmailAddress,
-    change: impl FnOnce(&mut Cursor) -> T,
+    change: impl FnOnce(&mut Cursor) -> SyncResult<T>,
 ) -> SyncResult<T> {
-    let mut cursor = read(store, account)?;
-    let out = change(&mut cursor);
-    write(store, account, &cursor)?;
-    Ok(out)
+    store.update_sync_cursor(account, |raw| {
+        let mut cursor = parse(account, raw)?;
+        let out = change(&mut cursor)?;
+        let raw = serde_json::to_string(&cursor).map_err(|e| SyncError::Mime(e.to_string()))?;
+        Ok((Some(raw), out))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use postrinch_model::{Account, Provider};
+
+    use super::*;
+
+    #[test]
+    fn updates_from_several_lanes_lose_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let me = EmailAddress::parse("ada@example.org").unwrap();
+        store
+            .put_account(&Account::new(me.clone(), Provider::Imap))
+            .unwrap();
+        std::thread::scope(|scope| {
+            for lane in 0..4u32 {
+                let (store, me) = (&store, &me);
+                scope.spawn(move || {
+                    for uid in 0..100 {
+                        update(store, me, |c| {
+                            c.pass += 1;
+                            let marked = c.marked.entry(format!("f{lane}")).or_default();
+                            marked.uids.insert(uid);
+                            Ok(())
+                        })
+                        .unwrap();
+                    }
+                });
+            }
+        });
+        let cursor = read(&store, &me).unwrap();
+        assert_eq!(cursor.pass, 400);
+        assert!(cursor.marked.values().all(|m| m.uids.len() == 100));
+    }
 }

@@ -12,19 +12,23 @@
 //! nothing waits for sync to read past a guess.
 //!
 //! A message without a `Message-ID` cannot be found by one, so its attempt
-//! stays until sync stores its copy there, or the folder goes: it is
-//! copied there at most once.
+//! stays until sync has read the folder past the attempt's UIDNEXT (and
+//! stored the copy, if made, under an id of its own), or the folder goes:
+//! it is copied there at most once until then. Attempts nothing would
+//! settle (their message has no copy left on the server) are swept at the
+//! end of each pass.
 
 use std::collections::{BTreeMap, HashSet};
 
-use postrinch_model::{EmailAddress, ImapCopyAttempt, ImapPlace, ProviderMessageId};
+use postrinch_model::{EmailAddress, ImapCopyAttempt, ImapFolder, ImapPlace, ProviderMessageId};
 use postrinch_store::Store;
 
 use super::super::ImapSync;
+use super::super::cursor::{self, Cursor};
 use super::super::places::{DELETED, Folder};
 use super::apply::{Exec, known};
 use super::commands::shown;
-use super::failure::{Outcome, refusal};
+use super::failure::{Failure, Outcome, refusal};
 use super::plan::Folders;
 use super::record;
 use crate::SyncResult;
@@ -51,28 +55,78 @@ impl Made {
     }
 }
 
+/// Whether sync has read the folder `folder` (as kept, with the sync
+/// cursor `cursor`) past where `attempt`'s copy would be: at the same
+/// UIDVALIDITY, its position moved past the attempt's UIDNEXT, and no
+/// message from there is owed its headers. Every UID below that position
+/// is then stored, so the copy, if the server made it, is kept by sync:
+/// under the message's id, or, for a message without a `Message-ID`,
+/// under an id of its own, which no attempt can be matched to.
+fn read_past(folder: &ImapFolder, cursor: &Cursor, attempt: &ImapCopyAttempt) -> bool {
+    if folder.uidvalidity != attempt.uidvalidity || folder.uidnext <= attempt.uidnext {
+        return false;
+    }
+    let owed = cursor
+        .silent
+        .get(&attempt.folder)
+        .filter(|s| s.uidvalidity == attempt.uidvalidity)
+        .is_some_and(|s| s.tries.keys().any(|&uid| uid >= attempt.uidnext));
+    !owed
+}
+
 /// The attempts kept for `message`, less those sync or a change has since
-/// found the copy of: a live copy in the folder at or past the attempt's
-/// UIDNEXT, or at another UIDVALIDITY (the folder read whole again).
+/// settled, which go: a live copy in the folder at or past the attempt's
+/// UIDNEXT, or at another UIDVALIDITY (the folder read whole again), or
+/// sync having read the folder past it ([`read_past`]), the copy found or
+/// not.
 pub(super) fn attempts(
     store: &Store,
     account: &EmailAddress,
     message: &ProviderMessageId,
 ) -> SyncResult<Vec<ImapCopyAttempt>> {
+    let kept = store.imap_copy_attempts(account, message)?;
+    if kept.is_empty() {
+        return Ok(kept);
+    }
     let places = store.imap_message_places(account, message)?;
+    let cursor = cursor::read(store, account)?;
     let mut open = Vec::new();
-    for attempt in store.imap_copy_attempts(account, message)? {
+    for attempt in kept {
         let found = places.iter().any(|p| {
             p.folder == attempt.folder
                 && !p.flags.iter().any(|f| f.eq_ignore_ascii_case(DELETED))
                 && (p.uidvalidity != attempt.uidvalidity || p.uid >= attempt.uidnext)
         });
-        match found {
+        let past = store
+            .imap_folder(account, &attempt.folder)?
+            .is_some_and(|f| read_past(&f, &cursor, &attempt));
+        match found || past {
             true => store.remove_imap_copy_attempt(account, &attempt.folder, message)?,
             false => open.push(attempt),
         }
     }
     Ok(open)
+}
+
+/// At the end of a pass: drops the attempts nothing would settle, so
+/// they never pile up: those of messages with no copy on the server that
+/// sync knows (expunged everywhere, or never stored), from which no copy
+/// could be made again, and those sync has read past ([`read_past`]),
+/// whatever their message. Those of a folder that went went with it.
+pub(in crate::imap::sync) fn sweep(store: &Store, account: &EmailAddress) -> SyncResult<()> {
+    let cursor = cursor::read(store, account)?;
+    for folder in store.imap_folders(account)? {
+        for attempt in store.imap_folder_copy_attempts(account, &folder.label_id)? {
+            if read_past(&folder, &cursor, &attempt)
+                || store
+                    .imap_message_places(account, &attempt.message)?
+                    .is_empty()
+            {
+                store.remove_imap_copy_attempt(account, &attempt.folder, &attempt.message)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Writes an attempt to copy each of `places`' messages into the folder
@@ -100,8 +154,9 @@ impl ImapSync {
     /// Settles the attempts kept for `messages` with a live listing of each
     /// folder they were made in, as the module says: copies found are
     /// recorded, attempts found not made go, and those of a folder whose
-    /// UIDVALIDITY changed go too (sync reads it whole). A listing the
-    /// server refuses stops the change, to be tried again.
+    /// UIDVALIDITY changed go too (sync reads it whole), as do those of a
+    /// folder the server will not open. A listing the server refuses stops
+    /// the change, to be tried again.
     pub(super) async fn settle_attempts(
         &self,
         exec: &mut Exec<'_>,
@@ -129,12 +184,16 @@ impl ImapSync {
         for (label, attempts) in by_folder {
             let (current, stale): (Vec<_>, Vec<_>) = match folders.get(&label) {
                 None => (Vec::new(), attempts),
-                Some(_) => {
-                    let validity = exec.open(folders, &label).await?;
-                    attempts
+                // A folder the server will not open (deleted there since
+                // sync read it, say) holds no copy: its attempts go, and a
+                // later change to the message is not held by them.
+                Some(_) => match exec.open(folders, &label).await {
+                    Ok(validity) => attempts
                         .into_iter()
-                        .partition(|a| a.uidvalidity == validity)
-                }
+                        .partition(|a| a.uidvalidity == validity),
+                    Err(Failure::Refused(_) | Failure::Declined(_)) => (Vec::new(), attempts),
+                    Err(other) => return Err(other),
+                },
             };
             if let Some(from) = current.iter().map(|a| a.uidnext).min() {
                 let validity = current[0].uidvalidity;

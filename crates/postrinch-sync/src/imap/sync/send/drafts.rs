@@ -189,7 +189,9 @@ impl ImapSync {
         if uids.is_empty() {
             return Ok(());
         }
-        let deleted = mailbox::delete(conn, &uids).await?;
+        let deleted = self
+            .delete_copies(conn, account, (drafts.label.clone(), uidvalidity), &uids)
+            .await?;
         if let Some(label) = drafts.label.clone() {
             self.forget(account, (label, uidvalidity), uids, old, deleted)
                 .await?;

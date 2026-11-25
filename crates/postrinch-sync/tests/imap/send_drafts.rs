@@ -87,6 +87,13 @@ async fn without_uidplus_another_deleted_message_is_left_for_its_owner() {
     // Gone from the store, as a message sync sees marked.
     f.sync().await;
     assert!(f.store.message(&f.me, &old_id).unwrap().is_none());
+    // Its owner expunges theirs: ours, still known as ours, go with the
+    // next draft's expunge.
+    f.user.expunge("Drafts", drafts[0].uid).unwrap();
+    let later = header_of(f.folder("Drafts").last().unwrap());
+    keep(&f, "Thursday, later still", Some(&later)).await;
+    assert_eq!(f.imap_commands("EXPUNGE"), 1);
+    assert_eq!(f.folder("Drafts").len(), 1);
 }
 
 #[tokio::test]

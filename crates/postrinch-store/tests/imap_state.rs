@@ -326,6 +326,24 @@ fn copy_attempts_are_kept_per_folder_and_go_with_it() {
     store.put_imap_copy_attempt(&me, &later).unwrap();
     let kept = store.imap_copy_attempts(&me, &m1).unwrap();
     assert!(kept.contains(&later) && kept.len() == 2, "{kept:?}");
+    store
+        .put_imap_copy_attempt(&me, &attempt("f0123456789ab", "m2"))
+        .unwrap();
+    let mut in_folder = store
+        .imap_folder_copy_attempts(&me, "f0123456789ab")
+        .unwrap();
+    in_folder.sort_by(|a, b| a.message.0.cmp(&b.message.0));
+    assert_eq!(in_folder, [later.clone(), attempt("f0123456789ab", "m2")]);
+    assert!(
+        store
+            .imap_folder_copy_attempts(&me, "f000000000000")
+            .unwrap()
+            .is_empty()
+    );
+    let m2 = ProviderMessageId("m2".into());
+    store
+        .remove_imap_copy_attempt(&me, "f0123456789ab", &m2)
+        .unwrap();
     let missing = store.put_imap_copy_attempt(&me, &attempt("f000000000000", "m1"));
     assert!(matches!(missing, Err(StoreError::UnknownImapFolder { .. })));
     store.remove_imap_copy_attempt(&me, "INBOX", &m1).unwrap();

@@ -36,6 +36,7 @@ use std::collections::HashSet;
 use postrinch_model::{EmailAddress, ProviderMessageId};
 use postrinch_store::OutboxEntry;
 
+pub(super) use self::attempts::sweep as sweep_attempts;
 use self::failure::{Failure, GIVE_UP};
 use self::plan::Folders;
 use super::folders::GMAIL;
@@ -107,6 +108,7 @@ impl ImapSync {
         let result = self
             .over(account, Lane::Sync, async |conn| {
                 let mut folders = self.folders(conn, account).await?;
+                self.settle_marks(conn, account, &folders).await?;
                 let mut behind = Behind::default();
                 for run in runs(waiting, BATCH) {
                     let mut free = Vec::with_capacity(run.len());

@@ -3,9 +3,11 @@
 //! against mock providers. No test touches a real mailbox or provider.
 
 mod changes;
+mod changes_attempts;
 mod changes_fallbacks;
 mod changes_keeping;
 mod changes_labels;
+mod changes_marks;
 mod changes_refusals;
 mod changes_safety;
 mod changes_stale;

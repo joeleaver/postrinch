@@ -18,17 +18,25 @@
 //! Mail another client marked `\Deleted` in the folder goes with it, as
 //! that client's next expunge would take it.
 //!
+//! A folder with folders under it is not deleted: some servers delete
+//! them with it, others leave it as a name that holds no mail, and each
+//! is a label of its own (renaming moves them with it).
+//!
 //! The folder is listed again after the copies, and anything new copied
-//! too, until a listing finds nothing new; then it is deleted. Mail that
+//! too, until a listing finds nothing new; then it is deleted. Each
+//! listing opens the folder afresh: should its UIDVALIDITY have changed
+//! since the first (another client deleted and made it again), the UIDs
+//! seen name other mail now, and the deletion waits for sync. Mail that
 //! arrives between that listing and the `DELETE` is lost with the folder:
 //! IMAP has no way to delete a folder only if nothing came in.
 
 use std::collections::{HashMap, HashSet};
 
-use postrinch_model::{EmailAddress, ImapPlace, ProviderMessageId};
+use postrinch_model::{EmailAddress, ImapFolder, ImapPlace, ProviderMessageId};
 
 use super::super::ImapSync;
 use super::super::places::Folder;
+use super::super::wire::Conn;
 use super::apply::{Exec, known};
 use super::commands::{CHUNK, shown};
 use super::failure::{Failure, Outcome};
@@ -49,6 +57,7 @@ impl ImapSync {
     pub async fn delete_label(&self, account: &EmailAddress, id: &str) -> SyncResult<()> {
         self.on_folders(account, async |conn, folders| {
             let folder = changeable(folders, id)?;
+            self.childless(conn, &folder).await?;
             let mut exec = Exec::new(conn);
             if !folders.keeps_everything() {
                 self.save_mail(&mut exec, account, folders, id).await?;
@@ -88,6 +97,38 @@ impl ImapSync {
         .await
     }
 
+    /// Refuses to delete a folder with folders under it: some servers
+    /// delete those with it, mail and all, and the labels under a label
+    /// are labels of their own, as renaming keeps them (it moves them
+    /// with it). LIST, not the folders sync keeps, says what is under
+    /// it, as sync leaves some folders out.
+    async fn childless(&self, conn: &mut Conn, folder: &ImapFolder) -> Outcome<()> {
+        let Some(delimiter) = folder.delimiter else {
+            return Ok(());
+        };
+        let under = format!("{}{delimiter}", folder.name);
+        let listed = conn.session_mut().list_folders().await?;
+        let mut children: Vec<String> = listed
+            .iter()
+            .filter(|f| f.name.starts_with(&under))
+            .map(|f| shown(&f.name))
+            .collect();
+        if children.is_empty() {
+            return Ok(());
+        }
+        children.sort();
+        let more = match children.len() {
+            1 => String::new(),
+            n => format!(" and {} more", n - 1),
+        };
+        Err(Failure::Refused(format!(
+            "{} has folders under it ({}{more}), which some servers delete with it; \
+             delete or move those first",
+            shown(&folder.name),
+            children[0]
+        )))
+    }
+
     /// Copies to the archive every message the folder `label` holds that
     /// has no copy elsewhere the server still has, listing the folder
     /// again until nothing new is there. A message whose copy the server
@@ -100,9 +141,20 @@ impl ImapSync {
         label: &str,
     ) -> Outcome<()> {
         let name = known(folders, label)?.name.clone();
+        // The UIDs seen are the folder's at the UIDVALIDITY of the first
+        // listing: should another client delete the folder and make it
+        // again meanwhile, its new mail has UIDs seen already.
+        let mut first: Option<u32> = None;
         let mut seen: HashSet<u32> = HashSet::new();
         for _ in 0..LISTINGS {
-            let validity = exec.open(folders, label).await?;
+            let validity = exec.reopen(folders, label).await?;
+            if *first.get_or_insert(validity) != validity {
+                return Err(Failure::Waits(format!(
+                    "the folder {} changed on the server while its mail was saved; the \
+                     label is deleted once sync has read it",
+                    shown(&name)
+                )));
+            }
             let Some(listed) = exec.conn.undeleted().await? else {
                 return Err(Failure::Declined(format!(
                     "the server would not list the mail in {}, so it cannot be saved \

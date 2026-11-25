@@ -229,22 +229,47 @@ pub(super) fn plan(
         .map(|l| l.provider_id())
         .into_iter()
         .find(|b| adds.contains(b));
-    match bin {
-        Some(bin) => into_bin(&live, bin, folders, &mut ops),
-        None => match relabel(&live, attempted, &adds, &removes, folders, &mut ops) {
-            Ok(()) => {}
-            Err(other) => return other,
-        },
+    let planned = match bin {
+        Some(bin) => into_bin(&live, attempted, bin, folders, &mut ops),
+        None => relabel(&live, attempted, &adds, &removes, folders, &mut ops),
+    };
+    match planned {
+        Ok(()) => Planned::Ops(ops),
+        Err(other) => other,
     }
-    Planned::Ops(ops)
+}
+
+/// A move into `to` that an earlier send asked for and nothing has
+/// settled: its copy may well be there, and is not made again. Only a
+/// message without a `Message-ID` keeps such an attempt into a change
+/// ([`super::attempts`]), and nothing can confirm that copy, so its other
+/// copies may not be deleted on the strength of it: the change is refused
+/// for it, and the message stays in both folders.
+fn attempted_move(to: &str, attempted: &[String], folders: &Folders) -> Result<(), Planned> {
+    if !attempted.iter().any(|a| a == to) {
+        return Ok(());
+    }
+    let name = folders.get(to).map_or("", |f| f.name.as_str());
+    Err(Planned::Refused(format!(
+        "a copy of a message was asked for in {} and the server never said it was made; \
+         the message has no Message-ID to find it by, so it is not moved again",
+        shown(name)
+    )))
 }
 
 /// Trash or Junk: one copy moved there (or the one there kept), every
-/// other deleted.
-fn into_bin(live: &[&ImapPlace], bin: &str, folders: &Folders, ops: &mut Vec<Op>) {
+/// other deleted; a move there asked for before is not made again.
+fn into_bin(
+    live: &[&ImapPlace],
+    attempted: &[String],
+    bin: &str,
+    folders: &Folders,
+    ops: &mut Vec<Op>,
+) -> Result<(), Planned> {
     let kept = match live.iter().find(|p| p.folder == bin) {
         Some(kept) => *kept,
         None => {
+            attempted_move(bin, attempted, folders)?;
             let from = live
                 .iter()
                 .find(|p| !folders.holds_everything(&p.folder))
@@ -263,6 +288,7 @@ fn into_bin(live: &[&ImapPlace], bin: &str, folders: &Folders, ops: &mut Vec<Op>
             });
         }
     }
+    Ok(())
 }
 
 /// Labels added and removed: moves where one goes and another comes,
@@ -322,6 +348,7 @@ fn relabel(
         let Some(home) = home else {
             return Err(Planned::NeedsArchive);
         };
+        attempted_move(&home, attempted, folders)?;
         moves.push((unpaired.remove(i), home));
     }
     deletes.extend(unpaired);

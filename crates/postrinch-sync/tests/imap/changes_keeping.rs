@@ -1,12 +1,14 @@
 //! A copy that only seems to keep a message never lets another go: a
 //! `\All` folder that is a view of the others (anywhere but Gmail), or a
 //! copy elsewhere that another client deleted or whose folder's
-//! UIDVALIDITY changed since sync read it. Nor is mail filed in a view.
+//! UIDVALIDITY changed since sync read it, or that the server will not
+//! say is there. Nor is mail filed in a view.
 
-use postrinch_mailtest::{ImapConfig, SpecialUse};
+use postrinch_mailtest::{ImapConfig, ImapFault, SpecialUse};
 use postrinch_model::{FolderRoles, MessageChange};
+use postrinch_sync::SyncError;
 
-use super::changes_support::{change, count, put, sync_agrees};
+use super::changes_support::{change, count, put, record, sync_agrees, uid_of};
 use super::sync_support::{Fixture, fixture, fixture_with};
 
 fn archive() -> MessageChange {
@@ -101,18 +103,27 @@ async fn a_copy_whose_folder_changed_since_sync_does_not_keep_the_message() {
     f.user.create_folder("Work").unwrap();
     put(&f, "a@x", &["INBOX", "Work"]);
     f.sync().await;
-    // The UIDs sync read in Work name other messages now.
+    // The UIDs sync read in Work name other messages now: its copy neither
+    // keeps the message nor is evidence that there is none, so the inbox
+    // copy is neither deleted nor filed in the archive.
     f.user.set_uid_validity("Work", 99).unwrap();
-    let report = change(&f, &["a@x"], archive()).await;
+    record(&f, &["a@x"], archive());
+    let waits = f.sync.send_outbox(&f.me).await;
+    assert!(matches!(waits, Err(SyncError::Server { .. })), "{waits:?}");
+    assert_eq!(
+        (count(&f, "INBOX"), count(&f, "Work"), count(&f, "Archive")),
+        (1, 1, 0)
+    );
+    // Once sync has read Work again, its copy keeps the message.
+    f.sync().await;
+    let report = f.sync.send_outbox(&f.me).await.unwrap();
     assert_eq!((report.sent, report.refused.len()), (1, 0));
     assert_eq!(
         (count(&f, "INBOX"), count(&f, "Work"), count(&f, "Archive")),
-        (0, 1, 1)
+        (0, 1, 0)
     );
     f.sync().await;
-    let mut labels = vec![f.label_id("Archive"), f.label_id("Work")];
-    labels.sort();
-    assert_eq!(f.labels("a@x"), labels);
+    assert_eq!(f.labels("a@x"), [f.label_id("Work")]);
     assert_eq!(f.message_count(), 1);
 }
 
@@ -132,4 +143,65 @@ async fn mail_is_not_filed_in_a_folder_that_has_become_a_view() {
     assert!(report.refused[0].contains("a view"), "{:?}", report.refused);
     assert_eq!(count(&f, VIEW), 0, "nothing copied into the view");
     assert_eq!(f.labels("a@x"), ["INBOX"]);
+}
+
+#[tokio::test]
+async fn a_copy_the_server_will_not_say_is_there_does_not_keep_the_message() {
+    let f = fixture().await;
+    f.user.create_standard_folders().unwrap();
+    f.user.create_folder("Work").unwrap();
+    put(&f, "a@x", &["INBOX", "Work"]);
+    f.sync().await;
+    // The inbox copy may be gone: Work's is neither deleted nor filed.
+    f.server.fail_next_matching(
+        "UID SEARCH",
+        "UNDELETED",
+        1,
+        ImapFault::No("Not now".into()),
+    );
+    record(
+        &f,
+        &["a@x"],
+        MessageChange::remove_label(f.label_id("Work")),
+    );
+    let waits = f.sync.send_outbox(&f.me).await;
+    assert!(matches!(waits, Err(SyncError::Server { .. })), "{waits:?}");
+    assert_eq!(
+        (count(&f, "INBOX"), count(&f, "Work"), count(&f, "Archive")),
+        (1, 1, 0)
+    );
+    let report = f.sync.send_outbox(&f.me).await.unwrap();
+    assert_eq!((report.sent, report.refused.len()), (1, 0));
+    assert_eq!(
+        (count(&f, "INBOX"), count(&f, "Work"), count(&f, "Archive")),
+        (1, 0, 0)
+    );
+    sync_agrees(&f).await;
+}
+
+#[tokio::test]
+async fn a_copy_deleted_just_before_the_deletes_does_not_keep_the_message() {
+    let f = fixture().await;
+    f.user.create_standard_folders().unwrap();
+    for folder in ["Work", "Home"] {
+        f.user.create_folder(folder).unwrap();
+    }
+    put(&f, "a@x", &["INBOX", "Work", "Home"]);
+    f.sync().await;
+    // The inbox copy is found, then deleted by another client as the
+    // first of the other two goes.
+    let inbox = uid_of(&f, "INBOX", "a@x");
+    let user = f.user.clone();
+    f.server.on_next("UID STORE", "", move || {
+        user.expunge("INBOX", inbox).unwrap();
+    });
+    let out = MessageChange {
+        remove_labels: vec![f.label_id("Work"), f.label_id("Home")],
+        ..MessageChange::default()
+    };
+    record(&f, &["a@x"], out);
+    let waits = f.sync.send_outbox(&f.me).await;
+    assert!(matches!(waits, Err(SyncError::Server { .. })), "{waits:?}");
+    assert_eq!(count(&f, "INBOX"), 0);
+    assert_eq!(count(&f, "Work") + count(&f, "Home"), 1, "one copy is left");
 }

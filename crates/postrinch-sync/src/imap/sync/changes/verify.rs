@@ -16,7 +16,7 @@
 //! message in no folder goes instead, so it is never lost. The checks are
 //! one `UID SEARCH` per folder for every message of the change at once.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use postrinch_model::{EmailAddress, ImapPlace, MessageChange, ProviderMessageId};
 
@@ -44,6 +44,11 @@ pub(super) struct Checked {
     pub gone: HashSet<Where>,
 }
 
+/// Why a message's deletes wait when the search could not say whether
+/// its other copies are there.
+pub(super) const UNANSWERED: &str = "the server would not say whether a message's other copy \
+     is still there, so the copy the change deletes stays; the change is tried again";
+
 fn deletes(ops: &[Op]) -> bool {
     ops.iter().any(|op| matches!(op, Op::Delete { .. }))
 }
@@ -57,10 +62,13 @@ impl ImapSync {
     /// Makes sure each message whose ops copy, move or delete do so from
     /// what the server has, as the module says, and returns the messages
     /// that keep a copy the server was seen to have, which the change
-    /// leaves in place. A message whose change only deletes and that keeps
-    /// none has a copy moved where a message in no folder goes instead (the
-    /// archive, or from Trash or Junk the inbox), or, where that is the
-    /// folder it is in, keeps its copies and is refused.
+    /// leaves in place, with that copy. A message whose change only
+    /// deletes and whose other copies the search found all gone has a copy
+    /// moved where a message in no folder goes instead (the archive, or
+    /// from Trash or Junk the inbox), or, where that is the folder it is
+    /// in, keeps its copies and is refused. Where the server would not say
+    /// (a folder it would not open or search, or whose UIDVALIDITY
+    /// changed), its deletes wait.
     pub(super) async fn keep_one_copy(
         &self,
         exec: &mut Exec<'_>,
@@ -69,11 +77,11 @@ impl ImapSync {
         (held, change): (&[Held], &MessageChange),
         planned: &mut [Vec<Op>],
         verdict: &mut Verdict,
-    ) -> Outcome<HashSet<ProviderMessageId>> {
+    ) -> Outcome<HashMap<ProviderMessageId, ImapPlace>> {
         let at_risk: Vec<usize> = (0..planned.len())
             .filter(|&i| deletes(&planned[i]) || transfers(&planned[i]))
             .collect();
-        let mut anchored = HashSet::new();
+        let mut anchored = HashMap::new();
         if at_risk.is_empty() {
             return Ok(anchored);
         }
@@ -98,14 +106,20 @@ impl ImapSync {
                     .plan_one(exec.conn, account, folders, &left, change, verdict)
                     .await?;
             }
-            let kept = kept(&left.places, &planned[i], folders)
-                .into_iter()
-                .find(|p| checked.there.contains(&where_of(p)));
-            if let Some(kept) = kept {
-                anchored.insert(kept.message.clone());
+            let kept = kept(&left.places, &planned[i], folders);
+            if let Some(found) = kept.iter().find(|p| checked.there.contains(&where_of(p))) {
+                anchored.insert(found.message.clone(), (*found).clone());
             } else if deletes(&planned[i]) && !transfers(&planned[i]) {
-                self.file_instead(exec, account, folders, &mut planned[i], verdict)
-                    .await?;
+                if kept.is_empty() {
+                    // The search found every other copy gone.
+                    self.file_instead(exec, account, folders, &mut planned[i], verdict)
+                        .await?;
+                } else {
+                    // A refused search is no evidence either way: the
+                    // copies stay as they are, and the change waits.
+                    planned[i].retain(|op| !matches!(op, Op::Delete { .. }));
+                    verdict.waits.get_or_insert(UNANSWERED.to_owned());
+                }
             }
         }
         Ok(anchored)

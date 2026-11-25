@@ -3,11 +3,15 @@
 //! its `Message-ID`, and deleting copies of one by UID; and keeping the
 //! store's places in step with what they did.
 
+use std::collections::HashSet;
+
 use postrinch_model::{
     EmailAddress, FolderRole, ImapPlace, ImapSettings, ProviderMessageId, SystemLabel,
 };
+use postrinch_store::Store;
 
 use super::super::folder_error::FolderError;
+use super::super::marks;
 use super::super::names::Command;
 use super::super::pending;
 use super::super::places::{self, DELETED};
@@ -239,34 +243,91 @@ pub(super) async fn find(conn: &mut Conn, header: &str) -> SyncResult<Vec<u32>> 
     }
 }
 
-/// Deletes the copies `uids` in the selected folder: `\Deleted`, then
-/// `UID EXPUNGE` (UIDPLUS); without UIDPLUS a plain `EXPUNGE`, but only
-/// when no other copy there is marked `\Deleted`.
-///
-/// Without UIDPLUS this has a race no client can close: another client
-/// may mark a message `\Deleted` between the `UID SEARCH DELETED` and the
-/// `EXPUNGE`, which then takes it too. It only goes sooner than its owner
-/// would have expunged it, as that client meant it to go (docs/imap.md,
-/// "Writing and sending").
-pub(super) async fn delete(conn: &mut Conn, uids: &[u32]) -> SyncResult<Deleted> {
-    let set = uid_set(uids);
-    let mark = Command::plain(format!("UID STORE {set} +FLAGS.SILENT (\\Deleted)"));
-    expect_ok(conn, "deleting a message", &mark).await?;
-    if conn.session_mut().capabilities().uidplus() {
-        let expunge = Command::plain(format!("UID EXPUNGE {set}"));
-        expect_ok(conn, "deleting a message", &expunge).await?;
-        return Ok(Deleted::Expunged);
+impl ImapSync {
+    /// Deletes the copies `uids` in the selected folder, which sync keeps
+    /// as `label` (if it keeps it yet) at UIDVALIDITY `uidvalidity`:
+    /// `\Deleted`, then `UID EXPUNGE` (UIDPLUS); without UIDPLUS a plain
+    /// `EXPUNGE`, but only when nothing else is marked `\Deleted` there
+    /// but Postrinch's own earlier marks, which go with it. The copies are
+    /// noted as marked by Postrinch before they are marked (`marks`), so a
+    /// mark left by a failure before the expunge is still known as ours,
+    /// and a later expunge there takes it.
+    ///
+    /// Without UIDPLUS this has a race no client can close: another client
+    /// may mark a message `\Deleted` between the `UID SEARCH DELETED` and
+    /// the `EXPUNGE`, which then takes it too. It only goes sooner than its
+    /// owner would have expunged it, as that client meant it to go
+    /// (docs/imap.md, "Writing and sending").
+    pub(super) async fn delete_copies(
+        &self,
+        conn: &mut Conn,
+        account: &EmailAddress,
+        (label, uidvalidity): (Option<String>, u32),
+        uids: &[u32],
+    ) -> SyncResult<Deleted> {
+        let set = uid_set(uids);
+        let ours = uids.to_vec();
+        let note = |uids: Vec<u32>| {
+            self.on_marks(account, &label, move |s, a, l| {
+                marks::note(s, a, (l, uidvalidity), &uids)
+            })
+        };
+        note(ours.clone()).await?;
+        let mark = Command::plain(format!("UID STORE {set} +FLAGS.SILENT (\\Deleted)"));
+        expect_ok(conn, "deleting a message", &mark).await?;
+        // Again, now that the server has them: a check of the folder by the
+        // outbox's connection may have dropped them while in flight.
+        note(ours.clone()).await?;
+        if conn.session_mut().capabilities().uidplus() {
+            let expunge = Command::plain(format!("UID EXPUNGE {set}"));
+            expect_ok(conn, "deleting a message", &expunge).await?;
+            self.on_marks(account, &label, move |s, a, l| {
+                marks::forget(s, a, (l, uidvalidity), &ours)
+            })
+            .await?;
+            return Ok(Deleted::Expunged);
+        }
+        let marked: HashSet<u32> = match conn.uid_search("DELETED").await {
+            Ok(Some(marked)) => marked.into_iter().collect(),
+            Ok(None) => return Ok(Deleted::Marked),
+            Err(e) => return Err(folder_error(conn, e)),
+        };
+        let m = marked.clone();
+        let left = self
+            .on_marks(account, &label, move |s, a, l| {
+                marks::ours(s, a, (l, uidvalidity), &m)
+            })
+            .await?
+            .unwrap_or_default();
+        if marked
+            .iter()
+            .any(|uid| !uids.contains(uid) && !left.contains(uid))
+        {
+            return Ok(Deleted::Marked);
+        }
+        expect_ok(conn, "deleting a message", &Command::plain("EXPUNGE")).await?;
+        self.on_marks(account, &label, move |s, a, l| {
+            marks::expunged(s, a, (l, uidvalidity), &left)?;
+            marks::forget(s, a, (l, uidvalidity), &ours)
+        })
+        .await?;
+        Ok(Deleted::Expunged)
     }
-    let marked = match conn.uid_search("DELETED").await {
-        Ok(Some(marked)) => marked,
-        Ok(None) => return Ok(Deleted::Marked),
-        Err(e) => return Err(folder_error(conn, e)),
-    };
-    if marked.iter().any(|uid| !uids.contains(uid)) {
-        return Ok(Deleted::Marked);
+
+    /// Runs `call` on Postrinch's marks in the folder sync keeps as
+    /// `label`; nothing, where sync does not keep it yet.
+    async fn on_marks<T: Send + 'static>(
+        &self,
+        account: &EmailAddress,
+        label: &Option<String>,
+        call: impl FnOnce(&Store, &EmailAddress, &str) -> SyncResult<T> + Send + 'static,
+    ) -> SyncResult<Option<T>> {
+        let Some(label) = label.clone() else {
+            return Ok(None);
+        };
+        let a = account.clone();
+        self.blocking(move |s| call(s, &a, &label).map(Some)).await
     }
-    expect_ok(conn, "deleting a message", &Command::plain("EXPUNGE")).await?;
-    Ok(Deleted::Expunged)
 }
 
 /// Sends a command that must succeed.
