@@ -18,6 +18,9 @@ pub enum ImapFault {
     No(String),
     /// Answer `BAD` with this text without running the command.
     Bad(String),
+    /// Answer `OK` with this text without running the command: an IDLE
+    /// the server ends as soon as it is asked, for example.
+    Ok(String),
     /// Close the connection as soon as the command arrives, without
     /// running it or answering.
     DisconnectBefore,

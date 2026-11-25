@@ -4,81 +4,24 @@
 //! is made again after a growing wait; a busy server is waited out and
 //! never asks the person to sign in; a server without IDLE is polled; a
 //! removed account's IDLE goes, and comes back when it is added again;
-//! and a connection limit makes the IDLE give way to the others.
+//! and a connection limit makes the IDLE give way to the others
+//! (`idle_gaps.rs` has the IDLE's harder cases).
 //!
 //! Every pass after the first comes from IDLE or from a wake the test
 //! gives: the poll interval is an hour, unless a test polls.
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use postrinch_mailtest::{Extension, ImapConfig, ImapFault, ImapServer};
+use postrinch_mailtest::{Extension, ImapConfig, ImapFault};
 use postrinch_model::FolderRoles;
 use postrinch_sync::imap::message_id;
 use postrinch_sync::{IdleOptions, KeepOptions, MailSync, SyncEvent};
-use tokio::sync::Notify;
 
 use super::add::adding;
-use super::keep_support::{Events, count, kinds, recorder, until, until_true};
+use super::idle_support::{IDLE, KEEP, arrived, idling, keeping, mail_sync, sign_ins};
+use super::keep_support::{count, kinds, until, until_true};
 use super::support::{PASSWORD, USER, account};
-use super::sync_support::{Fixture, fixture, fixture_with, fixture_without, mail};
-
-const IDLE: IdleOptions = IdleOptions {
-    restart: Duration::from_secs(3600),
-    settle: Duration::from_millis(30),
-    interval: Duration::from_secs(3600),
-    give_way: Duration::from_secs(3600),
-    reconnect: Duration::from_millis(100),
-    reconnect_cap: Duration::from_millis(800),
-};
-
-const KEEP: KeepOptions = KeepOptions {
-    interval: Duration::from_secs(3600),
-    retry: Duration::from_millis(50),
-    idle: IDLE,
-};
-
-/// The busy gate's first wait.
-const FIRST: Duration = Duration::from_millis(100);
-
-fn mail_sync(f: &Fixture) -> MailSync {
-    MailSync::new(f.store.clone(), None, f.sync.clone()).with_busy_backoff(FIRST, FIRST * 8)
-}
-
-/// How many times the client signed in.
-fn sign_ins(server: &ImapServer) -> usize {
-    server.command_count("LOGIN") + server.command_count("AUTHENTICATE")
-}
-
-/// Runs the keep-in-sync loop with `options` while `test` runs.
-async fn keeping(
-    sync: &MailSync,
-    options: KeepOptions,
-    test: impl AsyncFnOnce(&Events, Arc<Notify>),
-) -> Events {
-    let (events, log) = recorder();
-    let wake = Arc::new(Notify::new());
-    tokio::select! {
-        () = sync.keep_in_sync(options, log, wake.clone()) => panic!("the loop ended"),
-        () = test(&events, wake) => {}
-    }
-    events
-}
-
-/// Whether the message has been stored. Polled while a pass may be
-/// storing it, so a read that meets it half written counts as not yet;
-/// each test checks it strictly once the loop has stopped.
-fn arrived(f: &Fixture, header: &str) -> bool {
-    matches!(f.store.message(&f.me, &f.id(header)), Ok(Some(_)))
-}
-
-/// Waits until the server has this many sessions in an IDLE.
-async fn idling(server: &ImapServer, sessions: usize) {
-    until_true(&format!("{sessions} IDLEing"), || {
-        server.idling() == sessions
-    })
-    .await;
-}
+use super::sync_support::{fixture, fixture_with, fixture_without, mail};
 
 #[tokio::test]
 async fn new_mail_wakes_a_pass_and_it_arrives() {
@@ -161,14 +104,17 @@ async fn a_lost_connection_is_made_again_after_a_growing_wait() {
             "waited {waited:?}"
         );
         assert_eq!(f.server.command_count("IDLE"), idles + 2);
+        // Begun on a connection made again, it wakes a pass, for mail
+        // that came before its EXAMINE.
+        until(events, |k| k.iter().filter(|e| **e == "done").count() == 3).await;
         // It works again: new mail arrives.
         f.user.append("INBOX", mail(Some("b@x"), "B", "")).unwrap();
-        until(events, |k| k.iter().filter(|e| **e == "done").count() == 3).await;
+        until(events, |k| k.iter().filter(|e| **e == "done").count() == 4).await;
     })
     .await;
     assert!(f.message("b@x").is_some());
     // The IDLE that never began woke no pass of its own.
-    assert_eq!(count(&events, "done"), 3);
+    assert_eq!(count(&events, "done"), 4);
 }
 
 #[tokio::test]

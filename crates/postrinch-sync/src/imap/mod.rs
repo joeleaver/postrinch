@@ -42,7 +42,7 @@ pub use sync::{
     AccountFolder, Added, ImapSync, NewImapAccount, NewSignIn, OnGrant, OpenBrowser, SentLookup,
     SignInAgain, SignInCancel, SignInCanceller, sign_in_cancel,
 };
-pub(crate) use sync::{Idled, Idler};
+pub(crate) use sync::{IdleEnd, Idler};
 pub use threading::{Own, thread_for};
 pub use tls::{Timeouts, TlsConfig};
 pub use tokens::{AccessTokens, TokenFuture};

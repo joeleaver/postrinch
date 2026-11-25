@@ -117,13 +117,15 @@ impl ImapKeeper {
         self.emit(SyncEvent::Started {
             account: account.clone(),
         });
-        match self.sync_and_download(account).await {
+        watching.pass_began();
+        let result = self.sync_and_download(account).await;
+        watching.pass_ended(result.is_ok());
+        match result {
             Ok(downloaded) => {
                 self.emit(SyncEvent::Done {
                     account: account.clone(),
                     downloaded,
                 });
-                watching.passed();
                 Next::Pause(watching.interval(&self.options))
             }
             Err(e) => self.failed(account, e, |error, retry_in| SyncEvent::Failed {

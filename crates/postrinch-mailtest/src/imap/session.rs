@@ -191,6 +191,7 @@ impl Session {
             Some(ImapFault::DisconnectBefore) => return Ok(false),
             Some(ImapFault::No(text)) => return self.finish(&command, Reply::No(text)).await,
             Some(ImapFault::Bad(text)) => return self.finish(&command, Reply::Bad(text)).await,
+            Some(ImapFault::Ok(text)) => return self.finish(&command, Reply::Ok(text)).await,
             Some(ImapFault::DisconnectAfter) | None => {}
         }
         let (reply, next) = self.dispatch(&command).await?;
@@ -258,6 +259,10 @@ impl Session {
         // Commands that talk to the client more than once, or end the session.
         match name {
             "LOGOUT" => {
+                // The session is over before it says so, as a server's
+                // is: a client that has seen the answer can sign in again
+                // in its place.
+                self.sign_out();
                 self.out.extend_from_slice(b"* BYE Logging out\r\n");
                 return Ok((Reply::Ok("LOGOUT completed".into()), Next::Close));
             }

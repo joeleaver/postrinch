@@ -166,6 +166,14 @@ impl ImapServer {
         self.shared.notify();
     }
 
+    /// From now on, lets each user have at most `max` sessions signed in,
+    /// as [`ImapConfig::max_connections`] does from the start. Sessions
+    /// already signed in stay; only the next sign-ins are counted against
+    /// it.
+    pub fn set_max_connections(&self, max: usize) {
+        self.shared.lock().config.max_connections = Some(max);
+    }
+
     /// How many sessions are in an IDLE now.
     pub fn idling(&self) -> usize {
         self.shared.lock().idling

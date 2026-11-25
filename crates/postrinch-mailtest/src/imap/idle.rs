@@ -2,12 +2,16 @@
 //! about changes other sessions or the test make to its folder. The test
 //! can see how many sessions are idling ([`super::ImapServer::idling`])
 //! and end their IDLEs with a `BYE` ([`super::ImapServer::bye_idling`]).
+//! The `DONE` that ends an IDLE is logged as a command of its own, named
+//! `DONE`, so a test can see that the client ended its IDLE before it
+//! sent anything else.
 
 use std::io;
 
 use super::config::Extension;
 use super::response::Args;
 use super::session::{Next, Reply, Session};
+use super::state::LoggedCommand;
 
 impl Session {
     pub(crate) async fn idle(&mut self, args: Args) -> io::Result<(Reply, Next)> {
@@ -58,6 +62,10 @@ impl Session {
             self.send_pending().await?;
             if let Some(line) = self.conn.take_line() {
                 return Ok(if line.eq_ignore_ascii_case(b"DONE") {
+                    self.shared.lock().log.push(LoggedCommand {
+                        name: "DONE".into(),
+                        text: "DONE".into(),
+                    });
                     (Reply::Ok("IDLE terminated".into()), Next::Continue)
                 } else {
                     (Reply::Bad("Expected DONE".into()), Next::Continue)

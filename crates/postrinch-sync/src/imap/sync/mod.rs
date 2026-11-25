@@ -27,6 +27,7 @@ mod folder_error;
 mod folders;
 mod headers;
 mod idle;
+mod idle_link;
 mod idle_wire;
 mod marks;
 mod names;
@@ -55,8 +56,8 @@ pub use self::accounts::{
     sign_in_cancel,
 };
 pub(crate) use self::idle::Idler;
-use self::idle::Releases;
-pub(crate) use self::idle_wire::Idled;
+use self::idle_link::Links;
+pub(crate) use self::idle_wire::IdleEnd;
 pub use self::send::SentLookup;
 use self::wire::Conn;
 use super::{AccessTokens, BusyGate, Connector, ImapSecrets};
@@ -114,8 +115,9 @@ pub struct ImapSync {
     sent_lookup: SentLookup,
     /// The accounts' busy servers' waits, for the keep-in-sync loops.
     busy: BusyGate,
-    /// Tells each account's IDLE loop when its connections are let go.
-    releases: Releases,
+    /// Tells each account's IDLE loop when its connections are let go,
+    /// or when it is to give way to another.
+    links: Links,
 }
 
 impl ImapSync {
@@ -135,7 +137,7 @@ impl ImapSync {
             lanes: Arc::default(),
             sent_lookup: SentLookup::default(),
             busy: BusyGate::default(),
-            releases: Releases::default(),
+            links: Links::default(),
         }
     }
 
@@ -188,7 +190,7 @@ impl ImapSync {
     /// when the account is removed or its settings change. Its IDLE
     /// connection goes too ([`Self::released`]).
     pub async fn disconnect(&self, account: &EmailAddress) {
-        self.releases.release(account);
+        self.links.release(account);
         let lanes = self
             .lanes
             .lock()
@@ -267,11 +269,34 @@ impl ImapSync {
         }
     }
 
-    /// Connects and signs in to the account's server.
+    /// Connects and signs in to the account's server. Refused for the
+    /// account's connection limit while its IDLE connection is held, it
+    /// asks that one to give way and, once it has signed out, signs in
+    /// again at once in its place: the IDLE is the connection the account
+    /// can do without (docs/imap.md, "Sync"). Refused again, or with no
+    /// IDLE connection to give way, the refusal is the caller's
+    /// ([`SyncError::Busy`]).
     async fn open(&self, account: &EmailAddress) -> SyncResult<Conn> {
-        let mut conn = Conn::new(self.open_session(account).await?);
+        let session = match self.open_session(account).await {
+            Err(SyncError::Busy {
+                connections: true, ..
+            }) if self.links.give_way(account, self.give_way_within()).await => {
+                tracing::info!("{account}: its IDLE connection gave way to another");
+                self.open_session(account).await?
+            }
+            opened => opened?,
+        };
+        let mut conn = Conn::new(session);
         conn.enable_qresync().await?;
         Ok(conn)
+    }
+
+    /// How long a connection refused for the account's connection limit
+    /// waits for the IDLE connection to sign out: it ends its IDLE (an
+    /// answer it may be waiting for, then `DONE` and its answer) and signs
+    /// out, each an exchange under the command timeout.
+    fn give_way_within(&self) -> Duration {
+        self.connector.timeouts().command * 3
     }
 
     async fn settings(&self, account: &EmailAddress) -> SyncResult<ImapSettings> {

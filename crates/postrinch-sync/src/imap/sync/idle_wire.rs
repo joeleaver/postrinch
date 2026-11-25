@@ -12,9 +12,12 @@
 //! expunges, flags: `EXISTS`, `EXPUNGE`, `VANISHED`, `FETCH`), waits a
 //! moment more for the rest of a burst, and ends the IDLE; or ends it
 //! when it is time to restart, as servers may drop an IDLE that lasts
-//! (RFC 2177 says 29 minutes; Postrinch restarts sooner). Everything sent
-//! before the `+` and after `DONE` is under the command timeout; while
-//! idling, silence is what the server is meant to send.
+//! (RFC 2177 says 29 minutes; Postrinch restarts sooner); or when told to
+//! stop, so that the connection can sign out with no IDLE under way.
+//! Everything sent before the `+` and after `DONE` is under the command
+//! timeout; while idling, silence is what the server is meant to send.
+//! A server may end an IDLE itself, and [`Idled`] says so: the caller
+//! decides whether one that ended too soon means IDLE is not working.
 //!
 //! A `BYE` ends it: in words that say the server is busy it is
 //! [`SyncError::Busy`] (a connection limit's said so,
@@ -23,7 +26,7 @@
 
 use std::time::Duration;
 
-use async_imap::imap_proto::{MailboxDatum, RequestId, Response, Status};
+use async_imap::imap_proto::{MailboxDatum, RequestId, Response, ResponseCode, Status};
 use postrinch_model::Server;
 use tokio::time::Instant;
 
@@ -35,23 +38,35 @@ use crate::imap::reply::ImapStream;
 use crate::imap::session::imap_error;
 use crate::{SyncError, SyncResult};
 
-/// How one IDLE ended.
+/// How one IDLE went.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Idled {
+pub(crate) struct Idled<S> {
     /// The server told of changes in the inbox: a pass is due.
-    News,
-    /// Time to begin again, with nothing to tell (or the server ended the
-    /// IDLE itself).
-    Restart,
+    pub(crate) news: bool,
+    pub(crate) end: IdleEnd<S>,
+}
+
+/// What ended an IDLE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IdleEnd<S> {
+    /// Postrinch did, with `DONE`: news had settled, or it was time to
+    /// begin again.
+    Done,
+    /// The server did, with its tagged `OK`, before or after its `+`.
+    Server,
+    /// The `stop` given to [`Idler::idle`] came, with this, and the IDLE
+    /// was ended with `DONE`: the connection is ready to sign out.
+    Stopped(S),
 }
 
 /// What a response read during an IDLE means.
+#[derive(Debug)]
 enum Heard {
     /// The server is ready: the IDLE has begun.
     Ready,
     /// A change in the inbox.
     News,
-    /// The IDLE's tagged answer: `true` when it is `OK`.
+    /// The IDLE's tagged `OK` (any other tagged answer is an error).
     Ended,
     /// Anything else (`* OK Still here`, `RECENT`).
     Nothing,
@@ -61,14 +76,18 @@ type Session = async_imap::Session<ImapStream>;
 
 impl Idler {
     /// IDLEs once: until news (and then `settle` more, for the rest of a
-    /// burst), or until `restart` has passed, whichever comes first.
-    /// `ready` is called once the server has begun the IDLE.
-    pub(crate) async fn idle(
+    /// burst), until `restart` has passed, or until `stop` comes,
+    /// whichever is first. `ready` is called once the server has begun
+    /// the IDLE. `stop` is heard while idling only: before the `+` and
+    /// after `DONE`, the server's answer is waited for (under the command
+    /// timeout), so the connection is left with no command under way.
+    pub(crate) async fn idle<S>(
         &mut self,
         restart: Duration,
         settle: Duration,
         ready: impl FnOnce(),
-    ) -> SyncResult<Idled> {
+        stop: impl Future<Output = S>,
+    ) -> SyncResult<Idled<S>> {
         let session = self.conn.session_mut();
         let server = session.server().clone();
         let limit = session.connector().timeouts().command;
@@ -89,27 +108,41 @@ impl Idler {
                     break;
                 }
                 Heard::News => news = true,
-                // Ended before it began: the next one begins at once.
-                Heard::Ended => return Ok(ended(news)),
+                // Ended before it began.
+                Heard::Ended => {
+                    return Ok(Idled {
+                        news,
+                        end: IdleEnd::Server,
+                    });
+                }
                 Heard::Nothing => {}
             }
         }
+        let mut stop = std::pin::pin!(stop);
+        let mut stopped = None;
         let mut settle_at = news.then(|| Instant::now() + settle);
         loop {
             let deadline = settle_at.map_or(restart_at, |at| at.min(restart_at));
             let read = tokio::select! {
-                read = session.read_response() => Some(read),
-                () = tokio::time::sleep_until(deadline) => None,
+                read = session.read_response() => read,
+                () = tokio::time::sleep_until(deadline) => break,
+                why = &mut stop => {
+                    stopped = Some(why);
+                    break;
+                }
             };
-            let Some(read) = read else { break };
             let response = received(read, &server, "idling")?;
             match heard(response.parsed(), &tag, &server)? {
                 Heard::News => {
                     news = true;
                     settle_at.get_or_insert_with(|| Instant::now() + settle);
                 }
-                // A server may end an IDLE itself (as for a restart).
-                Heard::Ended => return Ok(ended(news)),
+                Heard::Ended => {
+                    return Ok(Idled {
+                        news,
+                        end: IdleEnd::Server,
+                    });
+                }
                 Heard::Ready | Heard::Nothing => {}
             }
         }
@@ -122,16 +155,14 @@ impl Idler {
         .await?;
         loop {
             match hear(session, &tag, &server, limit, "ending IDLE").await? {
-                Heard::Ended => return Ok(ended(news)),
+                Heard::Ended => break,
                 Heard::News => news = true,
                 Heard::Ready | Heard::Nothing => {}
             }
         }
+        let end = stopped.map_or(IdleEnd::Done, IdleEnd::Stopped);
+        Ok(Idled { news, end })
     }
-}
-
-fn ended(news: bool) -> Idled {
-    if news { Idled::News } else { Idled::Restart }
 }
 
 /// Reads the next response within the command timeout, and what it
@@ -200,17 +231,19 @@ fn heard(response: &Response<'_>, tag: &RequestId, server: &Server) -> SyncResul
             outcome,
         } => {
             let text = outcome.information.as_deref().unwrap_or("").to_owned();
-            let code = code_name(outcome.code.as_ref(), &text);
-            return Err(bye(server, code.as_deref(), text));
+            return Err(bye(server, outcome.code.as_ref(), text));
         }
         _ => Heard::Nothing,
     })
 }
 
-/// What a `BYE` while idling means: the server busy, in its words (as a
-/// `BYE` before sign-in is read, [`is_busy`]), or the connection lost.
-fn bye(server: &Server, code: Option<&str>, text: String) -> SyncError {
+/// What a `BYE` while idling means, from its response code as imap-proto
+/// parsed it and its text: the server busy, in its words (as a `BYE`
+/// before sign-in is read, [`is_busy`]), or the connection lost.
+fn bye(server: &Server, code: Option<&ResponseCode<'_>>, text: String) -> SyncError {
     // imap-proto leaves codes it does not know at the start of the text.
+    let code = code_name(code, &text);
+    let code = code.as_deref();
     let words = crate::imap::reply::Tagged::parse_text(&text).text;
     if is_busy(code, &words) {
         return SyncError::Busy {
@@ -240,33 +273,69 @@ mod tests {
         }
     }
 
+    /// What the IDLE tagged `a7` makes of `line`, parsed as the wire
+    /// gives it: the path every response read while idling takes.
+    fn hear_line(line: &str) -> SyncResult<Heard> {
+        let (rest, response) =
+            Response::parse(line.as_bytes()).unwrap_or_else(|e| panic!("{line:?} parses: {e:?}"));
+        assert!(rest.is_empty(), "{line:?} parsed whole");
+        heard(&response, &RequestId("a7".into()), &server())
+    }
+
     #[test]
     fn a_bye_is_busy_only_in_busy_words() {
-        let busy = bye(
-            &server(),
-            Some("ALERT"),
-            "Account exceeded command or bandwidth limits. (Failure)".into(),
-        );
+        let busy =
+            hear_line("* BYE [ALERT] Account exceeded command or bandwidth limits. (Failure)\r\n");
         assert!(
-            matches!(&busy, SyncError::Busy { connections: false, message, .. } if message.contains("bandwidth")),
+            matches!(&busy, Err(SyncError::Busy { connections: false, message, .. }) if message.contains("bandwidth")),
             "{busy:?}"
         );
-        let crowded = bye(
-            &server(),
-            None,
-            "[UNAVAILABLE] Too many simultaneous connections".into(),
-        );
+        // imap-proto parses no `UNAVAILABLE` or `LIMIT`: they are left at
+        // the start of the text, and read from there.
+        for line in [
+            "* BYE [UNAVAILABLE] Too many simultaneous connections\r\n",
+            "* BYE [LIMIT] Try again later\r\n",
+        ] {
+            let crowded = hear_line(line);
+            assert!(
+                matches!(
+                    &crowded,
+                    Err(SyncError::Busy { connections: true, message, .. }) if !message.starts_with('[')
+                ),
+                "{line}: {crowded:?}"
+            );
+        }
+        let lost = hear_line("* BYE Server shutting down\r\n");
         assert!(
-            matches!(
-                crowded,
-                SyncError::Busy {
-                    connections: true,
-                    ..
-                }
-            ),
-            "{crowded:?}"
+            matches!(lost, Err(SyncError::Unreachable { .. })),
+            "{lost:?}"
         );
-        let lost = bye(&server(), None, "Server shutting down".into());
-        assert!(matches!(lost, SyncError::Unreachable { .. }), "{lost:?}");
+    }
+
+    #[test]
+    fn what_is_heard_while_idling() {
+        assert!(matches!(hear_line("+ idling\r\n"), Ok(Heard::Ready)));
+        for news in [
+            "* 4 EXISTS\r\n",
+            "* 2 EXPUNGE\r\n",
+            "* 1 FETCH (FLAGS (\\Seen))\r\n",
+        ] {
+            assert!(matches!(hear_line(news), Ok(Heard::News)), "{news}");
+        }
+        assert!(matches!(
+            hear_line("* OK Still here\r\n"),
+            Ok(Heard::Nothing)
+        ));
+        assert!(matches!(
+            hear_line("a7 OK IDLE terminated\r\n"),
+            Ok(Heard::Ended)
+        ));
+        // Another command's answer is not the IDLE's.
+        assert!(matches!(hear_line("a6 OK done\r\n"), Ok(Heard::Nothing)));
+        let refused = hear_line("a7 NO Not now\r\n");
+        assert!(
+            matches!(refused, Err(SyncError::Server { .. })),
+            "{refused:?}"
+        );
     }
 }

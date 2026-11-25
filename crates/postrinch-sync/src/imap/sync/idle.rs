@@ -6,16 +6,17 @@
 //!
 //! The connection is the account's like the others: when they are let go
 //! ([`ImapSync::disconnect`], on removal, a new sign-in or new servers),
-//! the IDLE loop is told ([`ImapSync::released`]) and drops its own.
-
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+//! the IDLE loop is told ([`ImapSync::released`]) and signs out of its
+//! own. When another of the account's connections is refused for the
+//! account's connection limit, the IDLE loop is asked to give way
+//! ([`ImapSync::give_way_asked`], `idle_link.rs`).
 
 use postrinch_model::{EmailAddress, FolderRole, SystemLabel};
 use tokio::sync::watch;
 
 use super::ImapSync;
 use super::folder_error::FolderError;
+use super::idle_link::Holding;
 use super::wire::Conn;
 use crate::imap::connect::describe;
 use crate::imap::session::ImapSession;
@@ -25,6 +26,8 @@ use crate::{SyncError, SyncResult};
 /// (`idle_wire.rs`).
 pub(crate) struct Idler {
     pub(super) conn: Conn,
+    /// Marks the account as holding an IDLE connection while it lives.
+    _holding: Holding,
 }
 
 impl std::fmt::Debug for Idler {
@@ -36,34 +39,22 @@ impl std::fmt::Debug for Idler {
 }
 
 impl Idler {
+    /// What an IDLE the server ended itself as soon as it was asked means:
+    /// the server's IDLE does not work, and the connection is to be
+    /// dropped and made again later, backing off.
+    pub(crate) fn ended_at_once(&self) -> SyncError {
+        SyncError::Server {
+            service: "IMAP",
+            server: self.conn.describe(),
+            message: "the server ends each IDLE as soon as it begins".into(),
+        }
+    }
+
     /// Signs out and closes the connection; a failure only means it was
     /// gone already.
     pub(crate) async fn logout(self) {
         if let Err(e) = self.conn.into_session().logout().await {
             tracing::debug!("IMAP: signing out of an IDLE connection failed: {e}");
-        }
-    }
-}
-
-/// Per account, a count raised each time its connections are let go, for
-/// its IDLE loop to watch. Cheap to clone; clones share it.
-#[derive(Clone, Default)]
-pub(super) struct Releases(Arc<Mutex<HashMap<String, watch::Sender<u64>>>>);
-
-impl Releases {
-    fn subscribe(&self, account: &EmailAddress) -> watch::Receiver<u64> {
-        let mut senders = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        senders
-            .entry(account.key())
-            .or_insert_with(|| watch::channel(0).0)
-            .subscribe()
-    }
-
-    /// Tells the account's IDLE loop, if one watches, to let go.
-    pub(super) fn release(&self, account: &EmailAddress) {
-        let senders = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(sender) = senders.get(&account.key()) {
-            sender.send_modify(|count| *count += 1);
         }
     }
 }
@@ -104,7 +95,12 @@ impl ImapSync {
             message: format!("the inbox cannot be watched: {why}"),
         };
         let refusal = match conn.examine(&inbox).await {
-            Ok(Some(_)) => return Ok(Some(Idler { conn })),
+            Ok(Some(_)) => {
+                return Ok(Some(Idler {
+                    conn,
+                    _holding: self.links.hold(account),
+                }));
+            }
             Ok(None) => refused("the server would not open it".into()),
             Err(FolderError::Busy(text)) => refused(text),
             Err(FolderError::Sync(e)) => e,
@@ -118,7 +114,14 @@ impl ImapSync {
     /// A count that rises each time the account's connections are let
     /// go ([`Self::disconnect`]): its IDLE connection is to go too.
     pub(crate) fn released(&self, account: &EmailAddress) -> watch::Receiver<u64> {
-        self.releases.subscribe(account)
+        self.links.released(account)
+    }
+
+    /// A count that rises each time another of the account's connections
+    /// is refused for its connection limit while the IDLE connection is
+    /// held: the IDLE connection is to sign out, and stay away a while.
+    pub(crate) fn give_way_asked(&self, account: &EmailAddress) -> watch::Receiver<u64> {
+        self.links.give_way_asked(account)
     }
 
     /// The inbox's name on the server: the folder kept with the inbox's
