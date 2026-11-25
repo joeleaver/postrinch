@@ -110,8 +110,10 @@ impl ImapOAuth {
     /// The account's secret was `replaced` by `kept`: gives the replaced
     /// grant back, if it was one, unless `kept` is a grant with the same
     /// provider (with Google, the same grant: revoking the old token would
-    /// withdraw the new one). An account that now signs in with a
-    /// password has its access token forgotten too.
+    /// withdraw the new one). Its access token went when the secret was
+    /// replaced ([`Replacing::finish`]).
+    ///
+    /// [`Replacing::finish`]: super::replace::Replacing::finish
     pub(crate) async fn retire(
         &self,
         account: &EmailAddress,
@@ -125,12 +127,8 @@ impl ImapOAuth {
         else {
             return;
         };
-        match kept {
-            ImapSecret::OAuth2 { provider: now, .. } if now == provider => return,
-            ImapSecret::OAuth2 { .. } => {}
-            ImapSecret::Password { .. } => {
-                self.slot(account).lock().await.take();
-            }
+        if matches!(kept, ImapSecret::OAuth2 { provider: now, .. } if now == provider) {
+            return;
         }
         self.revoke(provider, refresh_token, account).await;
     }

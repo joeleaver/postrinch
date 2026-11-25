@@ -61,6 +61,24 @@ impl Store {
         Ok(account)
     }
 
+    /// Changes the account only if it is here, with no other change to it
+    /// in between, as [`Store::change_account`]: none when it is not here,
+    /// and nothing is written. `change` must not write accounts. Returns
+    /// what was stored.
+    pub fn update_account(
+        &self,
+        address: &EmailAddress,
+        change: impl FnOnce(&mut Account),
+    ) -> StoreResult<Option<Account>> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut account) = self.account(address)? else {
+            return Ok(None);
+        };
+        change(&mut account);
+        self.write_account(&account)?;
+        Ok(Some(account))
+    }
+
     /// [`Store::put_account`], the account lock held by the caller.
     fn write_account(&self, account: &Account) -> StoreResult<()> {
         let key = account.address.key();
@@ -224,6 +242,27 @@ mod tests {
             })
             .unwrap();
         assert_eq!(changed.display_name.as_deref(), Some("Ada"));
+        assert_eq!(store.account(&address).unwrap(), Some(changed));
+    }
+
+    #[test]
+    fn updating_changes_only_an_account_that_is_here() {
+        let (_dir, store) = store();
+        let address = EmailAddress::parse("ada@example.org").unwrap();
+        let missing = store
+            .update_account(&address, |_| panic!("there is no account to change"))
+            .unwrap();
+        assert_eq!(missing, None);
+        assert_eq!(store.account(&address).unwrap(), None, "nothing written");
+
+        let mut account = Account::new(address.clone(), Provider::Imap);
+        account.needs_sign_in(SignInReason::NoCredential);
+        store.put_account(&account).unwrap();
+        let changed = store
+            .update_account(&address, Account::signed_in)
+            .unwrap()
+            .unwrap();
+        assert!(changed.is_active());
         assert_eq!(store.account(&address).unwrap(), Some(changed));
     }
 

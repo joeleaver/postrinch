@@ -3,6 +3,7 @@
 //! against mock providers. No test touches a real mailbox or provider.
 
 mod add;
+mod add_secrets;
 mod changes;
 mod changes_attempts;
 mod changes_fallbacks;

@@ -94,16 +94,16 @@ impl ImapOAuth {
     }
 
     /// Keeps a grant as its account's secret, replacing any it had, and
-    /// its access token for the account's next connections.
+    /// its access token for the account's next connections. No refresh
+    /// runs on the old secret meanwhile ([`Replacing`]).
+    ///
+    /// [`Replacing`]: super::replace::Replacing
     pub(crate) async fn keep(&self, grant: OAuthGrant) -> SyncResult<OAuthSignIn> {
-        let address = &grant.signed_in.address;
-        // Held while the secret changes, so no refresh runs on the old one
-        // meanwhile and caches what it got after the new token is in.
-        let slot = self.slot(address);
-        let mut cached = slot.lock().await;
-        self.secrets.set(address, &grant.secret()).await?;
-        *cached = Some(grant.access);
-        Ok(grant.signed_in)
+        let mut replacing = self.replacing(&grant.signed_in.address).await?;
+        replacing.write(&grant.secret()).await?;
+        let signed_in = grant.signed_in.clone();
+        replacing.finish(Some(grant));
+        Ok(signed_in)
     }
 
     /// Sign an existing account in again, as its settings say: "Sign in

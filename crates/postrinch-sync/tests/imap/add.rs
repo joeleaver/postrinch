@@ -14,7 +14,7 @@ use postrinch_sync::imap::{
     Added, CheckFailure, ImapOAuth, ImapSecret, ImapSecrets, ImapSync, NewImapAccount, NewSignIn,
     OAuthClients, OAuthProvider,
 };
-use postrinch_sync::{MemorySecrets, SyncError};
+use postrinch_sync::{MemorySecrets, SecretStore, SyncError};
 use wiremock::MockServer;
 
 use super::check::Fakes;
@@ -24,7 +24,7 @@ use super::oauth_mock::{
 use super::support::{PASSWORD, Tokens, account, microsoft, settings};
 
 /// The scopes Google over IMAP asks for.
-const MAIL_SCOPES: &str = "openid email https://mail.google.com/";
+pub const MAIL_SCOPES: &str = "openid email https://mail.google.com/";
 
 pub struct Adding {
     pub fakes: Fakes,
@@ -40,10 +40,19 @@ pub async fn adding() -> Adding {
     adding_with(Fakes::with_passwords().await, OAuthClients::none()).await
 }
 
-async fn adding_with(fakes: Fakes, clients: OAuthClients) -> Adding {
+pub async fn adding_with(fakes: Fakes, clients: OAuthClients) -> Adding {
+    adding_over(fakes, clients, Arc::new(MemorySecrets::default())).await
+}
+
+/// As [`adding_with`], the accounts' secrets kept in `keychain`.
+pub async fn adding_over(
+    fakes: Fakes,
+    clients: OAuthClients,
+    keychain: Arc<dyn SecretStore>,
+) -> Adding {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
-    let secrets = ImapSecrets::new(Arc::new(MemorySecrets::default()));
+    let secrets = ImapSecrets::new(keychain);
     let sync = ImapSync::new(
         store.clone(),
         fakes.connector(),
@@ -94,7 +103,13 @@ impl Adding {
 
     /// Adds the account with Google over IMAP, as the mock browser signs
     /// in.
-    async fn add_with_google(&self) -> Added {
+    pub async fn add_with_google(&self) -> Added {
+        self.try_add_with_google().await.unwrap()
+    }
+
+    /// Adds the account with Google over IMAP, as the mock browser signs
+    /// in, however that goes.
+    pub async fn try_add_with_google(&self) -> Result<Added, SyncError> {
         let sign_in = NewSignIn::OAuth {
             provider: OAuthProvider::Google,
             open_browser: Box::new(browser(|_| {})),
@@ -102,13 +117,12 @@ impl Adding {
         self.sync
             .add_account(&self.oauth, self.new_account(), sign_in)
             .await
-            .unwrap()
     }
 
     /// Stores the account as signing in with `method`, with what sync
     /// learned about it: an archive folder chosen, and a provider that
     /// does not file sent mail.
-    fn store_learned(&self, method: SignInMethod) -> Account {
+    pub fn store_learned(&self, method: SignInMethod) -> Account {
         let mut stored = Account::new(account(), Provider::Imap);
         let mut settings = self.new_account().settings;
         settings.sign_in = method;
@@ -120,19 +134,19 @@ impl Adding {
         stored
     }
 
-    fn stored(&self) -> Option<Account> {
+    pub fn stored(&self) -> Option<Account> {
         self.store.account(&account()).unwrap()
     }
 }
 
 /// Google over IMAP at a mock server, its sign-in as the account.
-async fn google() -> MockServer {
+pub async fn google() -> MockServer {
     let server = MockServer::start().await;
     mock_google_sign_in(&server, MAIL_SCOPES).await;
     server
 }
 
-fn google_sign_in() -> SignInMethod {
+pub fn google_sign_in() -> SignInMethod {
     OAuthProvider::Google.sign_in_method()
 }
 

@@ -10,7 +10,7 @@ use std::time::Duration;
 use postrinch_model::{Account, EmailAddress, ImapSettings, Provider};
 
 use super::ImapSync;
-use crate::imap::{AccountCheck, ImapOAuth, ImapSecret, OAuthProvider, check_account};
+use crate::imap::{AccountCheck, ImapOAuth, ImapSecret, OAuthGrant, OAuthProvider, check_account};
 use crate::{SyncError, SyncResult, check_address_free};
 
 /// What the browser is asked to open, for an OAuth sign-in.
@@ -66,6 +66,10 @@ impl ImapSync {
     /// secret replaced is given back ([`ImapOAuth`]'s `retire`). Both
     /// servers just answered, so any busy wait for the account is over.
     ///
+    /// When the secret cannot be kept or the account stored after the
+    /// check passed, the error is returned with the account's secret put
+    /// back as it was, and a new grant given back as after a failed check.
+    ///
     /// An address that is a Google account here is refused first
     /// ([`SyncError::AlreadyAdded`]), before anything opens.
     pub async fn add_account(
@@ -108,20 +112,19 @@ impl ImapSync {
             }
         };
 
-        // The secret the account had, if any, to give back once replaced.
-        let replaced = self.secrets.get(&address).await.ok();
-        match grant {
-            Some(grant) => {
-                oauth.keep(grant).await?;
-            }
-            None => self.secrets.set(&address, &secret).await?,
+        // From reading the secret the account had to storing the account,
+        // no refresh of its access token runs (one would keep a rotated
+        // refresh token over the new secret); see `ImapOAuth::replacing`.
+        let mut replacing = match oauth.replacing(&address).await {
+            Ok(replacing) => replacing,
+            Err(e) => return Err(abandon(oauth, grant, e).await),
+        };
+        if let Err(e) = replacing.write(&secret).await {
+            replacing.undo().await;
+            return Err(abandon(oauth, grant, e).await);
         }
-        // Connections made with the old settings or secret go, and so does
-        // any wait for a server that was busy.
-        self.disconnect(&address).await;
-        self.busy.forget(&address);
         let a = address.clone();
-        let account = self
+        let stored = self
             .with_store(move |s| {
                 s.change_account(&a, |before| {
                     let mut account =
@@ -135,7 +138,19 @@ impl ImapSync {
                     account
                 })
             })
-            .await?;
+            .await;
+        let account = match stored {
+            Ok(account) => account,
+            Err(e) => {
+                replacing.undo().await;
+                return Err(abandon(oauth, grant, e).await);
+            }
+        };
+        let replaced = replacing.finish(grant);
+        // Connections made with the old settings or secret go, and so does
+        // any wait for a server that was busy.
+        self.disconnect(&address).await;
+        self.busy.forget(&address);
         if let Some(replaced) = replaced {
             oauth.retire(&address, &replaced, &secret).await;
         }
@@ -158,13 +173,11 @@ impl ImapSync {
             .await?;
         self.disconnect(account).await;
         let a = account.clone();
+        // Under the store's account lock, so nothing learned meanwhile
+        // (`Store::server_files_sent`) is written over.
         self.blocking(move |s| {
-            let mut stored = s
-                .account(&a)?
-                .ok_or_else(|| SyncError::Config(format!("{a} is not an account here")))?;
-            stored.signed_in();
-            s.put_account(&stored)?;
-            Ok(stored)
+            s.update_account(&a, Account::signed_in)?
+                .ok_or_else(|| SyncError::Config(format!("{a} is not an account here")))
         })
         .await
     }
@@ -189,4 +202,14 @@ impl ImapSync {
         })
         .await
     }
+}
+
+/// A checked secret that could not be kept, with the account left as it
+/// was: its grant, if it was one, is given back under the same rule as
+/// after a failed check ([`ImapOAuth`]'s `give_back`). Returns `error`.
+async fn abandon(oauth: &ImapOAuth, grant: Option<OAuthGrant>, error: SyncError) -> SyncError {
+    if let Some(grant) = grant {
+        oauth.give_back(grant).await;
+    }
+    error
 }
