@@ -8,6 +8,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use postrinch_model::{Account, EmailAddress, Provider};
 use postrinch_store::Store;
 use postrinch_sync::google::{ClientConfig, Endpoints, GmailApi, GmailSync, GoogleAuth};
+use postrinch_sync::imap::ImapSecrets;
 use postrinch_sync::{MemorySecrets, SecretStore};
 use serde_json::json;
 use wiremock::matchers::{method, path, query_param};
@@ -46,7 +47,8 @@ pub async fn fixture() -> Fixture {
     let me = EmailAddress::parse("me@example.org").unwrap();
     let secrets = Arc::new(MemorySecrets::default());
     secrets.set(&me, "rt").unwrap();
-    let auth = Arc::new(GoogleAuth::with_endpoints(config, endpoints, secrets));
+    let imap = ImapSecrets::new(Arc::new(MemorySecrets::default()));
+    let auth = Arc::new(GoogleAuth::with_endpoints(config, endpoints, secrets, imap).unwrap());
     let api = Arc::new(GmailApi::with_base(auth, format!("{}/gmail", server.uri())));
 
     let dir = tempfile::tempdir().unwrap();

@@ -8,14 +8,13 @@ use postrinch_model::{Account, EmailAddress, Provider, SignInReason};
 use tokio::sync::Mutex;
 
 use super::ClientConfig;
-use super::loopback::Loopback;
-use super::oauth::{Endpoints, OAuth, check_scopes};
-use super::pkce::Pkce;
+use super::grant::GoogleGrants;
+use super::oauth::{Endpoints, api_spec, check_scopes};
+use crate::imap::ImapSecrets;
+use crate::oauth::{Granted, OAuthFlow, OAuthTimeouts, browser_sign_in, http_client};
 use crate::secrets::SecretStore;
 use crate::{SyncError, SyncResult};
 
-/// How long the person has to finish signing in in the browser.
-const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Refresh an access token this long before Google says it expires.
 const EXPIRY_MARGIN: Duration = Duration::from_secs(60);
 
@@ -26,10 +25,14 @@ struct AccessToken {
 
 /// Google sign-in for any number of accounts. Refresh tokens live in a
 /// [`SecretStore`]; access tokens are cached in memory until shortly before
-/// they expire. Cheap to share: wrap in an `Arc`.
+/// they expire. IMAP accounts' secrets are read too, never changed: an
+/// address that is an IMAP account is not added as a Google account, and a
+/// grant an IMAP account shares is not revoked. Cheap to share: wrap in an
+/// `Arc`.
 pub struct GoogleAuth {
-    oauth: OAuth,
+    oauth: OAuthFlow,
     secrets: Arc<dyn SecretStore>,
+    grants: GoogleGrants,
     /// Held across a refresh, so concurrent callers wait for one refresh
     /// instead of each starting their own.
     cache: Mutex<HashMap<String, AccessToken>>,
@@ -39,26 +42,37 @@ pub struct GoogleAuth {
 }
 
 impl GoogleAuth {
-    pub fn new(config: ClientConfig, secrets: Arc<dyn SecretStore>) -> Self {
+    /// Google accounts' refresh tokens in `secrets` (the keychain's
+    /// `postrinch.google`), IMAP accounts' secrets in `imap_secrets`.
+    pub fn new(
+        config: ClientConfig,
+        secrets: Arc<dyn SecretStore>,
+        imap_secrets: ImapSecrets,
+    ) -> SyncResult<Self> {
         let endpoints = Endpoints::google(&config);
-        Self::with_endpoints(config, endpoints, secrets)
+        Self::with_endpoints(config, endpoints, secrets, imap_secrets)
     }
 
     pub fn with_endpoints(
         config: ClientConfig,
         endpoints: Endpoints,
         secrets: Arc<dyn SecretStore>,
-    ) -> Self {
-        Self {
-            oauth: OAuth {
-                config,
-                endpoints,
-                http: reqwest::Client::new(),
-            },
+        imap_secrets: ImapSecrets,
+    ) -> SyncResult<Self> {
+        let http = http_client(OAuthTimeouts::default())?;
+        Ok(Self {
+            oauth: OAuthFlow::new(api_spec(&config, endpoints), http),
+            grants: GoogleGrants::new(Arc::clone(&secrets), imap_secrets),
             secrets,
             cache: Mutex::new(HashMap::new()),
             scopes: std::sync::Mutex::new(HashMap::new()),
-        }
+        })
+    }
+
+    /// With other timeouts for Google's OAuth requests than the default.
+    pub fn with_timeouts(mut self, timeouts: OAuthTimeouts) -> SyncResult<Self> {
+        self.oauth.http = http_client(timeouts)?;
+        Ok(self)
     }
 
     /// Run the browser sign-in. `open_browser` is given the URL to open;
@@ -69,28 +83,24 @@ impl GoogleAuth {
     /// On success the refresh token is in the secret store, replacing any
     /// the account had, and the account is returned, active, for the caller
     /// to store.
+    ///
+    /// An address that is already an IMAP account is refused with
+    /// [`SyncError::AlreadyAdded`]: before the browser opens when it is the
+    /// login hint, otherwise once Google says who signed in.
     pub async fn sign_in(
         &self,
         login_hint: Option<&EmailAddress>,
         open_browser: impl FnOnce(&str) -> std::io::Result<()>,
     ) -> SyncResult<Account> {
-        let pkce = Pkce::new();
-        let loopback = Loopback::bind().await?;
-        let redirect_uri = loopback.redirect_uri().to_owned();
-        let url =
-            self.oauth
-                .authorize_url(&redirect_uri, &pkce.challenge, &pkce.state, login_hint)?;
-        open_browser(url.as_str())?;
-
-        let code = loopback.wait_for_code(&pkce.state, SIGN_IN_TIMEOUT).await?;
-        let tokens = self
-            .oauth
-            .exchange_code(&code, &pkce.verifier, &redirect_uri)
-            .await?;
-        let refresh_token = tokens
-            .refresh_token
-            .clone()
-            .ok_or_else(|| SyncError::SignIn("Google sent no refresh token".into()))?;
+        if let Some(hint) = login_hint {
+            self.grants
+                .refuse_other_kind(hint, Provider::Google)
+                .await?;
+        }
+        let Granted {
+            tokens,
+            refresh_token,
+        } = browser_sign_in(&self.oauth, login_hint, open_browser).await?;
 
         let user = self.oauth.userinfo(&tokens.access_token).await?;
         let address =
@@ -98,8 +108,9 @@ impl GoogleAuth {
         // Revoking a Google refresh token withdraws the whole grant for the
         // account and this client, every token issued under it included. So
         // a token Postrinch cannot use is given back only when Postrinch
-        // holds no other token for the account; otherwise it is left to
-        // lapse unused, and the token the account already has keeps working.
+        // holds no other token for the account (here, or an IMAP account's:
+        // `revoke_unless_shared`); otherwise it is left to lapse unused, and
+        // the token the account already has keeps working.
         let held = self.secret(&address, |s, a| s.get(a)).await?.is_some();
 
         let refused = if let Err(e) = check_scopes(&tokens.scope) {
@@ -115,11 +126,14 @@ impl GoogleAuth {
                 "signed in as {address}, not {hint}"
             )))
         } else {
-            None
+            self.grants
+                .refuse_other_kind(&address, Provider::Google)
+                .await
+                .err()
         };
         if let Some(e) = refused {
             if !held {
-                self.revoke_quietly(&refresh_token).await;
+                self.revoke_unless_shared(&refresh_token, &address).await;
             }
             return Err(e);
         }
@@ -129,7 +143,7 @@ impl GoogleAuth {
         let stored = refresh_token.clone();
         if let Err(e) = self.secret(&address, move |s, a| s.set(a, &stored)).await {
             if !held {
-                self.revoke_quietly(&refresh_token).await;
+                self.revoke_unless_shared(&refresh_token, &address).await;
             }
             return Err(e);
         }
@@ -200,23 +214,24 @@ impl GoogleAuth {
         self.cache.lock().await.remove(&account.key());
     }
 
-    /// Sign an account out: revoke its refresh token and remove it from the
-    /// secret store.
+    /// Sign an account out: revoke its refresh token, unless an IMAP
+    /// account shares its grant, and remove it from the secret store.
     pub async fn sign_out(&self, account: &EmailAddress) -> SyncResult<()> {
         self.invalidate(account).await;
         if let Some(token) = self.secret(account, |s, a| s.get(a)).await? {
-            self.revoke_quietly(&token).await;
+            self.revoke_unless_shared(&token, account).await;
         }
         self.secret(account, |s, a| s.delete(a)).await
     }
 
-    /// Revoke a token, and with it the account's whole grant to Postrinch.
-    /// A failure is logged, not returned: the token goes unused either way,
-    /// and Google retires the oldest when an account has too many.
-    async fn revoke_quietly(&self, token: &str) {
-        if let Err(e) = self.oauth.revoke(token).await {
-            tracing::warn!("could not revoke a refresh token: {e}");
-        }
+    /// Revoke a token, and with it the address's whole grant to Postrinch,
+    /// unless an IMAP account for the address holds a token under it.
+    /// Google retires the oldest token when an account has too many, so
+    /// one left unrevoked does no harm.
+    async fn revoke_unless_shared(&self, token: &str, address: &EmailAddress) {
+        self.grants
+            .revoke_unless_shared(&self.oauth, token, address, Provider::Google)
+            .await;
     }
 
     /// Run a secret-store call on a blocking thread.

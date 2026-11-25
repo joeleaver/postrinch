@@ -149,13 +149,35 @@ impl ImapSecrets {
     /// there is none, or what is kept cannot be read.
     pub async fn get(&self, account: &EmailAddress) -> SyncResult<ImapSecret> {
         let json = self
-            .run(account, |store, account| store.get(account))
+            .stored(account)
             .await?
             .ok_or(SyncError::NeedsSignIn(SignInReason::NoCredential))?;
         ImapSecret::from_json(&json).ok_or_else(|| {
             tracing::warn!("the saved IMAP sign-in for {account} is not one Postrinch reads");
             SyncError::NeedsSignIn(SignInReason::NoCredential)
         })
+    }
+
+    /// Whether the account has a secret here at all, readable or not.
+    pub(crate) async fn is_kept(&self, account: &EmailAddress) -> SyncResult<bool> {
+        Ok(self.stored(account).await?.is_some())
+    }
+
+    /// Whether the account's secret is a Google grant: one that shares
+    /// its OAuth client, and so its grant, with a Google account at the
+    /// address.
+    pub(crate) async fn holds_google_grant(&self, account: &EmailAddress) -> SyncResult<bool> {
+        let Some(json) = self.stored(account).await? else {
+            return Ok(false);
+        };
+        Ok(matches!(
+            ImapSecret::from_json(&json),
+            Some(ImapSecret::OAuth2 { provider, .. }) if provider == super::OAuthProvider::Google.id()
+        ))
+    }
+
+    async fn stored(&self, account: &EmailAddress) -> SyncResult<Option<String>> {
+        self.run(account, |store, account| store.get(account)).await
     }
 
     pub async fn set(&self, account: &EmailAddress, secret: &ImapSecret) -> SyncResult<()> {

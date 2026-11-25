@@ -4848,6 +4848,7 @@ dependencies = [
  "lettre",
  "mail-builder",
  "mail-parser",
+ "postrinch-discover",
  "postrinch-mailtest",
  "postrinch-model",
  "postrinch-rules",

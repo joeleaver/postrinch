@@ -1,4 +1,4 @@
-use postrinch_model::SignInReason;
+use postrinch_model::{EmailAddress, Provider, SignInReason};
 use postrinch_store::StoreError;
 
 pub type SyncResult<T> = Result<T, SyncError>;
@@ -14,6 +14,32 @@ pub enum SyncError {
     Config(String),
     #[error("sign-in failed: {0}")]
     SignIn(String),
+    /// This copy of Postrinch has no OAuth client for the provider: its
+    /// client file is missing (`detail` is `None`) or does not read. The
+    /// provider's accounts cannot sign in; others are unaffected.
+    #[error(
+        "{provider} sign-in isn't set up in this copy of Postrinch{}",
+        .detail.as_deref().map(|d| format!(" ({d})")).unwrap_or_default()
+    )]
+    OAuthNotSetUp {
+        provider: String,
+        detail: Option<String>,
+    },
+    /// The browser sign-in was finished by another account than the one
+    /// asked for. Nothing was kept.
+    #[error("signed in as {signed_in}, not {asked}")]
+    OtherAccount {
+        asked: EmailAddress,
+        signed_in: EmailAddress,
+    },
+    /// The address is already here as the other kind of account (a
+    /// Google account, or an IMAP account): the two cannot both be kept,
+    /// so nothing was added (docs/imap.md, "Credentials").
+    #[error("{address} is already added as {}", kind_phrase(*.existing))]
+    AlreadyAdded {
+        address: EmailAddress,
+        existing: Provider,
+    },
     #[error("the keychain: {0}")]
     Keychain(String),
     #[error("network: {}", crate::google::error_chain(.0))]
@@ -51,6 +77,14 @@ pub enum SyncError {
     Store(#[from] StoreError),
     #[error("{0}")]
     Io(#[from] std::io::Error),
+}
+
+/// "a Google account", "an IMAP account".
+fn kind_phrase(provider: Provider) -> &'static str {
+    match provider {
+        Provider::Google => "a Google account",
+        Provider::Imap => "an IMAP account",
+    }
 }
 
 impl SyncError {

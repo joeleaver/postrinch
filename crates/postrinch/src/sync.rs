@@ -10,6 +10,7 @@ use postrinch_sync::Keychain;
 use postrinch_sync::google::{
     ClientConfig, GmailApi, GmailSync, GoogleAuth, KeepOptions, Phase, Progress, SyncEvent,
 };
+use postrinch_sync::imap::ImapSecrets;
 use rinch::prelude::*;
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
@@ -86,7 +87,9 @@ pub fn start(
         };
         SyncOff::new(said, format!("{}: {e}", path.display()))
     })?;
-    let auth = Arc::new(GoogleAuth::new(config, Arc::new(Keychain::GOOGLE)));
+    let auth = GoogleAuth::new(config, Arc::new(Keychain::GOOGLE), ImapSecrets::keychain())
+        .map_err(|e| SyncOff::new("Sync is off: it could not start.", format!("sign-in: {e}")))?;
+    let auth = Arc::new(auth);
     let sync = GmailSync::new(Arc::new(GmailApi::new(auth.clone())), store.clone());
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

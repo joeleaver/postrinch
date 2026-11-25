@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use postrinch_model::{EmailAddress, SignInReason};
 use postrinch_sync::google::{ClientConfig, Endpoints, GoogleAuth};
+use postrinch_sync::imap::ImapSecrets;
 use postrinch_sync::{MemorySecrets, SecretStore, SyncError};
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -25,7 +26,12 @@ fn auth(server: &MockServer, secrets: Arc<MemorySecrets>) -> GoogleAuth {
         userinfo: format!("{}/userinfo", server.uri()),
         revoke: format!("{}/revoke", server.uri()),
     };
-    GoogleAuth::with_endpoints(config, endpoints, secrets)
+    GoogleAuth::with_endpoints(config, endpoints, secrets, imap_secrets()).unwrap()
+}
+
+/// No IMAP accounts.
+fn imap_secrets() -> ImapSecrets {
+    ImapSecrets::new(Arc::new(MemorySecrets::default()))
 }
 
 /// Plays the browser: reads the authorization URL and calls the loopback
@@ -273,7 +279,9 @@ async fn a_token_the_keychain_cannot_keep_is_revoked() {
         userinfo: format!("{}/userinfo", server.uri()),
         revoke: format!("{}/revoke", server.uri()),
     };
-    let auth = GoogleAuth::with_endpoints(config, endpoints, Arc::new(BrokenKeychain));
+    let auth =
+        GoogleAuth::with_endpoints(config, endpoints, Arc::new(BrokenKeychain), imap_secrets())
+            .unwrap();
     let err = auth.sign_in(None, browser).await.unwrap_err();
     assert!(matches!(err, SyncError::Keychain(_)), "{err:?}");
 }

@@ -9,6 +9,7 @@ use postrinch_sync::google::{
     ClientConfig, GmailApi, GmailSync, GoogleAuth, Phase, Progress, ProgressFn,
     remove_google_account, sign_in_google,
 };
+use postrinch_sync::imap::ImapSecrets;
 
 use crate::{Cli, Command};
 
@@ -29,7 +30,8 @@ impl Context {
         Ok(Arc::new(GoogleAuth::new(
             config,
             Arc::new(Keychain::GOOGLE),
-        )))
+            ImapSecrets::keychain(),
+        )?))
     }
 }
 
