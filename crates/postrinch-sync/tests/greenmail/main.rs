@@ -8,7 +8,9 @@
 //! added with a password (the check of both servers, the secret kept),
 //! synced, its mail read, starred, archived, trashed and moved (each seen
 //! on the server by another client), mail sent over SMTP arrives and is
-//! filed in Sent, and the server's search finds mail not downloaded yet.
+//! filed in Sent, and a query in the search language, put in IMAP's terms
+//! by the command layer as the window's search does, finds on the server
+//! mail not downloaded yet.
 //!
 //! It needs Java and GreenMail's standalone jar, so it is `#[ignore]`d:
 //! `tools/greenmail-smoke.sh` downloads the jar, checks its SHA-256 and
@@ -23,9 +25,10 @@ mod server;
 use std::sync::Arc;
 use std::time::Duration;
 
+use postrinch_commands::Commands;
 use postrinch_model::{
-    Draft, EmailAddress, FolderRoles, ImapAlternative, ImapSearch, ImapSettings, Mailbox,
-    MessageChange, Provider, ProviderMessageId, SearchKey, Security, Server, SignInMethod,
+    Draft, EmailAddress, FolderRoles, ImapSettings, Mailbox, MessageChange, Provider,
+    ProviderMessageId, Security, Server, SignInMethod,
 };
 use postrinch_store::{OutgoingKind, Store};
 use postrinch_sync::imap::{AccessTokens, TokenFuture};
@@ -170,19 +173,15 @@ async fn the_server_finds_mail_not_here_yet(client: &Client, other: &mut Peer) {
         .append("Trash", "f@smoke", "Old trip", "Zanzibar, last year.")
         .await;
     assert!(client.stored("d@smoke").is_none(), "not synced yet");
-    let search = ImapSearch {
-        alternatives: vec![ImapAlternative {
-            folders: Vec::new(),
-            not_in: Vec::new(),
-            set_aside_too: false,
-            key: SearchKey::Text("zanzibar".into()),
-            gmail: "zanzibar".into(),
-            inexact: None,
-        }],
-    };
+    // The window's path: the command layer reads the query in the search
+    // language and says which servers to ask and with what `SEARCH`.
+    let commands = Commands::new(client.store.clone());
+    let results = commands.search("zanzibar", 10).unwrap();
+    let remote = results.remote.expect("the server is asked");
+    let search = remote.imap_search(&client.me).expect("in IMAP's terms");
     let found = client
         .mail
-        .search_server(&client.me, "zanzibar", Some(&search), 50)
+        .search_server(&client.me, &remote.query, Some(search), 50)
         .await
         .unwrap();
     assert_eq!(found.incomplete, None);

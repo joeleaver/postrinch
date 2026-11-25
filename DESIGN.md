@@ -19,7 +19,7 @@ A desktop mail client that is built for an agent first and a person second, with
 - A hosted service, sync between machines, or shared mailboxes.
 - Contacts and tasks, beyond reading what is in a message.
 - Calendars other than Google's (CalDAV, iCloud, Exchange).
-- Exchange/EWS. (Outlook.com and Microsoft 365 are reached over IMAP and SMTP, with OAuth.)
+- Exchange/EWS. (Outlook.com and Microsoft 365 are reached over IMAP and SMTP, signing in with OAuth. That needs a Microsoft OAuth client configured for this copy of Postrinch, `microsoft-oauth-client.json`; without one, Microsoft sign-in is not set up and, as Microsoft takes no passwords, its accounts cannot sign in.)
 
 ## Shape
 

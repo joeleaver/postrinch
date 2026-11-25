@@ -60,12 +60,15 @@ impl GreenMail {
             "{JAR_VAR} names {jar:?}, which is not a file"
         );
         let (keystore, ca) = make_certificates(dir);
-        let imaps = free_port();
-        let smtps = free_port();
+        let held = free_ports(2);
+        let addr = |i: usize| held[i].local_addr().expect("a bound port");
+        let (imaps, smtps) = (addr(0), addr(1));
         let users: Vec<String> = users.iter().map(user_spec).collect();
         let log = dir.join("greenmail.log");
         let out = File::create(&log).expect("GreenMail's log file");
         let err = out.try_clone().expect("GreenMail's log file");
+        // Let the ports go only now, for GreenMail to bind.
+        drop(held);
         let process = Command::new(java_tool("java"))
             .arg("-Dgreenmail.hostname=127.0.0.1")
             .arg(format!("-Dgreenmail.imaps.port={}", imaps.port()))
@@ -144,15 +147,16 @@ fn user_spec(user: &User) -> String {
     format!("{local}:{}@{domain}", user.password)
 }
 
-/// A loopback port nothing listens on now. The listener is closed before
-/// GreenMail binds the port, so another process could take it in between;
-/// Linux hands ephemeral ports out in turn from a wide range, so that does
-/// not happen in practice, and if it did GreenMail would fail to bind and
-/// the test would fail with its log, never pass.
-fn free_port() -> SocketAddr {
-    TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .expect("a free loopback port")
+/// `count` distinct loopback ports nothing listens on now. Every listener
+/// is held until all are bound, so no two ports are the same; they are
+/// closed when the caller drops them, just before GreenMail binds the
+/// ports. Another process could take one in between (the kernel picks
+/// ephemeral ports at random from a wide range, so that is unlikely); then
+/// GreenMail fails to bind and the test fails with its log, never passes.
+fn free_ports(count: usize) -> Vec<TcpListener> {
+    (0..count)
+        .map(|_| TcpListener::bind("127.0.0.1:0").expect("a free loopback port"))
+        .collect()
 }
 
 /// `java` or `keytool`: from `$JAVA_HOME/bin` when it is set.

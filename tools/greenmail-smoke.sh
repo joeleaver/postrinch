@@ -37,7 +37,7 @@ if [ -z "${POSTRINCH_GREENMAIL_JAR:-}" ]; then
     partial="$(mktemp "$cache/.download.XXXXXX")"
     trap 'rm -f "$partial"' EXIT
     echo "Downloading GreenMail $version from Maven Central" >&2
-    curl --fail --silent --show-error --location --output "$partial" "$url"
+    curl --proto =https --proto-redir =https --fail --silent --show-error --location --output "$partial" "$url"
     if ! checked "$partial"; then
       echo "the downloaded $jar_name does not have the SHA-256 pinned in $0" >&2
       exit 1
@@ -48,4 +48,13 @@ if [ -z "${POSTRINCH_GREENMAIL_JAR:-}" ]; then
 fi
 
 cd "$repo_root"
-"${CARGO:-cargo}" test --release -p postrinch-sync --test greenmail -- --include-ignored "$@"
+# A filter that matches nothing runs no test and passes; the smoke test
+# must have run, so the output is read for how many passed.
+log="$(mktemp)"
+trap 'rm -f "$log" "${partial:-}"' EXIT
+"${CARGO:-cargo}" test --release -p postrinch-sync --test greenmail -- --include-ignored "$@" \
+  | tee "$log"
+if ! grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$log"; then
+  echo "no GreenMail test ran: check the filter passed to $0" >&2
+  exit 1
+fi
