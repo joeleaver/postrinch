@@ -17,6 +17,10 @@ use crate::{SyncError, SyncResult, check_address_free};
 /// What the browser is asked to open, for an OAuth sign-in.
 pub type OpenBrowser<'a> = Box<dyn FnOnce(&str) -> std::io::Result<()> + Send + 'a>;
 
+/// Told once the browser has come back with a grant, as the servers'
+/// check starts ([`NewSignIn::OAuth`]'s `on_grant`).
+pub type OnGrant<'a> = Box<dyn FnOnce() + Send + 'a>;
+
 /// A new IMAP account, as the person gave it or discovery found it.
 #[derive(Debug, Clone)]
 pub struct NewImapAccount {
@@ -40,10 +44,14 @@ pub enum NewSignIn<'a> {
     /// In the browser, with `provider`'s OAuth: the grant is checked
     /// first, kept only once both servers took it, and otherwise given
     /// back. With `cancel`, the person can stop waiting for the browser.
+    /// `on_grant` is called once the browser has come back, before the
+    /// servers are checked: from then on `cancel` stops nothing, and the
+    /// add runs to its end.
     OAuth {
         provider: OAuthProvider,
         open_browser: OpenBrowser<'a>,
         cancel: Option<SignInCancel>,
+        on_grant: Option<OnGrant<'a>>,
     },
 }
 
@@ -133,6 +141,7 @@ impl ImapSync {
                 provider,
                 open_browser,
                 cancel,
+                on_grant,
             } => {
                 let granting = oauth.grant(provider, &address, open_browser);
                 let grant = match cancel {
@@ -140,12 +149,13 @@ impl ImapSync {
                     // unkept: unused, it lapses.
                     Some(cancel) => tokio::select! {
                         grant = granting => grant?,
-                        () = cancel.cancelled() => {
-                            return Err(SyncError::SignIn("the sign-in was cancelled".into()));
-                        }
+                        () = cancel.cancelled() => return Err(SyncError::SignInCancelled),
                     },
                     None => granting.await?,
                 };
+                if let Some(on_grant) = on_grant {
+                    on_grant();
+                }
                 settings.sign_in = grant.method();
                 display_name = display_name.or(grant.display_name());
                 let secret = grant.secret();

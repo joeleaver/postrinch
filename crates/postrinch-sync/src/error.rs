@@ -14,6 +14,10 @@ pub enum SyncError {
     Config(String),
     #[error("sign-in failed: {0}")]
     SignIn(String),
+    /// The person stopped a browser sign-in while it waited for the
+    /// browser ([`crate::imap::SignInCanceller`]). Nothing was kept.
+    #[error("the sign-in was cancelled")]
+    SignInCancelled,
     /// This copy of Postrinch has no OAuth client for the provider: its
     /// client file is missing (`detail` is `None`) or does not read. The
     /// provider's accounts cannot sign in; others are unaffected.

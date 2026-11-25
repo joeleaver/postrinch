@@ -48,7 +48,8 @@ use tokio::sync::Mutex as AsyncMutex;
 
 pub use self::account_settings::{AccountFolder, SignInAgain};
 pub use self::accounts::{
-    Added, NewImapAccount, NewSignIn, OpenBrowser, SignInCancel, SignInCanceller, sign_in_cancel,
+    Added, NewImapAccount, NewSignIn, OnGrant, OpenBrowser, SignInCancel, SignInCanceller,
+    sign_in_cancel,
 };
 pub use self::send::SentLookup;
 use self::wire::Conn;

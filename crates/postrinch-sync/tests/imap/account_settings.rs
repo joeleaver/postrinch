@@ -4,6 +4,7 @@
 //! picks, and the person's say on whether the provider files sent mail.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use postrinch_model::{
     AccountState, FolderRole, FolderRoles, Security, SignInMethod, SignInReason, SystemLabel,
@@ -15,7 +16,7 @@ use postrinch_sync::imap::{
 
 use super::add::{Adding, adding, adding_with, google};
 use super::check::Fakes;
-use super::oauth_mock::clients;
+use super::oauth_mock::{browser, clients};
 use super::support::{PASSWORD, USER, account, closed_port, microsoft, server};
 
 /// An account added with the password, then stored with what sync
@@ -139,7 +140,11 @@ async fn the_folders_chosen_for_roles_take_them_at_the_next_pass() {
         drafts: Some("Entw&APw-rfe".into()),
         ..FolderRoles::default()
     };
-    let changed = a.sync.set_folder_roles(&account(), roles.clone()).await;
+    let chosen = roles.clone();
+    let changed = a
+        .sync
+        .change_folder_roles(&account(), move |r| *r = chosen)
+        .await;
     assert_eq!(changed.unwrap().imap.unwrap().roles, roles);
     a.sync.sync(&account(), Arc::new(|_| {})).await.unwrap();
     let folders = a.sync.account_folders(&account()).await.unwrap();
@@ -158,6 +163,29 @@ async fn the_folders_chosen_for_roles_take_them_at_the_next_pass() {
     );
     let stored = a.stored().unwrap().imap.unwrap();
     assert!(!stored.server_files_sent, "what was learned stays");
+}
+
+#[tokio::test]
+async fn two_quick_role_choices_each_keep_theirs() {
+    let a = added().await;
+    let ada = account();
+    let sent = a
+        .sync
+        .change_folder_roles(&ada, |r| r.sent = Some("Copies".into()));
+    let trash = a
+        .sync
+        .change_folder_roles(&ada, |r| r.trash = Some("Bin".into()));
+    let (sent, trash) = tokio::join!(sent, trash);
+    sent.unwrap();
+    trash.unwrap();
+    let roles = a.stored().unwrap().imap.unwrap().roles;
+    assert_eq!(roles.sent.as_deref(), Some("Copies"));
+    assert_eq!(roles.trash.as_deref(), Some("Bin"));
+    assert_eq!(
+        roles.archive.as_deref(),
+        Some("Old"),
+        "what was there stays"
+    );
 }
 
 #[tokio::test]
@@ -192,6 +220,7 @@ async fn a_browser_sign_in_cancelled_while_it_waits_adds_nothing() {
         provider: OAuthProvider::Google,
         open_browser,
         cancel: Some(cancel),
+        on_grant: Some(Box::new(|| panic!("no grant came back"))),
     };
     let adding = a.sync.add_account(&a.oauth, a.new_account(), sign_in);
     let cancelling = async {
@@ -199,9 +228,37 @@ async fn a_browser_sign_in_cancelled_while_it_waits_adds_nothing() {
         canceller.cancel();
     };
     let (result, ()) = tokio::join!(adding, cancelling);
-    assert!(matches!(result, Err(SyncError::SignIn(_))), "{result:?}");
+    assert!(
+        matches!(result, Err(SyncError::SignInCancelled)),
+        "{result:?}"
+    );
     assert!(a.stored().is_none());
     assert!(a.secrets.get(&account()).await.is_err(), "nothing kept");
+}
+
+#[tokio::test]
+async fn once_the_browser_is_back_cancelling_stops_nothing() {
+    let server = google().await;
+    let fakes = Fakes::with_password_and_token("g-access").await;
+    let a = adding_with(fakes, clients(&server)).await;
+    let (canceller, cancel) = sign_in_cancel();
+    let told = Arc::new(AtomicBool::new(false));
+    let t = told.clone();
+    // The person cancels just as the browser comes back: too late.
+    let on_grant = Box::new(move || {
+        t.store(true, Ordering::SeqCst);
+        canceller.cancel();
+    });
+    let sign_in = NewSignIn::OAuth {
+        provider: OAuthProvider::Google,
+        open_browser: Box::new(browser(|_| {})),
+        cancel: Some(cancel),
+        on_grant: Some(on_grant),
+    };
+    let added = a.sync.add_account(&a.oauth, a.new_account(), sign_in).await;
+    assert!(matches!(added, Ok(Added::Account(_))), "{added:?}");
+    assert!(told.load(Ordering::SeqCst), "told the browser was back");
+    assert!(a.stored().is_some());
 }
 
 #[tokio::test]
@@ -209,7 +266,7 @@ async fn settings_need_an_imap_account() {
     let a = adding().await;
     let roles = a
         .sync
-        .set_folder_roles(&account(), FolderRoles::default())
+        .change_folder_roles(&account(), |r| r.sent = None)
         .await;
     assert!(matches!(roles, Err(SyncError::Config(_))), "{roles:?}");
     assert!(a.sync.account_folders(&account()).await.is_err());

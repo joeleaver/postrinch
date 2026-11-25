@@ -177,26 +177,21 @@ impl ImapUi {
         });
     }
 
-    /// Gives `role` to `folder` (none: back to the server's choice). The
-    /// folders take their roles at the next pass, which starts now.
+    /// Gives `role` to `folder` (none: back to the server's choice),
+    /// changing only that role as the account is stored now, so a quick
+    /// second choice does not undo the first. The folders take their
+    /// roles at the next pass, which starts now.
     pub fn set_role(self, state: State, account: EmailAddress, role: Role, folder: Option<String>) {
         let Some(sync) = sync() else {
             return state.notice.set(Some(sync_off()));
         };
-        let current = state
-            .accounts
-            .get()
-            .into_iter()
-            .find(|a| a.account.address == account)
-            .and_then(|a| a.account.imap)
-            .map(|s| s.roles);
-        let Some(mut roles) = current else {
-            return;
-        };
-        role.choose(&mut roles, folder);
         let ui = self;
         sync.runtime.clone().spawn(async move {
-            let set = sync.mail().imap().set_folder_roles(&account, roles).await;
+            let set = sync
+                .mail()
+                .imap()
+                .change_folder_roles(&account, move |roles| role.choose(roles, folder))
+                .await;
             match set {
                 Ok(_) => {
                     state.revision.update_send(|n| *n += 1);
@@ -285,15 +280,8 @@ impl ImapUi {
     /// "Sign in": both servers check the password, and it is kept only
     /// once both took it.
     pub fn sign_in_again(self, state: State) {
-        let Some((account, _)) = self.again.get() else {
+        let Some((account, secret)) = self.ready_to_sign_in() else {
             return;
-        };
-        let secret = match again_secret(
-            self.password.get(),
-            self.again_separate.get().then(|| self.smtp_password.get()),
-        ) {
-            Ok(secret) => secret,
-            Err(error) => return self.again_error.set(Some(error)),
         };
         let Some(sync) = sync() else {
             return self.again_error.set(Some(sync_off().text));
@@ -332,6 +320,26 @@ impl ImapUi {
         });
     }
 
+    /// The account and the secret to check: none while a check is under
+    /// way (Enter and the button both ask), or when the dialog is closed
+    /// or lacks a password, which its error then says.
+    pub fn ready_to_sign_in(self) -> Option<(EmailAddress, ImapSecret)> {
+        if self.again_busy.get() {
+            return None;
+        }
+        let (account, _) = self.again.get()?;
+        match again_secret(
+            self.password.get(),
+            self.again_separate.get().then(|| self.smtp_password.get()),
+        ) {
+            Ok(secret) => Some((account, secret)),
+            Err(error) => {
+                self.again_error.set(Some(error));
+                None
+            }
+        }
+    }
+
     fn signed_in(self, state: State, done: Outcome) {
         match done {
             Outcome::Done(account) => {
@@ -346,6 +354,8 @@ impl ImapUi {
                 self.again_busy.set(false);
                 self.again_error.set(Some(error));
             }
+            // A password sign-in has no browser to cancel.
+            Outcome::Cancelled => self.again_busy.set(false),
         }
     }
 }

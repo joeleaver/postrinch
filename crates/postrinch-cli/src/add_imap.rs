@@ -134,6 +134,7 @@ pub async fn add_imap(
             }),
             // Ctrl-C ends the command, and the sign-in with it.
             cancel: None,
+            on_grant: None,
         },
         None if args.separate_smtp_password => {
             settings.sign_in = SignInMethod::SeparateSmtpPassword;

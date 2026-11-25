@@ -288,9 +288,22 @@ fn errors_say_what_happened() {
         detail: None,
     };
     assert!(error_text(&not_set_up).starts_with("Microsoft sign-in is not set up"));
-    let cancelled = SyncError::SignIn("the sign-in was cancelled".into());
+    let timed_out = SyncError::SignIn("timed out waiting for the browser".into());
     assert_eq!(
-        error_text(&cancelled),
-        "Signing in did not finish: the sign-in was cancelled."
+        error_text(&timed_out),
+        "Signing in did not finish: timed out waiting for the browser."
     );
+}
+
+#[test]
+fn a_cancelled_sign_in_is_no_failure() {
+    let (new, _) = fixture().form("pw").to_add().unwrap();
+    let settings = new.settings;
+    let cancelled = outcome(
+        Err(SyncError::SignInCancelled),
+        &settings,
+        &Found::default(),
+        Step::Found,
+    );
+    assert!(matches!(cancelled, Outcome::Cancelled), "{cancelled:?}");
 }

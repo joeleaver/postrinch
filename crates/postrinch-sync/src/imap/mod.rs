@@ -39,7 +39,7 @@ pub use secret::{ImapSecret, ImapSecrets};
 pub use session::ImapSession;
 pub use smtp::SmtpConnection;
 pub use sync::{
-    AccountFolder, Added, ImapSync, NewImapAccount, NewSignIn, OpenBrowser, SentLookup,
+    AccountFolder, Added, ImapSync, NewImapAccount, NewSignIn, OnGrant, OpenBrowser, SentLookup,
     SignInAgain, SignInCancel, SignInCanceller, sign_in_cancel,
 };
 pub use threading::{Own, thread_for};

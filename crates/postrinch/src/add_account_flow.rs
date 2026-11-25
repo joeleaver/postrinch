@@ -36,6 +36,9 @@ pub enum Outcome {
     /// Not done: nothing was kept. The person goes back to `step`, told
     /// `error`.
     Failed { step: Step, error: String },
+    /// The person stopped the browser sign-in while it waited: nothing
+    /// was kept, and there is nothing to tell them.
+    Cancelled,
 }
 
 /// What adding came to. `found` says what discovery knew (for the app
@@ -56,6 +59,7 @@ pub fn outcome(
             let step = if servers_wrong { Step::Servers } else { from };
             Outcome::Failed { step, error }
         }
+        Err(SyncError::SignInCancelled) => Outcome::Cancelled,
         Err(e) => {
             let step = match e {
                 SyncError::AlreadyAdded { .. } => Step::Address,

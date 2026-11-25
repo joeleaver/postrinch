@@ -1,23 +1,25 @@
 //! The add-account dialog in the window: its signals, and the slow work
 //! (`add_account_flow`) run on sync's runtime, reporting back by
-//! `send`. Each run carries the dialog's generation: an answer for a
-//! dialog since closed or gone back from is dropped.
-
-use std::cell::RefCell;
+//! `send`. Each lookup carries the dialog's generation: one for a dialog
+//! since closed or gone back from is dropped. An add's answer is never
+//! dropped: it goes to the dialog, or to a notice once the person has
+//! left it (`add_account_runs`).
 
 use postrinch_discover::{Progress, Step as LookStep, StepState};
 use postrinch_model::{EmailAddress, ImapSettings};
-use postrinch_sync::imap::{NewSignIn, OAuthProvider, SignInCanceller, sign_in_cancel};
+use postrinch_sync::imap::{ImapSecret, NewSignIn, OAuthProvider, sign_in_cancel};
 use rinch::prelude::*;
 
 use crate::actions::{Notice, sync};
 use crate::add_account::{AddForm, Kind, ServerForm, Step, Way};
 use crate::add_account_flow::{Outcome, look_up, outcome};
+use crate::add_account_runs::{Answer, Run, cancel_browser, done_text, keep_canceller};
 use crate::state::{SettingsSection, State, View};
 
-thread_local! {
-    /// Stops the browser sign-in the dialog waits on.
-    static CANCEL: RefCell<Option<SignInCanceller>> = const { RefCell::new(None) };
+/// How an add signs in, once the form is checked.
+enum How {
+    Browser(OAuthProvider),
+    Password(ImapSecret),
 }
 
 /// The add-account dialog's state.
@@ -40,6 +42,9 @@ pub struct AddUi {
     /// The account whose servers the servers panel changes ("Server
     /// settings…"); none while adding one.
     pub changing: Signal<Option<EmailAddress>>,
+    /// The addresses an add or change of servers is under way for, the
+    /// dialog open on it or not: no second one starts for them.
+    pub under_way: Signal<Vec<EmailAddress>>,
 }
 
 impl AddUi {
@@ -53,6 +58,7 @@ impl AddUi {
             browser_page: Signal::new(None),
             generation: Signal::new(0),
             changing: Signal::new(None),
+            under_way: Signal::new(Vec::new()),
         }
     }
 
@@ -78,6 +84,9 @@ impl AddUi {
     /// "Check and save" on an account's servers: both are checked with
     /// the sign-in it keeps, and changed only once both pass.
     pub fn save_servers(self, state: State) {
+        if self.working() {
+            return;
+        }
         let Some(account) = self.changing.get() else {
             return;
         };
@@ -109,8 +118,10 @@ impl AddUi {
         };
         settings.imap = imap;
         settings.smtp = smtp;
-        self.go(Step::Checking);
-        let generation = self.generation.get();
+        let run = match self.start(account.clone(), Step::Servers, Step::Checking, true) {
+            Ok(run) => run,
+            Err(error) => return self.error.set(Some(error)),
+        };
         let ui = self;
         let runtime = sync.runtime.clone();
         runtime.spawn(async move {
@@ -123,12 +134,13 @@ impl AddUi {
             if matches!(done, Outcome::Done(_)) {
                 sync.accounts_changed();
             }
-            ui.on_main(generation, move |ui| ui.finish(state, done, Step::Servers));
+            rinch::run_on_main_thread(move || ui.ended(state, &run, done));
         });
     }
 
     /// Closes the dialog, forgetting what was typed and stopping a
-    /// browser sign-in it waits on.
+    /// browser sign-in it waits on. An add whose servers are being
+    /// checked goes on, and a notice says how it went.
     pub fn close(self) {
         cancel_browser();
         self.generation.update(|n| *n += 1);
@@ -164,6 +176,9 @@ impl AddUi {
     /// "Continue" on the address: checks the address is not an account
     /// here already, then looks its servers up.
     pub fn look_up(self) {
+        if self.working() {
+            return;
+        }
         let form = self.form.get();
         let address = match form.parsed_address() {
             Ok(address) => address,
@@ -184,9 +199,8 @@ impl AddUi {
             .collect();
         let runtime = sync.runtime.clone();
         runtime.spawn(async move {
-            let looking = ui.looking;
             let progress = move |p: Progress| {
-                looking.update_send(move |steps| note_progress(steps, p));
+                rinch::run_on_main_thread(move || ui.noted(generation, p));
             };
             let found = look_up(&sync.store, &address, progress).await;
             ui.on_main(generation, move |ui| match found {
@@ -216,6 +230,9 @@ impl AddUi {
     /// form, then signs in and checks both servers off the window's
     /// thread, and adds the account once both took it.
     pub fn add(self, state: State) {
+        if self.working() {
+            return;
+        }
         let from = self.step.get().unwrap_or(Step::Found);
         let form = self.form.get();
         let (new, secret) = match form.to_add() {
@@ -225,22 +242,26 @@ impl AddUi {
         let Some(sync) = sync() else {
             return self.error.set(Some(sync_off()));
         };
-        let browser = match form.way {
-            Way::Browser(provider) => Some(provider),
-            Way::Password => None,
+        let how = match (form.way, secret) {
+            (Way::Browser(provider), _) => How::Browser(provider),
+            (Way::Password, Some(secret)) => How::Password(secret),
+            (Way::Password, None) => return self.error.set(Some("Give the password.".into())),
         };
-        self.go(if browser.is_some() {
-            Step::Browser
-        } else {
-            Step::Checking
-        });
-        let generation = self.generation.get();
+        let step = match how {
+            How::Browser(_) => Step::Browser,
+            How::Password(_) => Step::Checking,
+        };
+        let run = match self.start(new.address.clone(), from, step, false) {
+            Ok(run) => run,
+            Err(error) => return self.error.set(Some(error)),
+        };
         let ui = self;
-        let sign_in = match (browser, secret) {
-            (Some(provider), _) => {
+        let sign_in = match how {
+            How::Browser(provider) => {
                 let (canceller, cancel) = sign_in_cancel();
-                CANCEL.with(|c| *c.borrow_mut() = Some(canceller));
+                keep_canceller(run.generation, canceller);
                 let page = self.browser_page;
+                let back = run.clone();
                 NewSignIn::OAuth {
                     provider,
                     open_browser: Box::new(move |url: &str| {
@@ -248,10 +269,12 @@ impl AddUi {
                         open::that_detached(url)
                     }),
                     cancel: Some(cancel),
+                    on_grant: Some(Box::new(move || {
+                        rinch::run_on_main_thread(move || ui.granted(&back));
+                    })),
                 }
             }
-            (None, Some(secret)) => NewSignIn::Password(secret),
-            (None, None) => return self.error.set(Some("Give the password.".into())),
+            How::Password(secret) => NewSignIn::Password(secret),
         };
         let settings = new.settings.clone();
         let found = form.found.clone();
@@ -266,12 +289,16 @@ impl AddUi {
             if matches!(done, Outcome::Done(_)) {
                 sync.accounts_changed();
             }
-            ui.on_main(generation, move |ui| ui.finish(state, done, from));
+            rinch::run_on_main_thread(move || ui.ended(state, &run, done));
         });
     }
 
-    /// "Cancel" while the browser is open: stops waiting for it.
+    /// "Cancel" while the browser is open: stops waiting for it. Once the
+    /// browser is back the dialog is checking, and offers no Cancel.
     pub fn cancel_browser(self) {
+        if self.step.get() != Some(Step::Browser) {
+            return;
+        }
         cancel_browser();
         let back = if self.form.get().found.source.is_some() {
             Step::Found
@@ -289,37 +316,44 @@ impl AddUi {
         state.sign_in(address);
     }
 
-    /// The add's answer, for the dialog that asked from step `from`.
-    fn finish(self, state: State, done: Outcome, from: Step) {
-        CANCEL.with(|c| c.borrow_mut().take());
+    /// `run` ended with `done`: the dialog shows it if the person is
+    /// still waiting on it there, and a notice says it otherwise.
+    fn ended(self, state: State, run: &Run, done: Outcome) {
+        if matches!(done, Outcome::Done(_)) {
+            state.revision.update(|n| *n += 1);
+        }
+        match self.answer(run, done) {
+            Answer::Dialog(done) => self.finish(state, run, done),
+            Answer::Away(Some(notice)) => state.notice.set(Some(notice)),
+            Answer::Away(None) => {}
+        }
+    }
+
+    /// `run`'s answer, in the dialog the person is waiting in.
+    fn finish(self, state: State, run: &Run, done: Outcome) {
         match done {
             Outcome::Done(account) => {
-                let text = if self.changing.get().is_some() {
-                    format!("{}'s servers are changed.", account.address)
-                } else {
-                    format!("{} is added. Its mail is on the way.", account.address)
-                };
                 self.close();
                 // The account's detail, wherever the dialog was opened.
                 state.view.set(View::Settings);
                 state.settings_section.set(SettingsSection::Accounts);
                 state.account_shown.set(Some(account.address.clone()));
                 state.notice.set(Some(Notice {
-                    text,
+                    text: done_text(run),
                     trouble: false,
                 }));
-                state.revision.update(|n| *n += 1);
             }
             Outcome::Failed { step, error } => {
                 // The servers panel opened from the found step goes back
                 // there; one the person was already on keeps its Back.
-                if step == Step::Servers && from != Step::Servers {
-                    self.servers(from);
+                if step == Step::Servers && run.from != Step::Servers {
+                    self.servers(run.from);
                 } else {
                     self.go(step);
                 }
                 self.error.set(Some(error));
             }
+            Outcome::Cancelled => self.go(run.from),
         }
     }
 
@@ -331,13 +365,6 @@ impl AddUi {
                 then(self);
             }
         });
-    }
-}
-
-/// Stops a browser sign-in the dialog is waiting on, if one is.
-fn cancel_browser() {
-    if let Some(canceller) = CANCEL.with(|c| c.borrow_mut().take()) {
-        canceller.cancel();
     }
 }
 

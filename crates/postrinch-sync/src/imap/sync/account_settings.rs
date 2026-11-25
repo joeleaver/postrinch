@@ -108,15 +108,18 @@ impl ImapSync {
         }
     }
 
-    /// Keeps which folder the person chose for each role (by its name on
+    /// Changes which folder the person chose for a role (by its name on
     /// the server; `None` leaves the role to the server's SPECIAL-USE, or
-    /// the usual names). The next pass gives the folders their roles.
-    pub async fn set_folder_roles(
+    /// the usual names): `change` is given the roles as stored, under the
+    /// account lock, so it changes only what it means to and two quick
+    /// choices each keep theirs. The next pass gives the folders their
+    /// roles.
+    pub async fn change_folder_roles(
         &self,
         account: &EmailAddress,
-        roles: FolderRoles,
+        change: impl FnOnce(&mut FolderRoles) + Send + 'static,
     ) -> SyncResult<Account> {
-        self.change_imap(account, move |settings| settings.roles = roles)
+        self.change_imap(account, move |settings| change(&mut settings.roles))
             .await
     }
 

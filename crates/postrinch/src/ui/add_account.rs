@@ -11,7 +11,7 @@ use crate::add_account::{AddForm, Kind, Step, Way};
 use crate::add_account_run::{AddUi, LOOK_STEPS, adding_address, look_line};
 use crate::state::State;
 use crate::ui::add_account_servers::servers_panel;
-use postrinch_discover::{Discovery, Step as LookStep, StepState};
+use postrinch_discover::{Step as LookStep, StepState};
 use postrinch_sync::imap::OAuthProvider;
 
 #[component]
@@ -153,7 +153,7 @@ fn address(state: State) -> NodeHandle {
     rsx! {
         div { class: "dialog",
             {head(__scope, kind_title(&form), "Postrinch looks up the servers from the address.".into())}
-            {text_field(__scope, ui, "Email address", |f| f.address.clone(), |f, v| f.address = v)}
+            {text_field(__scope, ui, "Email address", |f| f.address.clone(), AddForm::set_address)}
             {text_field(__scope, ui, "Your name", |f| f.name.clone(), |f, v| f.name = v)}
             {error_line(__scope, ui)}
             div { class: "dialog-actions",
@@ -170,11 +170,7 @@ fn address(state: State) -> NodeHandle {
 
 /// "Set up servers by hand": the usual names guessed from the address.
 fn by_hand(ui: AddUi, back: Step) {
-    ui.edit(|f| {
-        if f.parsed_address().is_ok() && f.imap.host.is_empty() {
-            f.take_discovery(&Discovery::nothing(), |_| false);
-        }
-    });
+    ui.edit(AddForm::guess_servers);
     ui.servers(back);
 }
 

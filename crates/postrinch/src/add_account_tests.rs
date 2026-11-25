@@ -240,3 +240,45 @@ fn discovery_steps_report_in_place() {
         "The domain's DNS records: nothing found"
     );
 }
+
+#[test]
+fn a_changed_address_forgets_what_was_found_for_the_old_one() {
+    let mut google = fastmail();
+    google.hosted_by = Some(HostedBy::Google);
+    google.app_password_url = Some("https://example.com/app-passwords".into());
+    google.confirm_servers = true;
+    let mut f = form(Kind::Other, "a@gmail.com");
+    f.name = "Ada".into();
+    f.take_discovery(&google, every_sign_in);
+    f.password = "secret".into();
+    f.trusted = true;
+
+    // The same address, typed again with a space, keeps it all.
+    f.set_address("a@gmail.com ".into());
+    assert_eq!(f.way, Way::Browser(OAuthProvider::Google));
+    assert!(f.found.app_password_url.is_some());
+
+    f.set_address("b@example.org".into());
+    assert_eq!(f.address, "b@example.org");
+    assert_eq!(f.name, "Ada", "the name stays");
+    assert_eq!(f.found, Found::default());
+    assert_eq!(f.way, Way::Password);
+    assert!(!f.trusted);
+    assert!(f.password.is_empty(), "a password for the old address goes");
+    assert!(f.imap.host.is_empty() && f.smtp.host.is_empty());
+
+    // By hand, then: the new address's guesses, not the old servers.
+    f.guess_servers();
+    assert_eq!(f.imap.host, "mail.example.org");
+    assert_eq!(f.imap.username, "b@example.org");
+    assert_eq!(f.found.oauth, None);
+    assert!(f.found.app_password_url.is_none() && !f.found.confirm_servers);
+}
+
+#[test]
+fn servers_by_hand_keep_what_discovery_found_for_the_address() {
+    let mut f = form(Kind::Other, "ed@fastmail.com");
+    f.take_discovery(&fastmail(), no_sign_in);
+    f.guess_servers();
+    assert_eq!(f.imap.host, "imap.fastmail.com");
+}

@@ -318,6 +318,31 @@ impl AddForm {
         ))
     }
 
+    /// The address as typed. What discovery found was for the address
+    /// as it was, so a changed address forgets it all: the servers, how
+    /// to sign in, what was said about the provider, the trust given to
+    /// its servers and the passwords typed for it. Only the kind, the
+    /// name and the address itself stay.
+    pub fn set_address(&mut self, address: String) {
+        if address.trim() != self.address.trim() {
+            *self = Self {
+                address,
+                name: std::mem::take(&mut self.name),
+                ..Self::new(self.kind)
+            };
+        } else {
+            self.address = address;
+        }
+    }
+
+    /// "Set up servers by hand" before discovery has filled anything in:
+    /// the usual names, guessed from the address.
+    pub fn guess_servers(&mut self) {
+        if self.parsed_address().is_ok() && self.imap.host.is_empty() {
+            self.take_discovery(&Discovery::nothing(), |_| false);
+        }
+    }
+
     /// "Use IMAP anyway" on Google's mail: Google's browser sign-in over
     /// IMAP when this copy has it, else an app password.
     pub fn use_imap_anyway(&mut self) {

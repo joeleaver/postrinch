@@ -1,4 +1,5 @@
-//! The Folders section's choices and the sign-in-again dialog's secret.
+//! The Folders section's choices and the sign-in-again dialog's secret
+//! and its one check at a time.
 
 use postrinch_model::{FolderRole, FolderRoles, SystemLabel};
 use postrinch_sync::imap::{AccountFolder, ImapSecret};
@@ -113,4 +114,21 @@ fn signing_in_again_needs_each_password_it_asks_for() {
             smtp_password: Some("out".into())
         }
     );
+}
+
+#[test]
+fn a_second_sign_in_waits_for_the_check_under_way() {
+    let ui = ImapUi::new();
+    let account = EmailAddress::parse("ada@example.org").unwrap();
+    ui.open_sign_in_again(account.clone(), "why".into(), &SignInMethod::Password);
+    assert!(ui.ready_to_sign_in().is_none(), "no password yet");
+    assert_eq!(ui.again_error.get().as_deref(), Some("Give the password."));
+    ui.password.set("pw".into());
+    assert_eq!(
+        ui.ready_to_sign_in(),
+        Some((account, ImapSecret::password("pw")))
+    );
+    // The first Enter's check is running: a second Enter does nothing.
+    ui.again_busy.set(true);
+    assert!(ui.ready_to_sign_in().is_none());
 }

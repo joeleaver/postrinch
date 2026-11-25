@@ -114,6 +114,7 @@ impl Adding {
             provider: OAuthProvider::Google,
             open_browser: Box::new(browser(|_| {})),
             cancel: None,
+            on_grant: None,
         };
         self.sync
             .add_account(&self.oauth, self.new_account(), sign_in)
