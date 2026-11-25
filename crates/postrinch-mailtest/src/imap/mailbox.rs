@@ -92,6 +92,9 @@ pub(crate) struct Folder {
     pub(crate) special_use: Option<SpecialUse>,
     pub(crate) selectable: bool,
     pub(crate) subscribed: bool,
+    /// Whether LIST shows it; a test hides one to play a server that
+    /// leaves a folder out of a listing for a while.
+    pub(crate) listed: bool,
     pub(crate) uid_validity: u32,
     pub(crate) uid_next: u32,
     pub(crate) highest_modseq: u64,
@@ -114,6 +117,7 @@ impl Folder {
             special_use: None,
             selectable: true,
             subscribed: true,
+            listed: true,
             uid_validity: 1000 + u32::try_from(id).unwrap_or(u32::MAX - 1000),
             uid_next: 1,
             highest_modseq: 1,

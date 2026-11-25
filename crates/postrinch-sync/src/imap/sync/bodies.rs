@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use postrinch_model::{EmailAddress, ImapPlace, ProviderMessageId};
+use postrinch_model::{EmailAddress, ImapPlace, Message, ProviderMessageId};
 use postrinch_store::Store;
 
 use super::places::DELETED;
@@ -119,7 +119,7 @@ impl ImapSync {
                 .messages;
             let a = account.clone();
             stored += self
-                .blocking(move |s| store_bodies(s, &a, &current, fetched))
+                .blocking(move |s| store_bodies(s, &a, &name, &current, fetched))
                 .await?;
         }
         Ok(stored)
@@ -158,9 +158,15 @@ fn sources(
 
 /// Stores downloaded messages over what their headers gave. Returns how
 /// many were stored.
+///
+/// A message that cannot be parsed (a zero-byte one, as maildir servers
+/// can hold) is kept as downloaded with its raw bytes and what its
+/// headers gave, so backfill does not ask for it again on every pass and
+/// the person can still see it and save it.
 fn store_bodies(
     store: &Store,
     account: &EmailAddress,
+    folder_name: &str,
     places: &[ImapPlace],
     fetched: Vec<Fetched>,
 ) -> SyncResult<usize> {
@@ -182,7 +188,21 @@ fn store_bodies(
             flags: kept.flags,
             snippet: None,
         };
-        let message = parse_message(envelope, &bytes)?;
+        let message = match parse_message(envelope, &bytes) {
+            Ok(message) => message,
+            Err(e) => {
+                tracing::warn!(
+                    "IMAP: UID {} in {folder_name:?} of {account} cannot be read ({e}); \
+                     it is kept as the server sent it",
+                    f.uid
+                );
+                Message {
+                    size: bytes.len() as u64,
+                    downloaded: true,
+                    ..kept
+                }
+            }
+        };
         store.put_message(&message, Some(&bytes))?;
         stored += 1;
     }

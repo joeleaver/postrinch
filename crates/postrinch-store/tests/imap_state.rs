@@ -44,6 +44,7 @@ fn setup() -> (tempfile::TempDir, Store, EmailAddress) {
     inbox.role = Some(FolderRole::System(SystemLabel::Inbox));
     inbox.uidvalidity = 7;
     inbox.uidnext = 12;
+    inbox.mailbox_id = Some("F2212ea87".into());
     store.put_imap_folder(&me, &inbox).unwrap();
     let mut receipts = ImapFolder::new("f0123456789ab", "Receipts");
     receipts.delimiter = Some('.');
@@ -95,6 +96,8 @@ fn folders_are_kept_and_changed() {
     let labels: Vec<&str> = folders.iter().map(|f| f.label_id.as_str()).collect();
     assert_eq!(labels, ["INBOX", "f0123456789ab"]);
     assert_eq!(folders[0].delimiter, Some('/'));
+    assert_eq!(folders[0].mailbox_id.as_deref(), Some("F2212ea87"));
+    assert_eq!(folders[1].mailbox_id, None);
     assert_eq!(
         folders[0].role,
         Some(FolderRole::System(SystemLabel::Inbox))

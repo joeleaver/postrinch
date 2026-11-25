@@ -182,7 +182,7 @@ impl Session {
         let Some(account) = state.accounts.get(&user) else {
             return Reply::No("No such user".into());
         };
-        for folder in account.folders.values() {
+        for folder in account.folders.values().filter(|f| f.listed) {
             let name_matches = patterns
                 .iter()
                 .any(|p| pattern_matches(&format!("{reference}{p}"), &folder.name));

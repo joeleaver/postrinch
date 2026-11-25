@@ -29,8 +29,19 @@ pub enum ImapFault {
 #[derive(Debug)]
 struct PendingFault {
     command: String,
+    /// Text the command's logged form must contain, if any.
+    matching: Option<String>,
     remaining: usize,
     fault: ImapFault,
+}
+
+/// Something a test runs when a command arrives, before it is answered.
+pub(crate) type Action = Box<dyn FnOnce() + Send>;
+
+struct Hook {
+    command: String,
+    matching: String,
+    action: Action,
 }
 
 /// One command as the server saw it.
@@ -45,6 +56,7 @@ pub(crate) struct State {
     pub(crate) accounts: HashMap<String, Account>,
     pub(crate) next_folder_id: u64,
     faults: Vec<PendingFault>,
+    hooks: Vec<Hook>,
     pub(crate) log: Vec<LoggedCommand>,
     /// Raised to drop every open session.
     pub(crate) kill_epoch: u64,
@@ -56,6 +68,7 @@ impl State {
             accounts: HashMap::new(),
             next_folder_id: 0,
             faults: Vec::new(),
+            hooks: Vec::new(),
             log: Vec::new(),
             kill_epoch: 0,
             config: config.clone(),
@@ -79,21 +92,29 @@ impl State {
     }
 
     /// Adds a programmed failure for the next `times` commands named
-    /// `command`.
-    pub(crate) fn add_fault(&mut self, command: &str, times: usize, fault: ImapFault) {
+    /// `command` whose logged text contains `matching` (any, if `None`).
+    pub(crate) fn add_fault(
+        &mut self,
+        command: &str,
+        matching: Option<&str>,
+        times: usize,
+        fault: ImapFault,
+    ) {
         self.faults.push(PendingFault {
             command: command.to_ascii_uppercase(),
+            matching: matching.map(str::to_owned),
             remaining: times,
             fault,
         });
     }
 
     /// Takes the failure, if any, programmed for this command.
-    pub(crate) fn take_fault(&mut self, command: &str) -> Option<ImapFault> {
-        let i = self
-            .faults
-            .iter()
-            .position(|f| f.command == command && f.remaining > 0)?;
+    pub(crate) fn take_fault(&mut self, command: &str, text: &str) -> Option<ImapFault> {
+        let i = self.faults.iter().position(|f| {
+            f.command == command
+                && f.remaining > 0
+                && f.matching.as_deref().is_none_or(|m| text.contains(m))
+        })?;
         let pending = &mut self.faults[i];
         pending.remaining -= 1;
         let fault = pending.fault.clone();
@@ -101,6 +122,25 @@ impl State {
             self.faults.remove(i);
         }
         Some(fault)
+    }
+
+    /// Adds an action to run once, when the next command named `command`
+    /// whose logged text contains `matching` arrives.
+    pub(crate) fn add_hook(&mut self, command: &str, matching: &str, action: Action) {
+        self.hooks.push(Hook {
+            command: command.to_ascii_uppercase(),
+            matching: matching.to_owned(),
+            action,
+        });
+    }
+
+    /// Takes the action, if any, waiting for this command.
+    pub(crate) fn take_hook(&mut self, command: &str, text: &str) -> Option<Action> {
+        let i = self
+            .hooks
+            .iter()
+            .position(|h| h.command == command && text.contains(&h.matching))?;
+        Some(self.hooks.remove(i).action)
     }
 }
 

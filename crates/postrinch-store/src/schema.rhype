@@ -232,6 +232,8 @@ type ImapFolder {
     // 0 for none (no CONDSTORE).
     highest_modseq: u64
     subscribed: Bool
+    // RFC 8474 MAILBOXID, or null where the server has none.
+    mailbox_id: String
     places: [ImapPlace] @inverse(ImapPlace.folder)
 }
 

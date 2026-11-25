@@ -23,11 +23,14 @@ pub enum Extension {
     ListExtended,
     /// RFC 2177 IDLE.
     Idle,
+    /// RFC 8474 OBJECTID: each folder's `MAILBOXID`, kept across renames,
+    /// in SELECT's and EXAMINE's responses.
+    ObjectId,
 }
 
 impl Extension {
     /// Every extension the fake knows.
-    pub const ALL: [Extension; 7] = [
+    pub const ALL: [Extension; 8] = [
         Extension::Condstore,
         Extension::Qresync,
         Extension::Move,
@@ -35,6 +38,7 @@ impl Extension {
         Extension::SpecialUse,
         Extension::ListExtended,
         Extension::Idle,
+        Extension::ObjectId,
     ];
 
     /// The capability name advertised for it.
@@ -47,6 +51,7 @@ impl Extension {
             Extension::SpecialUse => "SPECIAL-USE",
             Extension::ListExtended => "LIST-EXTENDED",
             Extension::Idle => "IDLE",
+            Extension::ObjectId => "OBJECTID",
         }
     }
 }
@@ -73,6 +78,9 @@ pub struct ImapConfig {
     pub(crate) greets: bool,
     pub(crate) bye_greeting: Option<String>,
     pub(crate) injects_after_starttls: bool,
+    pub(crate) literal_plus: bool,
+    pub(crate) splits_fetches: bool,
+    pub(crate) unsolicited_fetches: bool,
 }
 
 impl Default for ImapConfig {
@@ -87,6 +95,9 @@ impl Default for ImapConfig {
             greets: true,
             bye_greeting: None,
             injects_after_starttls: false,
+            literal_plus: true,
+            splits_fetches: false,
+            unsolicited_fetches: false,
         }
     }
 }
@@ -173,6 +184,33 @@ impl ImapConfig {
     /// For testing that clients refuse whatever came before TLS.
     pub fn injects_after_starttls(mut self, on: bool) -> Self {
         self.injects_after_starttls = on;
+        self
+    }
+
+    /// Whether LITERAL+ (RFC 7888) is offered. On by default. Off, a
+    /// client must wait for `+` before each literal it sends.
+    pub fn literal_plus(mut self, on: bool) -> Self {
+        self.literal_plus = on;
+        self
+    }
+
+    /// Whether each message's FETCH data is split across two responses,
+    /// as RFC 3501 7.4.2 allows: the first with the UID and the first half
+    /// of the items, the second, without the UID, with the rest. Off by
+    /// default.
+    pub fn splits_fetches(mut self, on: bool) -> Self {
+        self.splits_fetches = on;
+        self
+    }
+
+    /// Whether a FETCH that asks for a body section also brings
+    /// unsolicited flag updates, as CONDSTORE servers send when another
+    /// client changes flags: `* n FETCH (UID u FLAGS (...) MODSEQ (m))`
+    /// for every message of the folder it did not ask for, and one for the
+    /// first message it asked for, before that message's answer. Off by
+    /// default.
+    pub fn unsolicited_fetches(mut self, on: bool) -> Self {
+        self.unsolicited_fetches = on;
         self
     }
 

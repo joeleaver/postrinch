@@ -4817,6 +4817,7 @@ dependencies = [
  "async-imap",
  "base64 0.22.1",
  "bytes",
+ "chrono",
  "dirs",
  "futures-util",
  "jiff",

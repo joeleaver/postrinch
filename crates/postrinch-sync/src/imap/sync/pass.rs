@@ -9,24 +9,24 @@
 //! - otherwise new mail is fetched from the UIDNEXT read last time, flags
 //!   by `CHANGEDSINCE` the HIGHESTMODSEQ read last time (or all of them
 //!   without CONDSTORE), and gone mail found by QRESYNC's `VANISHED` (or
-//!   by comparing the UIDs kept with the folder's).
+//!   by comparing the UIDs kept with the folder's) ([`super::read`]).
 //!
 //! A folder's position is written only once everything before it is
 //! stored, so an interrupted pass repeats work and never skips mail.
+//! Messages and folders that went are removed only at the end of a
+//! complete pass ([`super::pending`]).
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
-use postrinch_model::{EmailAddress, ImapFolder, ImapPlace};
+use postrinch_model::{EmailAddress, ImapFolder};
 
 use super::ImapSync;
 use super::folders::{Planned, plan};
-use super::places::{self, FlagChange, Folder, Stored};
-use super::wire::{Conn, Fetched, Selected, uid_set};
+use super::names::sendable;
+use super::pending;
+use super::wire::Conn;
 use crate::SyncResult;
 use crate::google::{Phase, Progress, ProgressFn, SyncReport};
-
-/// How many messages' headers are asked for at once.
-const HEADER_BATCH: usize = 100;
 
 impl ImapSync {
     pub(super) async fn pass(
@@ -36,19 +36,35 @@ impl ImapSync {
         progress: &ProgressFn,
     ) -> SyncResult<SyncReport> {
         let mut report = SyncReport::default();
-        let listed = conn.session_mut().list_folders().await?;
+        let a = account.clone();
+        let number = self.blocking(move |s| pending::begin_pass(s, &a)).await?;
+        let mut listed = conn.session_mut().list_folders().await?;
+        listed.retain(|folder| {
+            let ok = sendable(&folder.name);
+            if !ok {
+                tracing::warn!(
+                    "IMAP: {account} has a folder whose name cannot be sent back to the \
+                     server; it is not synced: {:?}",
+                    folder.name
+                );
+            }
+            ok
+        });
         let roles = self.settings(account).await?.roles;
         let a = account.clone();
         let stored = self.with_store(move |s| s.imap_folders(&a)).await?;
-        let planned = plan(&listed, &stored, &roles);
+        let renames = self.renames(conn, &listed, &stored).await?;
+        let planned = plan(&listed, &stored, &roles, &renames);
         self.keep_folders(account, &planned).await?;
+        let mut complete = true;
         for (i, folder) in planned.iter().enumerate() {
             progress(Progress::Working {
                 phase: Phase::Changes,
                 done: i,
                 total: planned.len(),
             });
-            self.folder(conn, account, folder.state.clone(), progress, &mut report)
+            complete &= self
+                .folder(conn, account, folder.state.clone(), progress, &mut report)
                 .await?;
         }
         let a = account.clone();
@@ -57,23 +73,7 @@ impl ImapSync {
             .map(|p| p.label.provider_id.clone())
             .collect();
         report.removed += self
-            .blocking(move |s| {
-                // Folders gone from the server go once every folder is
-                // read, so mail that moved with a rename keeps its body.
-                for label in s.labels(&a)? {
-                    if !keep.contains(&label.provider_id) {
-                        places::forget_folder(s, &a, &label.provider_id)?;
-                        s.remove_label(&a, &label.provider_id)?;
-                    }
-                }
-                for folder in s.imap_folders(&a)? {
-                    if !keep.contains(&folder.label_id) {
-                        places::forget_folder(s, &a, &folder.label_id)?;
-                        s.remove_imap_folder(&a, &folder.label_id)?;
-                    }
-                }
-                places::resolve_pending(s, &a)
-            })
+            .blocking(move |s| finish(s, &a, &keep, number, complete))
             .await?;
         Ok(report)
     }
@@ -86,7 +86,7 @@ impl ImapSync {
             for p in &planned {
                 s.put_label(&a, &p.label)?;
                 if p.forget_places {
-                    places::forget_folder(s, &a, &p.label.provider_id)?;
+                    pending::forget_folder(s, &a, &p.label.provider_id)?;
                 }
                 s.put_imap_folder(&a, &p.state)?;
             }
@@ -95,6 +95,9 @@ impl ImapSync {
         .await
     }
 
+    /// Reads one folder. Returns whether it was read whole: `false` when
+    /// the server refused to open it, or did not answer for every message
+    /// asked for.
     async fn folder(
         &self,
         conn: &mut Conn,
@@ -102,17 +105,25 @@ impl ImapSync {
         mut state: ImapFolder,
         progress: &ProgressFn,
         report: &mut SyncReport,
-    ) -> SyncResult<()> {
+    ) -> SyncResult<bool> {
         let Some(selected) = conn.select(&state.name).await? else {
-            return Ok(());
+            return Ok(false);
         };
+        let mut changed = selected.mailbox_id.is_some() && selected.mailbox_id != state.mailbox_id;
+        if changed {
+            state.mailbox_id = selected.mailbox_id.clone();
+        }
         if selected.uidvalidity != state.uidvalidity {
             state.uidvalidity = selected.uidvalidity;
             state.uidnext = 0;
             state.highest_modseq = 0;
+            changed = true;
+        }
+        if changed {
             self.put_folder(account, &state).await?;
         }
-        let highest_seen = if state.uidnext == 0 {
+        let whole = state.uidnext == 0;
+        let read = if whole {
             report.full = true;
             self.read_whole(conn, account, &state, &selected, progress, report)
                 .await?
@@ -120,206 +131,20 @@ impl ImapSync {
             self.read_changes(conn, account, &state, &selected, progress, report)
                 .await?
         };
-        state.uidnext = selected
-            .uidnext
-            .unwrap_or(0)
-            .max(highest_seen.map_or(state.uidnext, |uid| uid.saturating_add(1)));
+        let next = selected.uidnext.unwrap_or(0).max(
+            read.highest
+                .map_or(state.uidnext, |uid| uid.saturating_add(1)),
+        );
+        state.uidnext = match read.unanswered {
+            None => next,
+            // Read whole again next time: only what is missing is fetched.
+            Some(_) if whole => 0,
+            // From the first message missing, so the next pass asks again.
+            Some(missing) => next.min(missing),
+        };
         state.highest_modseq = selected.highest_modseq.unwrap_or(0);
-        self.put_folder(account, &state).await
-    }
-
-    /// Reads a folder from the start. Returns the highest UID it has.
-    async fn read_whole(
-        &self,
-        conn: &mut Conn,
-        account: &EmailAddress,
-        state: &ImapFolder,
-        selected: &Selected,
-        progress: &ProgressFn,
-        report: &mut SyncReport,
-    ) -> SyncResult<Option<u32>> {
-        let listing = if selected.exists == 0 {
-            Vec::new()
-        } else {
-            conn.uid_fetch("1:*", &flag_items(conn), None)
-                .await?
-                .messages
-        };
-        let (a, label, uv) = (account.clone(), state.label_id.clone(), state.uidvalidity);
-        let present: Vec<FlagChange> = listing.iter().map(flag_change).collect();
-        let highest = present.iter().map(|c| c.uid).max();
-        let (stale, applied) = self
-            .blocking(move |s| {
-                let folder = Folder {
-                    label: &label,
-                    uidvalidity: uv,
-                };
-                let (kept, stale) = places::folder_places(s, &a, folder)?;
-                let here: HashSet<u32> = present.iter().map(|c| c.uid).collect();
-                let gone: Vec<ImapPlace> = kept
-                    .into_values()
-                    .filter(|p| !here.contains(&p.uid))
-                    .collect();
-                places::forget(s, &a, &gone)?;
-                let applied = places::apply_flags(s, &a, folder, &present)?;
-                Ok((stale, applied))
-            })
-            .await?;
-        report.relabelled += applied.relabelled;
-        self.fetch_headers(conn, account, state, applied.fetch, progress, report)
-            .await?;
-        let a = account.clone();
-        self.blocking(move |s| places::forget(s, &a, &stale))
-            .await?;
-        Ok(highest)
-    }
-
-    /// Reads what changed in a folder since its last pass. Returns the
-    /// highest UID of the new mail.
-    async fn read_changes(
-        &self,
-        conn: &mut Conn,
-        account: &EmailAddress,
-        state: &ImapFolder,
-        selected: &Selected,
-        progress: &ProgressFn,
-        report: &mut SyncReport,
-    ) -> SyncResult<Option<u32>> {
-        let folder_label = state.label_id.clone();
-        let uv = state.uidvalidity;
-        let known_end = state.uidnext - 1;
-        // New mail.
-        let mut fetch = Vec::new();
-        let mut highest = None;
-        let more = selected.uidnext.is_none_or(|next| next > state.uidnext);
-        if selected.exists > 0 && more {
-            let listing = conn
-                .uid_fetch(&format!("{}:*", state.uidnext), "(UID)", None)
-                .await?;
-            fetch.extend(
-                listing
-                    .messages
-                    .iter()
-                    .map(|m| m.uid)
-                    .filter(|&uid| uid >= state.uidnext),
-            );
-            highest = fetch.iter().copied().max();
-        }
-        // Changed flags, and mail gone.
-        let mut changes = Vec::new();
-        let mut gone_uids = Vec::new();
-        let mut present = None;
-        if known_end == 0 {
-            // Nothing was kept before: there is nothing to compare.
-        } else if selected.exists == 0 {
-            present = Some(HashSet::new());
-        } else if conn.condstore() && state.highest_modseq > 0 && selected.highest_modseq.is_some()
-        {
-            let unchanged = selected.highest_modseq == Some(state.highest_modseq);
-            if !unchanged {
-                let mut modifiers = format!("CHANGEDSINCE {}", state.highest_modseq);
-                if conn.qresync() {
-                    modifiers.push_str(" VANISHED");
-                }
-                let reply = conn
-                    .uid_fetch(
-                        &format!("1:{known_end}"),
-                        "(UID FLAGS MODSEQ)",
-                        Some(&modifiers),
-                    )
-                    .await?;
-                changes.extend(reply.messages.iter().map(flag_change));
-                gone_uids = reply.vanished;
-            }
-            if !conn.qresync() {
-                let uids = conn.uid_search(&format!("UID 1:{known_end}")).await?;
-                present = Some(uids.into_iter().collect());
-            }
-        } else {
-            let reply = conn
-                .uid_fetch(&format!("1:{known_end}"), &flag_items(conn), None)
-                .await?;
-            present = Some(reply.messages.iter().map(|m| m.uid).collect());
-            changes.extend(reply.messages.iter().map(flag_change));
-        }
-        let a = account.clone();
-        let applied = self
-            .blocking(move |s| {
-                let folder = Folder {
-                    label: &folder_label,
-                    uidvalidity: uv,
-                };
-                let (kept, _) = places::folder_places(s, &a, folder)?;
-                let gone_set: HashSet<u32> = gone_uids.into_iter().collect();
-                let gone: Vec<ImapPlace> = kept
-                    .into_values()
-                    .filter(|p| p.uid <= known_end)
-                    .filter(|p| {
-                        gone_set.contains(&p.uid)
-                            || present.as_ref().is_some_and(|here| !here.contains(&p.uid))
-                    })
-                    .collect();
-                places::forget(s, &a, &gone)?;
-                places::apply_flags(s, &a, folder, &changes)
-            })
-            .await?;
-        report.relabelled += applied.relabelled;
-        fetch.extend(applied.fetch.into_iter().filter(|&uid| uid <= known_end));
-        self.fetch_headers(conn, account, state, fetch, progress, report)
-            .await?;
-        Ok(highest)
-    }
-
-    /// Fetches and stores copies by their headers, newest first.
-    async fn fetch_headers(
-        &self,
-        conn: &mut Conn,
-        account: &EmailAddress,
-        state: &ImapFolder,
-        mut uids: Vec<u32>,
-        progress: &ProgressFn,
-        report: &mut SyncReport,
-    ) -> SyncResult<()> {
-        uids.sort_unstable_by(|a, b| b.cmp(a));
-        uids.dedup();
-        let total = uids.len();
-        let items = if conn.condstore() {
-            "(UID FLAGS MODSEQ RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER])"
-        } else {
-            "(UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER])"
-        };
-        for (i, batch) in uids.chunks(HEADER_BATCH).enumerate() {
-            progress(Progress::Working {
-                phase: Phase::Headers,
-                done: i * HEADER_BATCH,
-                total,
-            });
-            let fetched = conn.uid_fetch(&uid_set(batch), items, None).await?.messages;
-            let (a, label, uv) = (account.clone(), state.label_id.clone(), state.uidvalidity);
-            let stored = self
-                .blocking(move |s| {
-                    store_batch(
-                        s,
-                        &a,
-                        Folder {
-                            label: &label,
-                            uidvalidity: uv,
-                        },
-                        fetched,
-                    )
-                })
-                .await?;
-            report.headers += stored.iter().filter(|s| **s == Stored::New).count();
-            report.relabelled += stored.iter().filter(|s| **s == Stored::Known).count();
-        }
-        if total > 0 {
-            progress(Progress::Working {
-                phase: Phase::Headers,
-                done: total,
-                total,
-            });
-        }
-        Ok(())
+        self.put_folder(account, &state).await?;
+        Ok(read.unanswered.is_none())
     }
 
     async fn put_folder(&self, account: &EmailAddress, state: &ImapFolder) -> SyncResult<()> {
@@ -329,33 +154,46 @@ impl ImapSync {
     }
 }
 
-/// Stores the copies of a batch, newest first.
-fn store_batch(
+/// The end of pass `pass`, which read the folders `keep`, every one of
+/// them whole if `complete`: folders missing from LIST twice go, and, if
+/// the pass was complete, messages that stayed without a copy since an
+/// earlier pass go. Returns how many messages went.
+fn finish(
     store: &postrinch_store::Store,
     account: &EmailAddress,
-    folder: Folder<'_>,
-    mut fetched: Vec<Fetched>,
-) -> SyncResult<Vec<Stored>> {
-    fetched.sort_unstable_by_key(|f| std::cmp::Reverse(f.uid));
-    fetched
-        .iter()
-        .map(|f| places::store_copy(store, account, folder, f))
-        .collect()
-}
-
-/// The items that list a folder's UIDs and flags.
-fn flag_items(conn: &Conn) -> String {
-    if conn.condstore() {
-        "(UID FLAGS MODSEQ)".into()
-    } else {
-        "(UID FLAGS)".into()
+    keep: &HashSet<String>,
+    pass: u64,
+    complete: bool,
+) -> SyncResult<usize> {
+    let labels: BTreeSet<String> = store
+        .labels(account)?
+        .into_iter()
+        .map(|l| l.provider_id)
+        .collect();
+    let folders: BTreeSet<String> = store
+        .imap_folders(account)?
+        .into_iter()
+        .map(|f| f.label_id)
+        .collect();
+    let missing: BTreeSet<String> = labels
+        .union(&folders)
+        .filter(|id| !keep.contains(*id))
+        .cloned()
+        .collect();
+    let gone = pending::note_missing(store, account, &missing, pass)?;
+    if !complete || gone.len() < missing.len() {
+        // A folder could not be read, or is missing for the first time:
+        // what seems gone may be there.
+        return Ok(0);
     }
-}
-
-fn flag_change(fetched: &Fetched) -> FlagChange {
-    FlagChange {
-        uid: fetched.uid,
-        flags: fetched.flags.clone().unwrap_or_default(),
-        modseq: fetched.modseq,
+    for id in &gone {
+        pending::forget_folder(store, account, id)?;
+        if labels.contains(id) {
+            store.remove_label(account, id)?;
+        }
+        if folders.contains(id) {
+            store.remove_imap_folder(account, id)?;
+        }
     }
+    pending::resolve(store, account, pass)
 }

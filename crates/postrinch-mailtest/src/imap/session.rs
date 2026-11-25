@@ -168,19 +168,24 @@ impl Session {
 
     /// Runs one command. `false` when the session must end.
     async fn handle(&mut self, command: Command, log: String) -> io::Result<bool> {
-        let fault = {
+        let (fault, hook) = {
             let mut state = self.shared.lock();
             let text = if command.name == "LOGIN" {
                 "LOGIN <credentials>".to_string()
             } else {
                 log
             };
+            let fault = state.take_fault(&command.name, &text);
+            let hook = state.take_hook(&command.name, &text);
             state.log.push(LoggedCommand {
                 name: command.name.clone(),
                 text,
             });
-            state.take_fault(&command.name)
+            (fault, hook)
         };
+        if let Some(action) = hook {
+            action();
+        }
         match fault {
             Some(ImapFault::DisconnectBefore) => return Ok(false),
             Some(ImapFault::No(text)) => return self.finish(&command, Reply::No(text)).await,

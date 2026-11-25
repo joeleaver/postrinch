@@ -223,6 +223,15 @@ impl UserHandle {
         })
     }
 
+    /// Hides a folder from LIST (or shows it again), as a server that
+    /// briefly leaves one out of a listing does. It can still be selected.
+    pub fn hide_folder(&self, name: &str, hidden: bool) -> Result<(), Error> {
+        self.change(|a, _| {
+            Self::folder_mut(a, name)?.listed = !hidden;
+            Ok(())
+        })
+    }
+
     /// Every folder, in name order.
     pub fn folders(&self) -> Result<Vec<FolderInfo>, Error> {
         self.read(|a| Ok(a.folders.values().map(FolderInfo::from).collect()))

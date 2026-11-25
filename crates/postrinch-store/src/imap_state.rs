@@ -48,6 +48,7 @@ fn decode_folder(fields: &Fields) -> StoreResult<ImapFolder> {
         uidnext: fields.u32("uidnext")?,
         highest_modseq: fields.u64("highest_modseq")?,
         subscribed: fields.bool("subscribed")?,
+        mailbox_id: fields.opt_str("mailbox_id")?,
     })
 }
 
@@ -81,6 +82,7 @@ impl Store {
                 .u32("uidnext", folder.uidnext)
                 .u64("highest_modseq", folder.highest_modseq)
                 .bool("subscribed", folder.subscribed)
+                .opt_str("mailbox_id", folder.mailbox_id.clone())
         };
         let create = fields()
             .str("key", key.clone())

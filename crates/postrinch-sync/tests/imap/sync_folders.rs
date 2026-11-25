@@ -3,11 +3,11 @@
 //! renames and deletions, one message in several folders, header-less
 //! mail and threads across folders.
 
-use postrinch_mailtest::{ImapConfig, SpecialUse};
+use postrinch_mailtest::{Extension, ImapConfig, SpecialUse};
 use postrinch_model::{FolderRole, FolderRoles, LabelKind, SystemLabel};
 use postrinch_sync::imap::message_id_without_header;
 
-use super::sync_support::{fixture, fixture_with, mail};
+use super::sync_support::{Fixture, fixture, fixture_with, fixture_without, mail};
 
 #[tokio::test]
 async fn special_folders_are_the_system_labels() {
@@ -134,6 +134,7 @@ async fn copies_in_two_folders_are_one_message() {
     assert_eq!(f.labels("self@x"), ["SENT"]);
     f.user.expunge("Sent", 1).unwrap();
     f.sync().await;
+    f.sync().await;
     assert!(f.message("self@x").is_none());
 }
 
@@ -159,8 +160,16 @@ async fn mail_moved_by_another_client_keeps_its_body() {
 }
 
 #[tokio::test]
-async fn a_renamed_folder_is_a_new_label_and_its_mail_follows() {
-    let f = fixture().await;
+async fn a_renamed_folder_keeps_its_label_by_mailbox_id() {
+    a_renamed_folder_keeps_its_label(fixture().await).await;
+}
+
+#[tokio::test]
+async fn a_renamed_folder_keeps_its_label_by_uidvalidity() {
+    a_renamed_folder_keeps_its_label(fixture_without(&[Extension::ObjectId]).await).await;
+}
+
+async fn a_renamed_folder_keeps_its_label(f: Fixture) {
     f.user.create_folder("Work").unwrap();
     f.user
         .append("Work", mail(Some("w@x"), "Work", ""))
@@ -169,14 +178,18 @@ async fn a_renamed_folder_is_a_new_label_and_its_mail_follows() {
     f.backfill().await;
     let old = f.label_id("Work");
     f.user.rename_folder("Work", "Projects").unwrap();
-    f.sync().await;
+    let report = f.sync().await;
+    assert!(!report.full, "a renamed folder is not read again");
     assert_eq!(f.label_names(), ["INBOX", "Projects"]);
-    let new = f.label_id("Projects");
-    assert_ne!(new, old);
+    assert_eq!(f.label_id("Projects"), old);
     let w = f.message("w@x").unwrap();
-    assert_eq!(w.labels, [new]);
+    assert_eq!(w.labels, std::slice::from_ref(&old));
     assert!(w.downloaded);
-    assert!(f.store.imap_folder(&f.me, &old).unwrap().is_none());
+    let state = f.store.imap_folder(&f.me, &old).unwrap().unwrap();
+    assert_eq!(state.name, "Projects");
+    f.sync().await;
+    assert_eq!(f.label_id("Projects"), old);
+    assert!(f.message("w@x").unwrap().downloaded);
 }
 
 #[tokio::test]
@@ -189,9 +202,13 @@ async fn a_deleted_folder_takes_its_mail() {
         .unwrap();
     f.sync().await;
     f.user.delete_folder("Old").unwrap();
-    let report = f.sync().await;
-    assert_eq!(report.removed, 1);
+    // Missing from one LIST, it may be back: nothing goes.
+    assert_eq!(f.sync().await.removed, 0);
+    assert_eq!(f.label_names(), ["INBOX", "Old"]);
+    // Missing from two, it is gone, and its mail waits one more pass.
+    assert_eq!(f.sync().await.removed, 0);
     assert_eq!(f.label_names(), ["INBOX"]);
+    assert_eq!(f.sync().await.removed, 1);
     assert!(f.message("o@x").is_none());
     assert!(f.message("keep@x").is_some());
 }

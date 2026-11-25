@@ -89,14 +89,18 @@ async fn gone_mail_by_qresync_vanished() {
     let a = f.user.append("INBOX", mail(Some("a@x"), "A", "")).unwrap();
     f.user.append("INBOX", mail(Some("b@x"), "B", "")).unwrap();
     f.sync().await;
+    let searches = f.server.command_count("UID SEARCH");
     f.user.expunge("INBOX", a).unwrap();
     let report = f.sync().await;
-    assert_eq!(report.removed, 1);
+    // It waits for a complete pass that started after it went.
+    assert_eq!(report.removed, 0);
+    assert!(f.message("a@x").unwrap().labels.is_empty());
+    assert_eq!(f.sync().await.removed, 1);
     assert!(f.message("a@x").is_none());
     assert!(f.message("b@x").is_some());
     let commands = f.server.commands();
     assert!(commands.iter().any(|c| c.contains("VANISHED")));
-    assert_eq!(f.server.command_count("UID SEARCH"), 0);
+    assert_eq!(f.server.command_count("UID SEARCH"), searches);
 }
 
 async fn gone_mail_by_comparing(without: &[Extension]) {
@@ -104,18 +108,14 @@ async fn gone_mail_by_comparing(without: &[Extension]) {
     let a = f.user.append("INBOX", mail(Some("a@x"), "A", "")).unwrap();
     f.user.append("INBOX", mail(Some("b@x"), "B", "")).unwrap();
     f.sync().await;
+    let searches = f.server.command_count("UID SEARCH");
     f.user.expunge("INBOX", a).unwrap();
-    let report = f.sync().await;
-    assert_eq!(report.removed, 1);
+    assert_eq!(f.sync().await.removed, 0);
+    assert_eq!(f.sync().await.removed, 1);
     assert!(f.message("a@x").is_none());
     assert!(f.message("b@x").is_some());
-    let search = f.server.command_count("UID SEARCH");
-    let condstore = !without.contains(&Extension::Condstore);
-    assert_eq!(
-        search > 0,
-        condstore,
-        "UID SEARCH only stands in for VANISHED"
-    );
+    // Without VANISHED, the folder's UIDs are listed to compare.
+    assert!(f.server.command_count("UID SEARCH") > searches);
 }
 
 #[tokio::test]
@@ -135,6 +135,7 @@ async fn the_last_copy_emptied_out_of_a_folder() {
     f.sync().await;
     f.user.expunge("INBOX", a).unwrap();
     f.sync().await;
+    f.sync().await;
     assert!(f.message("a@x").is_none());
     assert_eq!(f.message_count(), 0);
 }
@@ -150,6 +151,7 @@ async fn a_new_uidvalidity_reads_the_folder_again_and_keeps_bodies() {
     f.user.set_uid_validity("INBOX", 4242).unwrap();
     let report = f.sync().await;
     assert!(report.full);
+    f.sync().await;
     let a = f.message("a@x").unwrap();
     assert!(a.downloaded, "a message still there keeps its body");
     assert!(f.message("b@x").is_none());
@@ -190,8 +192,9 @@ async fn a_copy_marked_deleted_counts_as_gone() {
     let a = f.user.append("INBOX", mail(Some("a@x"), "A", "")).unwrap();
     f.sync().await;
     f.user.add_flags("INBOX", a, &["\\Deleted"]).unwrap();
-    let report = f.sync().await;
-    assert_eq!(report.removed, 1);
+    assert_eq!(f.sync().await.removed, 0);
+    assert!(f.message("a@x").unwrap().labels.is_empty());
+    assert_eq!(f.sync().await.removed, 1);
     assert!(f.message("a@x").is_none());
     f.user.remove_flags("INBOX", a, &["\\Deleted"]).unwrap();
     f.sync().await;

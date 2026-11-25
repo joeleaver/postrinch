@@ -18,4 +18,6 @@ mod smtp_limits;
 mod support;
 mod sync;
 mod sync_folders;
+mod sync_passes;
+mod sync_quirks;
 mod sync_support;

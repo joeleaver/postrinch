@@ -39,6 +39,10 @@ pub struct ImapFolder {
     /// none.
     pub highest_modseq: u64,
     pub subscribed: bool,
+    /// The folder's RFC 8474 `MAILBOXID` (OBJECTID), which stays the same
+    /// when the folder is renamed; `None` where the server has none.
+    #[serde(default)]
+    pub mailbox_id: Option<String>,
 }
 
 impl ImapFolder {
@@ -53,6 +57,7 @@ impl ImapFolder {
             uidnext: 0,
             highest_modseq: 0,
             subscribed: true,
+            mailbox_id: None,
         }
     }
 }

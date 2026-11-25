@@ -120,7 +120,34 @@ impl ImapServer {
     /// says. Names are as the client sends them, upper case, with `UID `
     /// before UID commands: `"SELECT"`, `"UID FETCH"`, `"UID MOVE"`.
     pub fn fail_next(&self, command: &str, times: usize, fault: ImapFault) {
-        self.shared.lock().add_fault(command, times, fault);
+        self.shared.lock().add_fault(command, None, times, fault);
+    }
+
+    /// As [`ImapServer::fail_next`], for commands whose text as
+    /// [`ImapServer::commands`] shows it contains `matching`: for
+    /// example `fail_next_matching("SELECT", "\"Work\"", 1, ...)` fails
+    /// the next SELECT of Work only.
+    pub fn fail_next_matching(
+        &self,
+        command: &str,
+        matching: &str,
+        times: usize,
+        fault: ImapFault,
+    ) {
+        self.shared
+            .lock()
+            .add_fault(command, Some(matching), times, fault);
+    }
+
+    /// Runs `action` once, when the next command named `command` (as for
+    /// [`ImapServer::fail_next`]) whose text contains `matching` arrives,
+    /// before the command runs: for changing the mail in the middle of a
+    /// client's work, as another client would. The action may use a
+    /// [`UserHandle`].
+    pub fn on_next(&self, command: &str, matching: &str, action: impl FnOnce() + Send + 'static) {
+        self.shared
+            .lock()
+            .add_hook(command, matching, Box::new(action));
     }
 
     /// Closes every open connection at once, as a server restart would.
