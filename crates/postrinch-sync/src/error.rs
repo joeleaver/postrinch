@@ -103,6 +103,12 @@ pub enum SyncError {
         /// "Sync"). Always `false` for SMTP.
         connections: bool,
     },
+    /// A server would not search as asked (`NO [BADCHARSET]` to text that
+    /// is not ASCII, a term IMAP cannot ask, a `SEARCH` refused in every
+    /// folder): the search keeps to the mail here. The message says why,
+    /// in the server's words where it gave some.
+    #[error("{server} could not search: {message}")]
+    SearchRefused { server: String, message: String },
     #[error("store: {0}")]
     Store(#[from] StoreError),
     #[error("{0}")]

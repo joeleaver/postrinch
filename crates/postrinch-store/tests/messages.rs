@@ -317,3 +317,44 @@ fn headers_never_overwrite_a_downloaded_body() {
     assert_eq!(stored.body_text, "the body");
     assert!(!stored.flags.unread);
 }
+
+#[test]
+fn search_narrows_by_size_and_to_named_messages() {
+    let (_dir, store, me) = setup();
+    let mut small = message(&me, "s1", "t1", 1_000, "small", "a");
+    small.size = 100;
+    let mut big = message(&me, "b1", "t2", 2_000, "big", "b");
+    big.size = 10_000;
+    store.put_message(&small, None).unwrap();
+    store.put_message(&big, None).unwrap();
+    let ids = |find: Find| -> Vec<String> {
+        let found = store.find_messages(&find).unwrap();
+        found.into_iter().map(|f| f.id.0).collect()
+    };
+    let larger = Find {
+        larger: Some(100),
+        ..Default::default()
+    };
+    assert_eq!(ids(larger), ["b1"], "larger is more than, not as much as");
+    let smaller = Find {
+        smaller: Some(10_000),
+        ..Default::default()
+    };
+    assert_eq!(ids(smaller), ["s1"]);
+    let within = Find {
+        within: Some(vec![
+            (me.clone(), small.id.clone()),
+            (
+                me.clone(),
+                postrinch_model::ProviderMessageId("gone".into()),
+            ),
+        ]),
+        ..Default::default()
+    };
+    assert_eq!(ids(within), ["s1"], "only the named messages that are here");
+    let none = Find {
+        within: Some(Vec::new()),
+        ..Default::default()
+    };
+    assert!(ids(none).is_empty());
+}

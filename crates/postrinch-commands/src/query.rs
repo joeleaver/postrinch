@@ -3,7 +3,8 @@
 //! text can be handed to Gmail for mail not downloaded yet.
 //!
 //! `from:` `to:` `cc:` `bcc:` `subject:` `label:` `in:` `category:` `is:`
-//! `has:` `after:` `before:` `newer_than:` `older_than:`, and Postrinch's
+//! `has:` `after:` `before:` `newer_than:` `older_than:` `larger:`
+//! `smaller:` (`size:` is `larger:`, as in Gmail), and Postrinch's
 //! own `account:` and `last:` (`last:me`, the account answered last;
 //! `last:them`, someone else wrote last). A value with spaces is quoted
 //! (`from:"Ada Lovelace"`); `-label:` and `-in:` leave a label out, and
@@ -38,6 +39,10 @@ pub struct Query {
     pub attachments: Option<bool>,
     pub after: Option<Timestamp>,
     pub before: Option<Timestamp>,
+    /// `larger:`: more than this many bytes.
+    pub larger: Option<u64>,
+    /// `smaller:`: fewer than this many bytes.
+    pub smaller: Option<u64>,
     /// `last:me` or `last:them`: whose the conversation's latest message
     /// is.
     pub last: Option<Last>,
@@ -139,6 +144,8 @@ impl Query {
                 "before" => query.before = Some(date(&value)?),
                 "newer_than" => query.after = Some(ago(&value, now)?),
                 "older_than" => query.before = Some(ago(&value, now)?),
+                "larger" | "size" => query.larger = Some(size(&value)?),
+                "smaller" => query.smaller = Some(size(&value)?),
                 other => return Err(invalid(format!("{other}: is not known."))),
             }
         }
@@ -276,6 +283,9 @@ pub(crate) fn operator(token: &str) -> Option<(bool, &str, &str)> {
         "before",
         "newer_than",
         "older_than",
+        "larger",
+        "smaller",
+        "size",
         "account",
         "last",
     ];
@@ -322,6 +332,24 @@ fn ago(value: &str, now: Timestamp) -> CommandResult<Timestamp> {
         .checked_sub(span)
         .map_err(|_| bad())?;
     Ok(Timestamp::from_millis(then.timestamp().as_millisecond()))
+}
+
+/// `500`, `200K`, `10M` or `1G` (binary units, an optional `B` after
+/// them, any case), in bytes.
+fn size(value: &str) -> CommandResult<u64> {
+    let bad = || invalid(format!("{value} is not a size like 500K or 10M."));
+    let upper = value.to_ascii_uppercase();
+    let digits = upper.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    let unit = &upper[digits.len()..];
+    let times: u64 = match unit {
+        "" | "B" => 1,
+        "K" | "KB" => 1 << 10,
+        "M" | "MB" => 1 << 20,
+        "G" | "GB" => 1 << 30,
+        _ => return Err(bad()),
+    };
+    let n: u64 = digits.parse().map_err(|_| bad())?;
+    n.checked_mul(times).ok_or_else(bad)
 }
 
 fn invalid(message: String) -> CommandError {
@@ -381,6 +409,24 @@ mod tests {
         let now = 1_790_000_000_000;
         let age = now - q.after.unwrap().as_millis();
         assert!((47 * 3_600_000..=49 * 3_600_000).contains(&age));
+    }
+
+    #[test]
+    fn sizes_in_bytes() {
+        let q = parse("larger:10M smaller:2gb");
+        assert_eq!((q.larger, q.smaller), (Some(10 << 20), Some(2 << 30)));
+        assert_eq!(parse("size:500").larger, Some(500));
+        assert_eq!(parse("larger:200k").larger, Some(200 << 10));
+        assert_eq!(parse("larger:3M").gmail, "larger:3M");
+        let now = Timestamp::from_millis(0);
+        for bad in [
+            "larger:big",
+            "smaller:10Q",
+            "larger:M",
+            "larger:99999999999999999999G",
+        ] {
+            assert!(Query::parse(bad, now).is_err(), "{bad}");
+        }
     }
 
     #[test]

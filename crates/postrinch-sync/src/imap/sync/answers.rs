@@ -53,6 +53,7 @@ pub(super) fn code_name(code: Option<&ResponseCode<'_>>, text: &str) -> Option<S
         Some(ResponseCode::TryCreate) => Some("TRYCREATE".to_owned()),
         Some(ResponseCode::ReadOnly) => Some("READ-ONLY".to_owned()),
         Some(ResponseCode::Alert) => Some("ALERT".to_owned()),
+        Some(ResponseCode::BadCharset(_)) => Some("BADCHARSET".to_owned()),
         Some(_) => None,
         None => Tagged::parse_text(text).code,
     }

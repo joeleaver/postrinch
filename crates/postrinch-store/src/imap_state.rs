@@ -170,6 +170,20 @@ impl Store {
         Ok(())
     }
 
+    /// The copy kept at a folder's UID, of that UIDVALIDITY, if any.
+    pub fn imap_place(
+        &self,
+        account: &EmailAddress,
+        folder: &str,
+        uidvalidity: u32,
+        uid: u32,
+    ) -> StoreResult<Option<ImapPlace>> {
+        let key = place_key(&scoped(account, folder), uidvalidity, uid);
+        self.find(PLACE, "key", &key)?
+            .map(|found| decode_place(&scoped(account, ""), &found))
+            .transpose()
+    }
+
     /// Every kept copy of a message, in no particular order.
     pub fn imap_message_places(
         &self,

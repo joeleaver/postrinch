@@ -40,7 +40,7 @@ pub use session::ImapSession;
 pub use smtp::SmtpConnection;
 pub use sync::{
     AccountFolder, Added, ImapSync, NewImapAccount, NewSignIn, OnGrant, OpenBrowser, SentLookup,
-    SignInAgain, SignInCancel, SignInCanceller, sign_in_cancel,
+    ServerFound, SignInAgain, SignInCancel, SignInCanceller, sign_in_cancel,
 };
 pub(crate) use sync::{IdleEnd, Idler};
 pub use threading::{Own, thread_for};

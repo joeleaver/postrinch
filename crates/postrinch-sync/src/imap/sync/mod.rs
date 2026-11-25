@@ -39,6 +39,9 @@ mod places;
 mod read;
 mod reads;
 mod renames;
+mod search;
+mod search_folders;
+mod search_keys;
 mod send;
 mod uids;
 mod utf7;
@@ -60,6 +63,7 @@ pub use self::accounts::{
 pub(crate) use self::idle::Idler;
 use self::idle_link::Links;
 pub(crate) use self::idle_wire::IdleEnd;
+pub use self::search::ServerFound;
 pub use self::send::SentLookup;
 use self::wire::Conn;
 use super::{AccessTokens, BusyGate, Connector, ImapSecrets};

@@ -119,7 +119,8 @@ pub struct SearchArgs {
     /// phrases"`, `prefix*`, and `from:` `to:` `subject:` `label:`
     /// (`label:work-clients`) `in:inbox|sent|drafts|trash|spam|anywhere`
     /// `category:promotions` `is:unread|read|starred` `has:attachment`
-    /// `after:2024/01/31` `before:` `newer_than:7d|2w|6m|1y` `older_than:`,
+    /// `after:2024/01/31` `before:` `newer_than:7d|2w|6m|1y` `older_than:`
+    /// `larger:5M` `smaller:100K`,
     /// plus `account:` (part of an address). `-label:` and `-in:` leave out.
     pub query: String,
     /// At most this many threads (default 25, at most 200).

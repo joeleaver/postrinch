@@ -1,13 +1,15 @@
 //! Searching mail: a query in the search language (query.rs) run over the
 //! store, as conversations, newest first. Words are searched in what has
 //! been downloaded; mail known only by its headers matches on subject and
-//! people, and [`Remote`] says when Gmail should be asked too.
+//! people, and [`Remote`] says when the accounts' servers should be asked
+//! too: Gmail in its own language, an IMAP server by `SEARCH`
+//! (imap_search.rs). What they find is listed by search_remote.rs.
 
 use std::collections::{HashMap, HashSet};
 
 use postrinch_model::{
-    EmailAddress, LabelKind, Message, Provider, ProviderMessageId, ProviderThreadId, ThreadSummary,
-    Timestamp,
+    EmailAddress, ImapSearch, Message, Provider, ProviderMessageId, ProviderThreadId,
+    ThreadSummary, Timestamp,
 };
 use postrinch_store::PersonEntry;
 use serde::{Deserialize, Serialize};
@@ -29,13 +31,13 @@ pub struct SearchResults {
     pub threads: Vec<ThreadRow>,
     /// Whether more threads matched than the limit let through.
     pub more: bool,
-    /// Gmail's search to run too, when the words could be in mail not
-    /// downloaded yet.
+    /// The servers' search to run too, when the words could be in mail
+    /// not downloaded yet.
     #[serde(default)]
     pub remote: Option<Remote>,
 }
 
-/// Asking the provider about mail whose bodies are not here yet.
+/// Asking the providers about mail whose bodies are not here yet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Remote {
     /// The query in Gmail's language.
@@ -43,6 +45,20 @@ pub struct Remote {
     /// The accounts to ask, with how many of their messages are not
     /// downloaded.
     pub accounts: Vec<(EmailAddress, usize)>,
+    /// The IMAP accounts among them, each with its server's search; the
+    /// others are Google's, asked in Gmail's language.
+    #[serde(default)]
+    pub imap: Vec<(EmailAddress, ImapSearch)>,
+}
+
+impl Remote {
+    /// The IMAP server's search for an account, if it is an IMAP one.
+    pub fn imap_search(&self, account: &EmailAddress) -> Option<&ImapSearch> {
+        self.imap
+            .iter()
+            .find(|(a, _)| a == account)
+            .map(|(_, search)| search)
+    }
 }
 
 /// Where a search matched in a message, to show with the match marked.
@@ -123,88 +139,51 @@ impl Commands {
             }
         }
         if query.has_words() {
-            let waiting = self.store.undownloaded_counts()?;
-            // Gmail is asked; an IMAP account's server is not (its
-            // search stays local until searching on the server comes),
-            // so its mail is found once its bodies are here.
-            let google: HashSet<String> = self
-                .store
-                .accounts()?
-                .into_iter()
-                .filter(|a| a.provider == Provider::Google)
-                .map(|a| a.address.key())
-                .collect();
-            let ask: Vec<(EmailAddress, usize)> = accounts
-                .iter()
-                .filter(|a| google.contains(&a.key()))
-                .filter_map(|a| waiting.get(&a.key()).map(|&n| (a.clone(), n)))
-                .filter(|(_, n)| *n > 0)
-                .collect();
-            if !ask.is_empty() {
-                results.remote = Some(Remote {
-                    query: query.gmail(),
-                    accounts: ask,
-                });
-            }
+            results.remote = self.remote(text, &query, &accounts)?;
         }
         Ok(results)
     }
 
-    /// Rows for messages the provider found that the local search did
-    /// not: their threads (or, by [`Grouping::Messages`], the messages
-    /// themselves), leaving out those in `listed` (thread or message ids,
-    /// as grouped) and, unless the query looks there, the trash and spam.
-    /// Marked as found remotely.
-    pub fn remote_rows(
+    /// The servers to ask about a query with words, of the accounts it
+    /// looked in: those with mail whose bodies are not here, where the
+    /// words could be. Gmail is asked in its language, an IMAP server by
+    /// `SEARCH`.
+    fn remote(
         &self,
-        query: &str,
-        account: &EmailAddress,
-        found: &[ProviderMessageId],
-        listed: &HashSet<String>,
-        grouping: Grouping,
-    ) -> CommandResult<Vec<ThreadRow>> {
-        self.check(account)?;
-        let now = Timestamp::from_millis(jiff::Timestamp::now().as_millisecond());
-        let query = Either::parse(query, now)?;
-        let set_aside = if query.set_aside_too() {
-            HashSet::new()
-        } else {
-            self.set_aside_ids(account)?
-        };
-        let terms = query.terms();
-        let mut chips = HashMap::new();
-        let mut seen: HashSet<String> = listed.clone();
-        let mut rows = Vec::new();
-        for id in found {
-            let Some(message) = self.store.message(account, id)? else {
-                continue;
-            };
-            let one = match grouping {
-                Grouping::Conversations => message.thread.0.clone(),
-                Grouping::Messages => message.id.0.clone(),
-            };
-            if !seen.insert(one) {
-                continue;
-            }
-            if message.labels.iter().any(|l| set_aside.contains(l)) {
-                continue;
-            }
-            let row = match grouping {
-                Grouping::Conversations => {
-                    self.search_row(account, &message.thread, Some(id), &terms, &mut chips)?
-                }
-                Grouping::Messages => self.search_message_row(account, id, &terms, &mut chips)?,
-            };
-            if let Some(mut row) = row {
-                row.remote = true;
-                rows.push(row);
+        text: &str,
+        query: &Either,
+        accounts: &[EmailAddress],
+    ) -> CommandResult<Option<Remote>> {
+        let waiting = self.store.undownloaded_counts()?;
+        let providers: HashMap<String, Provider> = self
+            .store
+            .accounts()?
+            .into_iter()
+            .map(|a| (a.address.key(), a.provider))
+            .collect();
+        let ask: Vec<(EmailAddress, usize)> = accounts
+            .iter()
+            .filter_map(|a| waiting.get(&a.key()).map(|&n| (a.clone(), n)))
+            .filter(|(_, n)| *n > 0)
+            .collect();
+        if ask.is_empty() {
+            return Ok(None);
+        }
+        let mut imap = Vec::new();
+        for (account, _) in &ask {
+            if providers.get(&account.key()) == Some(&Provider::Imap) {
+                imap.push((account.clone(), self.imap_search(text, account)?));
             }
         }
-        Ok(rows)
+        Ok(Some(Remote {
+            query: query.gmail(),
+            accounts: ask,
+            imap,
+        }))
     }
 
     /// A search result's row: the thread, with where `matched` matched.
-    fn search_row(
+    pub(crate) fn search_row(
         &self,
         account: &EmailAddress,
         thread: &ProviderThreadId,
@@ -246,7 +225,7 @@ impl Commands {
 
     /// A search result's row when messages are listed one at a time: the
     /// message, with where it matched.
-    fn search_message_row(
+    pub(crate) fn search_message_row(
         &self,
         account: &EmailAddress,
         id: &ProviderMessageId,
@@ -270,24 +249,6 @@ impl Commands {
     /// choosing senders and recipients to search by.
     pub fn people(&self, part: &str, limit: usize) -> CommandResult<Vec<PersonEntry>> {
         Ok(self.store.find_people(part, limit)?)
-    }
-
-    /// The provider's ids for the account's trash and spam.
-    fn set_aside_ids(&self, account: &EmailAddress) -> CommandResult<HashSet<String>> {
-        Ok(self
-            .store
-            .labels(account)?
-            .into_iter()
-            .filter(|l| {
-                matches!(
-                    l.kind,
-                    LabelKind::System(
-                        postrinch_model::SystemLabel::Trash | postrinch_model::SystemLabel::Spam
-                    )
-                )
-            })
-            .map(|l| l.provider_id)
-            .collect())
     }
 
     pub(crate) fn account_chips(

@@ -130,6 +130,9 @@ impl Commands {
             attachments: query.attachments,
             after: query.after,
             before: query.before,
+            larger: query.larger,
+            smaller: query.smaller,
+            within: None,
             set_aside_too: query.set_aside_too,
             every: false,
         })

@@ -1,5 +1,5 @@
 //! Search's own parts of the window, after the Search mockup: the lines
-//! under the results' heading about Gmail's part and about a query that
+//! under the results' heading about the servers' part and about a query that
 //! does not read. A search is refined in the view panel, from the pencil
 //! on its row in the sidebar.
 
