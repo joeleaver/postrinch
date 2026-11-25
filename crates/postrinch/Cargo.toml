@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 postrinch-agents = { workspace = true }
 postrinch-commands = { workspace = true }
+postrinch-log = { workspace = true }
 postrinch-model = { workspace = true }
 postrinch-render = { workspace = true }
 postrinch-rules = { workspace = true }
@@ -23,7 +24,7 @@ open = "5"
 reqwest = { version = "0.13", features = ["blocking"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-rinch = { workspace = true, features = ["desktop", "components", "theme", "clipboard", "html", "file-dialogs", "notifications"] }
+rinch = { workspace = true, features = ["desktop", "gpu", "components", "theme", "clipboard", "html", "file-dialogs", "notifications"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -2,7 +2,7 @@
 //!
 //! It listens with implicit TLS (the 465-style port) and in plain text
 //! with STARTTLS (the 587-style port), signs users in with AUTH PLAIN,
-//! LOGIN or XOAUTH2, and records every message it accepts for the test to
+//! LOGIN, XOAUTH2 or OAUTHBEARER, and records every message it accepts for the test to
 //! inspect. Failures can be programmed at each stage of a submission,
 //! including the uncertain one: the data received and the connection
 //! dropped without a reply, either before the message is stored or after
@@ -12,6 +12,7 @@
 mod data;
 mod session;
 
+use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -20,6 +21,7 @@ use tokio_rustls::TlsAcceptor;
 
 use crate::Error;
 use crate::listener;
+use crate::sasl::Mechanism;
 use crate::tls::TestCertificate;
 
 /// A point in a submission where a failure can be programmed.
@@ -69,13 +71,17 @@ pub struct ReceivedMessage {
 }
 
 /// The fake SMTP server's setup. By default it listens on both ports,
-/// accepts messages up to 35 MB, and has no users.
+/// accepts messages up to 35 MB, offers PLAIN, LOGIN and XOAUTH2, and has
+/// no users.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SmtpConfig {
     implicit_tls: bool,
     starttls: bool,
+    offer_starttls: bool,
     max_size: usize,
+    mechanisms: BTreeSet<Mechanism>,
     users: Vec<SmtpUser>,
+    challenges_again: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,8 +96,11 @@ impl Default for SmtpConfig {
         Self {
             implicit_tls: true,
             starttls: true,
+            offer_starttls: true,
             max_size: 35 * 1024 * 1024,
+            mechanisms: Mechanism::DEFAULT.into_iter().collect(),
             users: Vec::new(),
+            challenges_again: false,
         }
     }
 }
@@ -137,6 +146,32 @@ impl SmtpConfig {
     /// default. Before STARTTLS that port refuses AUTH.
     pub fn starttls(mut self, on: bool) -> Self {
         self.starttls = on;
+        self
+    }
+
+    /// Whether the plain-text port offers STARTTLS. On by default. Off, it
+    /// is a server with no encryption at all, as misconfigured servers
+    /// are: it offers AUTH over plain text. For testing that clients
+    /// refuse it.
+    pub fn offer_starttls(mut self, on: bool) -> Self {
+        self.offer_starttls = on;
+        self
+    }
+
+    /// Offers exactly these SASL mechanisms ([`Mechanism::Plain`] offers
+    /// `PLAIN` and `LOGIN`).
+    pub fn mechanisms(mut self, mechanisms: &[Mechanism]) -> Self {
+        self.mechanisms = mechanisms.iter().copied().collect();
+        self
+    }
+
+    /// Whether a refused XOAUTH2 or OAUTHBEARER sign-in misbehaves: after
+    /// the client answers the error challenge, the server sends the same
+    /// challenge again instead of 535, until the client cancels with `*`
+    /// (then 501). Off by default. For testing that clients give up
+    /// rather than loop or misreport it.
+    pub fn challenges_again(mut self, on: bool) -> Self {
+        self.challenges_again = on;
         self
     }
 

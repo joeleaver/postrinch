@@ -11,6 +11,7 @@ repository = "https://github.com/joeleaver/postrinch"
 [workspace.dependencies]
 postrinch-agents = { path = "crates/postrinch-agents" }
 postrinch-commands = { path = "crates/postrinch-commands" }
+postrinch-log = { path = "crates/postrinch-log" }
 postrinch-model = { path = "crates/postrinch-model" }
 postrinch-render = { path = "crates/postrinch-render" }
 postrinch-rules = { path = "crates/postrinch-rules" }

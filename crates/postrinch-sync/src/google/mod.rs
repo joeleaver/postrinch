@@ -9,9 +9,6 @@ mod loopback;
 mod oauth;
 mod pkce;
 mod quota;
-#[cfg(all(unix, not(target_os = "macos")))]
-mod secret_service;
-mod secrets;
 mod sync;
 
 pub use accounts::{remove_google_account, sign_in_google};
@@ -20,7 +17,6 @@ pub(crate) use api::chain as error_chain;
 pub use auth::GoogleAuth;
 pub use config::ClientConfig;
 pub use oauth::{Endpoints, SCOPES, SETTINGS_SCOPE};
-pub use secrets::{Keychain, MemorySecrets, SecretStore};
 pub use sync::{
     Answered, CalendarReport, GmailSync, KeepOptions, Phase, Progress, ProgressFn, RulesReport,
     SETTINGS_LABEL, SendReport, SyncEvent, SyncEventFn, SyncReport,

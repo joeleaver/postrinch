@@ -5,7 +5,8 @@
 //! system browser, a loopback redirect) and sync over the Gmail API. Other
 //! accounts are IMAP and SMTP ([`imap`], being built: docs/imap.md). Every
 //! write goes through `postrinch-store`; nothing here keeps state of its own
-//! except refresh tokens, which live in the OS keychain.
+//! except secrets (refresh tokens and passwords), which live in the OS
+//! keychain ([`Keychain`]).
 
 mod compose;
 mod error;
@@ -13,8 +14,12 @@ pub mod google;
 pub mod imap;
 mod mime;
 mod reparse;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod secret_service;
+mod secrets;
 
 pub use compose::build_message;
 pub use error::{SyncError, SyncResult};
 pub use mime::{Envelope, parse_headers, parse_message};
 pub use reparse::reparse;
+pub use secrets::{Keychain, MemorySecrets, SecretStore};
