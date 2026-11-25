@@ -39,7 +39,7 @@ if [ -z "${POSTRINCH_GREENMAIL_JAR:-}" ]; then
     # runners: curl retries that and other passing failures, after the
     # Retry-After the server gives.
     curl --proto =https --proto-redir =https --fail --silent --show-error --location \
-      --retry 6 --retry-max-time 300 --output "$partial" "$url"
+      --retry 10 --retry-max-time 300 --output "$partial" "$url"
     if ! checked "$partial"; then
       echo "the downloaded $jar_name does not have the SHA-256 pinned in tools/greenmail.pin" >&2
       exit 1
