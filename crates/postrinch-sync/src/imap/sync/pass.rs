@@ -31,7 +31,7 @@ use postrinch_model::{EmailAddress, ImapFolder};
 
 use super::ImapSync;
 use super::folder_error::{FolderError, FolderResult};
-use super::folders::{Planned, plan};
+use super::folders::{GMAIL, Planned, plan, view_of_all};
 use super::names::sendable;
 use super::wire::Conn;
 use super::{pending, reads};
@@ -60,6 +60,8 @@ impl ImapSync {
             }
             ok
         });
+        let gmail = conn.offers(GMAIL);
+        listed.retain(|folder| !view_of_all(folder, gmail));
         let roles = self.settings(account).await?.roles;
         let a = account.clone();
         let stored = self.with_store(move |s| s.imap_folders(&a)).await?;

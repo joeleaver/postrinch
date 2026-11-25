@@ -1,7 +1,9 @@
-//! Carrying out one outbox entry: each message's change planned
-//! ([`super::plan`]), then done folder by folder, many UIDs to a command,
-//! in phases: flags, then copies, then moves, then deletes, so a copy
-//! carries the flags just set and is made before its source moves.
+//! Carrying out one change's ops ([`super::plan`], gathered by
+//! [`super::change`]) folder by folder, many UIDs to a command, in phases:
+//! flags, then copies, then moves, then deletes, so a copy carries the
+//! flags just set and is made before its source moves. Deletes go only
+//! when nothing before them waited: a copy skipped because its folder
+//! changed on the server may be the one the delete counted on.
 //!
 //! Without `MOVE`, a move is `COPY`, `STORE +FLAGS (\Deleted)` and an
 //! expunge. Without UIDPLUS there is no `UID EXPUNGE`, and a plain
@@ -11,12 +13,13 @@
 //! expunging); otherwise the change waits. Without UIDPLUS a server does
 //! not say where copies went (`COPYUID`): they are found among the
 //! folder's new mail by their `Message-ID`, from the UIDNEXT it had
-//! before; any not found are left to sync ([`super::record`]).
+//! before; one not found is kept as a copy whose UID is not known
+//! ([`postrinch_model::ImapUnplacedCopy`]) until sync finds it, so the
+//! change sent again does not copy the message twice.
 
 use std::collections::{BTreeMap, HashSet};
 
-use postrinch_model::{EmailAddress, ImapPlace, ProviderMessageId};
-use postrinch_store::OutboxEntry;
+use postrinch_model::{EmailAddress, ImapPlace, ImapUnplacedCopy, ProviderMessageId};
 
 use super::super::ImapSync;
 use super::super::names::Command;
@@ -24,19 +27,19 @@ use super::super::places::{DELETED, Folder};
 use super::super::wire::Conn;
 use super::commands::{CHUNK, CopyUid, shown};
 use super::failure::{Failure, Outcome};
-use super::plan::{Folders, Op, Planned, plan};
+use super::plan::{Folders, Op};
 use super::record;
 
 /// The connection as one change uses it: what it offers, which folder
-/// is selected, and what was declined along the way.
+/// is selected, and what waits along the way.
 pub(super) struct Exec<'c> {
     pub conn: &'c mut Conn,
-    uidplus: bool,
+    pub uidplus: bool,
     has_move: bool,
     /// The selected folder's label and UIDVALIDITY.
     selected: Option<(String, u32)>,
     /// Why part of the change waits, when it does.
-    declined: Option<String>,
+    waits: Option<String>,
 }
 
 impl<'c> Exec<'c> {
@@ -48,13 +51,18 @@ impl<'c> Exec<'c> {
             uidplus,
             has_move,
             selected: None,
-            declined: None,
+            waits: None,
         }
+    }
+
+    /// Why part of the change waits, if it does, now said.
+    pub(super) fn take_waits(&mut self) -> Option<String> {
+        self.waits.take()
     }
 
     /// Selects the folder that is label `label`, unless it is selected,
     /// and returns its UIDVALIDITY.
-    async fn open(&mut self, folders: &Folders, label: &str) -> Outcome<u32> {
+    pub(super) async fn open(&mut self, folders: &Folders, label: &str) -> Outcome<u32> {
         if let Some((open, validity)) = &self.selected
             && open == label
         {
@@ -98,7 +106,7 @@ impl<'c> Exec<'c> {
             places.into_iter().partition(|p| p.uidvalidity == validity);
         if let Some(place) = stale.first() {
             let name = folders.get(&place.folder).map_or("", |f| f.name.as_str());
-            self.declined.get_or_insert(format!(
+            self.waits.get_or_insert(format!(
                 "the folder {} changed on the server since it was read; the change waits for sync",
                 shown(name)
             ));
@@ -114,7 +122,7 @@ impl<'c> Exec<'c> {
         if marked.iter().all(|uid| ours.contains(uid)) {
             return Ok(());
         }
-        Err(Failure::Declined(format!(
+        Err(Failure::Waits(format!(
             "other mail in {} is marked deleted, and the server cannot remove ours alone; \
              the change waits until that mail is gone",
             shown(name)
@@ -122,19 +130,22 @@ impl<'c> Exec<'c> {
     }
 }
 
-fn known<'f>(folders: &'f Folders, label: &str) -> Outcome<&'f postrinch_model::ImapFolder> {
+pub(super) fn known<'f>(
+    folders: &'f Folders,
+    label: &str,
+) -> Outcome<&'f postrinch_model::ImapFolder> {
     folders
         .get(label)
         .ok_or_else(|| Failure::Refused("a folder this change names is gone".to_owned()))
 }
 
-fn uids(places: &[ImapPlace]) -> Vec<u32> {
+pub(super) fn uids(places: &[ImapPlace]) -> Vec<u32> {
     places.iter().map(|p| p.uid).collect()
 }
 
 /// One entry's ops, grouped by folder.
 #[derive(Default)]
-struct Grouped {
+pub(super) struct Grouped {
     flags: BTreeMap<(String, &'static str, bool), Vec<ImapPlace>>,
     copies: BTreeMap<(String, String), Vec<ImapPlace>>,
     moves: BTreeMap<(String, String), Vec<ImapPlace>>,
@@ -142,7 +153,7 @@ struct Grouped {
 }
 
 impl Grouped {
-    fn add(&mut self, op: Op) {
+    pub(super) fn add(&mut self, op: Op) {
         match op {
             Op::Flag { place, flag, add } => self
                 .flags
@@ -169,57 +180,8 @@ impl Grouped {
 }
 
 impl ImapSync {
-    /// Makes `entry`'s change on the server, keeping the store's copies in
-    /// step, and brings its messages in step with their copies whatever
-    /// happened. A message the change cannot be made to does not stop the
-    /// others: the entry is refused once the rest is done.
-    pub(super) async fn make_change(
-        &self,
-        conn: &mut Conn,
-        account: &EmailAddress,
-        folders: &mut Folders,
-        entry: &OutboxEntry,
-    ) -> Outcome<()> {
-        let (a, ids) = (account.clone(), entry.messages.clone());
-        let places = self
-            .blocking(move |s| {
-                ids.iter()
-                    .map(|id| Ok(s.imap_message_places(&a, id)?))
-                    .collect::<crate::SyncResult<Vec<Vec<ImapPlace>>>>()
-            })
-            .await?;
-        let mut grouped = Grouped::default();
-        let mut refused: Option<String> = None;
-        for copies in &places {
-            let mut planned = plan(copies, &entry.change, folders);
-            if planned == Planned::NeedsArchive {
-                self.make_archive(conn, account, folders).await?;
-                planned = plan(copies, &entry.change, folders);
-            }
-            match planned {
-                Planned::Ops(ops) => ops.into_iter().for_each(|op| grouped.add(op)),
-                Planned::Refused(reason) => {
-                    refused.get_or_insert(reason);
-                }
-                Planned::NeedsArchive => {
-                    refused.get_or_insert("the account has no archive folder".to_owned());
-                }
-            }
-        }
-        let mut exec = Exec::new(conn);
-        let done = self.run(&mut exec, account, folders, grouped).await;
-        let declined = exec.declined.take();
-        let (a, ids) = (account.clone(), entry.messages.clone());
-        self.blocking(move |s| record::settle(s, &a, &ids)).await?;
-        done?;
-        match (refused, declined) {
-            (Some(reason), _) => Err(Failure::Refused(reason)),
-            (None, Some(reason)) => Err(Failure::Declined(reason)),
-            (None, None) => Ok(()),
-        }
-    }
-
-    async fn run(
+    /// Carries out the ops, phase by phase.
+    pub(super) async fn run(
         &self,
         exec: &mut Exec<'_>,
         account: &EmailAddress,
@@ -237,6 +199,9 @@ impl ImapSync {
         for ((from, to), places) in grouped.moves {
             self.transfer(exec, account, folders, (&from, &to), places, true)
                 .await?;
+        }
+        if exec.waits.is_some() {
+            return Ok(());
         }
         for (label, places) in grouped.deletes {
             self.delete(exec, account, folders, &label, places).await?;
@@ -279,7 +244,16 @@ impl ImapSync {
         let source = known(folders, from)?.name.clone();
         let before = match exec.uidplus {
             true => None,
-            false => exec.conn.uid_next(&dest).await?,
+            false => match exec.conn.uid_next(&dest).await? {
+                Some(before) => Some(before),
+                None => {
+                    return Err(Failure::Declined(format!(
+                        "the server would not say where new mail goes in {}, which it must \
+                         for copies to be found without UIDPLUS",
+                        shown(&dest)
+                    )));
+                }
+            },
         };
         let validity = exec.open(folders, from).await?;
         let places = exec.current(folders, validity, places);
@@ -315,6 +289,43 @@ impl ImapSync {
         removed.and(found)
     }
 
+    /// Keeps the copies of `places` just made in `to` that were not found
+    /// as copies whose UID is not known, from the UIDVALIDITY and UIDNEXT
+    /// `to` had before.
+    async fn keep_unplaced(
+        &self,
+        account: &EmailAddress,
+        folders: &Folders,
+        to: &str,
+        (uidvalidity, uidnext): (u32, u32),
+        places: &[ImapPlace],
+        found: &HashSet<ProviderMessageId>,
+    ) -> Outcome<()> {
+        let read_uidvalidity = known(folders, to)?.uidvalidity;
+        let copies: Vec<ImapUnplacedCopy> = places
+            .iter()
+            .filter(|p| !found.contains(&p.message))
+            .map(|p| ImapUnplacedCopy {
+                folder: to.to_owned(),
+                message: p.message.clone(),
+                uidvalidity,
+                uidnext,
+                read_uidvalidity,
+            })
+            .collect();
+        if copies.is_empty() {
+            return Ok(());
+        }
+        let a = account.clone();
+        self.with_store(move |s| {
+            copies
+                .iter()
+                .try_for_each(|c| s.put_imap_unplaced_copy(&a, c))
+        })
+        .await?;
+        Ok(())
+    }
+
     /// Keeps the copies `COPYUID` says were made of `chunk` in `to`.
     async fn keep_copies(
         &self,
@@ -348,23 +359,27 @@ impl ImapSync {
         places: &[ImapPlace],
     ) -> Outcome<()> {
         let validity = exec.open(folders, to).await?;
-        if validity != uidvalidity {
-            return Ok(());
-        }
-        let reply = exec.conn.copies_from(from).await?;
-        let name = known(folders, to)?.name.clone();
-        let wanted: HashSet<ProviderMessageId> = places.iter().map(|p| p.message.clone()).collect();
-        let (a, to) = (account.clone(), to.to_owned());
-        self.blocking(move |s| {
-            let folder = Folder {
-                label: &to,
-                name: &name,
-                uidvalidity,
-            };
-            record::found_copies(s, &a, folder, &reply.messages, &wanted).map(|_| ())
-        })
-        .await?;
-        Ok(())
+        let found = match validity == uidvalidity {
+            true => {
+                let reply = exec.conn.copies_from(from).await?;
+                let name = known(folders, to)?.name.clone();
+                let wanted: HashSet<ProviderMessageId> =
+                    places.iter().map(|p| p.message.clone()).collect();
+                let (a, label) = (account.clone(), to.to_owned());
+                self.blocking(move |s| {
+                    let folder = Folder {
+                        label: &label,
+                        name: &name,
+                        uidvalidity,
+                    };
+                    record::found_copies(s, &a, folder, &reply.messages, &wanted)
+                })
+                .await?
+            }
+            false => HashSet::new(),
+        };
+        self.keep_unplaced(account, folders, to, (uidvalidity, from), places, &found)
+            .await
     }
 
     /// Deletes copies in one folder.
@@ -412,6 +427,12 @@ impl ImapSync {
             }
             return Ok(());
         }
+        // What is checked here can change before the EXPUNGE arrives: mail
+        // another client marks `\Deleted` in between is expunged with ours.
+        // IMAP without UIDPLUS has no way to expunge only some messages,
+        // so the window can be made short, not closed; that mail was
+        // marked to be expunged, and the other client's own expunge would
+        // remove it too, unless it took the mark off again first.
         if let Err(unsafe_now) = exec.expunge_is_safe(&uids(places), name).await {
             for chunk in places.chunks(CHUNK) {
                 exec.conn.store_flag(&uids(chunk), DELETED, false).await?;

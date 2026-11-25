@@ -2,6 +2,8 @@
 //! each answers with what it did, or a [`Failure`] saying whether it is
 //! for good, may pass, or is to be waited out.
 
+use std::collections::HashSet;
+
 use async_imap::imap_proto::rfc4315::UidSetMember;
 use async_imap::imap_proto::{MailboxDatum, Response, ResponseCode, StatusAttribute};
 
@@ -48,7 +50,7 @@ pub(super) fn shown(name: &str) -> String {
 
 impl Conn {
     /// Whether the server offers an extension, by its capability name.
-    pub(super) fn offers(&mut self, capability: &str) -> bool {
+    pub(in crate::imap::sync) fn offers(&mut self, capability: &str) -> bool {
         self.session_mut().capabilities().has(capability)
     }
 
@@ -125,6 +127,28 @@ impl Conn {
             )),
             Err(e) => Err(Failure::in_folder(e, server)),
         }
+    }
+
+    /// Which of `uids` the selected folder has, not marked `\Deleted`
+    /// (`UID SEARCH UID <uids> UNDELETED`); `None` when the server will
+    /// not say.
+    pub(super) async fn present(&mut self, uids: &[u32]) -> Outcome<Option<HashSet<u32>>> {
+        self.search_to_change(&format!("UID {} UNDELETED", uid_set(uids)))
+            .await
+            .map(|found| found.map(|uids| uids.into_iter().collect()))
+    }
+
+    /// Every UID of the selected folder not marked `\Deleted`; `None`
+    /// when the server will not say.
+    pub(super) async fn undeleted(&mut self) -> Outcome<Option<Vec<u32>>> {
+        self.search_to_change("UNDELETED").await
+    }
+
+    async fn search_to_change(&mut self, criteria: &str) -> Outcome<Option<Vec<u32>>> {
+        let server = self.describe();
+        self.uid_search(criteria)
+            .await
+            .map_err(|e| Failure::in_folder(e, server))
     }
 
     /// `UID EXPUNGE <uids>` (UIDPLUS), or, without `uids`, `EXPUNGE`:

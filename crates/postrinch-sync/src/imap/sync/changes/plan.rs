@@ -13,40 +13,62 @@
 //! - adding Trash (or Junk) moves one copy there and deletes the others,
 //!   as Gmail drops a trashed message's other labels.
 //!
-//! A folder that holds every message (`\All`: Gmail's All Mail, a virtual
-//! folder elsewhere) is never moved from or deleted from, except into
-//! Trash or Junk: on such servers mail leaves it only that way, and
-//! deleting its copy would delete the message. Removing its label is left
-//! alone, and the label comes back by sync.
+//! A folder that holds every message (Gmail's All Mail, `\All` on Gmail)
+//! is never moved from or deleted from, except into Trash or Junk: there
+//! mail leaves it only that way, and deleting its copy would delete the
+//! message. Removing its label is left alone, and the label comes back by
+//! sync. A `\All` folder elsewhere is a view of the other folders' mail
+//! ([`super::super::folders::view_of_all`]): its copies are never changed
+//! or counted as keeping a message, so archiving there moves the inbox
+//! copy to a real archive folder.
+//!
+//! A message with a copy just made whose UID is not known yet
+//! ([`postrinch_model::ImapUnplacedCopy`]) takes only labels added until sync finds that
+//! copy: anything else waits, as the copy could be neither changed nor
+//! counted.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use postrinch_model::{FolderRole, ImapFolder, ImapPlace, MessageChange, SystemLabel};
 
+use super::super::folders::view_of_all;
 use super::super::places::{DELETED, FLAGGED, SEEN, first_copy};
+use super::commands::shown;
 use crate::imap::folders::{ListedFolder, SpecialUse};
 
 /// The account's folders as the outbox needs them.
 #[derive(Debug, Clone, Default)]
 pub(super) struct Folders {
     by_label: HashMap<String, ImapFolder>,
-    /// Label ids of the folders that hold every message (`\All`).
+    /// Label ids of the folders that hold every message (Gmail's All Mail).
     everything: HashSet<String>,
+    /// Label ids of `\All` folders elsewhere, kept from before they were
+    /// left out of sync: views, never copies.
+    views: HashSet<String>,
 }
 
 impl Folders {
-    /// The folders kept, with which of them LIST marks `\All`.
-    pub(super) fn new(stored: Vec<ImapFolder>, listed: &[ListedFolder]) -> Self {
-        let all: HashSet<&str> = listed
+    /// The folders kept, with which of them LIST marks `\All`, on Gmail
+    /// (`gmail`) or elsewhere.
+    pub(super) fn new(stored: Vec<ImapFolder>, listed: &[ListedFolder], gmail: bool) -> Self {
+        let (mut all, mut views) = (HashSet::new(), HashSet::new());
+        for f in listed
             .iter()
             .filter(|f| f.special_use == Some(SpecialUse::All))
-            .map(|f| f.name.as_str())
-            .collect();
-        let everything = stored
-            .iter()
-            .filter(|f| all.contains(f.name.as_str()))
-            .map(|f| f.label_id.clone())
-            .collect();
+        {
+            match view_of_all(f, gmail) {
+                true => views.insert(f.name.as_str()),
+                false => all.insert(f.name.as_str()),
+            };
+        }
+        let labels = |names: &HashSet<&str>| -> HashSet<String> {
+            stored
+                .iter()
+                .filter(|f| names.contains(f.name.as_str()))
+                .map(|f| f.label_id.clone())
+                .collect()
+        };
+        let (everything, views) = (labels(&all), labels(&views));
         let by_label = stored
             .into_iter()
             .map(|f| (f.label_id.clone(), f))
@@ -54,6 +76,7 @@ impl Folders {
         Self {
             by_label,
             everything,
+            views,
         }
     }
 
@@ -71,15 +94,27 @@ impl Folders {
         let mut found: Vec<&ImapFolder> = self
             .by_label
             .values()
-            .filter(|f| f.role == Some(FolderRole::Archive))
+            .filter(|f| f.role == Some(FolderRole::Archive) && !self.is_view(&f.label_id))
             .collect();
         found.sort_by(|a, b| a.label_id.cmp(&b.label_id));
         found.into_iter().next()
     }
 
-    /// Whether the folder holds every message (`\All`).
+    /// Whether the folder holds every message (Gmail's All Mail).
     pub(super) fn holds_everything(&self, label: &str) -> bool {
         self.everything.contains(label)
+    }
+
+    /// Whether the account has a folder that holds every message, so
+    /// mail is kept whatever folders it leaves (Gmail).
+    pub(super) fn keeps_everything(&self) -> bool {
+        !self.everything.is_empty()
+    }
+
+    /// Whether the folder is a view of the other folders' mail (`\All`
+    /// other than Gmail's), whose copies are not copies.
+    pub(super) fn is_view(&self, label: &str) -> bool {
+        self.views.contains(label)
     }
 
     /// Every folder, in no particular order.
@@ -116,6 +151,8 @@ pub(super) enum Planned {
     /// Removing the message's last folder files it in the archive, and
     /// the account has no archive folder yet.
     NeedsArchive,
+    /// The change waits for sync, for this reason.
+    Waits(String),
 }
 
 fn inbox() -> &'static str {
@@ -130,6 +167,12 @@ fn live(place: &ImapPlace) -> bool {
     !place.flags.iter().any(|f| f.eq_ignore_ascii_case(DELETED))
 }
 
+/// Whether a kept copy is one a change acts on and counts: not marked
+/// deleted, in a folder still there, and not in a view of other folders.
+pub(super) fn counted(place: &ImapPlace, folders: &Folders) -> bool {
+    live(place) && folders.get(&place.folder).is_some() && !folders.is_view(&place.folder)
+}
+
 /// Each label once, in the order named.
 fn each_once(labels: &[String]) -> Vec<&str> {
     let mut seen = BTreeSet::new();
@@ -140,12 +183,25 @@ fn each_once(labels: &[String]) -> Vec<&str> {
         .collect()
 }
 
-/// What to do to a message's copies (`places`, as kept) for `change`.
-pub(super) fn plan(places: &[ImapPlace], change: &MessageChange, folders: &Folders) -> Planned {
-    let live: Vec<&ImapPlace> = places
-        .iter()
-        .filter(|p| live(p) && folders.get(&p.folder).is_some())
-        .collect();
+/// What to do to a message's copies (`places`, as kept) for `change`;
+/// `unplaced`, the label ids of the folders where a copy was made whose
+/// UID is not known yet.
+pub(super) fn plan(
+    places: &[ImapPlace],
+    unplaced: &[String],
+    change: &MessageChange,
+    folders: &Folders,
+) -> Planned {
+    if let Some(label) = unplaced.first()
+        && !only_adds(change)
+    {
+        let name = folders.get(label).map_or("", |f| f.name.as_str());
+        return Planned::Waits(format!(
+            "a copy of a message was just made in {} and waits for sync to find it",
+            shown(name)
+        ));
+    }
+    let live: Vec<&ImapPlace> = places.iter().filter(|p| counted(p, folders)).collect();
     if live.is_empty() {
         return Planned::Ops(Vec::new());
     }
@@ -179,7 +235,7 @@ pub(super) fn plan(places: &[ImapPlace], change: &MessageChange, folders: &Folde
         .find(|b| adds.contains(b));
     match bin {
         Some(bin) => into_bin(&live, bin, folders, &mut ops),
-        None => match relabel(&live, &adds, &removes, folders, &mut ops) {
+        None => match relabel(&live, unplaced, &adds, &removes, folders, &mut ops) {
             Ok(()) => {}
             Err(other) => return other,
         },
@@ -218,13 +274,15 @@ fn into_bin(live: &[&ImapPlace], bin: &str, folders: &Folders, ops: &mut Vec<Op>
 /// where the message is kept when it is in no folder.
 fn relabel(
     live: &[&ImapPlace],
+    unplaced: &[String],
     adds: &[&str],
     removes: &[&str],
     folders: &Folders,
     ops: &mut Vec<Op>,
 ) -> Result<(), Planned> {
     let have: BTreeSet<&str> = live.iter().map(|p| p.folder.as_str()).collect();
-    let mut to_add: Vec<&str> = adds.iter().copied().filter(|a| !have.contains(a)).collect();
+    let made = |a: &&str| have.contains(a) || unplaced.iter().any(|u| u == a);
+    let mut to_add: Vec<&str> = adds.iter().copied().filter(|a| !made(a)).collect();
     let to_remove: Vec<&str> = removes
         .iter()
         .copied()
@@ -299,10 +357,38 @@ fn relabel(
     Ok(())
 }
 
+/// Whether a change only adds labels (none of them Trash or Junk).
+fn only_adds(change: &MessageChange) -> bool {
+    change.unread.is_none()
+        && change.starred.is_none()
+        && change.remove_labels.is_empty()
+        && !change.add_labels.iter().any(|l| is_bin(l))
+}
+
+/// The copies `ops` leave where they are: counted ones neither moved nor
+/// deleted, the copies a message keeps when its others are deleted.
+pub(super) fn kept<'p>(
+    places: &'p [ImapPlace],
+    ops: &[Op],
+    folders: &Folders,
+) -> Vec<&'p ImapPlace> {
+    let goes = |p: &ImapPlace| {
+        ops.iter().any(|op| match op {
+            Op::Move { from, .. } => from == p,
+            Op::Delete { place } => place == p,
+            Op::Flag { .. } | Op::Copy { .. } => false,
+        })
+    };
+    places
+        .iter()
+        .filter(|p| counted(p, folders) && !goes(p))
+        .collect()
+}
+
 /// Where a message taken out of its last folder, `from`, is kept: the
 /// inbox when it leaves Trash or Junk, else the archive folder (`None`
 /// when the account has none yet).
-fn home_for(from: &str, folders: &Folders) -> Option<String> {
+pub(super) fn home_for(from: &str, folders: &Folders) -> Option<String> {
     if is_bin(from) {
         return Some(inbox().to_owned());
     }

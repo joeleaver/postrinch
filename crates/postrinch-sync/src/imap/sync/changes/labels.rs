@@ -3,30 +3,21 @@
 //!
 //! A label's name is its path with `/` between levels, as the person reads
 //! it; on the server each level is in modified UTF-7, joined by the
-//! server's delimiter, under `INBOX` where every folder of the account is
-//! (Courier's way). The special folders (the inbox, Sent, Drafts, Trash,
-//! Junk and the archive) are not renamed or deleted from here.
-//!
-//! Deleting a folder deletes the mail in it, but deleting a label must
-//! not: mail only in that folder is copied to the archive first (where the
-//! archive holds every message, as Gmail's All Mail does, it is there
-//! already).
-
-use std::collections::HashSet;
+//! server's delimiter, under `INBOX` where the server keeps every folder
+//! there (Courier's way; see [`server_name`]). The special folders (the
+//! inbox, Sent, Drafts, Trash, Junk and the archive) are not renamed or
+//! deleted from here; deleting a label is [`super::drop_label`]'s.
 
 use postrinch_model::{
-    EmailAddress, FolderRole, ImapFolder, ImapPlace, Label, LabelKind, LabelVisibility, SystemLabel,
+    EmailAddress, FolderRole, ImapFolder, Label, LabelKind, LabelVisibility, SystemLabel,
 };
 
 use super::super::names::Command;
-use super::super::places::DELETED;
 use super::super::wire::Conn;
 use super::super::{ImapSync, Lane, utf7};
-use super::apply::Exec;
 use super::commands::shown;
 use super::failure::{Failure, Outcome};
 use super::plan::Folders;
-use super::record;
 use crate::SyncResult;
 use crate::imap::mint_folder_label_id;
 
@@ -42,20 +33,35 @@ fn delimiter(folders: &Folders) -> char {
         .unwrap_or('/')
 }
 
-/// The name on the server for the label path `path`.
-fn server_name(folders: &Folders, path: &str) -> Outcome<String> {
-    let d = delimiter(folders);
-    let inbox = format!("INBOX{d}");
+/// Whether the server keeps every folder under the inbox (Courier, or a
+/// personal namespace of `INBOX.`): its special folders are all there and
+/// no folder is beside the inbox.
+///
+/// RFC 2342's `NAMESPACE` says this outright, but the IMAP parser sync
+/// uses (imap-proto) cannot read its answer, and an answer it cannot read
+/// stops the connection, so the folders are the evidence: the special
+/// folders sync found, not the person's own, as an account elsewhere may
+/// keep its own folders under the inbox by choice. An account with no
+/// special folder yet gets its labels beside the inbox.
+fn under_inbox(folders: &Folders, inbox: &str) -> bool {
+    let in_inbox = |f: &ImapFolder| {
+        f.name
+            .get(..inbox.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(inbox))
+    };
     let others: Vec<&ImapFolder> = folders
         .all()
         .filter(|f| !f.name.eq_ignore_ascii_case("INBOX"))
         .collect();
-    let under_inbox = !others.is_empty()
-        && others.iter().all(|f| {
-            f.name
-                .get(..inbox.len())
-                .is_some_and(|p| p.eq_ignore_ascii_case(&inbox))
-        });
+    let special: Vec<&&ImapFolder> = others.iter().filter(|f| f.role.is_some()).collect();
+    !special.is_empty() && others.iter().all(|f| in_inbox(f))
+}
+
+/// The name on the server for the label path `path`.
+fn server_name(folders: &Folders, path: &str) -> Outcome<String> {
+    let d = delimiter(folders);
+    let inbox = format!("INBOX{d}");
+    let under_inbox = under_inbox(folders, &inbox);
     let parts: Vec<&str> = path.split('/').map(str::trim).collect();
     if parts.iter().any(|p| p.is_empty()) {
         return Err(Failure::Refused(format!(
@@ -91,7 +97,7 @@ fn display(name: &str, delimiter: Option<char>) -> String {
 }
 
 /// The special folders are the account's own, not the person's labels.
-fn changeable(folders: &Folders, id: &str) -> Outcome<ImapFolder> {
+pub(super) fn changeable(folders: &Folders, id: &str) -> Outcome<ImapFolder> {
     let folder = folders
         .get(id)
         .ok_or_else(|| Failure::Refused("the label is gone".to_owned()))?;
@@ -101,10 +107,16 @@ fn changeable(folders: &Folders, id: &str) -> Outcome<ImapFolder> {
             shown(&folder.name)
         )));
     }
+    if folders.is_view(id) {
+        return Err(Failure::Refused(format!(
+            "{} is a view of the mail in the other folders",
+            shown(&folder.name)
+        )));
+    }
     Ok(folder.clone())
 }
 
-fn mailbox(verb: &str, name: &str) -> Outcome<Command> {
+pub(super) fn mailbox(verb: &str, name: &str) -> Outcome<Command> {
     Command::with_mailbox(verb, name).ok_or_else(|| {
         Failure::Refused(format!(
             "the folder {} has a name that cannot be sent to the server",
@@ -190,88 +202,15 @@ impl ImapSync {
         .await
     }
 
-    /// Deletes a label's folder. Its mail stays: what is only there is
-    /// copied to the archive first.
-    pub async fn delete_label(&self, account: &EmailAddress, id: &str) -> SyncResult<()> {
-        self.on_folders(account, async |conn, folders| {
-            let folder = changeable(folders, id)?;
-            let (a, label) = (account.clone(), id.to_owned());
-            let only_here = self
-                .blocking(move |s| {
-                    let mut only = Vec::new();
-                    for place in s.imap_folder_places(&a, &label)? {
-                        let elsewhere =
-                            s.imap_message_places(&a, &place.message)?.iter().any(|p| {
-                                p.folder != label
-                                    && !p.flags.iter().any(|f| f.eq_ignore_ascii_case(DELETED))
-                            });
-                        let live = !place.flags.iter().any(|f| f.eq_ignore_ascii_case(DELETED));
-                        if live && !elsewhere {
-                            only.push(place);
-                        }
-                    }
-                    Ok(only)
-                })
-                .await?;
-            let mut exec = Exec::new(conn);
-            if !only_here.is_empty() {
-                if folders.archive().is_none() {
-                    self.make_archive(exec.conn, account, folders).await?;
-                }
-                let archive = folders.archive().map(|f| f.label_id.clone());
-                if let Some(archive) = archive.filter(|a| !folders.holds_everything(a)) {
-                    self.transfer(
-                        &mut exec,
-                        account,
-                        folders,
-                        (id, &archive),
-                        only_here,
-                        false,
-                    )
-                    .await?;
-                }
-            }
-            if exec.selected() == Some(id) {
-                exec.close().await?;
-            }
-            let what = format!("deleting {}", shown(&folder.name));
-            let deleted = exec
-                .conn
-                .folder_command(&what, &mailbox("DELETE", &folder.name)?)
-                .await;
-            if let Err(refused) = deleted {
-                // Gone already: the label goes too.
-                let gone = matches!(refused, Failure::Refused(_))
-                    && self.gone(exec.conn, &folder.name).await?;
-                if !gone {
-                    return Err(refused);
-                }
-            }
-            let (a, label) = (account.clone(), id.to_owned());
-            self.blocking(move |s| {
-                let places: Vec<ImapPlace> = s.imap_folder_places(&a, &label)?;
-                for place in &places {
-                    record::remove_copy(s, &a, place)?;
-                }
-                s.remove_label(&a, &label)?;
-                let messages: HashSet<_> = places.into_iter().map(|p| p.message).collect();
-                record::settle(s, &a, &messages)
-            })
-            .await?;
-            Ok(())
-        })
-        .await
-    }
-
     /// Whether the folder `name` is missing from LIST.
-    async fn gone(&self, conn: &mut Conn, name: &str) -> Outcome<bool> {
+    pub(super) async fn gone(&self, conn: &mut Conn, name: &str) -> Outcome<bool> {
         let listed = conn.session_mut().list_folders().await?;
         Ok(!listed.iter().any(|f| f.name == name))
     }
 
     /// Runs label work over the passes' connection, with the account's
     /// folders, giving the server's words for what it refused.
-    async fn on_folders<T>(
+    pub(super) async fn on_folders<T>(
         &self,
         account: &EmailAddress,
         work: impl AsyncFnOnce(&mut Conn, &mut Folders) -> Outcome<T>,
@@ -353,12 +292,20 @@ impl ImapSync {
 mod tests {
     use super::*;
 
+    /// The folders with these names, Sent and Trash (under the inbox or
+    /// not) given their roles, as sync gives them.
     fn folders(names: &[(&str, char)]) -> Folders {
+        let role = |name: &str| match name.rsplit(['.', '/']).next() {
+            Some("Sent") => Some(FolderRole::System(SystemLabel::Sent)),
+            Some("Trash") => Some(FolderRole::System(SystemLabel::Trash)),
+            _ => None,
+        };
         let stored = names
             .iter()
             .enumerate()
             .map(|(i, (name, d))| ImapFolder {
                 delimiter: Some(*d),
+                role: role(name),
                 ..ImapFolder::new(
                     if *name == "INBOX" {
                         "INBOX".to_owned()
@@ -369,7 +316,7 @@ mod tests {
                 )
             })
             .collect();
-        Folders::new(stored, &[])
+        Folders::new(stored, &[], false)
     }
 
     #[test]
@@ -397,5 +344,21 @@ mod tests {
         assert_eq!(server_name(&courier, "Work").unwrap(), "INBOX.Work");
         assert_eq!(server_name(&courier, "INBOX/Work").unwrap(), "INBOX.Work");
         assert_eq!(display("INBOX.Work", Some('.')), "INBOX/Work");
+    }
+
+    #[test]
+    fn folders_of_the_persons_under_the_inbox_are_not_courier() {
+        // Dovecot, its special folders beside the inbox or none yet: the
+        // person's own folders under the inbox say nothing.
+        let none_yet = folders(&[("INBOX", '/'), ("INBOX/Work", '/')]);
+        assert_eq!(server_name(&none_yet, "Projects").unwrap(), "Projects");
+        let beside = folders(&[("INBOX", '/'), ("INBOX/Work", '/'), ("Sent", '/')]);
+        assert_eq!(server_name(&beside, "Projects").unwrap(), "Projects");
+        // A personal namespace of `INBOX/`: everything there.
+        let prefixed = folders(&[("INBOX", '/'), ("INBOX/Work", '/'), ("INBOX/Sent", '/')]);
+        assert_eq!(
+            server_name(&prefixed, "Projects").unwrap(),
+            "INBOX/Projects"
+        );
     }
 }

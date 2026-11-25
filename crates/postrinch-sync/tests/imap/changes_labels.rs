@@ -4,7 +4,7 @@
 use postrinch_sync::SyncError;
 
 use super::changes_support::{count, put, sync_agrees};
-use super::sync_support::fixture;
+use super::sync_support::{fixture, mail};
 
 #[tokio::test]
 async fn a_label_made_is_a_folder_and_sync_keeps_its_id() {
@@ -95,4 +95,78 @@ async fn the_special_folders_are_not_renamed_or_deleted() {
         f.server.command_count("RENAME") + f.server.command_count("DELETE"),
         0
     );
+}
+
+#[tokio::test]
+async fn deleting_a_label_whose_folder_changed_since_sync_saves_its_mail() {
+    let f = fixture().await;
+    f.user.create_standard_folders().unwrap();
+    f.user.create_folder("Work").unwrap();
+    put(&f, "only@x", &["Work"]);
+    f.sync().await;
+    // The UIDs sync read name other messages now.
+    f.user.set_uid_validity("Work", 99).unwrap();
+    let work = f.label_id("Work");
+    f.sync.delete_label(&f.me, &work).await.unwrap();
+    assert!(f.user.folder("Work").is_err());
+    assert_eq!(
+        count(&f, "Archive"),
+        1,
+        "saved, not deleted with the folder"
+    );
+    f.sync().await;
+    assert_eq!(f.labels("only@x"), [f.label_id("Archive")]);
+    assert_eq!(f.message_count(), 1);
+}
+
+#[tokio::test]
+async fn deleting_a_label_saves_mail_sync_has_not_read() {
+    let f = fixture().await;
+    f.user.create_standard_folders().unwrap();
+    f.user.create_folder("Work").unwrap();
+    put(&f, "only@x", &["Work"]);
+    f.sync().await;
+    put(&f, "new@x", &["Work"]);
+    // And mail arriving while the folder's mail is being saved.
+    let user = f.user.clone();
+    f.server.on_next("UID COPY", "", move || {
+        user.append("Work", mail(Some("late@x"), "late@x", ""))
+            .unwrap();
+    });
+    let work = f.label_id("Work");
+    f.sync.delete_label(&f.me, &work).await.unwrap();
+    assert!(f.user.folder("Work").is_err());
+    assert_eq!(count(&f, "Archive"), 3, "everything the folder held");
+    f.sync().await;
+    for header in ["only@x", "new@x", "late@x"] {
+        assert_eq!(f.labels(header), [f.label_id("Archive")], "{header}");
+    }
+    assert_eq!(f.message_count(), 3);
+}
+
+#[tokio::test]
+async fn deleting_a_label_saves_mail_whose_other_copy_is_gone() {
+    let f = fixture().await;
+    f.user.create_standard_folders().unwrap();
+    f.user.create_folder("Work").unwrap();
+    put(&f, "both@x", &["INBOX", "Work"]);
+    f.sync().await;
+    let uid = f.user.messages("INBOX").unwrap()[0].uid;
+    f.user.expunge("INBOX", uid).unwrap();
+    let work = f.label_id("Work");
+    f.sync.delete_label(&f.me, &work).await.unwrap();
+    assert_eq!((count(&f, "INBOX"), count(&f, "Archive")), (0, 1));
+    assert_eq!(f.labels("both@x"), [f.label_id("Archive")]);
+    sync_agrees(&f).await;
+}
+
+#[tokio::test]
+async fn folders_of_the_persons_under_the_inbox_do_not_put_new_labels_there() {
+    let f = fixture().await;
+    f.user.create_folder("INBOX/Work").unwrap();
+    f.sync().await;
+    let made = f.sync.create_label(&f.me, "Projects").await.unwrap();
+    assert_eq!(made.name, "Projects");
+    assert!(f.user.folder("Projects").is_ok());
+    assert!(f.user.folder("INBOX/Projects").is_err());
 }

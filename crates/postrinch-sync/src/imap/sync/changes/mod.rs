@@ -16,17 +16,21 @@
 //! the server will not take is [`failure`]'s to say.
 
 mod apply;
+mod change;
 mod commands;
+mod drop_label;
 mod failure;
 mod labels;
 mod plan;
 mod record;
+mod verify;
 
 use postrinch_model::EmailAddress;
 use postrinch_store::OutboxEntry;
 
 use self::failure::{Failure, GIVE_UP};
 use self::plan::Folders;
+use super::folders::GMAIL;
 use super::wire::Conn;
 use super::{ImapSync, Lane};
 use crate::google::SendReport;
@@ -52,8 +56,9 @@ impl ImapSync {
     /// Sends the account's waiting changes, oldest first. One the server
     /// refuses for good, or has declined [`GIVE_UP`] times, is dropped
     /// with its reason in the report and its messages shown as the server
-    /// has them; one that may pass stays to be tried again, the ones after
-    /// it wait behind it, and the error is returned.
+    /// has them; one that may pass, or waits (for sync, for other mail to
+    /// go, for the server), stays to be tried again, the ones after it
+    /// wait behind it, and the error is returned.
     pub async fn send_outbox(&self, account: &EmailAddress) -> SyncResult<SendReport> {
         let owner = account.clone();
         let entries = self.with_store(move |s| s.outbox(&owner)).await?;
@@ -78,10 +83,11 @@ impl ImapSync {
 
     /// The account's folders as kept, with which hold every message.
     async fn folders(&self, conn: &mut Conn, account: &EmailAddress) -> SyncResult<Folders> {
+        let gmail = conn.offers(GMAIL);
         let listed = conn.session_mut().list_folders().await?;
         let a = account.clone();
         let stored = self.with_store(move |s| s.imap_folders(&a)).await?;
-        Ok(Folders::new(stored, &listed))
+        Ok(Folders::new(stored, &listed, gmail))
     }
 
     /// One run of identical changes: together, or, when the server would
@@ -107,7 +113,7 @@ impl ImapSync {
                 report.sent += run.len();
                 Ok(())
             }
-            Err(Failure::Refused(_) | Failure::Declined(_)) => {
+            Err(Failure::Refused(_) | Failure::Declined(_) | Failure::Waits(_)) => {
                 for entry in run {
                     self.send_one(conn, account, folders, entry, report).await?;
                 }
@@ -118,10 +124,8 @@ impl ImapSync {
                     run.iter().map(|e| e.id).collect::<Vec<u64>>(),
                     e.to_string(),
                 );
-                self.with_store(move |s| {
-                    ids.iter().try_for_each(|id| s.outbox_failed(*id, &error))
-                })
-                .await?;
+                self.with_store(move |s| ids.iter().try_for_each(|id| s.outbox_waits(*id, &error)))
+                    .await?;
                 Err(e)
             }
         }
@@ -151,16 +155,16 @@ impl ImapSync {
                 let error = reason.clone();
                 self.with_store(move |s| s.outbox_failed(id, &error))
                     .await?;
-                return Err(SyncError::Server {
-                    service: "IMAP",
-                    server: conn.describe(),
-                    message: reason,
-                });
+                return Err(server_said(conn, reason));
+            }
+            Err(Failure::Waits(reason)) => {
+                let error = reason.clone();
+                self.with_store(move |s| s.outbox_waits(id, &error)).await?;
+                return Err(server_said(conn, reason));
             }
             Err(Failure::Wait(e)) => {
                 let error = e.to_string();
-                self.with_store(move |s| s.outbox_failed(id, &error))
-                    .await?;
+                self.with_store(move |s| s.outbox_waits(id, &error)).await?;
                 return Err(e);
             }
         };
@@ -173,5 +177,14 @@ impl ImapSync {
         .await?;
         report.refused.push(reason);
         Ok(())
+    }
+}
+
+/// Why a change did not go, as the server's (or the outbox's) words.
+fn server_said(conn: &Conn, message: String) -> SyncError {
+    SyncError::Server {
+        service: "IMAP",
+        server: conn.describe(),
+        message,
     }
 }

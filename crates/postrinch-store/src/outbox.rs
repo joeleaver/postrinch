@@ -157,6 +157,20 @@ impl Store {
         })
     }
 
+    /// Sending the entry waits, for `error`: the provider busy or out of
+    /// reach, or the change waiting for something that comes in time. It
+    /// is tried again later, and the wait is not counted as a failed
+    /// attempt.
+    pub fn outbox_waits(&self, entry: u64, error: &str) -> StoreResult<()> {
+        let fields = FieldsBuilder::new().str("error", error);
+        self.db_update(TYPE, entry, fields.build())?;
+        self.with_outbox(|o| {
+            o.update(entry, |e| {
+                e.error = Some(error.to_owned());
+            });
+        })
+    }
+
     /// Drop an entry without sending it: one the provider refused for good.
     /// What it changed stays until sync brings the provider's state back.
     pub fn outbox_drop(&self, entry: u64) -> StoreResult<()> {

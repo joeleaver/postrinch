@@ -1,11 +1,11 @@
 //! Changing mail on a server offering every extension: each kind of
 //! change reaches the server's copies, and the next sync agrees.
 
-use postrinch_mailtest::SpecialUse;
-use postrinch_model::MessageChange;
+use postrinch_mailtest::{ImapConfig, SpecialUse};
+use postrinch_model::{FolderRoles, MessageChange};
 
 use super::changes_support::{all_have, change, count, put, sync_agrees};
-use super::sync_support::fixture;
+use super::sync_support::{fixture, fixture_with};
 
 #[tokio::test]
 async fn read_unread_and_star_reach_every_copy() {
@@ -125,7 +125,8 @@ async fn a_label_is_a_copy_in_its_folder() {
 
 #[tokio::test]
 async fn all_mail_is_left_alone_as_gmail_keeps_it() {
-    let f = fixture().await;
+    // Gmail, by its capability: elsewhere `\All` is a view, not All Mail.
+    let f = fixture_with(ImapConfig::new().gmail(true), FolderRoles::default()).await;
     f.user
         .create_special_folder("[Gmail]/All Mail", SpecialUse::All)
         .unwrap();

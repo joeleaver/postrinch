@@ -21,6 +21,7 @@ mod faults;
 mod find;
 mod format;
 mod imap_state;
+mod imap_unplaced;
 mod keys;
 mod labels;
 mod mailboxes;

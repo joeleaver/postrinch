@@ -54,6 +54,9 @@ impl Session {
                 .filter(|e| state.has(*e))
                 .map(Extension::capability),
         );
+        if state.config.gmail {
+            caps.push("X-GM-EXT-1");
+        }
         caps.join(" ")
     }
 

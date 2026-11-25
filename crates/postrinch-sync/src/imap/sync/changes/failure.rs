@@ -10,8 +10,15 @@
 //!   and given up on once the entry has failed [`GIVE_UP`] times, so one
 //!   change the server will never take cannot hold every later one back
 //!   for ever.
+//! - **Waits**: the change waits for something that comes in time: sync
+//!   to read a folder that changed (its UIDVALIDITY, or a copy whose UID
+//!   is not known yet), or other mail marked deleted to go before a plain
+//!   `EXPUNGE`. Tried again however long it takes.
 //! - **Wait**: the server busy (for a folder or the account) or out of
 //!   reach. Waiting cures it, so it is tried again however long it takes.
+//!
+//! Only a declined send counts towards [`GIVE_UP`], and only for the entry
+//! sent: waiting never makes a change be given up on.
 
 use super::super::folder_error::FolderError;
 use super::super::wire::Refusal;
@@ -29,6 +36,8 @@ pub(super) enum Failure {
     Refused(String),
     /// Declined in words that may pass, with the reason.
     Declined(String),
+    /// Waiting for sync, or for other mail to go, with the reason.
+    Waits(String),
     /// Busy or unreachable: tried again later.
     Wait(SyncError),
 }
@@ -65,11 +74,13 @@ impl Failure {
     /// deleting a label): the server's own words for a refusal.
     pub(super) fn into_error(self, server: String) -> SyncError {
         match self {
-            Self::Refused(message) | Self::Declined(message) => SyncError::Server {
-                service: "IMAP",
-                server,
-                message,
-            },
+            Self::Refused(message) | Self::Declined(message) | Self::Waits(message) => {
+                SyncError::Server {
+                    service: "IMAP",
+                    server,
+                    message,
+                }
+            }
             Self::Wait(e) => e,
         }
     }

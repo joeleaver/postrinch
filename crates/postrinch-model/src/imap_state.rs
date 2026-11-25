@@ -84,3 +84,38 @@ pub struct ImapPlace {
     #[serde(default)]
     pub arrived: Option<Timestamp>,
 }
+
+/// A copy a change made on a server without UIDPLUS, which did not say
+/// the copy's UID, and which was not found by its `Message-ID` either. It
+/// stands for the copy until sync has read the folder past it, so the
+/// change, sent again meanwhile, does not copy the message twice
+/// (docs/imap.md, "Changing mail").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImapUnplacedCopy {
+    /// The label id of the folder the copy was made in.
+    pub folder: String,
+    /// The message the copy is of.
+    pub message: ProviderMessageId,
+    /// The folder's UIDVALIDITY on the server when the copy was made.
+    pub uidvalidity: u32,
+    /// The folder's UIDNEXT on the server just before: the copy's UID is
+    /// this or above.
+    pub uidnext: u32,
+    /// The folder's UIDVALIDITY as sync had read it then (0 for a folder
+    /// not read yet).
+    pub read_uidvalidity: u32,
+}
+
+impl ImapUnplacedCopy {
+    /// Whether the copy still waits for sync to find it, given the folder
+    /// as sync has now read it: once sync has read the folder past the
+    /// copy's UIDNEXT, at the copy's UIDVALIDITY, the copy is a place (or
+    /// gone), and once the folder's UIDVALIDITY moves on to another one,
+    /// sync reads the folder whole.
+    pub fn waits(&self, read: &ImapFolder) -> bool {
+        if read.uidvalidity == self.uidvalidity {
+            return read.uidnext <= self.uidnext;
+        }
+        read.uidvalidity == self.read_uidvalidity
+    }
+}

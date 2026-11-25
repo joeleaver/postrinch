@@ -81,6 +81,7 @@ pub struct ImapConfig {
     pub(crate) literal_plus: bool,
     pub(crate) splits_fetches: bool,
     pub(crate) unsolicited_fetches: bool,
+    pub(crate) gmail: bool,
 }
 
 impl Default for ImapConfig {
@@ -98,6 +99,7 @@ impl Default for ImapConfig {
             literal_plus: true,
             splits_fetches: false,
             unsolicited_fetches: false,
+            gmail: false,
         }
     }
 }
@@ -211,6 +213,16 @@ impl ImapConfig {
     /// default.
     pub fn unsolicited_fetches(mut self, on: bool) -> Self {
         self.unsolicited_fetches = on;
+        self
+    }
+
+    /// Whether the server says it is Gmail, by advertising Gmail's
+    /// `X-GM-EXT-1` capability. Off by default. Only the capability: the
+    /// fake has none of Gmail's `X-GM-` commands or attributes, and its
+    /// `\All` folder is an ordinary one the test fills, as Gmail's All
+    /// Mail is filled with every message.
+    pub fn gmail(mut self, on: bool) -> Self {
+        self.gmail = on;
         self
     }
 
