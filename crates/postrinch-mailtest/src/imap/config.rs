@@ -83,6 +83,7 @@ pub struct ImapConfig {
     pub(crate) unsolicited_fetches: bool,
     pub(crate) gmail: bool,
     pub(crate) max_connections: Option<usize>,
+    pub(crate) ascii_search: bool,
 }
 
 impl Default for ImapConfig {
@@ -102,6 +103,7 @@ impl Default for ImapConfig {
             unsolicited_fetches: false,
             gmail: false,
             max_connections: None,
+            ascii_search: false,
         }
     }
 }
@@ -228,12 +230,20 @@ impl ImapConfig {
     }
 
     /// Whether the server says it is Gmail, by advertising Gmail's
-    /// `X-GM-EXT-1` capability. Off by default. Only the capability: the
-    /// fake has none of Gmail's `X-GM-` commands or attributes, and its
+    /// `X-GM-EXT-1` capability. Off by default. Of Gmail's `X-GM-` items
+    /// the fake has only `SEARCH X-GM-RAW` (see `search.rs`), and its
     /// `\All` folder is an ordinary one the test fills, as Gmail's All
     /// Mail is filled with every message.
     pub fn gmail(mut self, on: bool) -> Self {
         self.gmail = on;
+        self
+    }
+
+    /// Whether SEARCH takes only US-ASCII: `CHARSET UTF-8` is refused
+    /// with `NO [BADCHARSET (US-ASCII)]`, as some servers do. Off by
+    /// default.
+    pub fn ascii_search(mut self, on: bool) -> Self {
+        self.ascii_search = on;
         self
     }
 

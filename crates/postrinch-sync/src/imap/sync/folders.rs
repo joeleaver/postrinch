@@ -170,7 +170,7 @@ fn roles_by_index(listed: &[&ListedFolder], roles: &FolderRoles) -> Vec<Option<F
 
 /// Where a folder comes in a pass: the inbox first, then Sent, Drafts,
 /// the person's folders, Archive, Trash and Junk.
-fn rank(role: Option<FolderRole>) -> u8 {
+pub(super) fn rank(role: Option<FolderRole>) -> u8 {
     match role {
         Some(FolderRole::System(SystemLabel::Inbox)) => 0,
         Some(FolderRole::System(SystemLabel::Sent)) => 1,

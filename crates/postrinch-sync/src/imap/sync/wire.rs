@@ -283,10 +283,29 @@ impl Conn {
     /// `UID SEARCH <criteria>` in the selected folder, the UIDs in order;
     /// `None` when the server refuses it.
     pub(super) async fn uid_search(&mut self, criteria: &str) -> FolderResult<Option<Vec<u32>>> {
-        let mut found = Vec::new();
         let search = Command::plain(format!("UID SEARCH {criteria}"));
+        match self.uid_search_command(&search).await? {
+            Ok(found) => Ok(Some(found)),
+            Err(refusal) => {
+                tracing::info!(
+                    "IMAP: {} refused a UID SEARCH: {}",
+                    self.describe(),
+                    refusal.text
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    /// A `UID SEARCH` command as it is (literals and all) in the selected
+    /// folder: the UIDs in order, or the server's refusal (`NO`).
+    pub(super) async fn uid_search_command(
+        &mut self,
+        search: &Command,
+    ) -> FolderResult<Result<Vec<u32>, Refusal>> {
+        let mut found = Vec::new();
         let done = self
-            .command("listing messages", &search, |response| {
+            .command("listing messages", search, |response| {
                 if let Response::MailboxData(MailboxDatum::Search(uids)) = response {
                     found.extend_from_slice(uids);
                 }
@@ -295,16 +314,11 @@ impl Conn {
             .await?
             .in_folder()?;
         if let Done::No(refusal) = done {
-            tracing::info!(
-                "IMAP: {} refused a UID SEARCH: {}",
-                self.describe(),
-                refusal.text
-            );
-            return Ok(None);
+            return Ok(Err(refusal));
         }
         found.sort_unstable();
         found.dedup();
-        Ok(Some(found))
+        Ok(Ok(found))
     }
 
     /// Sends a command and reads every response up to its tagged one,

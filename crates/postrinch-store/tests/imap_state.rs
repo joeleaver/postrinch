@@ -154,6 +154,13 @@ fn places_are_found_by_message_and_by_folder() {
     let places = store.imap_folder_places(&me, "INBOX").unwrap();
     assert_eq!(places.len(), 2);
     assert_eq!(places[1], flagged);
+    // One copy by its folder, UIDVALIDITY and UID.
+    assert_eq!(
+        store.imap_place(&me, "INBOX", 7, 10).unwrap(),
+        Some(flagged)
+    );
+    assert_eq!(store.imap_place(&me, "INBOX", 8, 10).unwrap(), None);
+    assert_eq!(store.imap_place(&me, "nowhere", 7, 10).unwrap(), None);
 
     store.remove_imap_place(&me, "INBOX", 7, 10).unwrap();
     assert_eq!(uids(&store, &me, "INBOX"), [3]);

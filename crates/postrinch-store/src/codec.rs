@@ -72,6 +72,14 @@ impl Fields {
         }
     }
 
+    pub(crate) fn opt_u64(&self, name: &str) -> StoreResult<Option<u64>> {
+        match self.value(name) {
+            Value::Null => Ok(None),
+            Value::U64(n) => Ok(Some(*n)),
+            _ => Err(self.wrong(name, "u64")),
+        }
+    }
+
     pub(crate) fn datetime(&self, name: &str) -> StoreResult<i64> {
         self.opt_datetime(name)?
             .ok_or_else(|| self.wrong(name, "DateTime"))

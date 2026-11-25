@@ -1,14 +1,23 @@
 //! Downloading whole messages: backfill, newest first, for the messages
 //! stored by their headers, and at once for one the person opens
 //! (`BODY.PEEK[]` from any live copy, so reading it does not mark it read).
+//!
+//! A message is fetched from the copy that gave it its headers when it
+//! can be ([`first_copy`](super::places::first_copy)), so its body and
+//! headers are of one copy. A copy is fetched only once `SELECT` confirms
+//! its own UIDVALIDITY, so copies a search stored in a folder no pass has
+//! read yet, or after the folder's UIDVALIDITY changed (search.rs), open
+//! too: the folder's state is left as the last pass read it. A message
+//! whose copy could not be fetched (gone, busy, another UIDVALIDITY) is
+//! tried from its next copy.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use postrinch_model::{EmailAddress, ImapPlace, Message, ProviderMessageId};
 use postrinch_store::Store;
 
 use super::folder_error::{FolderError, FolderResult};
-use super::places::first_copy;
+use super::places::live_copies;
 use super::wire::{Conn, Fetched, uid_set};
 use super::{ImapSync, Lane};
 use crate::{Envelope, SyncResult, parse_message};
@@ -18,9 +27,7 @@ use crate::{Phase, Progress, ProgressFn, SyncReport};
 /// account's sync connection, so a pass waits for at most one batch.
 const BODY_BATCH: usize = 20;
 
-/// Where to fetch a message from: of its live copies in a folder whose
-/// state says the copy's UIDVALIDITY is current, the one that gave it its
-/// headers ([`first_copy`]), so its body and headers are of one copy.
+/// A copy to fetch a message from.
 #[derive(Debug, Clone)]
 struct Source {
     folder_name: String,
@@ -94,46 +101,63 @@ impl ImapSync {
         ids: Vec<ProviderMessageId>,
     ) -> SyncResult<usize> {
         let a = account.clone();
-        let sources = self.blocking(move |s| sources(s, &a, &ids)).await?;
-        let mut by_folder: BTreeMap<String, Vec<ImapPlace>> = BTreeMap::new();
-        for source in sources {
-            by_folder
-                .entry(source.folder_name)
-                .or_default()
-                .push(source.place);
-        }
+        // Each message's copies not tried yet, the best first.
+        let mut left = self.blocking(move |s| sources(s, &a, &ids)).await?;
         let mut stored = 0;
-        for (name, places) in by_folder {
-            match self.download_in(conn, account, &name, places).await {
-                Ok(n) => stored += n,
-                // The bodies of that folder wait for a later download.
-                Err(FolderError::Busy(message)) => tracing::info!(
-                    "IMAP: {} is busy for the folder {name:?}: {message}",
-                    conn.describe()
-                ),
-                Err(FolderError::Sync(e)) => return Err(e),
+        loop {
+            let mut by_folder: BTreeMap<String, Vec<ImapPlace>> = BTreeMap::new();
+            for copies in &mut left {
+                if !copies.is_empty() {
+                    let next = copies.remove(0);
+                    by_folder
+                        .entry(next.folder_name)
+                        .or_default()
+                        .push(next.place);
+                }
             }
+            if by_folder.is_empty() {
+                return Ok(stored);
+            }
+            let mut done: HashSet<ProviderMessageId> = HashSet::new();
+            for (name, places) in by_folder {
+                match self.download_in(conn, account, &name, places).await {
+                    Ok(ids) => done.extend(ids),
+                    // Its messages are tried from another copy, if they have
+                    // one, or wait for a later download.
+                    Err(FolderError::Busy(message)) => tracing::info!(
+                        "IMAP: {} is busy for the folder {name:?}: {message}",
+                        conn.describe()
+                    ),
+                    Err(FolderError::Sync(e)) => return Err(e),
+                }
+            }
+            stored += done.len();
+            left.retain(|copies| {
+                copies
+                    .first()
+                    .is_some_and(|c| !done.contains(&c.place.message))
+            });
         }
-        Ok(stored)
     }
 
-    /// Downloads the bodies of these copies in one folder.
+    /// Downloads the bodies of these copies in one folder: those whose
+    /// UIDVALIDITY is the folder's now. Returns the messages stored.
     async fn download_in(
         &self,
         conn: &mut Conn,
         account: &EmailAddress,
         name: &str,
         places: Vec<ImapPlace>,
-    ) -> FolderResult<usize> {
+    ) -> FolderResult<Vec<ProviderMessageId>> {
         let Some(selected) = conn.select(name).await? else {
-            return Ok(0);
+            return Ok(Vec::new());
         };
         let current: Vec<ImapPlace> = places
             .into_iter()
             .filter(|p| p.uidvalidity == selected.uidvalidity)
             .collect();
         if current.is_empty() {
-            return Ok(0);
+            return Ok(Vec::new());
         }
         let uids: Vec<u32> = current.iter().map(|p| p.uid).collect();
         let fetched = conn
@@ -147,12 +171,16 @@ impl ImapSync {
     }
 }
 
-/// A source for each message that has one.
+/// Each message's copies to fetch it from, best first: those whose
+/// UIDVALIDITY the folder's state has, then those of another (a folder
+/// not read yet, or read before its UIDVALIDITY changed), each in the
+/// order of [`live_copies`]. A message with none is left out (the next
+/// pass removes it).
 fn sources(
     store: &Store,
     account: &EmailAddress,
     ids: &[ProviderMessageId],
-) -> SyncResult<Vec<Source>> {
+) -> SyncResult<Vec<Vec<Source>>> {
     let folders: BTreeMap<String, (String, u32)> = store
         .imap_folders(account)?
         .into_iter()
@@ -161,25 +189,31 @@ fn sources(
     let mut out = Vec::new();
     for id in ids {
         let places = store.imap_message_places(account, id)?;
-        let current = places.iter().filter(|place| {
-            folders
-                .get(&place.folder)
-                .is_some_and(|(_, uidvalidity)| *uidvalidity == place.uidvalidity)
-        });
-        let source = first_copy(current).map(|place| Source {
-            folder_name: folders[&place.folder].0.clone(),
-            place: place.clone(),
-        });
-        match source {
-            Some(source) => out.push(source),
-            None => tracing::debug!("IMAP: {account} has no copy of {} to download", id.0),
+        let mut copies: Vec<(bool, Source)> = live_copies(&places)
+            .into_iter()
+            .filter_map(|place| {
+                let (name, uidvalidity) = folders.get(&place.folder)?;
+                let confirmed = *uidvalidity != 0 && *uidvalidity == place.uidvalidity;
+                let source = Source {
+                    folder_name: name.clone(),
+                    place: place.clone(),
+                };
+                Some((confirmed, source))
+            })
+            .collect();
+        // Stable: within each, the order of live_copies.
+        copies.sort_by_key(|(confirmed, _)| !confirmed);
+        if copies.is_empty() {
+            tracing::debug!("IMAP: {account} has no copy of {} to download", id.0);
+        } else {
+            out.push(copies.into_iter().map(|(_, s)| s).collect());
         }
     }
     Ok(out)
 }
 
-/// Stores downloaded messages over what their headers gave. Returns how
-/// many were stored.
+/// Stores downloaded messages over what their headers gave. Returns the
+/// messages stored.
 ///
 /// A message that cannot be parsed (a zero-byte one, as maildir servers
 /// can hold) is kept as downloaded with its raw bytes and what its
@@ -191,8 +225,8 @@ fn store_bodies(
     folder_name: &str,
     places: &[ImapPlace],
     fetched: Vec<Fetched>,
-) -> SyncResult<usize> {
-    let mut stored = 0;
+) -> SyncResult<Vec<ProviderMessageId>> {
+    let mut stored = Vec::new();
     for f in fetched {
         let (Some(place), Some(bytes)) = (places.iter().find(|p| p.uid == f.uid), f.body) else {
             continue;
@@ -226,7 +260,7 @@ fn store_bodies(
             }
         };
         store.put_message(&message, Some(&bytes))?;
-        stored += 1;
+        stored.push(place.message.clone());
     }
     Ok(stored)
 }

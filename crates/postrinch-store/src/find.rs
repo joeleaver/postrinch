@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use postrinch_model::{EmailAddress, ProviderMessageId, ProviderThreadId, Timestamp};
 
 use crate::codec::Fields;
+use crate::keys::scoped;
 use crate::messages::{CONTENT, THREAD, TYPE};
 use crate::{Store, StoreResult, ThreadEntry, labels};
 
@@ -22,13 +23,14 @@ const TEXT_LIMIT: usize = 5_000;
 /// over every message.
 const BY_ONE: usize = 3_000;
 /// The message fields a search checks.
-const FIELDS: [&str; 6] = [
+const FIELDS: [&str; 7] = [
     "key",
     "received",
     "unread",
     "starred",
     "has_attachments",
     "subject",
+    "size",
 ];
 
 /// What to look for. Every field given must hold; an empty one is no
@@ -38,6 +40,9 @@ pub struct Find {
     /// A full-text query in rhypedb's syntax (`+word`, `+"a phrase"`,
     /// `prefix*`), over subject, people and body.
     pub text: Option<String>,
+    /// Full-text queries no message may match, each as `text` is written:
+    /// Gmail's `-word`. A message is left out when it matches one.
+    pub text_without: Vec<String>,
     /// Only these accounts' mail; empty for every account's.
     pub accounts: Vec<EmailAddress>,
     /// Each entry must match a sender's address or name (a part of it,
@@ -63,6 +68,13 @@ pub struct Find {
     pub after: Option<Timestamp>,
     /// Received before.
     pub before: Option<Timestamp>,
+    /// More than this many bytes.
+    pub larger: Option<u64>,
+    /// Fewer than this many bytes.
+    pub smaller: Option<u64>,
+    /// Only these messages, when given: for checking what a server's
+    /// search found against the rest of a query.
+    pub within: Option<Vec<(EmailAddress, ProviderMessageId)>>,
     /// Look in the trash and spam too (every other mailbox leaves them out).
     pub set_aside_too: bool,
     /// Every message the words match, not only the most relevant
@@ -104,6 +116,9 @@ impl Store {
         }
         for any in &find.labels {
             narrow(self.labelled(any)?);
+        }
+        if let Some(within) = &find.within {
+            narrow(self.message_objects(within)?);
         }
 
         // Then the words. Ranking every match and keeping those the filters
@@ -154,6 +169,9 @@ impl Store {
         for part in &find.not_to {
             without.extend(self.people_messages(part, "received")?);
         }
+        for text in &find.text_without {
+            without.extend(self.text_matches(text, candidates.as_ref())?);
+        }
 
         // A few candidates are read one by one; past BY_ONE, one pass over
         // every message's small fields is quicker.
@@ -199,6 +217,13 @@ impl Store {
             if find.unread.is_some_and(|v| unread != v)
                 || find.starred.is_some_and(|v| starred != v)
                 || find.attachments.is_some_and(|v| attachments != v)
+            {
+                continue;
+            }
+            // Old stores may lack it; no size is known then.
+            let size = fields.opt_u64("size")?;
+            if find.larger.is_some_and(|n| size.is_none_or(|s| s <= n))
+                || find.smaller.is_some_and(|n| size.is_none_or(|s| s >= n))
             {
                 continue;
             }
@@ -295,6 +320,20 @@ impl Store {
     }
 
     /// Messages carrying any of `labels`.
+    /// The objects of these messages, those that are stored.
+    fn message_objects(
+        &self,
+        messages: &[(EmailAddress, ProviderMessageId)],
+    ) -> StoreResult<HashSet<u64>> {
+        let mut objects = HashSet::new();
+        for (account, id) in messages {
+            if let Some(found) = self.find(TYPE, "key", &scoped(account, &id.0))? {
+                objects.insert(found.id());
+            }
+        }
+        Ok(objects)
+    }
+
     fn labelled(&self, labels: &[(EmailAddress, String)]) -> StoreResult<HashSet<u64>> {
         let mut messages = HashSet::new();
         for (account, provider_id) in labels {
@@ -323,6 +362,24 @@ impl Store {
             }
         }
         Ok(hits)
+    }
+
+    /// Every message `text` matches (among `within`, when given).
+    fn text_matches(&self, text: &str, within: Option<&HashSet<u64>>) -> StoreResult<HashSet<u64>> {
+        let hits = match within {
+            Some(messages) if messages.len() <= BY_ONE => {
+                if messages.is_empty() {
+                    return Ok(HashSet::new());
+                }
+                let contents = self.contents_of(messages)?;
+                self.text_hits(text, contents.len().max(1), Some(&contents))?
+            }
+            _ => {
+                let every = (self.db.count_type(CONTENT)? as usize).max(1);
+                self.text_hits(text, every, None)?
+            }
+        };
+        Ok(hits.into_keys().collect())
     }
 
     /// The content objects of `messages`, which the full-text index holds.

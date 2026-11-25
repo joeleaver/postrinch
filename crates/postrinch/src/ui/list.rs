@@ -67,7 +67,7 @@ pub(crate) fn id_of(row: &ThreadRow) -> RowId {
     )
 }
 
-/// The rows to show: the search's, with what Gmail found after them,
+/// The rows to show: the search's, with what the servers found after them,
 /// while there is one, or the folder's.
 fn with_rows<R>(state: State, f: impl FnOnce(&[ThreadRow]) -> R) -> R {
     if state.search.get().is_some() {
@@ -80,7 +80,7 @@ fn with_rows<R>(state: State, f: impl FnOnce(&[ThreadRow]) -> R) -> R {
                     .results
                     .with(|r| r.as_ref().is_some_and(|r| r.query == remote.query))
             {
-                // Gmail was asked in every account the text names; a
+                // The servers were asked in every account the text names; a
                 // search kept to some accounts shows only theirs.
                 let only = state.search_accounts.get();
                 rows.extend(
@@ -210,7 +210,7 @@ fn row(state: State, id: RowId) -> NodeHandle {
                 span {
                     class: "found-by",
                     style: {move || shown(thread.get().remote)},
-                    "found by Gmail"
+                    "found on the server"
                 }
                 span { class: "snippet",
                     {move || match thread.get().excerpt {

@@ -117,6 +117,7 @@ impl Commands {
         };
         Ok(Find {
             text: query.text(),
+            text_without: query.text_without(),
             accounts: accounts.to_vec(),
             from: query.from.clone(),
             to: query.to.clone(),
@@ -130,6 +131,9 @@ impl Commands {
             attachments: query.attachments,
             after: query.after,
             before: query.before,
+            larger: query.larger,
+            smaller: query.smaller,
+            within: None,
             set_aside_too: query.set_aside_too,
             every: false,
         })

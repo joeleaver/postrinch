@@ -3,7 +3,8 @@
 //! text can be handed to Gmail for mail not downloaded yet.
 //!
 //! `from:` `to:` `cc:` `bcc:` `subject:` `label:` `in:` `category:` `is:`
-//! `has:` `after:` `before:` `newer_than:` `older_than:`, and Postrinch's
+//! `has:` `after:` `before:` `newer_than:` `older_than:` `larger:`
+//! `smaller:` (`size:` is `larger:`, as in Gmail), and Postrinch's
 //! own `account:` and `last:` (`last:me`, the account answered last;
 //! `last:them`, someone else wrote last). A value with spaces is quoted
 //! (`from:"Ada Lovelace"`); `-label:` and `-in:` leave a label out, and
@@ -38,6 +39,10 @@ pub struct Query {
     pub attachments: Option<bool>,
     pub after: Option<Timestamp>,
     pub before: Option<Timestamp>,
+    /// `larger:`: more than this many bytes.
+    pub larger: Option<u64>,
+    /// `smaller:`: fewer than this many bytes.
+    pub smaller: Option<u64>,
     /// `last:me` or `last:them`: whose the conversation's latest message
     /// is.
     pub last: Option<Last>,
@@ -139,6 +144,8 @@ impl Query {
                 "before" => query.before = Some(date(&value)?),
                 "newer_than" => query.after = Some(ago(&value, now)?),
                 "older_than" => query.before = Some(ago(&value, now)?),
+                "larger" | "size" => query.larger = Some(size(&value)?),
+                "smaller" => query.smaller = Some(size(&value)?),
                 other => return Err(invalid(format!("{other}: is not known."))),
             }
         }
@@ -151,17 +158,44 @@ impl Query {
         !self.words.is_empty()
     }
 
-    /// The words as rhypedb's full-text query: every word and phrase
-    /// required, as in Gmail.
+    /// The words and phrases mail must have, as typed: all but those
+    /// with Gmail's `-` before them.
+    pub fn wanted_words(&self) -> impl Iterator<Item = &str> {
+        self.words
+            .iter()
+            .map(String::as_str)
+            .filter(|w| !w.starts_with('-'))
+    }
+
+    /// The words and phrases mail must not have (Gmail's `-word`), without
+    /// their `-`.
+    pub fn unwanted_words(&self) -> impl Iterator<Item = &str> {
+        self.words.iter().filter_map(|w| w.strip_prefix('-'))
+    }
+
+    /// The words mail must have as rhypedb's full-text query: every word
+    /// and phrase required, as in Gmail.
     pub fn text(&self) -> Option<String> {
-        let terms: Vec<String> = self.words.iter().map(|w| format!("+{w}")).collect();
+        let terms: Vec<String> = self.wanted_words().map(|w| format!("+{w}")).collect();
         (!terms.is_empty()).then(|| terms.join(" "))
     }
 
-    /// The words to mark in an excerpt, lowercased.
+    /// The words mail must not have, each as rhypedb's full-text query
+    /// that mail with it matches (every word of `-invoice-4471` or of a
+    /// phrase, as the word without `-` would be searched for). rhypedb has
+    /// no query that leaves out, so the store leaves out what these
+    /// match. One that is no term to search for (stop words, punctuation)
+    /// leaves nothing out.
+    pub fn text_without(&self) -> Vec<String> {
+        self.unwanted_words()
+            .filter(|w| !postrinch_store::search_tokens(w).is_empty())
+            .map(|w| format!("+{w}"))
+            .collect()
+    }
+
+    /// The words to mark in an excerpt, lowercased: not those left out.
     pub fn terms(&self) -> Vec<String> {
-        self.words
-            .iter()
+        self.wanted_words()
             .flat_map(|w| w.split(|c: char| c.is_whitespace() || c == '"'))
             .map(|w| w.trim_end_matches('*'))
             .filter(|w| w.chars().count() > 1)
@@ -276,6 +310,9 @@ pub(crate) fn operator(token: &str) -> Option<(bool, &str, &str)> {
         "before",
         "newer_than",
         "older_than",
+        "larger",
+        "smaller",
+        "size",
         "account",
         "last",
     ];
@@ -324,102 +361,28 @@ fn ago(value: &str, now: Timestamp) -> CommandResult<Timestamp> {
     Ok(Timestamp::from_millis(then.timestamp().as_millisecond()))
 }
 
+/// `500`, `200K`, `10M` or `1G` (binary units, an optional `B` after
+/// them, any case), in bytes.
+fn size(value: &str) -> CommandResult<u64> {
+    let bad = || invalid(format!("{value} is not a size like 500K or 10M."));
+    let upper = value.to_ascii_uppercase();
+    let digits = upper.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    let unit = &upper[digits.len()..];
+    let times: u64 = match unit {
+        "" | "B" => 1,
+        "K" | "KB" => 1 << 10,
+        "M" | "MB" => 1 << 20,
+        "G" | "GB" => 1 << 30,
+        _ => return Err(bad()),
+    };
+    let n: u64 = digits.parse().map_err(|_| bad())?;
+    n.checked_mul(times).ok_or_else(bad)
+}
+
 fn invalid(message: String) -> CommandError {
     CommandError::Invalid(message)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parse(text: &str) -> Query {
-        Query::parse(text, Timestamp::from_millis(1_790_000_000_000)).unwrap()
-    }
-
-    #[test]
-    fn words_and_operators_separate() {
-        let q = parse(r#"from:amazon "order shipped" refund* label:Work/Clients is:unread"#);
-        assert_eq!(q.words, [r#""order shipped""#, "refund*"]);
-        assert_eq!(q.from, ["amazon"]);
-        assert_eq!(q.labels, [LabelName::Named("Work/Clients".into())]);
-        assert_eq!(q.unread, Some(true));
-        assert_eq!(q.text().unwrap(), r#"+"order shipped" +refund*"#);
-        assert_eq!(q.terms(), ["order", "shipped", "refund"]);
-    }
-
-    #[test]
-    fn quoted_values_and_gmail_text() {
-        let q = parse(r#"from:"Ada Lovelace" account:ada@example.org shift"#);
-        assert_eq!(q.from, ["Ada Lovelace"]);
-        assert_eq!(q.accounts, ["ada@example.org"]);
-        assert_eq!(q.gmail, r#"from:"Ada Lovelace" shift"#);
-        assert!(q.has_words());
-    }
-
-    #[test]
-    fn mailboxes_and_set_aside() {
-        let q = parse("in:inbox -in:spam category:promotions");
-        assert_eq!(
-            q.labels,
-            [
-                LabelName::System(SystemLabel::Inbox),
-                LabelName::System(SystemLabel::CategoryPromotions)
-            ]
-        );
-        assert_eq!(q.without, [LabelName::System(SystemLabel::Spam)]);
-        assert!(parse("in:trash").set_aside_too);
-        assert!(parse("in:anywhere").labels.is_empty());
-    }
-
-    #[test]
-    fn dates_and_ages() {
-        let q = parse("after:2024/01/31 before:2024-02-02");
-        let (after, before) = (q.after.unwrap(), q.before.unwrap());
-        // Two days apart, whatever the zone (no change of clocks then).
-        assert_eq!(before.as_millis() - after.as_millis(), 2 * 86_400_000);
-        let q = parse("newer_than:2d");
-        let now = 1_790_000_000_000;
-        let age = now - q.after.unwrap().as_millis();
-        assert!((47 * 3_600_000..=49 * 3_600_000).contains(&age));
-    }
-
-    #[test]
-    fn mistakes_say_what_is_wrong() {
-        let now = Timestamp::from_millis(0);
-        for bad in [
-            "is:snoozed",
-            "after:yesterday",
-            "older_than:3q",
-            "\"open",
-            "-subject:x",
-            "from:",
-        ] {
-            assert!(Query::parse(bad, now).is_err(), "{bad}");
-        }
-        let left_out = parse("-from:noreply -cc:list@x.org");
-        assert_eq!(
-            (left_out.not_from, left_out.not_to),
-            (vec!["noreply".to_owned()], vec!["list@x.org".to_owned()])
-        );
-        // An unknown word with a colon is just a word.
-        assert_eq!(parse("re:invoice").words, ["re:invoice"]);
-    }
-
-    #[test]
-    fn last_is_postrinch_own() {
-        let q = parse("last:me in:inbox");
-        assert_eq!(q.last, Some(Last::Me));
-        assert_eq!(q.gmail, "in:inbox");
-        assert_eq!(parse("last:Them").last, Some(Last::Them));
-        let now = Timestamp::from_millis(0);
-        assert!(Query::parse("last:you", now).is_err());
-        assert!(Query::parse("-last:me", now).is_err());
-    }
-
-    #[test]
-    fn labels_match_as_gmail_writes_them() {
-        assert!(label_matches("Work/Clients", "work-clients"));
-        assert!(label_matches("Receipts 2024", "receipts-2024"));
-        assert!(!label_matches("Work", "work-clients"));
-    }
-}
+#[path = "query_tests.rs"]
+mod tests;

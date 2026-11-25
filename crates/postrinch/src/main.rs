@@ -31,6 +31,7 @@ mod notify;
 mod pictures;
 mod reading;
 mod recent;
+mod remote_line;
 mod remote_mail;
 mod remote_search;
 mod rule_draft;

@@ -33,6 +33,7 @@ mod outgoing;
 mod outgoing_put_off;
 mod people;
 mod rules;
+mod search_terms;
 mod sent_filing;
 mod threads;
 mod upkeep;
@@ -53,6 +54,7 @@ pub use outbox::OutboxEntry;
 pub use outgoing::{Outgoing, OutgoingKind, SendStage};
 pub use outgoing_put_off::PutOff;
 pub use people::PersonEntry;
+pub use search_terms::{SearchToken, search_tokens, server_texts};
 pub use sent_filing::SentBackOff;
 
 /// Label stats by account key, each with the write count it was read at.

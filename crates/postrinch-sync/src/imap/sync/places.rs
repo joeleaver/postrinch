@@ -198,18 +198,24 @@ pub(super) fn store_copy(
 pub(super) fn first_copy<'a>(
     places: impl IntoIterator<Item = &'a ImapPlace>,
 ) -> Option<&'a ImapPlace> {
-    places
-        .into_iter()
-        .filter(|p| !has(p, DELETED))
-        .min_by_key(|p| {
-            (
-                p.arrived.is_none(),
-                p.arrived,
-                &p.folder,
-                p.uidvalidity,
-                p.uid,
-            )
-        })
+    live_copies(places).into_iter().next()
+}
+
+/// A message's live copies, in the order [`first_copy`] picks from.
+pub(super) fn live_copies<'a>(
+    places: impl IntoIterator<Item = &'a ImapPlace>,
+) -> Vec<&'a ImapPlace> {
+    let mut live: Vec<&ImapPlace> = places.into_iter().filter(|p| !has(p, DELETED)).collect();
+    live.sort_by_key(|p| {
+        (
+            p.arrived.is_none(),
+            p.arrived,
+            &p.folder,
+            p.uidvalidity,
+            p.uid,
+        )
+    });
+    live
 }
 
 /// The thread of a message new to the store.
