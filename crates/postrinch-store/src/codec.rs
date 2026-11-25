@@ -150,6 +150,14 @@ impl FieldsBuilder {
         self
     }
 
+    /// A DateTime field, or null for `None`.
+    pub(crate) fn opt_datetime(self, name: &str, millis: Option<i64>) -> Self {
+        match millis {
+            Some(millis) => self.datetime(name, millis),
+            None => self.null(name),
+        }
+    }
+
     pub(crate) fn json(mut self, name: &str, value: &impl Serialize) -> Self {
         let json = serde_json::to_value(value).expect("model types serialize to JSON");
         self.0.insert(name.into(), Value::Json(json));

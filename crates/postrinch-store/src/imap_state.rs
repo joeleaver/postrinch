@@ -65,6 +65,9 @@ fn decode_place(account_prefix: &str, fields: &Fields) -> StoreResult<ImapPlace>
         message: ProviderMessageId(message),
         flags: fields.json("flags")?,
         modseq: fields.u64("modseq")?,
+        arrived: fields
+            .opt_datetime("arrived")?
+            .map(postrinch_model::Timestamp::from_millis),
     })
 }
 
@@ -139,6 +142,7 @@ impl Store {
                 .str("message", scoped(account, &place.message.0))
                 .json("flags", &place.flags)
                 .u64("modseq", place.modseq)
+                .opt_datetime("arrived", place.arrived.map(|t| t.as_millis()))
         };
         let create = fields()
             .str("key", key.clone())

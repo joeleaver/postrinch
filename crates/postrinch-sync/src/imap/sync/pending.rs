@@ -1,5 +1,5 @@
-//! What waits for a complete pass before it goes: messages that lost
-//! their last copy, and folders missing from LIST.
+//! What waits before it goes: messages that lost their last copy, and
+//! folders missing from LIST.
 //!
 //! A message whose last copy goes is not removed at once: mail moved by
 //! another client vanishes from one folder before it is found in the
@@ -9,60 +9,33 @@
 //! became pending in, *before* its places go, so an interrupted pass
 //! leaves nothing behind.
 //!
-//! It is removed only by a later *complete* pass that still finds no copy
-//! of it: one that started after it became pending, so every folder was
-//! read after the move (mail moved into a folder the same pass had
-//! already read is found by the next one), and that read every folder it
-//! knows. A pass is incomplete when a folder refused `SELECT`, when the
-//! pass stopped on an error, or when a folder known from earlier passes
-//! is missing from LIST for the first time: some servers leave a folder
-//! out of a listing for a moment. A folder missing from two passes' LISTs
-//! is gone: its label and state go in the second, and its mail becomes
-//! pending like any other.
+//! It is removed only once every folder has been read whole in a pass
+//! after the one it became pending in, and still no copy of it is found:
+//! every folder was read after the move (mail moved into a folder the
+//! same pass had already read is found by the next one). A folder is not
+//! read whole when it refused `SELECT`, when a command in it was refused,
+//! when a message in it went unanswered, or when it is missing from LIST
+//! for the first time: some servers leave a folder out of a listing for
+//! a moment. A folder that stays unreadable stops holding removals back
+//! after a few passes ([`super::reads`]). A folder missing from two
+//! passes' LISTs is gone: its label and state go in the second, and its
+//! mail becomes pending like any other.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use postrinch_model::{EmailAddress, ImapPlace, ProviderMessageId};
 use postrinch_store::Store;
-use serde::{Deserialize, Serialize};
 
+use super::cursor;
 use super::places::{refresh, summary};
-use crate::{SyncError, SyncResult};
-
-/// What the sync cursor of an IMAP account holds.
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct Cursor {
-    /// The number of the pass running, or of the last one.
-    #[serde(default)]
-    pass: u64,
-    /// Messages without a live copy, with the pass each became so in.
-    #[serde(default)]
-    pending: BTreeMap<String, u64>,
-    /// Label ids of folders missing from LIST, with the pass each was
-    /// first missed in.
-    #[serde(default)]
-    missing: BTreeMap<String, u64>,
-}
-
-fn read(store: &Store, account: &EmailAddress) -> SyncResult<Cursor> {
-    match store.sync_cursor(account)? {
-        None => Ok(Cursor::default()),
-        Some(raw) => serde_json::from_str(&raw)
-            .map_err(|e| SyncError::Mime(format!("the IMAP sync cursor of {account}: {e}"))),
-    }
-}
-
-fn write(store: &Store, account: &EmailAddress, cursor: &Cursor) -> SyncResult<()> {
-    let raw = serde_json::to_string(cursor).map_err(|e| SyncError::Mime(e.to_string()))?;
-    Ok(store.set_sync_cursor(account, Some(&raw))?)
-}
+use crate::SyncResult;
 
 /// Starts a pass: returns its number, one more than the last one's.
 pub(super) fn begin_pass(store: &Store, account: &EmailAddress) -> SyncResult<u64> {
-    let mut cursor = read(store, account)?;
-    cursor.pass += 1;
-    write(store, account, &cursor)?;
-    Ok(cursor.pass)
+    cursor::update(store, account, |c| {
+        c.pass += 1;
+        c.pass
+    })
 }
 
 /// Makes these messages pending as of the running pass (again, if they
@@ -72,12 +45,14 @@ pub(super) fn mark<'a>(
     account: &EmailAddress,
     ids: impl IntoIterator<Item = &'a ProviderMessageId>,
 ) -> SyncResult<()> {
-    let mut cursor = read(store, account)?;
-    let pass = cursor.pass;
-    cursor
-        .pending
-        .extend(ids.into_iter().map(|id| (id.0.clone(), pass)));
-    write(store, account, &cursor)
+    let mut ids = ids.into_iter().peekable();
+    if ids.peek().is_none() {
+        return Ok(());
+    }
+    cursor::update(store, account, |c| {
+        let pass = c.pass;
+        c.pending.extend(ids.map(|id| (id.0.clone(), pass)));
+    })
 }
 
 /// Forgets copies the server no longer has (or that belong to another
@@ -118,26 +93,25 @@ pub(super) fn note_missing(
     missing: &BTreeSet<String>,
     pass: u64,
 ) -> SyncResult<Vec<String>> {
-    let mut cursor = read(store, account)?;
-    cursor.missing.retain(|id, _| missing.contains(id));
-    for id in missing {
-        cursor.missing.entry(id.clone()).or_insert(pass);
-    }
-    let gone = cursor
-        .missing
-        .iter()
-        .filter(|&(_, since)| *since < pass)
-        .map(|(id, _)| id.clone())
-        .collect();
-    write(store, account, &cursor)?;
-    Ok(gone)
+    cursor::update(store, account, |c| {
+        c.missing.retain(|id, _| missing.contains(id));
+        for id in missing {
+            c.missing.entry(id.clone()).or_insert(pass);
+        }
+        c.missing
+            .iter()
+            .filter(|&(_, since)| *since < pass)
+            .map(|(id, _)| id.clone())
+            .collect()
+    })
 }
 
-/// At the end of complete pass `pass`: removes each message pending since
-/// an earlier pass that still has no live copy, and stops waiting for the
-/// ones that have one again. Returns how many went.
-pub(super) fn resolve(store: &Store, account: &EmailAddress, pass: u64) -> SyncResult<usize> {
-    let mut cursor = read(store, account)?;
+/// At the end of a pass: removes each message pending since a pass before
+/// `floor` (every folder was read whole after it became pending,
+/// [`super::reads::settle`]) that still has no live copy, and stops
+/// waiting for the ones that have one again. Returns how many went.
+pub(super) fn resolve(store: &Store, account: &EmailAddress, floor: u64) -> SyncResult<usize> {
+    let mut cursor = cursor::read(store, account)?;
     let mut removed = 0;
     let mut waiting = BTreeMap::new();
     for (id, since) in std::mem::take(&mut cursor.pending) {
@@ -146,7 +120,7 @@ pub(super) fn resolve(store: &Store, account: &EmailAddress, pass: u64) -> SyncR
         if summary(&places).is_some() || !store.has_message(account, &message)? {
             continue;
         }
-        if since < pass {
+        if since < floor {
             store.remove_message(account, &message)?;
             removed += 1;
         } else {
@@ -154,6 +128,6 @@ pub(super) fn resolve(store: &Store, account: &EmailAddress, pass: u64) -> SyncR
         }
     }
     cursor.pending = waiting;
-    write(store, account, &cursor)?;
+    cursor::write(store, account, &cursor)?;
     Ok(removed)
 }

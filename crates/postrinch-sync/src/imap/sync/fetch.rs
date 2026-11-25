@@ -14,8 +14,12 @@
 //! the change again (and without CONDSTORE every pass reads every flag).
 
 use std::collections::BTreeMap;
+use std::ops::RangeInclusive;
 
 use async_imap::imap_proto::{AttributeValue, MessageSection, SectionPath};
+
+use super::uids::UidSet;
+use super::wire::Refusal;
 
 /// One message's attributes from the FETCH responses of a command.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -55,12 +59,16 @@ impl Fetched {
     }
 }
 
-/// What a `UID FETCH` brought: the messages asked for, in UID order, and
-/// the UIDs the server said had vanished (QRESYNC).
+/// What a `UID FETCH` brought: the messages asked for, in UID order, the
+/// UIDs the server said had vanished (QRESYNC), and, when the command
+/// ended in `NO`, why: the server answered for some messages and not the
+/// others (Gmail's "Some messages could not be FETCHed", Dovecot's
+/// `[SERVERBUG]`), and the answers that came are still good.
 #[derive(Debug, Default)]
 pub(super) struct FetchReply {
     pub messages: Vec<Fetched>,
-    pub vanished: Vec<u32>,
+    pub vanished: UidSet,
+    pub refused: Option<Refusal>,
 }
 
 /// Gathers a command's FETCH responses.
@@ -69,7 +77,7 @@ pub(super) struct Collector {
     by_uid: BTreeMap<u32, Fetched>,
     /// The UID each sequence number named in this command.
     by_seq: BTreeMap<u32, u32>,
-    vanished: Vec<u32>,
+    vanished: UidSet,
 }
 
 impl Collector {
@@ -79,7 +87,7 @@ impl Collector {
             asked: UidSet::parse(set),
             by_uid: BTreeMap::new(),
             by_seq: BTreeMap::new(),
-            vanished: Vec::new(),
+            vanished: UidSet::default(),
         }
     }
 
@@ -111,9 +119,28 @@ impl Collector {
         }
     }
 
-    /// `* VANISHED`.
-    pub(super) fn vanished(&mut self, uids: impl IntoIterator<Item = u32>) {
-        self.vanished.extend(uids);
+    /// `* VANISHED [(EARLIER)] <set>`. Without `EARLIER` the messages went
+    /// just now, as by `EXPUNGE` (RFC 7162 3.2.10): the sequence numbers
+    /// of the messages after each one move down by one. Sequence numbers
+    /// go up with UIDs, so a message's new number is its old one less
+    /// the vanished UIDs below its own.
+    pub(super) fn vanished(
+        &mut self,
+        earlier: bool,
+        ranges: impl IntoIterator<Item = RangeInclusive<u32>>,
+    ) {
+        let gone = UidSet::from_ranges(ranges);
+        if !earlier && !gone.is_empty() {
+            self.by_seq = std::mem::take(&mut self.by_seq)
+                .into_iter()
+                .filter(|&(_, uid)| !gone.contains(uid))
+                .filter_map(|(seq, uid)| {
+                    let below = u32::try_from(gone.count_below(uid)).ok()?;
+                    Some((seq.checked_sub(below)?, uid))
+                })
+                .collect();
+        }
+        self.vanished.extend(gone.ranges());
     }
 
     /// The answers: the messages asked for.
@@ -126,6 +153,7 @@ impl Collector {
                 .filter(|f| asked.contains(f.uid))
                 .collect(),
             vanished: self.vanished,
+            refused: None,
         }
     }
 }
@@ -161,62 +189,6 @@ fn attributes_of(attributes: &[AttributeValue<'_>]) -> (Option<u32>, Fetched) {
     (uid, out)
 }
 
-/// A set of UIDs in IMAP's syntax (`1:4,7,9:*`), for asking whether a
-/// UID is in it. `*` is taken as the largest UID there can be.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct UidSet(Vec<(u32, u32)>);
-
-impl UidSet {
-    fn parse(set: &str) -> Self {
-        let number = |n: &str| match n {
-            "*" => Some(u32::MAX),
-            n => n.parse().ok(),
-        };
-        let ranges = set
-            .split(',')
-            .filter_map(|part| match part.split_once(':') {
-                Some((a, b)) => {
-                    let (a, b) = (number(a)?, number(b)?);
-                    Some((a.min(b), a.max(b)))
-                }
-                None => number(part).map(|n| (n, n)),
-            })
-            .collect();
-        Self(ranges)
-    }
-
-    fn contains(&self, uid: u32) -> bool {
-        self.0.iter().any(|&(a, b)| (a..=b).contains(&uid))
-    }
-}
-
-/// A UID set in IMAP's syntax, runs folded into ranges: `1:4,7,9:10`.
-pub(super) fn uid_set(uids: &[u32]) -> String {
-    let mut sorted = uids.to_vec();
-    sorted.sort_unstable();
-    sorted.dedup();
-    let mut out = String::new();
-    let mut i = 0;
-    while i < sorted.len() {
-        let start = sorted[i];
-        let mut end = start;
-        while i + 1 < sorted.len() && sorted[i + 1] == end + 1 {
-            i += 1;
-            end = sorted[i];
-        }
-        if !out.is_empty() {
-            out.push(',');
-        }
-        if start == end {
-            out.push_str(&start.to_string());
-        } else {
-            out.push_str(&format!("{start}:{end}"));
-        }
-        i += 1;
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
@@ -250,22 +222,6 @@ mod tests {
             data: data.map(Cow::Borrowed),
         });
         out
-    }
-
-    #[test]
-    fn uid_sets_fold_runs() {
-        assert_eq!(uid_set(&[7, 1, 2, 3, 4, 9, 10, 2]), "1:4,7,9:10");
-        assert_eq!(uid_set(&[5]), "5");
-        assert_eq!(uid_set(&[]), "");
-    }
-
-    #[test]
-    fn uid_sets_parse() {
-        let set = UidSet::parse("1:4,7,20:*");
-        assert!(set.contains(1) && set.contains(4) && set.contains(7));
-        assert!(!set.contains(5) && !set.contains(19));
-        assert!(set.contains(20) && set.contains(u32::MAX));
-        assert!(UidSet::parse("9:3").contains(5));
     }
 
     #[test]
@@ -318,5 +274,29 @@ mod tests {
         assert_eq!(thirty.header.as_deref(), Some(&[][..]));
         let twenty = reply.messages.iter().find(|m| m.uid == 20).unwrap();
         assert_eq!(twenty.header, None);
+    }
+
+    #[test]
+    fn vanished_now_moves_sequence_numbers_and_earlier_does_not() {
+        let mut c = Collector::new("1:*");
+        c.fetch(1, &flags(Some(10), &[], 1));
+        c.fetch(2, &flags(Some(20), &[], 1));
+        c.fetch(3, &flags(Some(30), &[], 1));
+        c.fetch(4, &flags(Some(40), &[], 1));
+        // Earlier vanishings are not of this session's numbers.
+        c.vanished(true, std::iter::once(5..=5));
+        // 10 and 20 go now: 30 is number 1, 40 number 2.
+        c.vanished(false, [10..=10, 20..=20]);
+        c.fetch(1, &header(None, Some(b"thirty")));
+        c.fetch(2, &header(None, Some(b"forty")));
+        let reply = c.finish();
+        let header_of = |uid| {
+            let m = reply.messages.iter().find(|m| m.uid == uid).unwrap();
+            m.header.clone()
+        };
+        assert_eq!(header_of(30).as_deref(), Some(&b"thirty"[..]));
+        assert_eq!(header_of(40).as_deref(), Some(&b"forty"[..]));
+        assert_eq!(header_of(10), None);
+        assert!(reply.vanished.contains(5) && reply.vanished.contains(20));
     }
 }

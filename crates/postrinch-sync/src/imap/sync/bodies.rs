@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use postrinch_model::{EmailAddress, ImapPlace, Message, ProviderMessageId};
 use postrinch_store::Store;
 
-use super::places::DELETED;
+use super::places::first_copy;
 use super::wire::{Conn, Fetched, uid_set};
 use super::{ImapSync, Lane};
 use crate::google::{Phase, Progress, ProgressFn, SyncReport};
@@ -17,8 +17,9 @@ use crate::{Envelope, SyncResult, parse_message};
 /// account's sync connection, so a pass waits for at most one batch.
 const BODY_BATCH: usize = 20;
 
-/// Where to fetch a message from: a live copy in a folder whose state
-/// says the copy's UIDVALIDITY is current.
+/// Where to fetch a message from: of its live copies in a folder whose
+/// state says the copy's UIDVALIDITY is current, the one that gave it its
+/// headers ([`first_copy`]), so its body and headers are of one copy.
 #[derive(Debug, Clone)]
 struct Source {
     folder_name: String,
@@ -140,13 +141,14 @@ fn sources(
     let mut out = Vec::new();
     for id in ids {
         let places = store.imap_message_places(account, id)?;
-        let source = places.into_iter().find_map(|place| {
-            let (name, uidvalidity) = folders.get(&place.folder)?;
-            let live = !place.flags.iter().any(|f| f.eq_ignore_ascii_case(DELETED));
-            (live && *uidvalidity == place.uidvalidity).then(|| Source {
-                folder_name: name.clone(),
-                place,
-            })
+        let current = places.iter().filter(|place| {
+            folders
+                .get(&place.folder)
+                .is_some_and(|(_, uidvalidity)| *uidvalidity == place.uidvalidity)
+        });
+        let source = first_copy(current).map(|place| Source {
+            folder_name: folders[&place.folder].0.clone(),
+            place: place.clone(),
         });
         match source {
             Some(source) => out.push(source),

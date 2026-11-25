@@ -8,8 +8,9 @@
 //! limits under `[ALERT]`, and some send no code for either.
 //!
 //! The same limits turn up outside the answer to LOGIN or AUTHENTICATE:
-//! as a `BYE` instead of the greeting ([`is_busy_bye`]), and as a `BAD`
-//! to the first commands after signing in (`session.rs`).
+//! as a `BYE` instead of the greeting, as a `NO` to a command sync sends
+//! ([`is_busy`]), and as a `BAD` to the first commands after signing in
+//! (`session.rs`).
 
 /// What a tagged NO to LOGIN or AUTHENTICATE means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,11 +111,13 @@ pub(crate) fn is_temporary_limit(text: &str) -> bool {
 }
 
 /// Whether a `BYE` before signing in (in place of the greeting, or
-/// while CAPABILITY or STARTTLS was asked) turns the account away for
-/// now rather than saying the server failed: RFC 5530's "try again
-/// later" codes, or, with `[ALERT]` or no code, a known temporary limit.
-/// Any other code, or other words, is the server's.
-pub(crate) fn is_busy_bye(code: Option<&str>, text: &str) -> bool {
+/// while CAPABILITY or STARTTLS was asked), or a `NO` to a command once
+/// signed in (a `SELECT`, a `UID FETCH`), turns the account away for now
+/// rather than saying the server failed or would not do that one thing:
+/// RFC 5530's "try again later" codes, or, with `[ALERT]` or no code, a
+/// known temporary limit. Any other code, or other words, is the
+/// server's.
+pub(crate) fn is_busy(code: Option<&str>, text: &str) -> bool {
     match code {
         Some("UNAVAILABLE" | "INUSE" | "LIMIT") => true,
         None | Some("ALERT") => is_temporary_limit(text),
@@ -198,19 +201,16 @@ mod tests {
 
     #[test]
     fn busy_byes() {
-        assert!(is_busy_bye(Some("UNAVAILABLE"), "Too busy"));
-        assert!(is_busy_bye(Some("INUSE"), ""));
-        assert!(is_busy_bye(Some("LIMIT"), "Try later"));
-        assert!(is_busy_bye(
+        assert!(is_busy(Some("UNAVAILABLE"), "Too busy"));
+        assert!(is_busy(Some("INUSE"), ""));
+        assert!(is_busy(Some("LIMIT"), "Try later"));
+        assert!(is_busy(
             None,
             "Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)"
         ));
-        assert!(is_busy_bye(
-            Some("ALERT"),
-            "Too many simultaneous connections"
-        ));
-        assert!(!is_busy_bye(None, "Server shutting down"));
-        assert!(!is_busy_bye(
+        assert!(is_busy(Some("ALERT"), "Too many simultaneous connections"));
+        assert!(!is_busy(None, "Server shutting down"));
+        assert!(!is_busy(
             Some("SERVERBUG"),
             "Too many simultaneous connections"
         ));

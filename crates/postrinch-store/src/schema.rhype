@@ -256,4 +256,6 @@ type ImapPlace {
     flags: Json
     // 0 for none (no CONDSTORE).
     modseq: u64
+    // The copy's INTERNALDATE; absent when the server gave none.
+    arrived: DateTime
 }

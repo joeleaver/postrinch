@@ -20,4 +20,6 @@ mod sync;
 mod sync_folders;
 mod sync_passes;
 mod sync_quirks;
+mod sync_refusals;
+mod sync_stuck;
 mod sync_support;

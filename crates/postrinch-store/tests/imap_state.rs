@@ -61,6 +61,7 @@ fn place(folder: &str, uidvalidity: u32, uid: u32, message: &str) -> ImapPlace {
         message: ProviderMessageId(message.into()),
         flags: vec!["\\Seen".into()],
         modseq: 0,
+        arrived: None,
     }
 }
 

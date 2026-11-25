@@ -12,14 +12,18 @@
 //! keeps it open (Gmail allows about 15 at once per account).
 
 mod bodies;
+mod cursor;
 mod fetch;
 mod folders;
+mod headers;
 mod names;
 mod pass;
 mod pending;
 mod places;
 mod read;
+mod reads;
 mod renames;
+mod uids;
 mod utf7;
 mod wire;
 

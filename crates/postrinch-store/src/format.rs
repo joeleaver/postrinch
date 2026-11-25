@@ -162,7 +162,8 @@ mod tests {
                 "uid",
                 "message",
                 "flags",
-                "modseq"
+                "modseq",
+                "arrived"
             ]
         );
     }

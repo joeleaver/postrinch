@@ -2,7 +2,8 @@
 //! "A message's identity"): a message's labels are the folders holding a
 //! copy of it, it is unread if any copy lacks `\Seen` and starred if any
 //! has `\Flagged`, and a copy marked `\Deleted` counts as gone. A message
-//! left without a live copy waits for a complete pass ([`super::pending`]).
+//! left without a live copy waits until every folder is read again
+//! ([`super::pending`]).
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -101,9 +102,8 @@ pub(super) struct Folder<'a> {
 /// person sees it is there. Backfill downloads it once like any other.
 ///
 /// When several copies of one message are stored by their headers, the
-/// one with the earliest INTERNALDATE gives the message its time and
-/// headers (the first stored, of copies as early): that is when the
-/// message first arrived, wherever another client filed it later.
+/// first of them ([`first_copy`]) gives the message its time and headers,
+/// whatever order they are read in.
 pub(super) fn store_copy(
     store: &Store,
     account: &EmailAddress,
@@ -153,6 +153,7 @@ pub(super) fn store_copy(
             message: message.id.clone(),
             flags: normalize(fetched.flags.as_deref().unwrap_or_default()),
             modseq: fetched.modseq.unwrap_or(0),
+            arrived: internal,
         },
     )?;
     let places = store.imap_message_places(account, &message.id)?;
@@ -160,12 +161,18 @@ pub(super) fn store_copy(
         return Ok(Stored::Skipped);
     };
     if let Some(kept) = store.message(account, &message.id)? {
-        let earlier = internal.is_some_and(|t| t < kept.received);
-        if !earlier {
+        let first = first_copy(&places).is_some_and(|p| {
+            p.folder == folder.label && p.uidvalidity == folder.uidvalidity && p.uid == fetched.uid
+        });
+        if internal.is_none() {
+            message.received = kept.received;
+        }
+        let same = kept.received == message.received && kept.headers == message.headers;
+        if !first || same {
             store.set_message_labels(account, &message.id, &labels, flags)?;
             return Ok(Stored::Known);
         }
-        // An earlier copy: its time and headers, the message's thread.
+        // The first copy: its time and headers, the message's thread.
         message.thread = kept.thread;
         message.labels = labels;
         message.flags = flags;
@@ -181,6 +188,28 @@ pub(super) fn store_copy(
     message.flags = flags;
     store.put_message(&message, None)?;
     Ok(Stored::New)
+}
+
+/// Of a message's live copies, the one that gives it its time, headers
+/// and body: the one that arrived first (the earliest INTERNALDATE; that
+/// is when the message came, wherever another client filed it later),
+/// copies without one last, then by folder label id and UID, so the
+/// choice is the same whatever order the copies are read in.
+pub(super) fn first_copy<'a>(
+    places: impl IntoIterator<Item = &'a ImapPlace>,
+) -> Option<&'a ImapPlace> {
+    places
+        .into_iter()
+        .filter(|p| !has(p, DELETED))
+        .min_by_key(|p| {
+            (
+                p.arrived.is_none(),
+                p.arrived,
+                &p.folder,
+                p.uidvalidity,
+                p.uid,
+            )
+        })
 }
 
 /// The thread of a message new to the store.
@@ -275,6 +304,7 @@ pub(super) fn apply_flags(
     changes: &[FlagChange],
 ) -> SyncResult<Applied> {
     let mut applied = Applied::default();
+    let mut emptied = Vec::new();
     for change in changes {
         let Some(place) = kept.get_mut(&change.uid) else {
             applied.fetch.push(change.uid);
@@ -298,13 +328,19 @@ pub(super) fn apply_flags(
             continue;
         }
         if summary(&store.imap_message_places(account, &place.message)?).is_none() {
-            // Every copy is now marked deleted: it waits for a complete
-            // pass, as a vanished one does.
-            pending::mark(store, account, [&place.message])?;
+            // Every copy is now marked deleted: it waits as a vanished
+            // one does (made pending below, before it loses its labels).
+            emptied.push(place.message.clone());
+            continue;
         }
         refresh(store, account, &place.message)?;
         applied.relabelled += 1;
     }
+    pending::mark(store, account, &emptied)?;
+    for id in &emptied {
+        refresh(store, account, id)?;
+    }
+    applied.relabelled += emptied.len();
     Ok(applied)
 }
 
@@ -353,6 +389,7 @@ mod tests {
             message: ProviderMessageId("m1".into()),
             flags: flags.iter().map(|f| f.to_string()).collect(),
             modseq: 0,
+            arrived: None,
         }
     }
 
@@ -370,6 +407,32 @@ mod tests {
         let (_, flags) = summary(&[place("INBOX", &[]), place("SENT", &[SEEN])]).unwrap();
         assert!(flags.unread);
         assert!(summary(&[place("INBOX", &[SEEN, DELETED])]).is_none());
+    }
+
+    #[test]
+    fn the_first_copy_is_the_earliest_then_by_folder_and_uid() {
+        let at = |folder: &str, uid, millis: Option<i64>| ImapPlace {
+            uid,
+            arrived: millis.map(Timestamp::from_millis),
+            ..place(folder, &[])
+        };
+        let copies = [
+            at("Work", 3, Some(20)),
+            at("INBOX", 9, Some(10)),
+            at("Archive", 5, Some(10)),
+            at("Archive", 2, None),
+        ];
+        let first = first_copy(&copies).unwrap();
+        assert_eq!((first.folder.as_str(), first.uid), ("Archive", 5));
+        // Whatever the order.
+        let mut reversed = copies.clone();
+        reversed.reverse();
+        assert_eq!(first_copy(&reversed), Some(first));
+        let deleted = ImapPlace {
+            flags: vec![DELETED.into()],
+            ..at("A", 1, Some(1))
+        };
+        assert_eq!(first_copy([&deleted]), None);
     }
 
     #[test]

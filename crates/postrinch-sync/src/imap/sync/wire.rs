@@ -13,9 +13,12 @@ use async_imap::imap_proto::{MailboxDatum, Response, ResponseCode, Status};
 use postrinch_model::Server;
 
 use super::fetch::Collector;
-pub(super) use super::fetch::{FetchReply, Fetched, uid_set};
+pub(super) use super::fetch::{FetchReply, Fetched};
 use super::names::Command;
+pub(super) use super::uids::uid_set;
 use crate::imap::connect::{describe, within};
+use crate::imap::refusal::is_busy;
+use crate::imap::reply::Tagged;
 use crate::imap::session::{ImapSession, imap_error};
 use crate::{SyncError, SyncResult};
 
@@ -40,8 +43,16 @@ pub(super) struct Selected {
 /// How a command ended, short of an error.
 enum Done {
     Ok,
-    /// `NO`, with the server's text.
-    No(String),
+    No(Refusal),
+}
+
+/// A tagged `NO` that is not the server busy (that is
+/// [`SyncError::Busy`], and stops the pass to be tried again later): the
+/// server would not, or could not, do all of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Refusal {
+    /// The server's text, with its response code.
+    pub text: String,
 }
 
 impl Conn {
@@ -144,10 +155,11 @@ impl Conn {
                 Ok(())
             })
             .await?;
-        if let Done::No(text) = done {
+        if let Done::No(refusal) = done {
             tracing::info!(
-                "IMAP: {} refused to open the folder {name:?}: {text}",
-                self.describe()
+                "IMAP: {} refused to open the folder {name:?}: {}",
+                self.describe(),
+                refusal.text
             );
             return Ok(None);
         }
@@ -164,7 +176,8 @@ impl Conn {
 
     /// `UID FETCH <set> <items> [modifiers]` in the selected folder: the
     /// messages of `set` the server answered, each once, however many
-    /// responses it took ([`Collector`]).
+    /// responses it took ([`Collector`]). A `NO` is not an error: the
+    /// reply says so ([`FetchReply::refused`]) and carries what did come.
     pub(super) async fn uid_fetch(
         &mut self,
         set: &str,
@@ -181,20 +194,29 @@ impl Conn {
                 match response {
                     Response::Fetch(seq, attributes) => collector.fetch(*seq, attributes),
                     Response::Expunge(seq) => collector.expunge(*seq),
-                    Response::Vanished { uids, .. } => {
-                        collector.vanished(uids.iter().flat_map(|r| r.clone()));
+                    Response::Vanished { earlier, uids } => {
+                        collector.vanished(*earlier, uids.iter().cloned());
                     }
                     _ => {}
                 }
                 Ok(())
             })
             .await?;
-        self.refused(done, "UID FETCH")?;
-        Ok(collector.finish())
+        let mut reply = collector.finish();
+        if let Done::No(refusal) = done {
+            tracing::info!(
+                "IMAP: {} did not answer all of a UID FETCH: {}",
+                self.describe(),
+                refusal.text
+            );
+            reply.refused = Some(refusal);
+        }
+        Ok(reply)
     }
 
-    /// `UID SEARCH <criteria>` in the selected folder.
-    pub(super) async fn uid_search(&mut self, criteria: &str) -> SyncResult<Vec<u32>> {
+    /// `UID SEARCH <criteria>` in the selected folder, the UIDs in order;
+    /// `None` when the server refuses it.
+    pub(super) async fn uid_search(&mut self, criteria: &str) -> SyncResult<Option<Vec<u32>>> {
         let mut found = Vec::new();
         let search = Command::plain(format!("UID SEARCH {criteria}"));
         let done = self
@@ -205,10 +227,17 @@ impl Conn {
                 Ok(())
             })
             .await?;
-        self.refused(done, "UID SEARCH")?;
+        if let Done::No(refusal) = done {
+            tracing::info!(
+                "IMAP: {} refused a UID SEARCH: {}",
+                self.describe(),
+                refusal.text
+            );
+            return Ok(None);
+        }
         found.sort_unstable();
         found.dedup();
-        Ok(found)
+        Ok(Some(found))
     }
 
     /// Sends a command and reads every response up to its tagged one,
@@ -255,7 +284,12 @@ impl Conn {
                     let text = outcome.information.as_deref().unwrap_or("").to_owned();
                     return match status {
                         Status::Ok => Ok(Done::Ok),
-                        Status::No => Ok(Done::No(text)),
+                        Status::No if busy(outcome.code.as_ref(), &text) => Err(SyncError::Busy {
+                            service: "IMAP",
+                            server: describe(&server),
+                            message: text,
+                        }),
+                        Status::No => Ok(Done::No(Refusal { text })),
                         _ => Err(server_error(&server, &format!("{verb} refused: {text}"))),
                     };
                 }
@@ -291,13 +325,6 @@ impl Conn {
         }
     }
 
-    fn refused(&self, done: Done, command: &str) -> SyncResult<()> {
-        match done {
-            Done::Ok => Ok(()),
-            Done::No(text) => Err(self.protocol(&format!("{command} refused: {text}"))),
-        }
-    }
-
     fn protocol(&self, message: &str) -> SyncError {
         server_error(self.session.server(), message)
     }
@@ -315,6 +342,20 @@ fn server_error(server: &Server, message: &str) -> SyncError {
     }
 }
 
+/// Whether a tagged `NO` says the server is busy ([`is_busy`]). imap-proto
+/// takes `[ALERT]` out of the text; codes it does not know (RFC 5530's
+/// among them) stay at the start of the text.
+fn busy(code: Option<&ResponseCode<'_>>, text: &str) -> bool {
+    match code {
+        Some(ResponseCode::Alert) => is_busy(Some("ALERT"), text),
+        Some(_) => false,
+        None => {
+            let parsed = Tagged::parse_text(text);
+            is_busy(parsed.code.as_deref(), &parsed.text)
+        }
+    }
+}
+
 /// The id in an untagged `OK [MAILBOXID (<id>)]`'s text.
 fn mailbox_id_of(text: &str) -> Option<String> {
     let code = text
@@ -328,6 +369,30 @@ fn mailbox_id_of(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn busy_refusals_are_told_from_partial_ones() {
+        let busy_ones = [
+            (None, "[UNAVAILABLE] Try later"),
+            (None, "[LIMIT] Too many"),
+            (None, "[INUSE] Locked"),
+            (
+                Some(ResponseCode::Alert),
+                "Account exceeded command or bandwidth limits. (Failure)",
+            ),
+        ];
+        for (code, text) in busy_ones {
+            assert!(busy(code.as_ref(), text), "{text}");
+        }
+        let partial = [
+            (None, "Some messages could not be FETCHed (Failure)"),
+            (None, "[SERVERBUG] Internal error occurred"),
+            (Some(ResponseCode::Alert), "Mailbox is broken"),
+        ];
+        for (code, text) in partial {
+            assert!(!busy(code.as_ref(), text), "{text}");
+        }
+    }
 
     #[test]
     fn mailbox_ids_are_read_from_the_text() {

@@ -44,7 +44,8 @@ async fn a_refused_select_of_the_destination_keeps_a_moved_message() {
         "SELECT",
         "\"Work\"",
         1,
-        ImapFault::No("[UNAVAILABLE] Try later".into()),
+        // Refused, not busy (a busy server stops the pass instead).
+        ImapFault::No("[SERVERBUG] Cannot open the mailbox".into()),
     );
     let report = f.sync().await;
     assert_eq!(report.removed, 0);

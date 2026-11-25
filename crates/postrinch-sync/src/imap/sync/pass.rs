@@ -12,19 +12,22 @@
 //!   by comparing the UIDs kept with the folder's) ([`super::read`]).
 //!
 //! A folder's position is written only once everything before it is
-//! stored, so an interrupted pass repeats work and never skips mail.
-//! Messages and folders that went are removed only at the end of a
-//! complete pass ([`super::pending`]).
+//! stored, so an interrupted pass repeats work and never skips mail, and
+//! it is not moved when the server refused a command in the folder. A
+//! message the server lists but gives no headers for does not hold the
+//! position back: it is asked for again by its UID ([`super::reads`]).
+//! Messages that went are removed once every folder has been read whole
+//! since, and folders once two LISTs left them out ([`super::pending`]).
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use postrinch_model::{EmailAddress, ImapFolder};
 
 use super::ImapSync;
 use super::folders::{Planned, plan};
 use super::names::sendable;
-use super::pending;
 use super::wire::Conn;
+use super::{pending, reads};
 use crate::SyncResult;
 use crate::google::{Phase, Progress, ProgressFn, SyncReport};
 
@@ -56,15 +59,18 @@ impl ImapSync {
         let renames = self.renames(conn, &listed, &stored).await?;
         let planned = plan(&listed, &stored, &roles, &renames);
         self.keep_folders(account, &planned).await?;
-        let mut complete = true;
         for (i, folder) in planned.iter().enumerate() {
             progress(Progress::Working {
                 phase: Phase::Changes,
                 done: i,
                 total: planned.len(),
             });
-            complete &= self
-                .folder(conn, account, folder.state.clone(), progress, &mut report)
+            let state = folder.state.clone();
+            let whole = self
+                .folder(conn, account, state, progress, &mut report)
+                .await?;
+            let (a, label) = (account.clone(), folder.state.label_id.clone());
+            self.blocking(move |s| reads::note(s, &a, &label, number, whole))
                 .await?;
         }
         let a = account.clone();
@@ -72,9 +78,7 @@ impl ImapSync {
             .iter()
             .map(|p| p.label.provider_id.clone())
             .collect();
-        report.removed += self
-            .blocking(move |s| finish(s, &a, &keep, number, complete))
-            .await?;
+        report.removed += self.blocking(move |s| finish(s, &a, &keep, number)).await?;
         Ok(report)
     }
 
@@ -96,8 +100,8 @@ impl ImapSync {
     }
 
     /// Reads one folder. Returns whether it was read whole: `false` when
-    /// the server refused to open it, or did not answer for every message
-    /// asked for.
+    /// the server refused to open it or a command in it, or a message in
+    /// it went unanswered.
     async fn folder(
         &self,
         conn: &mut Conn,
@@ -122,29 +126,54 @@ impl ImapSync {
         if changed {
             self.put_folder(account, &state).await?;
         }
-        let whole = state.uidnext == 0;
-        let read = if whole {
+        let (a, label, uidvalidity) = (account.clone(), state.label_id.clone(), state.uidvalidity);
+        let silent = self
+            .blocking(move |s| reads::silent(s, &a, &label, uidvalidity))
+            .await?;
+        let read = if state.uidnext == 0 {
             report.full = true;
-            self.read_whole(conn, account, &state, &selected, progress, report)
+            self.read_whole(conn, account, &state, &selected, &silent, report)
                 .await?
         } else {
-            self.read_changes(conn, account, &state, &selected, progress, report)
+            self.read_changes(conn, account, &state, &selected, &silent, report)
                 .await?
         };
-        let next = selected.uidnext.unwrap_or(0).max(
+        let asked: HashSet<u32> = read.fetch.keys().copied().collect();
+        let mut unanswered = self
+            .fetch_headers(conn, account, &state, read.fetch, progress, report)
+            .await?;
+        if read.stale {
+            // What was not asked for this time is still owed.
+            unanswered.extend(silent.into_iter().filter(|(uid, _)| !asked.contains(uid)));
+        }
+        let whole = !read.stale && unanswered.is_empty();
+        self.keep_silent(account, &state, unanswered).await?;
+        if read.stale {
+            // Read the same changes again next time.
+            return Ok(false);
+        }
+        let a = account.clone();
+        let replaced = read.replaced;
+        self.blocking(move |s| pending::forget(s, &a, &replaced))
+            .await?;
+        state.uidnext = selected.uidnext.unwrap_or(0).max(
             read.highest
                 .map_or(state.uidnext, |uid| uid.saturating_add(1)),
         );
-        state.uidnext = match read.unanswered {
-            None => next,
-            // Read whole again next time: only what is missing is fetched.
-            Some(_) if whole => 0,
-            // From the first message missing, so the next pass asks again.
-            Some(missing) => next.min(missing),
-        };
         state.highest_modseq = selected.highest_modseq.unwrap_or(0);
         self.put_folder(account, &state).await?;
-        Ok(read.unanswered.is_none())
+        Ok(whole)
+    }
+
+    async fn keep_silent(
+        &self,
+        account: &EmailAddress,
+        state: &ImapFolder,
+        unanswered: BTreeMap<u32, u32>,
+    ) -> SyncResult<()> {
+        let (a, label, uidvalidity) = (account.clone(), state.label_id.clone(), state.uidvalidity);
+        self.blocking(move |s| reads::keep_silent(s, &a, &label, uidvalidity, unanswered))
+            .await
     }
 
     async fn put_folder(&self, account: &EmailAddress, state: &ImapFolder) -> SyncResult<()> {
@@ -154,16 +183,15 @@ impl ImapSync {
     }
 }
 
-/// The end of pass `pass`, which read the folders `keep`, every one of
-/// them whole if `complete`: folders missing from LIST twice go, and, if
-/// the pass was complete, messages that stayed without a copy since an
-/// earlier pass go. Returns how many messages went.
+/// The end of pass `pass`, which listed the folders `keep`: folders
+/// missing from LIST twice go, and messages that stayed without a copy
+/// since a pass before every folder was last read whole go. Returns how
+/// many messages went.
 fn finish(
     store: &postrinch_store::Store,
     account: &EmailAddress,
     keep: &HashSet<String>,
     pass: u64,
-    complete: bool,
 ) -> SyncResult<usize> {
     let labels: BTreeSet<String> = store
         .labels(account)?
@@ -180,12 +208,9 @@ fn finish(
         .filter(|id| !keep.contains(*id))
         .cloned()
         .collect();
-    let gone = pending::note_missing(store, account, &missing, pass)?;
-    if !complete || gone.len() < missing.len() {
-        // A folder could not be read, or is missing for the first time:
-        // what seems gone may be there.
-        return Ok(0);
-    }
+    let gone: BTreeSet<String> = pending::note_missing(store, account, &missing, pass)?
+        .into_iter()
+        .collect();
     for id in &gone {
         pending::forget_folder(store, account, id)?;
         if labels.contains(id) {
@@ -195,5 +220,10 @@ fn finish(
             store.remove_imap_folder(account, id)?;
         }
     }
-    pending::resolve(store, account, pass)
+    // Missing for the first time: it may be there, unread.
+    let unread: BTreeSet<String> = missing.difference(&gone).cloned().collect();
+    let mut known = unread.clone();
+    known.extend(keep.iter().cloned());
+    let floor = reads::settle(store, account, &known, &unread, pass)?;
+    pending::resolve(store, account, floor)
 }

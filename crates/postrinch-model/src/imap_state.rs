@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ProviderMessageId, SystemLabel};
+use crate::{ProviderMessageId, SystemLabel, Timestamp};
 
 /// The special role a folder plays, if any.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -78,4 +78,9 @@ pub struct ImapPlace {
     pub flags: Vec<String>,
     /// The copy's MODSEQ (CONDSTORE); 0 for none.
     pub modseq: u64,
+    /// The copy's INTERNALDATE, when the server gave one: of a message's
+    /// copies, the one that arrived first gives it its time, headers and
+    /// body (docs/imap.md, "A message's identity").
+    #[serde(default)]
+    pub arrived: Option<Timestamp>,
 }

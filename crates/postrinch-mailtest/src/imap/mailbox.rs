@@ -102,6 +102,9 @@ pub(crate) struct Folder {
     pub(crate) messages: Vec<Message>,
     /// Expunged UIDs with the MODSEQ of their expunge.
     pub(crate) vanished: Vec<(u32, u64)>,
+    /// UIDs whose header and body FETCH leaves out, as a server failing
+    /// to read a message does.
+    pub(crate) withheld: BTreeSet<u32>,
     /// Every keyword set in this folder, spelled as it was first seen.
     /// Keywords compare case-insensitively (RFC 9051 2.3.2), so a later
     /// `$label` is the same keyword as an earlier `$Label` and is stored
@@ -123,6 +126,7 @@ impl Folder {
             highest_modseq: 1,
             messages: Vec::new(),
             vanished: Vec::new(),
+            withheld: BTreeSet::new(),
             keywords: Vec::new(),
         }
     }

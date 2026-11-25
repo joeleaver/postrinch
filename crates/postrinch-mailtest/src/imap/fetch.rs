@@ -208,14 +208,19 @@ impl Session {
             items.insert(0, Item::Uid);
         }
         self.sync_selected(false);
-        let changed = self.run_fetch(&set, &items, &modifiers, uid_mode, with_uid);
+        let (changed, withheld) = self.run_fetch(&set, &items, &modifiers, uid_mode, with_uid);
         if changed {
             self.shared.notify();
+        }
+        if withheld {
+            return Reply::No("Some messages could not be FETCHed (Failure)".into());
         }
         Reply::Ok("FETCH completed".into())
     }
 
-    /// Writes the FETCH responses; returns whether it set `\Seen` anywhere.
+    /// Writes the FETCH responses; returns whether it set `\Seen` anywhere,
+    /// and whether it left out a message withheld from header and body
+    /// FETCHes.
     /// `with_uid` says whether a response that sets `\Seen` must carry the
     /// UID (see [`Session::fetch_carries_uid`]).
     fn run_fetch(
@@ -225,7 +230,7 @@ impl Session {
         modifiers: &Modifiers,
         uid_mode: bool,
         with_uid: bool,
-    ) -> bool {
+    ) -> (bool, bool) {
         let shared = self.shared.clone();
         let mut state = shared.lock();
         let user = self.user.clone().unwrap_or_default();
@@ -234,14 +239,14 @@ impl Session {
             state.config.unsolicited_fetches,
         );
         let Some(selected) = self.selected.as_mut() else {
-            return false;
+            return (false, false);
         };
         let Some(folder) = state
             .accounts
             .get_mut(&user)
             .and_then(|a| a.folder_by_id_mut(selected.folder_id))
         else {
-            return false;
+            return (false, false);
         };
         if modifiers.vanished {
             let since = modifiers.changed_since.unwrap_or(0);
@@ -267,6 +272,7 @@ impl Session {
         let seen: BTreeSet<String> = ["\\Seen".to_string()].into();
         let mut changed = false;
         let wants_body = items.iter().any(|i| matches!(i, Item::Body { .. }));
+        let mut withheld = false;
         if unsolicited && wants_body {
             // Another client's flag changes, for messages not asked for.
             let asked: BTreeSet<u32> = targets.iter().map(|&(_, uid)| uid).collect();
@@ -278,6 +284,10 @@ impl Session {
             }
         }
         for (n, (seq, uid)) in targets.into_iter().enumerate() {
+            if wants_body && folder.withheld.contains(&uid) {
+                withheld = true;
+                continue;
+            }
             let marks_seen = items
                 .iter()
                 .any(|i| matches!(i, Item::Body { peek: false, .. }));
@@ -326,7 +336,7 @@ impl Session {
                 respond(&mut self.out, seq, &items, message);
             }
         }
-        changed
+        (changed, withheld)
     }
 }
 

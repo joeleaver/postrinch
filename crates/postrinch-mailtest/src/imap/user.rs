@@ -305,6 +305,22 @@ impl UserHandle {
         self.flags(folder, uid, FlagOp::Remove, flags)
     }
 
+    /// Makes FETCH leave out a message's header and body (or give them
+    /// again): it still lists, and answers for its flags, but a FETCH
+    /// asking for its header or body ends `NO Some messages could not be
+    /// FETCHed (Failure)`, as Gmail's does for a message it cannot read.
+    pub fn withhold(&self, folder: &str, uid: u32, withheld: bool) -> Result<(), Error> {
+        self.change(|a, _| {
+            let folder = Self::folder_mut(a, folder)?;
+            if withheld {
+                folder.withheld.insert(uid);
+            } else {
+                folder.withheld.remove(&uid);
+            }
+            Ok(())
+        })
+    }
+
     /// Removes a message, as another client's expunge would.
     pub fn expunge(&self, folder: &str, uid: u32) -> Result<(), Error> {
         self.change(|a, _| {
