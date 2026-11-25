@@ -14,7 +14,7 @@ use tokio::sync::Notify;
 
 use super::add::{Adding, adding};
 use super::changes_support::record;
-use super::keep_support::{busy_waits, kinds, recorder, until};
+use super::keep_support::{busy_waits, kinds, recorder, until, until_done};
 use super::support::{PASSWORD, USER, account};
 use super::sync_support::{Fixture, fixture, mail};
 
@@ -74,7 +74,7 @@ async fn a_busy_server_is_waited_out_longer_each_time_and_never_needs_sign_in() 
             .fail_next("UID FETCH", 1, ImapFault::No(BANDWIDTH.into()));
         f.user.append("INBOX", mail(Some("b@x"), "B", "")).unwrap();
         wake.notify_one();
-        until(&events, |k| k.iter().filter(|e| **e == "done").count() == 2).await;
+        until_done(&events, 2).await;
         let again = busy_waits(&events)[2].0;
         assert!(first_step(again), "the wait starts again: {again:?}");
     };

@@ -169,7 +169,7 @@ impl Session {
 
     /// Runs one command. `false` when the session must end.
     async fn handle(&mut self, command: Command, log: String) -> io::Result<bool> {
-        let (fault, hook) = {
+        let (fault, hook, hold) = {
             let mut state = self.shared.lock();
             let text = if command.name == "LOGIN" {
                 "LOGIN <credentials>".to_string()
@@ -178,12 +178,17 @@ impl Session {
             };
             let fault = state.take_fault(&command.name, &text);
             let hook = state.take_hook(&command.name, &text);
+            let hold = state.take_hold(&command.name, &text);
             state.log.push(LoggedCommand {
                 name: command.name.clone(),
                 text,
             });
-            (fault, hook)
+            (fault, hook, hold)
         };
+        // Let go, or dropped with the test's handle: either way, on.
+        if let Some(gate) = hold {
+            let _ = gate.await;
+        }
         if let Some(action) = hook {
             action();
         }

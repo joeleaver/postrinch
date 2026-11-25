@@ -19,7 +19,7 @@ use postrinch_sync::{IdleOptions, KeepOptions, MailSync, SyncEvent};
 
 use super::add::adding;
 use super::idle_support::{IDLE, KEEP, arrived, idling, keeping, mail_sync, sign_ins};
-use super::keep_support::{count, kinds, until, until_true};
+use super::keep_support::{count, kinds, until, until_done, until_true};
 use super::support::{PASSWORD, USER, account};
 use super::sync_support::{fixture, fixture_with, fixture_without, mail};
 
@@ -35,7 +35,7 @@ async fn new_mail_wakes_a_pass_and_it_arrives() {
             let id = format!("new{n}@x");
             f.user.append("INBOX", mail(Some(&id), "New", "")).unwrap();
         }
-        until(events, |k| k.iter().filter(|e| **e == "done").count() == 2).await;
+        until_done(events, 2).await;
         for n in 0..3 {
             assert!(f.message(&format!("new{n}@x")).is_some(), "message {n}");
         }
@@ -45,10 +45,10 @@ async fn new_mail_wakes_a_pass_and_it_arrives() {
         // A flag set elsewhere, and a message gone, are news too.
         let uid = f.user.messages("INBOX").unwrap()[0].uid;
         f.user.add_flags("INBOX", uid, &["\\Flagged"]).unwrap();
-        until(events, |k| k.iter().filter(|e| **e == "done").count() == 3).await;
+        until_done(events, 3).await;
         idling(&f.server, 1).await;
         f.user.expunge("INBOX", uid).unwrap();
-        until(events, |k| k.iter().filter(|e| **e == "done").count() == 4).await;
+        until_done(events, 4).await;
     })
     .await;
     assert!(!kinds(&events).contains(&"failed"), "{:?}", kinds(&events));
@@ -94,7 +94,7 @@ async fn a_lost_connection_is_made_again_after_a_growing_wait() {
         let dropped = Instant::now();
         f.server.disconnect_all();
         // News may have been missed: the drop wakes a pass.
-        until(events, |k| k.iter().filter(|e| **e == "done").count() == 2).await;
+        until_done(events, 2).await;
         idling(&f.server, 1).await;
         // The first wait is at least half of `reconnect`, the second at
         // least half of twice it.
@@ -106,10 +106,10 @@ async fn a_lost_connection_is_made_again_after_a_growing_wait() {
         assert_eq!(f.server.command_count("IDLE"), idles + 2);
         // Begun on a connection made again, it wakes a pass, for mail
         // that came before its EXAMINE.
-        until(events, |k| k.iter().filter(|e| **e == "done").count() == 3).await;
+        until_done(events, 3).await;
         // It works again: new mail arrives.
         f.user.append("INBOX", mail(Some("b@x"), "B", "")).unwrap();
-        until(events, |k| k.iter().filter(|e| **e == "done").count() == 4).await;
+        until_done(events, 4).await;
     })
     .await;
     assert!(f.message("b@x").is_some());
@@ -157,7 +157,7 @@ async fn a_server_without_idle_is_polled() {
     };
     keeping(&sync, polled, async |events, _| {
         f.user.append("INBOX", mail(Some("d@x"), "D", "")).unwrap();
-        until(events, |k| k.iter().filter(|e| **e == "done").count() >= 3).await;
+        until_done(events, 3).await;
     })
     .await;
     assert!(f.message("d@x").is_some());
@@ -178,7 +178,7 @@ async fn too_many_connections_makes_idle_give_way_and_the_account_is_polled() {
         until(events, |k| k.contains(&"done")).await;
         f.user.append("INBOX", mail(Some("e@x"), "E", "")).unwrap();
         until_true("E arrives", || arrived(&f, "e@x")).await;
-        until(events, |k| k.iter().filter(|e| **e == "done").count() >= 4).await;
+        until_done(events, 4).await;
     })
     .await;
     assert!(f.message("e@x").is_some());
@@ -218,7 +218,7 @@ async fn a_removed_account_stops_idling_and_idles_again_when_added_back() {
             .user(USER)
             .append("INBOX", mail(Some("f@x"), "F", ""))
             .unwrap();
-        until(events, |k| k.iter().filter(|e| **e == "done").count() == 3).await;
+        until_done(events, 3).await;
     })
     .await;
     let id = message_id(&account(), "f@x");
@@ -244,7 +244,7 @@ async fn signing_in_anew_idles_again_with_the_new_sign_in() {
         idling(server, 1).await;
         // The pass, and the IDLE, signed in again.
         assert!(sign_ins(server) >= before + 2, "signed in anew");
-        until(events, |k| k.iter().filter(|e| **e == "done").count() == 2).await;
+        until_done(events, 2).await;
     })
     .await;
 }

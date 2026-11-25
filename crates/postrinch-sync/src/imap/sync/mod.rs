@@ -28,6 +28,8 @@ mod folders;
 mod headers;
 mod idle;
 mod idle_link;
+#[cfg(test)]
+mod idle_tests;
 mod idle_wire;
 mod marks;
 mod names;
@@ -292,11 +294,18 @@ impl ImapSync {
     }
 
     /// How long a connection refused for the account's connection limit
-    /// waits for the IDLE connection to sign out: it ends its IDLE (an
-    /// answer it may be waiting for, then `DONE` and its answer) and signs
-    /// out, each an exchange under the command timeout.
+    /// waits for the IDLE connection to sign out. Asked while it IDLEs,
+    /// it ends its IDLE (an answer it may be waiting for, then `DONE` and
+    /// its answer) and signs out: three exchanges. Asked while it is
+    /// still being made, it finishes first: the TCP connection and TLS
+    /// handshake under the connect timeout, then at most eight exchanges
+    /// (the greeting; STARTTLS and the capabilities it is asked for,
+    /// perhaps; the sign-in, an OAuth account's tried once more with a
+    /// fresh token; the capabilities; the EXAMINE; and signing out).
+    /// Each exchange is under the command timeout.
     fn give_way_within(&self) -> Duration {
-        self.connector.timeouts().command * 3
+        let timeouts = self.connector.timeouts();
+        timeouts.connect + timeouts.command * 8
     }
 
     async fn settings(&self, account: &EmailAddress) -> SyncResult<ImapSettings> {

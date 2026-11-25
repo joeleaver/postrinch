@@ -8,8 +8,9 @@
 //!   connections because the account has too many open, the IDLE
 //!   connection, the one it can do without, signs out so that one can
 //!   sign in in its place ([`Links::give_way`]).
-//! - **Holding.** Whether the IDLE loop holds a signed-in connection now,
-//!   so that a refused connection knows whether there is one to ask for.
+//! - **Holding.** Whether the IDLE loop holds a connection now, signed
+//!   in or signing in, so that a refused connection knows whether there
+//!   is one to ask for.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -24,8 +25,8 @@ struct Link {
     released: watch::Sender<u64>,
     /// Raised each time another connection asks the IDLE to give way.
     give_way: watch::Sender<u64>,
-    /// How many signed-in IDLE connections the account has (one at
-    /// most, in the ordinary run of things).
+    /// How many IDLE connections the account has, signed in or signing
+    /// in (one at most, in the ordinary run of things).
     holding: watch::Sender<usize>,
 }
 
@@ -65,16 +66,17 @@ impl Links {
         self.link(account).released.send_modify(|n| *n += 1);
     }
 
-    /// Marks a signed-in IDLE connection as held until the returned
-    /// guard is dropped, with the connection.
+    /// Marks an IDLE connection as held, from before it signs in, until
+    /// the returned guard is dropped, with the connection.
     pub(super) fn hold(&self, account: &EmailAddress) -> Holding {
         let link = self.link(account);
         link.holding.send_modify(|n| *n += 1);
         Holding(link)
     }
 
-    /// When the account holds an IDLE connection, asks it to give way and
-    /// waits, at most `within`, until it has signed out. Returns whether
+    /// When the account holds an IDLE connection, signed in or signing
+    /// in, asks it to give way and waits, at most `within`, until it has
+    /// signed out (or failed to sign in). Returns whether
     /// it did: only then is a connection refused for the account's
     /// connection limit worth trying again at once.
     pub(super) async fn give_way(&self, account: &EmailAddress, within: Duration) -> bool {

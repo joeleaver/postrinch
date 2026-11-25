@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, MutexGuard};
 
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 use tokio_rustls::TlsAcceptor;
 
 use super::config::{Extension, ImapConfig};
@@ -47,6 +47,15 @@ struct Hook {
     action: Action,
 }
 
+/// A command to be left unanswered until the test lets it go
+/// ([`super::ImapServer::hold_next`]).
+struct Hold {
+    command: String,
+    matching: String,
+    /// Sent, or dropped, when the test lets the command go.
+    gate: oneshot::Receiver<()>,
+}
+
 /// One command as the server saw it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LoggedCommand {
@@ -60,6 +69,7 @@ pub(crate) struct State {
     pub(crate) next_folder_id: u64,
     faults: Vec<PendingFault>,
     hooks: Vec<Hook>,
+    holds: Vec<Hold>,
     pub(crate) log: Vec<LoggedCommand>,
     /// Raised to drop every open session.
     pub(crate) kill_epoch: u64,
@@ -79,6 +89,7 @@ impl State {
             next_folder_id: 0,
             faults: Vec::new(),
             hooks: Vec::new(),
+            holds: Vec::new(),
             log: Vec::new(),
             kill_epoch: 0,
             signed_in: HashMap::new(),
@@ -154,6 +165,25 @@ impl State {
             .iter()
             .position(|h| h.command == command && text.contains(&h.matching))?;
         Some(self.hooks.remove(i).action)
+    }
+
+    /// Holds the next command named `command` whose logged text contains
+    /// `matching` until `gate` is sent or dropped.
+    pub(crate) fn add_hold(&mut self, command: &str, matching: &str, gate: oneshot::Receiver<()>) {
+        self.holds.push(Hold {
+            command: command.to_ascii_uppercase(),
+            matching: matching.to_owned(),
+            gate,
+        });
+    }
+
+    /// Takes the gate, if any, this command is to wait on.
+    pub(crate) fn take_hold(&mut self, command: &str, text: &str) -> Option<oneshot::Receiver<()>> {
+        let i = self
+            .holds
+            .iter()
+            .position(|h| h.command == command && text.contains(&h.matching))?;
+        Some(self.holds.remove(i).gate)
     }
 }
 

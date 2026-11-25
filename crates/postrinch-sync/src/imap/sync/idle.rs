@@ -26,7 +26,8 @@ use crate::{SyncError, SyncResult};
 /// (`idle_wire.rs`).
 pub(crate) struct Idler {
     pub(super) conn: Conn,
-    /// Marks the account as holding an IDLE connection while it lives.
+    /// Marks the account as holding an IDLE connection while it lives,
+    /// as it did while the connection was made.
     _holding: Holding,
 }
 
@@ -66,6 +67,14 @@ impl ImapSync {
     /// EXAMINEs the inbox. `Ok(None)` when the server does not offer
     /// IDLE: the account is polled only.
     ///
+    /// The connection is held (`idle_link.rs`) from before it signs in:
+    /// the server counts it against the account's connection limit from
+    /// the moment it accepts the sign-in, perhaps before this end hears
+    /// so, and another connection refused for that limit while this one
+    /// signs in or EXAMINEs is to ask it to give way, not find nothing to
+    /// ask. An ask made then is heard once it is made
+    /// (`mail::imap_idle`), before any IDLE.
+    ///
     /// Errors are those of signing in ([`SyncError::NeedsSignIn`],
     /// [`SyncError::Busy`], the connection) and of the EXAMINE: a server
     /// busy for the inbox, or refusing to open it, is
@@ -75,6 +84,7 @@ impl ImapSync {
         &self,
         account: &EmailAddress,
     ) -> SyncResult<Option<Idler>> {
+        let holding = self.links.hold(account);
         let session = self.open_session(account).await?;
         if !session.capabilities().idle() {
             tracing::info!(
@@ -98,7 +108,7 @@ impl ImapSync {
             Ok(Some(_)) => {
                 return Ok(Some(Idler {
                     conn,
-                    _holding: self.links.hold(account),
+                    _holding: holding,
                 }));
             }
             Ok(None) => refused("the server would not open it".into()),

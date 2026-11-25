@@ -202,7 +202,9 @@ impl ImapKeeper {
 impl Idle<'_> {
     /// Connects, and IDLEs until the connection ends.
     async fn connection(&mut self, reconnected: bool) -> Ended {
-        // Only an ask made while this connection is held is for it.
+        // Only an ask made while this connection is held is for it. It is
+        // held from before it signs in: an ask made while it is being
+        // made is heard before its first IDLE (`Self::asked_to_stop`).
         self.give_way.mark_unchanged();
         let opened = tokio::select! {
             opened = self.keeper.sync.idle_connection(self.account) => opened,

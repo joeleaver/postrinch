@@ -65,6 +65,17 @@ pub async fn until(events: &Events, done: impl Fn(&[&'static str]) -> bool) {
     assert!(waited.is_ok(), "gave up waiting: {:?}", kinds(events));
 }
 
+/// Waits (up to 10 s) until at least `passes` passes are done. At
+/// least, not exactly: the waiting looks at the events only now and then,
+/// and a pass that follows at once (one the last woke) may be done before
+/// it looks again. A test that wants no more says so on its own.
+pub async fn until_done(events: &Events, passes: usize) {
+    until(events, |k| {
+        k.iter().filter(|e| **e == "done").count() >= passes
+    })
+    .await;
+}
+
 /// Waits (up to 10 s) until `holds`, saying `what` if it never does.
 pub async fn until_true(what: &str, holds: impl Fn() -> bool) {
     let waited = tokio::time::timeout(Duration::from_secs(10), async {

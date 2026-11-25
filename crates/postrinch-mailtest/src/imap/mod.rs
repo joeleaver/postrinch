@@ -29,6 +29,7 @@ mod user;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 pub use config::{Extension, ImapConfig};
@@ -41,6 +42,19 @@ use crate::listener;
 use crate::tls::TestCertificate;
 use session::Session;
 use state::{Shared, State};
+
+/// A command left unanswered ([`ImapServer::hold_next`]) until this is
+/// let go or dropped.
+#[derive(Debug)]
+pub struct HeldCommand(oneshot::Sender<()>);
+
+impl HeldCommand {
+    /// Lets the command run and be answered.
+    pub fn let_go(self) {
+        // The session may be gone already; then there is nothing to do.
+        let _ = self.0.send(());
+    }
+}
 
 /// A running fake IMAP server. Dropping it stops the server and every
 /// session on it.
@@ -148,6 +162,18 @@ impl ImapServer {
         self.shared
             .lock()
             .add_hook(command, matching, Box::new(action));
+    }
+
+    /// Leaves the next command named `command` (as for
+    /// [`ImapServer::fail_next`]) whose text contains `matching`
+    /// unanswered, as a slow server would, until the returned
+    /// [`HeldCommand`] is let go or dropped: for acting while a client
+    /// waits on it. It is logged ([`ImapServer::commands`]) as it
+    /// arrives; then it runs as any other.
+    pub fn hold_next(&self, command: &str, matching: &str) -> HeldCommand {
+        let (gate, held) = oneshot::channel();
+        self.shared.lock().add_hold(command, matching, held);
+        HeldCommand(gate)
     }
 
     /// Closes every open connection at once, as a server restart would.
