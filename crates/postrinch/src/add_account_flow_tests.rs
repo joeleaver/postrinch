@@ -307,3 +307,110 @@ fn a_cancelled_sign_in_is_no_failure() {
     );
     assert!(matches!(cancelled, Outcome::Cancelled), "{cancelled:?}");
 }
+
+/// A Thunderbird home whose one profile has ada's account on the fakes,
+/// with a decoy `logins.json` beside its prefs.
+fn thunderbird_home(f: &Fixture) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    let root = home.path().join(".thunderbird");
+    let profile = root.join("t1.default-release");
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::write(
+        root.join("profiles.ini"),
+        "[Profile0]\nName=default-release\nIsRelative=1\nPath=t1.default-release\nDefault=1\n",
+    )
+    .unwrap();
+    let imap = f.imap_server.tls_addr().unwrap();
+    let smtp = f.smtp_server.starttls_addr().unwrap();
+    std::fs::write(
+        profile.join("prefs.js"),
+        format!(
+            r#"user_pref("mail.accountmanager.accounts", "account1");
+user_pref("mail.account.account1.server", "server1");
+user_pref("mail.account.account1.identities", "id1");
+user_pref("mail.identity.id1.useremail", "{USER}");
+user_pref("mail.identity.id1.fullName", "Ada Lovelace");
+user_pref("mail.identity.id1.smtpServer", "smtp1");
+user_pref("mail.server.server1.type", "imap");
+user_pref("mail.server.server1.hostname", "{}");
+user_pref("mail.server.server1.port", {});
+user_pref("mail.server.server1.socketType", 3);
+user_pref("mail.server.server1.userName", "{USER}");
+user_pref("mail.smtpserver.smtp1.hostname", "{}");
+user_pref("mail.smtpserver.smtp1.port", {});
+user_pref("mail.smtpserver.smtp1.try_ssl", 2);
+user_pref("mail.smtpserver.smtp1.username", "{USER}");
+"#,
+            imap.ip(),
+            imap.port(),
+            smtp.ip(),
+            smtp.port()
+        ),
+    )
+    .unwrap();
+    std::fs::write(profile.join("logins.json"), "{\"logins\": [\"DECOY\"]}").unwrap();
+    home
+}
+
+/// The form of the one account in `home`'s Thunderbird.
+fn imported_form(home: &std::path::Path) -> AddForm {
+    use crate::import_thunderbird::{Route, listing};
+
+    let list = listing(&postrinch_thunderbird::find(home), &[], |_| false).unwrap();
+    let row = list.rows().next().unwrap();
+    assert_eq!(row.how, "Password");
+    match &row.route {
+        Some(Route::Imap(form)) => (**form).clone(),
+        _ => panic!("not an IMAP account"),
+    }
+}
+
+#[test]
+fn an_account_imported_from_thunderbird_is_added() {
+    let f = fixture();
+    let home = thunderbird_home(&f);
+    let mut form = imported_form(home.path());
+    assert!(
+        form.password.is_empty(),
+        "nothing secret comes from Thunderbird"
+    );
+    // The person gives the password, as the import's turn asks.
+    form.password = PASSWORD.into();
+    let Outcome::Done(account) = f.add(&form, Step::ImportSignIn) else {
+        panic!("not added");
+    };
+    assert_eq!(account.address, ada());
+    assert_eq!(account.display_name.as_deref(), Some("Ada Lovelace"));
+    let settings = f.store.account(&ada()).unwrap().unwrap().imap.unwrap();
+    assert_eq!(settings.imap.security, Security::Tls);
+    assert_eq!(settings.smtp.security, Security::StartTls);
+    assert_eq!(settings.sign_in, SignInMethod::Password);
+
+    // Looked at again, it is here already.
+    let here: Vec<EmailAddress> = f
+        .store
+        .accounts()
+        .unwrap()
+        .into_iter()
+        .map(|a| a.address)
+        .collect();
+    let found = postrinch_thunderbird::find(home.path());
+    let again = crate::import_thunderbird::listing(&found, &here, |_| false).unwrap();
+    let row = again.rows().next().unwrap();
+    assert_eq!(row.how, "Already in Postrinch");
+    assert!(row.route.is_none());
+}
+
+#[test]
+fn a_wrong_password_on_an_imported_account_stays_on_its_turn() {
+    let f = fixture();
+    let home = thunderbird_home(&f);
+    let mut form = imported_form(home.path());
+    form.password = "wrong".into();
+    let Outcome::Failed { step, error } = f.add(&form, Step::ImportSignIn) else {
+        panic!("a wrong password was taken");
+    };
+    assert_eq!(step, Step::ImportSignIn);
+    assert!(error.contains("refused the password"), "{error}");
+    assert!(f.store.account(&ada()).unwrap().is_none());
+}

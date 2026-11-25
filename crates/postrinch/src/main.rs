@@ -3,6 +3,7 @@
 mod actions;
 mod add_account;
 mod add_account_flow;
+mod add_account_import;
 mod add_account_run;
 mod add_account_run_end;
 mod add_account_runs;
@@ -20,6 +21,7 @@ mod changes;
 mod conversations;
 mod dates;
 mod imap_settings_run;
+mod import_thunderbird;
 mod invitations;
 mod links;
 mod loader;

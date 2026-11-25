@@ -1,15 +1,18 @@
-//! The add-account dialog (design/mockups/add-imap-account.html): which
-//! kind, the address, discovery's steps as they run, what was found with
-//! the password or the browser sign-in, Google's mail offered as a Google
-//! account, the wait for the browser and the check. The servers panel is
-//! in `add_account_servers`; the state and slow work in
-//! `add_account_run`.
+//! The add-account dialog (design/mockups/add-imap-account.html): the
+//! address, discovery's steps as they run, what was found with the
+//! password or the browser sign-in, Google's mail offered as a Google
+//! account, the wait for the browser and the check. The chooser is in
+//! `add_account_choose`, the servers panel in `add_account_servers`, the
+//! import from Thunderbird in `add_account_import`; the state and slow
+//! work in `add_account_run`.
 
 use rinch::prelude::*;
 
 use crate::add_account::{AddForm, Kind, Step, Way};
 use crate::add_account_run::{AddUi, LOOK_STEPS, adding_address, look_line};
 use crate::state::State;
+use crate::ui::add_account_choose::choose;
+use crate::ui::add_account_import::{import_done, import_list, import_sign_in};
 use crate::ui::add_account_servers::servers_panel;
 use postrinch_discover::{Step as LookStep, StepState};
 use postrinch_sync::imap::OAuthProvider;
@@ -33,6 +36,9 @@ pub fn add_account_dialog(state: State) -> NodeHandle {
                     Some(Step::Servers) => {servers_panel(__scope, state)},
                     Some(Step::Browser) => {browser(__scope, state)},
                     Some(Step::Checking) => {checking(__scope, state)},
+                    Some(Step::ImportList) => {import_list(__scope, state)},
+                    Some(Step::ImportSignIn) => {import_sign_in(__scope, state)},
+                    Some(Step::ImportDone) => {import_done(__scope, state)},
                     None => "",
                 }
             }
@@ -66,6 +72,7 @@ pub fn kind_title(form: &AddForm) -> String {
     match form.kind {
         Kind::Other => "Other mail account".to_owned(),
         Kind::Microsoft => "Microsoft account".to_owned(),
+        Kind::Thunderbird => "Import from Thunderbird".to_owned(),
     }
 }
 
@@ -106,40 +113,6 @@ pub fn password_field(
                 autocomplete: "off",
                 value_fn: move || get(&ui.form.get()),
                 oninput: move |v: String| ui.edit(|f| set(f, v)),
-            }
-        }
-    }
-}
-
-#[component]
-fn choose(state: State) -> NodeHandle {
-    let ui = state.adding;
-    rsx! {
-        div { class: "dialog",
-            {head(__scope, "Add an account".into(), "Which kind of account is it?".into())}
-            div { class: "add-choice", onclick: move || ui.add_as_google(state),
-                span { class: "add-choice-icon", "G" }
-                div {
-                    span { class: "add-choice-name", "Google" }
-                    span { class: "add-choice-about", "Gmail and Google Workspace. Signs in in your browser; mail, labels and calendars." }
-                }
-            }
-            div { class: "add-choice", onclick: move || ui.choose(Kind::Microsoft),
-                span { class: "add-choice-icon", "M" }
-                div {
-                    span { class: "add-choice-name", "Microsoft" }
-                    span { class: "add-choice-about", "Outlook.com, Hotmail and Microsoft 365. Signs in in your browser. Mail only." }
-                }
-            }
-            div { class: "add-choice", onclick: move || ui.choose(Kind::Other),
-                span { class: "add-choice-icon", "@" }
-                div {
-                    span { class: "add-choice-name", "Other mail account" }
-                    span { class: "add-choice-about", "Fastmail, iCloud, Yahoo, your work's server: any IMAP and SMTP account. Mail only." }
-                }
-            }
-            div { class: "dialog-actions",
-                Button { variant: "default", size: "sm", onclick: move || ui.close(), "Cancel" }
             }
         }
     }
@@ -237,8 +210,9 @@ fn mark(state: StepState) -> &'static str {
     }
 }
 
-/// The found box: who, the servers, and where they came from.
-pub fn found_box(__scope: &mut RenderScope, ui: AddUi, form: &AddForm) -> NodeHandle {
+/// The found box: who, the servers, and where they came from. Change
+/// opens the servers panel, whose Back returns to `back`.
+pub fn found_box(__scope: &mut RenderScope, ui: AddUi, form: &AddForm, back: Step) -> NodeHandle {
     let domain = adding_address(form)
         .rsplit_once('@')
         .map_or(String::new(), |(_, d)| d.to_owned());
@@ -253,7 +227,7 @@ pub fn found_box(__scope: &mut RenderScope, ui: AddUi, form: &AddForm) -> NodeHa
             div { class: "add-row",
                 span { class: "add-who", {who} }
                 span { class: "add-spacer" }
-                span { class: "add-link", onclick: move || ui.servers(Step::Found), "Change" }
+                span { class: "add-link", onclick: move || ui.servers(back), "Change" }
             }
             div { class: "add-server", {imap} }
             div { class: "add-server", {smtp} }
@@ -263,7 +237,7 @@ pub fn found_box(__scope: &mut RenderScope, ui: AddUi, form: &AddForm) -> NodeHa
 }
 
 /// "Sign in with Microsoft".
-fn provider_name(provider: OAuthProvider) -> &'static str {
+pub fn provider_name(provider: OAuthProvider) -> &'static str {
     match provider {
         OAuthProvider::Google => "Google",
         OAuthProvider::Microsoft => "Microsoft",
@@ -282,7 +256,7 @@ fn found(state: State) -> NodeHandle {
     rsx! {
         div { class: "dialog",
             {head(__scope, kind_title(&form), sub)}
-            {found_box(__scope, ui, &form)}
+            {found_box(__scope, ui, &form, Step::Found)}
             match way.get() {
                 Way::Browser(provider) => {browser_way(__scope, state, provider)},
                 Way::Password => {password_way(__scope, state)},
@@ -298,9 +272,7 @@ fn browser_way(state: State, provider: OAuthProvider) -> NodeHandle {
     let takes_passwords = ui.form.get().found.takes_passwords;
     rsx! {
         div { class: "dialog",
-            p { class: "settings-hint",
-                {format!("{name} signs you in in your browser. Postrinch keeps only a token, in the system keyring, and never sees your password.")}
-            }
+            {browser_hint(__scope, name)}
             {error_line(__scope, ui)}
             div { class: "dialog-actions",
                 if takes_passwords {
@@ -314,10 +286,34 @@ fn browser_way(state: State, provider: OAuthProvider) -> NodeHandle {
     }
 }
 
+/// What the browser sign-in does with the person's password.
+pub fn browser_hint(__scope: &mut RenderScope, name: &str) -> NodeHandle {
+    rsx! {
+        p { class: "settings-hint",
+            {format!("{name} signs you in in your browser. Postrinch keeps only a token, in the system keyring, and never sees your password.")}
+        }
+    }
+}
+
 #[component]
 fn password_way(state: State) -> NodeHandle {
     let ui = state.adding;
-    let form = ui.form.get();
+    rsx! {
+        div { class: "dialog",
+            {password_body(__scope, ui, &ui.form.get())}
+            {error_line(__scope, ui)}
+            div { class: "dialog-actions",
+                span { class: "add-spacer" }
+                Button { variant: "default", size: "sm", onclick: move || ui.go(Step::Address), "Back" }
+                Button { variant: "filled", size: "sm", onclick: move || ui.add(state), "Add account" }
+            }
+        }
+    }
+}
+
+/// The password, or app password with the provider's page for making
+/// one, and the trust asked for servers nobody vouches for.
+pub fn password_body(__scope: &mut RenderScope, ui: AddUi, form: &AddForm) -> NodeHandle {
     let app_page = form.found.app_password_url.clone();
     let who = form
         .found
@@ -346,12 +342,6 @@ fn password_way(state: State) -> NodeHandle {
                     checked_fn: move || ui.form.get().trusted,
                     onchange: move || ui.edit(|f| f.trusted = !f.trusted),
                 }
-            }
-            {error_line(__scope, ui)}
-            div { class: "dialog-actions",
-                span { class: "add-spacer" }
-                Button { variant: "default", size: "sm", onclick: move || ui.go(Step::Address), "Back" }
-                Button { variant: "filled", size: "sm", onclick: move || ui.add(state), "Add account" }
             }
         }
     }

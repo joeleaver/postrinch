@@ -18,6 +18,7 @@ postrinch-render = { path = "crates/postrinch-render" }
 postrinch-rules = { path = "crates/postrinch-rules" }
 postrinch-store = { path = "crates/postrinch-store" }
 postrinch-sync = { path = "crates/postrinch-sync" }
+postrinch-thunderbird = { path = "crates/postrinch-thunderbird" }
 postrinch-update = { path = "crates/postrinch-update" }
 
 # rinch, from its repository's main branch: rinch-html (HtmlView, the

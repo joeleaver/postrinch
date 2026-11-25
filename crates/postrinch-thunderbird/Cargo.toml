@@ -1,0 +1,15 @@
+[package]
+name = "postrinch-thunderbird"
+description = "Postrinch's reading of Thunderbird's account settings, for importing them: profiles.ini and prefs.js only, never passwords."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# O_NOFOLLOW, so a settings file that is a link is refused by the open
+# itself (files.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -4604,6 +4604,7 @@ dependencies = [
  "postrinch-rules",
  "postrinch-store",
  "postrinch-sync",
+ "postrinch-thunderbird",
  "postrinch-update",
  "reqwest",
  "rinch",
@@ -4852,6 +4853,14 @@ dependencies = [
  "tracing",
  "url",
  "wiremock",
+]
+
+[[package]]
+name = "postrinch-thunderbird"
+version = "0.1.34"
+dependencies = [
+ "libc",
+ "tempfile",
 ]
 
 [[package]]
