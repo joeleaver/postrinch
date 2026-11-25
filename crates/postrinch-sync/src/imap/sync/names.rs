@@ -50,6 +50,14 @@ impl Command {
         Some(Self(pieces))
     }
 
+    /// Adds a space and another folder name at the end (`RENAME`'s
+    /// second argument); `None` when the name cannot be sent.
+    pub(super) fn then_mailbox(mut self, name: &str) -> Option<Self> {
+        self.0.push(Piece::Text(" ".to_owned()));
+        self.0.push(mailbox(name)?);
+        Some(self)
+    }
+
     /// Adds text at the end.
     pub(super) fn then(mut self, text: &str) -> Self {
         self.0.push(Piece::Text(text.to_owned()));
@@ -184,6 +192,28 @@ mod tests {
         );
         let big = Command::plain("APPEND x ").literal(vec![b'a'; 5000]);
         assert_eq!(big.wire(false, true).first, "APPEND x {5000}");
+    }
+
+    #[test]
+    fn a_second_name_follows_the_first() {
+        let c = Command::with_mailbox("RENAME", "Work")
+            .and_then(|c| c.then_mailbox("Entwürfe"))
+            .unwrap();
+        let wire = c.wire(false, false);
+        assert_eq!(wire.first, "RENAME \"Work\" {9}");
+        assert_eq!(
+            wire.rest,
+            [Line {
+                bytes: "Entwürfe".as_bytes().to_vec(),
+                wait: true
+            }]
+        );
+        assert!(
+            Command::with_mailbox("RENAME", "a")
+                .unwrap()
+                .then_mailbox("a\0")
+                .is_none()
+        );
     }
 
     #[test]

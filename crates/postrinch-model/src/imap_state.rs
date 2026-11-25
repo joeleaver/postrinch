@@ -84,3 +84,22 @@ pub struct ImapPlace {
     #[serde(default)]
     pub arrived: Option<Timestamp>,
 }
+
+/// A `UID COPY` or `UID MOVE` of a message into a folder whose copy the
+/// server has not been seen to make: written before the command and
+/// removed once the copy is found or known not to have been made. It is
+/// never a copy: it never keeps a message nor lets another copy be
+/// deleted; it only stops the copy being made twice (docs/imap.md,
+/// "Keeping every message safe").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImapCopyAttempt {
+    /// The label id of the folder the copy was to be made in.
+    pub folder: String,
+    /// The message copied.
+    pub message: ProviderMessageId,
+    /// The folder's UIDVALIDITY on the server just before the command.
+    pub uidvalidity: u32,
+    /// The folder's UIDNEXT on the server just before the command: the
+    /// copy, if made, has this UID or a higher one.
+    pub uidnext: u32,
+}

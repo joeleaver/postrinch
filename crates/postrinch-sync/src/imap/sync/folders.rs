@@ -3,7 +3,8 @@
 //! person's choices in the account's settings win over what the server
 //! says, and every other folder keeps the id minted when it was first
 //! seen. Gmail's virtual `\Flagged` and `\Important` folders are left out:
-//! the flags carry what they mirror.
+//! the flags carry what they mirror. So is a `\All` folder anywhere but
+//! Gmail ([`view_of_all`]).
 
 use postrinch_model::{
     FolderRole, FolderRoles, ImapFolder, Label, LabelKind, LabelVisibility, SystemLabel,
@@ -75,7 +76,8 @@ impl Role {
     }
 
     /// Whether a folder's special use names this role. `\All` is the
-    /// archive only where there is no `\Archive` (Gmail's All Mail).
+    /// archive only where there is no `\Archive`; it is listed only on
+    /// Gmail, where it is All Mail ([`view_of_all`]).
     fn special_use(self, special: SpecialUse, has_archive: bool) -> bool {
         matches!(
             (self, special),
@@ -172,6 +174,21 @@ fn rank(role: Option<FolderRole>) -> u8 {
         Some(FolderRole::System(SystemLabel::Trash)) => 5,
         Some(FolderRole::System(_)) => 6,
     }
+}
+
+/// The capability by which Gmail says it is Gmail.
+pub(super) const GMAIL: &str = "X-GM-EXT-1";
+
+/// Whether a listed folder is a `\All` folder of a server other than
+/// Gmail (`gmail`, the [`GMAIL`] capability). Gmail's All Mail holds a copy
+/// of every message, kept when every other label goes. Elsewhere a `\All`
+/// folder (Dovecot's `virtual/All` and the like) is a view of the mail in
+/// the other folders: its "copies" are those folders' messages, so a copy
+/// deleted from it, or the last real copy deleted because it seemed to
+/// stay there, is the message lost. Such a folder is not synced, and the
+/// outbox never counts it as keeping a message.
+pub(super) fn view_of_all(folder: &ListedFolder, gmail: bool) -> bool {
+    !gmail && folder.special_use == Some(SpecialUse::All)
 }
 
 /// Whether a listed folder is synced: it can be selected, and is not one

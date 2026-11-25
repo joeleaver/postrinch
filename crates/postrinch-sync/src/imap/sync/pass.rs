@@ -31,10 +31,10 @@ use postrinch_model::{EmailAddress, ImapFolder};
 
 use super::ImapSync;
 use super::folder_error::{FolderError, FolderResult};
-use super::folders::{Planned, plan};
+use super::folders::{GMAIL, Planned, plan, view_of_all};
 use super::names::sendable;
 use super::wire::Conn;
-use super::{pending, reads};
+use super::{changes, pending, reads};
 use crate::SyncResult;
 use crate::google::{Phase, Progress, ProgressFn, SyncReport};
 
@@ -60,6 +60,8 @@ impl ImapSync {
             }
             ok
         });
+        let gmail = conn.offers(GMAIL);
+        listed.retain(|folder| !view_of_all(folder, gmail));
         let roles = self.settings(account).await?.roles;
         let a = account.clone();
         let stored = self.with_store(move |s| s.imap_folders(&a)).await?;
@@ -247,5 +249,7 @@ fn finish(
     let mut known = unread.clone();
     known.extend(keep.iter().cloned());
     let floor = reads::settle(store, account, &known, &unread, pass)?;
-    pending::resolve(store, account, floor)
+    let removed = pending::resolve(store, account, floor)?;
+    changes::sweep_attempts(store, account)?;
+    Ok(removed)
 }

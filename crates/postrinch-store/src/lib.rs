@@ -20,6 +20,7 @@ mod error;
 mod faults;
 mod find;
 mod format;
+mod imap_attempts;
 mod imap_state;
 mod keys;
 mod labels;
@@ -83,6 +84,10 @@ pub struct Store {
     /// Held while an account's IMAP settings are written, or read and
     /// written back (sent_filing.rs).
     account_lock: Arc<Mutex<()>>,
+    /// Held while an account's sync cursor is read, changed and written
+    /// back ([`Store::update_sync_cursor`]), as several connections of one
+    /// account change it.
+    cursor_lock: Arc<Mutex<()>>,
     /// How many writes have gone through since the store opened.
     writes: Arc<AtomicU64>,
     /// Each account's label stats, with [`Store::writes`] as it was when

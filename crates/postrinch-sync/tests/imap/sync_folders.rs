@@ -62,7 +62,8 @@ async fn the_persons_choice_of_folder_wins() {
 
 #[tokio::test]
 async fn gmail_all_mail_is_the_archive_and_one_message_has_both_labels() {
-    let f = fixture().await;
+    // Gmail says so with X-GM-EXT-1; elsewhere `\All` is a view, not synced.
+    let f = fixture_with(ImapConfig::new().gmail(true), FolderRoles::default()).await;
     f.user.create_noselect_folder("[Gmail]").unwrap();
     f.user
         .create_special_folder("[Gmail]/All Mail", SpecialUse::All)

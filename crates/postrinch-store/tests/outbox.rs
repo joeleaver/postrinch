@@ -110,6 +110,10 @@ fn failures_are_counted_and_entries_can_be_dropped() {
     store.outbox_failed(entry, "still offline").unwrap();
     let e = &store.outbox(&me).unwrap()[0];
     assert_eq!((e.attempts, e.error.as_deref()), (2, Some("still offline")));
+    // A wait says why, and is not counted.
+    store.outbox_waits(entry, "busy").unwrap();
+    let e = &store.outbox(&me).unwrap()[0];
+    assert_eq!((e.attempts, e.error.as_deref()), (2, Some("busy")));
     store.outbox_sent(entry).unwrap();
     assert_eq!(
         store.outbox(&me).unwrap()[0].error,

@@ -25,6 +25,39 @@ pub(super) fn decode(name: &str) -> String {
     try_decode(name).unwrap_or_else(|| name.to_owned())
 }
 
+/// A folder name as the server spells it, for a name the person typed:
+/// printable ASCII as it is (`&` as `&-`), every run of other characters
+/// as `&`, its UTF-16 in modified BASE64, and `-`.
+pub(super) fn encode(name: &str) -> String {
+    let engine = engine();
+    let mut out = String::with_capacity(name.len());
+    let mut run: Vec<u16> = Vec::new();
+    let flush = |run: &mut Vec<u16>, out: &mut String| {
+        if run.is_empty() {
+            return;
+        }
+        let bytes: Vec<u8> = run.iter().flat_map(|unit| unit.to_be_bytes()).collect();
+        out.push('&');
+        out.push_str(&engine.encode(bytes));
+        out.push('-');
+        run.clear();
+    };
+    for c in name.chars() {
+        if (' '..='~').contains(&c) {
+            flush(&mut run, &mut out);
+            out.push(c);
+            if c == '&' {
+                out.push('-');
+            }
+        } else {
+            let mut units = [0u16; 2];
+            run.extend_from_slice(c.encode_utf16(&mut units));
+        }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
 fn try_decode(name: &str) -> Option<String> {
     let engine = engine();
     let mut out = String::with_capacity(name.len());
@@ -57,7 +90,22 @@ fn try_decode(name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::decode;
+    use super::{decode, encode};
+
+    #[test]
+    fn encodes_rfc_examples_and_others() {
+        assert_eq!(
+            encode("~peter/mail/台北/日本語"),
+            "~peter/mail/&U,BTFw-/&ZeVnLIqe-"
+        );
+        assert_eq!(encode("Отправленные"), "&BB4EQgQ,BEAEMAQyBDsENQQ9BD0ESwQ1-");
+        assert_eq!(encode("Tom & Jerry"), "Tom &- Jerry");
+        assert_eq!(encode("Entwürfe"), "Entw&APw-rfe");
+        assert_eq!(encode("Plain"), "Plain");
+        for name in ["Fächer/Ärger", "😀 Fun", "a&b&", "Tab\there"] {
+            assert_eq!(decode(&encode(name)), name, "{name}");
+        }
+    }
 
     #[test]
     fn decodes_rfc_examples_and_others() {

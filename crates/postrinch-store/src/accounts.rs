@@ -113,6 +113,23 @@ impl Store {
         Ok(())
     }
 
+    /// Reads the sync position, changes it with `change` and writes back
+    /// what it returns, with no other `update_sync_cursor` of any account
+    /// in between: callers that change different parts of one cursor from
+    /// different connections lose none of each other's changes. `change`
+    /// may use the store, but not this method. Nothing is written when it
+    /// fails.
+    pub fn update_sync_cursor<T, E: From<StoreError>>(
+        &self,
+        address: &EmailAddress,
+        change: impl FnOnce(Option<String>) -> Result<(Option<String>, T), E>,
+    ) -> Result<T, E> {
+        let _held = self.cursor_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let (cursor, out) = change(self.sync_cursor(address)?)?;
+        self.set_sync_cursor(address, cursor.as_deref())?;
+        Ok(out)
+    }
+
     /// Remove an account with its labels, threads, messages and IMAP
     /// folder state (the relations cascade). Raw messages stay in the blob
     /// store; [`Store::collect_garbage`] removes them.
@@ -194,6 +211,31 @@ mod tests {
             store.sync_cursor(&address).unwrap().as_deref(),
             Some("12345")
         );
+    }
+
+    #[test]
+    fn sync_cursor_updates_lose_nothing_to_each_other() {
+        let (_dir, store) = store();
+        let address = EmailAddress::parse("ada@example.org").unwrap();
+        store
+            .put_account(&Account::new(address.clone(), Provider::Imap))
+            .unwrap();
+        let count = |store: &Store, address: &EmailAddress| {
+            for _ in 0..200 {
+                store
+                    .update_sync_cursor(address, |raw| {
+                        let n: u32 = raw.map_or(0, |r| r.parse().unwrap());
+                        Ok::<_, StoreError>((Some((n + 1).to_string()), ()))
+                    })
+                    .unwrap();
+            }
+        };
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| count(&store, &address));
+            }
+        });
+        assert_eq!(store.sync_cursor(&address).unwrap().as_deref(), Some("800"));
     }
 
     #[test]

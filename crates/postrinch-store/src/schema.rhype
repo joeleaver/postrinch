@@ -248,6 +248,7 @@ type ImapFolder {
     // RFC 8474 MAILBOXID, or null where the server has none.
     mailbox_id: String
     places: [ImapPlace] @inverse(ImapPlace.folder)
+    attempts: [ImapCopyAttempt] @inverse(ImapCopyAttempt.folder)
 }
 
 // One copy of a message on an IMAP server: a UID in a folder
@@ -271,4 +272,22 @@ type ImapPlace {
     modseq: u64
     // The copy's INTERNALDATE; absent when the server gave none.
     arrived: DateTime
+}
+
+// A COPY or MOVE of a message into a folder whose copy the server has not
+// been seen to make (imap_attempts.rs): it stops the copy being made twice,
+// and is never counted as a copy. Its one to-one relation is its folder, so
+// removing the folder, or the account, removes it.
+type ImapCopyAttempt {
+    // "<folder key>\u001f<message provider id>".
+    key: String @unique
+    folder: ImapFolder @on_delete(cascade)
+    label_id: String
+    // "<account address key>\u001f<message provider id>", indexed to find
+    // a message's.
+    message: String @indexed
+    // The folder's UIDVALIDITY and UIDNEXT on the server just before the
+    // command.
+    uidvalidity: u32
+    uidnext: u32
 }

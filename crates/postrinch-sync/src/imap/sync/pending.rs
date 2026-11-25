@@ -34,7 +34,7 @@ use crate::SyncResult;
 pub(super) fn begin_pass(store: &Store, account: &EmailAddress) -> SyncResult<u64> {
     cursor::update(store, account, |c| {
         c.pass += 1;
-        c.pass
+        Ok(c.pass)
     })
 }
 
@@ -52,6 +52,7 @@ pub(super) fn mark<'a>(
     cursor::update(store, account, |c| {
         let pass = c.pass;
         c.pending.extend(ids.map(|id| (id.0.clone(), pass)));
+        Ok(())
     })
 }
 
@@ -98,11 +99,11 @@ pub(super) fn note_missing(
         for id in missing {
             c.missing.entry(id.clone()).or_insert(pass);
         }
-        c.missing
+        Ok(c.missing
             .iter()
             .filter(|&(_, since)| *since < pass)
             .map(|(id, _)| id.clone())
-            .collect()
+            .collect())
     })
 }
 
@@ -111,23 +112,23 @@ pub(super) fn note_missing(
 /// [`super::reads::settle`]) that still has no live copy, and stops
 /// waiting for the ones that have one again. Returns how many went.
 pub(super) fn resolve(store: &Store, account: &EmailAddress, floor: u64) -> SyncResult<usize> {
-    let mut cursor = cursor::read(store, account)?;
-    let mut removed = 0;
-    let mut waiting = BTreeMap::new();
-    for (id, since) in std::mem::take(&mut cursor.pending) {
-        let message = ProviderMessageId(id);
-        let places = store.imap_message_places(account, &message)?;
-        if summary(&places).is_some() || !store.has_message(account, &message)? {
-            continue;
+    cursor::update(store, account, |cursor| {
+        let mut removed = 0;
+        let mut waiting = BTreeMap::new();
+        for (id, since) in std::mem::take(&mut cursor.pending) {
+            let message = ProviderMessageId(id);
+            let places = store.imap_message_places(account, &message)?;
+            if summary(&places).is_some() || !store.has_message(account, &message)? {
+                continue;
+            }
+            if since < floor {
+                store.remove_message(account, &message)?;
+                removed += 1;
+            } else {
+                waiting.insert(message.0, since);
+            }
         }
-        if since < floor {
-            store.remove_message(account, &message)?;
-            removed += 1;
-        } else {
-            waiting.insert(message.0, since);
-        }
-    }
-    cursor.pending = waiting;
-    cursor::write(store, account, &cursor)?;
-    Ok(removed)
+        cursor.pending = waiting;
+        Ok(removed)
+    })
 }
