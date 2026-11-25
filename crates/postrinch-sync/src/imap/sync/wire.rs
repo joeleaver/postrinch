@@ -29,7 +29,7 @@ use super::folder_error::{FolderError, FolderResult};
 use super::names::Command;
 pub(super) use super::uids::uid_set;
 use crate::imap::connect::{describe, within};
-use crate::imap::refusal::BusyScope;
+use crate::imap::refusal::{BusyScope, names_connections};
 use crate::imap::reply::ImapStream;
 use crate::imap::session::{ImapSession, imap_error};
 use crate::{SyncError, SyncResult};
@@ -138,6 +138,9 @@ impl Conn {
                 return Err(SyncError::Busy {
                     service: "IMAP",
                     server: self.describe(),
+                    // `[INUSE]` or `[UNAVAILABLE]`: the connection count
+                    // comes in words, which make it the account's.
+                    connections: false,
                     message,
                 });
             }
@@ -360,6 +363,10 @@ impl Conn {
                             Some(BusyScope::Account) => Err(SyncError::Busy {
                                 service: "IMAP",
                                 server: describe(&server),
+                                connections: names_connections(
+                                    code_name(outcome.code.as_ref(), &text).as_deref(),
+                                    &text,
+                                ),
                                 message: text,
                             }),
                             Some(BusyScope::Folder) => Ok(Done::FolderBusy(text)),

@@ -156,6 +156,21 @@ impl ImapServer {
         self.shared.notify();
     }
 
+    /// Ends every IDLE under way now with `* BYE <text>` and closes its
+    /// connection, as a server going down, or one turning the account
+    /// away, would. Sessions not idling are left alone.
+    pub fn bye_idling(&self, text: &str) {
+        let mut state = self.shared.lock();
+        state.idle_bye = (state.idle_bye.0 + 1, text.to_string());
+        drop(state);
+        self.shared.notify();
+    }
+
+    /// How many sessions are in an IDLE now.
+    pub fn idling(&self) -> usize {
+        self.shared.lock().idling
+    }
+
     /// Every command received so far, in order, without tags, literals
     /// shown as `{n}` and LOGIN's credentials hidden: for example
     /// `UID FETCH 1:* (FLAGS) (CHANGEDSINCE 4)`.

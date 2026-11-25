@@ -102,6 +102,7 @@ impl Session {
         // An I/O error ends the session as a closed connection would; the
         // test sees it from the client side.
         let _ = self.serve().await;
+        self.sign_out();
         self.conn.close().await;
     }
 

@@ -82,6 +82,7 @@ pub struct ImapConfig {
     pub(crate) splits_fetches: bool,
     pub(crate) unsolicited_fetches: bool,
     pub(crate) gmail: bool,
+    pub(crate) max_connections: Option<usize>,
 }
 
 impl Default for ImapConfig {
@@ -100,6 +101,7 @@ impl Default for ImapConfig {
             splits_fetches: false,
             unsolicited_fetches: false,
             gmail: false,
+            max_connections: None,
         }
     }
 }
@@ -176,6 +178,15 @@ impl ImapConfig {
     /// exceeded` this way. Off by default.
     pub fn greets_with_bye(mut self, text: &str) -> Self {
         self.bye_greeting = Some(text.to_string());
+        self
+    }
+
+    /// Lets each user have at most `max` sessions signed in at once, as
+    /// Dovecot's `mail_max_userip_connections` does: one more sign-in is
+    /// answered `NO [LIMIT] Maximum number of connections from user+IP
+    /// exceeded`. No limit by default.
+    pub fn max_connections(mut self, max: usize) -> Self {
+        self.max_connections = Some(max);
         self
     }
 

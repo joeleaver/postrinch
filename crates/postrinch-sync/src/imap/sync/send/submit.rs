@@ -206,6 +206,7 @@ async fn rcpt(
             service: "SMTP",
             server: describe(server),
             message: format!("{recipient}: too many recipients"),
+            connections: false,
         })),
         RcptAnswer::PutOff => Ok(Rcpt::PutOff(reply_text(&error))),
         RcptAnswer::TooMany | RcptAnswer::Other => {

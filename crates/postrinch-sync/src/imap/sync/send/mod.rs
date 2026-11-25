@@ -155,6 +155,7 @@ impl ImapSync {
                         service: "SMTP",
                         server,
                         message: why,
+                        connections: false,
                     });
                 }
                 Ok(Delivery::Skipped) => {}

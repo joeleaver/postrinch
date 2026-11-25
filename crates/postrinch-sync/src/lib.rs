@@ -31,7 +31,7 @@ pub use accounts::check_address_free;
 pub use backoff::Backoff;
 pub use compose::{build_message, outgoing_message_id};
 pub use error::{SyncError, SyncResult};
-pub use events::{KeepOptions, SyncEvent, SyncEventFn};
+pub use events::{IdleOptions, KeepOptions, SyncEvent, SyncEventFn};
 pub use mail::MailSync;
 pub use mime::{Envelope, parse_headers, parse_message};
 pub use oauth::OAuthTimeouts;

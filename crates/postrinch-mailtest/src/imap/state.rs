@@ -60,6 +60,13 @@ pub(crate) struct State {
     pub(crate) log: Vec<LoggedCommand>,
     /// Raised to drop every open session.
     pub(crate) kill_epoch: u64,
+    /// How many sessions each user has signed in.
+    pub(crate) signed_in: HashMap<String, usize>,
+    /// How many sessions are IDLEing now.
+    pub(crate) idling: usize,
+    /// Raised, with the words, to end every IDLE begun before with a
+    /// `BYE` ([`super::ImapServer::bye_idling`]).
+    pub(crate) idle_bye: (u64, String),
 }
 
 impl State {
@@ -71,6 +78,9 @@ impl State {
             hooks: Vec::new(),
             log: Vec::new(),
             kill_epoch: 0,
+            signed_in: HashMap::new(),
+            idling: 0,
+            idle_bye: (0, String::new()),
             config: config.clone(),
         };
         for user in &config.users {

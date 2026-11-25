@@ -9,7 +9,7 @@
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use super::capabilities::Capabilities;
-use super::refusal::is_busy;
+use super::refusal::{is_busy, names_connections};
 use super::reply::{Status, Tagged};
 use crate::{SyncError, SyncResult};
 
@@ -48,6 +48,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreAuth<S> {
             return SyncError::Busy {
                 service: "IMAP",
                 server: self.server.clone(),
+                connections: names_connections(bye.code.as_deref(), &bye.text),
                 message: bye.text,
             };
         }

@@ -163,10 +163,12 @@ impl ImapSync {
 /// A folder's busy answer is the server busy for what a send does there.
 fn folder_error(conn: &Conn, error: FolderError) -> SyncError {
     match error {
+        // About the folder, never the connection count.
         FolderError::Busy(message) => SyncError::Busy {
             service: "IMAP",
             server: conn.describe(),
             message,
+            connections: false,
         },
         FolderError::Sync(e) => e,
     }

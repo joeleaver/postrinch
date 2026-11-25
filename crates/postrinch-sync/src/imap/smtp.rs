@@ -342,6 +342,7 @@ pub(super) fn server_error(server: &Server, error: &lettre::transport::smtp::Err
             service: "SMTP",
             server: describe(server),
             message: reply_text(error),
+            connections: false,
         };
     }
     SyncError::Server {

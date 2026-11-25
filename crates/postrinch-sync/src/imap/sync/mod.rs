@@ -13,7 +13,8 @@
 //! Connections are few and kept: per account, one for passes and
 //! backfill, one for what the person opens and one for outgoing mail,
 //! each reused while the server keeps it open (Gmail allows about 15 at
-//! once per account).
+//! once per account), and one that IDLEs on the inbox where the server
+//! offers it ([`idle`]).
 
 mod account_settings;
 mod accounts;
@@ -25,6 +26,8 @@ mod fetch;
 mod folder_error;
 mod folders;
 mod headers;
+mod idle;
+mod idle_wire;
 mod marks;
 mod names;
 mod pass;
@@ -51,9 +54,12 @@ pub use self::accounts::{
     Added, NewImapAccount, NewSignIn, OnGrant, OpenBrowser, SignInCancel, SignInCanceller,
     sign_in_cancel,
 };
+pub(crate) use self::idle::Idler;
+use self::idle::Releases;
+pub(crate) use self::idle_wire::Idled;
 pub use self::send::SentLookup;
 use self::wire::Conn;
-use super::{AccessTokens, BusyGate, Connector, ImapSecrets, ImapSession};
+use super::{AccessTokens, BusyGate, Connector, ImapSecrets};
 use crate::{ProgressFn, SyncReport};
 use crate::{SyncError, SyncResult};
 
@@ -108,6 +114,8 @@ pub struct ImapSync {
     sent_lookup: SentLookup,
     /// The accounts' busy servers' waits, for the keep-in-sync loops.
     busy: BusyGate,
+    /// Tells each account's IDLE loop when its connections are let go.
+    releases: Releases,
 }
 
 impl ImapSync {
@@ -127,6 +135,7 @@ impl ImapSync {
             lanes: Arc::default(),
             sent_lookup: SentLookup::default(),
             busy: BusyGate::default(),
+            releases: Releases::default(),
         }
     }
 
@@ -176,8 +185,10 @@ impl ImapSync {
     }
 
     /// Forgets the account's kept connections, signing out of them, as
-    /// when the account is removed or its settings change.
+    /// when the account is removed or its settings change. Its IDLE
+    /// connection goes too ([`Self::released`]).
     pub async fn disconnect(&self, account: &EmailAddress) {
+        self.releases.release(account);
         let lanes = self
             .lanes
             .lock()
@@ -258,17 +269,7 @@ impl ImapSync {
 
     /// Connects and signs in to the account's server.
     async fn open(&self, account: &EmailAddress) -> SyncResult<Conn> {
-        let settings = self.settings(account).await?;
-        let secret = self.secrets.get(account).await?;
-        let session = ImapSession::open(
-            &self.connector,
-            account,
-            &settings,
-            &secret,
-            self.tokens.as_ref(),
-        )
-        .await?;
-        let mut conn = Conn::new(session);
+        let mut conn = Conn::new(self.open_session(account).await?);
         conn.enable_qresync().await?;
         Ok(conn)
     }

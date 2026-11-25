@@ -20,8 +20,10 @@ impl MailSync {
     /// Sync every signed-in account, again and again, until the future is
     /// dropped: Google accounts one after another, as Gmail's quota is the
     /// account's; IMAP accounts each on their own, polled every
-    /// [`KeepOptions::interval`], a busy server waited out with a growing
-    /// wait ([`crate::SyncEvent::Busy`]). Notifying `wake` starts every
+    /// [`KeepOptions::interval`] and woken at once by an IDLE on the inbox
+    /// where the server offers it (polled every
+    /// [`crate::IdleOptions::interval`] while that IDLE is begun), a busy
+    /// server waited out with a growing wait ([`crate::SyncEvent::Busy`]). Notifying `wake` starts every
     /// account's next pass at once (a busy server's wait excepted): after
     /// an account signs in, or when the person asks.
     pub async fn keep_in_sync(&self, options: KeepOptions, events: SyncEventFn, wake: Arc<Notify>) {
