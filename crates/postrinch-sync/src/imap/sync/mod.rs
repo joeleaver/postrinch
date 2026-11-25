@@ -60,6 +60,9 @@ struct Lanes {
     /// Filing sent mail and keeping drafts ([`send`]), so they never
     /// wait behind a pass either.
     outgoing: Slot,
+    /// Held while the account's outgoing mail is delivered, so two
+    /// deliveries never take the same message ([`send`]).
+    sending: Arc<AsyncMutex<()>>,
 }
 
 /// A connection taken from its slot while a call uses it.
@@ -209,6 +212,12 @@ impl ImapSync {
             held.keep();
         }
         result
+    }
+
+    /// The lock an account's deliveries take turns on.
+    fn sending(&self, account: &EmailAddress) -> Arc<AsyncMutex<()>> {
+        let mut lanes = self.lanes.lock().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(&lanes.entry(account.key()).or_default().sending)
     }
 
     fn slot(&self, account: &EmailAddress, lane: Lane) -> Slot {

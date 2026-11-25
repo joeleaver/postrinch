@@ -7,16 +7,21 @@
 //! ([`SendStage`]) and decides what the next one does: a message whose
 //! data reached the server without an answer is looked for in Sent, never
 //! sent blind; one the server took is only filed, never sent again.
+//!
+//! One delivery per account at a time: [`ImapSync::send_outgoing`] holds
+//! the account's sending lock while it works, so two callers never take
+//! the same message; the second waits, then finds what is left.
 
 mod drafts;
 mod mailbox;
 mod sent;
 mod submit;
+mod transmit;
 
 use std::time::Duration;
 
-use postrinch_model::{EmailAddress, ImapSettings, ProviderMessageId};
-use postrinch_store::{Outgoing, OutgoingKind, SendStage};
+use postrinch_model::{EmailAddress, ProviderMessageId};
+use postrinch_store::{Outgoing, OutgoingKind};
 
 use super::{ImapSync, Lane};
 use crate::compose::outgoing_message_id;
@@ -39,6 +44,11 @@ impl Default for SentLookup {
         }
     }
 }
+
+/// How many sends in a row may look in Sent for the copy a provider said
+/// to file sent mail makes, and not find it, before Postrinch files sent
+/// mail itself: one slow lookup is not enough to tell.
+const SENT_MISSES_ALLOWED: u32 = 3;
 
 /// What became of one piece of outgoing mail, short of a failure to try
 /// again.
@@ -63,6 +73,19 @@ struct Built {
     id: ProviderMessageId,
     /// Its bytes, `Bcc` included (as Sent and Drafts keep it).
     raw: Vec<u8>,
+    /// The attachments no longer on this computer, by name: left out of
+    /// `raw`, which then goes nowhere but Sent.
+    missing: Vec<String>,
+}
+
+impl Built {
+    /// Why it cannot go out as the person made it: an attachment gone
+    /// from this computer (the person must take it out or attach it
+    /// again).
+    fn incomplete(&self) -> Option<String> {
+        let name = self.missing.first()?;
+        Some(format!("{name} is no longer on this computer"))
+    }
 }
 
 impl ImapSync {
@@ -72,7 +95,12 @@ impl ImapSync {
     /// here, for the next call, and is returned (a server too busy is
     /// [`SyncError::Busy`]; a refused sign-in also marks the account as
     /// needing to sign in). Returns how many were delivered.
+    ///
+    /// Calls for one account take turns, so a message never goes twice
+    /// because two deliveries read it waiting at once.
     pub async fn send_outgoing(&self, account: &EmailAddress) -> SyncResult<usize> {
+        let sending = self.sending(account);
+        let _turn = sending.lock().await;
         let owner = account.clone();
         let waiting = self.with_store(move |s| s.outgoing_for(&owner)).await?;
         let mut delivered = 0;
@@ -113,19 +141,22 @@ impl ImapSync {
         let settings = stored
             .and_then(|a| a.imap)
             .ok_or_else(|| SyncError::Config(format!("{account} is not an IMAP account")))?;
-        let built = match self.build(outgoing, from_name.as_deref()).await? {
-            Ok(built) => built,
-            Err(why) => return Ok(Delivery::Refused(why)),
-        };
+        let built = self.build(outgoing, from_name.as_deref()).await?;
+        let replaced = self
+            .replaced(account, outgoing.draft.replaces.as_ref())
+            .await?;
         match outgoing.kind {
             OutgoingKind::Send => {
-                self.send_message(account, &settings, outgoing, &built)
+                self.send_message(account, &settings, outgoing, &built, &replaced)
                     .await
             }
             OutgoingKind::Keep => {
-                let replaces = outgoing.draft.replaces.as_ref();
+                // Kept without an attachment, the draft would lose it.
+                if let Some(why) = built.incomplete() {
+                    return Ok(Delivery::Refused(why));
+                }
                 self.over(account, Lane::Outgoing, async |conn| {
-                    self.keep_draft(conn, account, &settings, &built, replaces)
+                    self.keep_draft(conn, account, &settings, &built, &replaced)
                         .await
                 })
                 .await
@@ -134,48 +165,47 @@ impl ImapSync {
         }
     }
 
-    /// The message a queued draft makes, or why it cannot be made (an
-    /// attachment gone from this computer: the person must take it out
-    /// or attach it again).
-    async fn build(
-        &self,
-        outgoing: &Outgoing,
-        from_name: Option<&str>,
-    ) -> SyncResult<Result<Built, String>> {
+    /// The message a queued draft makes, without the attachments no
+    /// longer on this computer ([`Built::missing`]): such a message is
+    /// only filed (one already delivered), never sent or kept.
+    async fn build(&self, outgoing: &Outgoing, from_name: Option<&str>) -> SyncResult<Built> {
         let header = outgoing_message_id(outgoing);
         let wanted = outgoing.draft.attachments.clone();
         let files = self
             .with_store(move |s| {
                 wanted
                     .iter()
-                    .map(|a| s.attachment_bytes(&a.blob).map(|b| (a.name.clone(), b)))
+                    .map(|a| s.attachment_bytes(&a.blob))
                     .collect::<Result<Vec<_>, _>>()
             })
             .await?;
+        let mut draft = outgoing.draft.clone();
         let mut bytes = Vec::with_capacity(files.len());
-        for (name, file) in files {
-            let Some(file) = file else {
-                return Ok(Err(format!("{name} is no longer on this computer")));
-            };
-            bytes.push(file);
+        let mut missing = Vec::new();
+        let mut present = Vec::with_capacity(files.len());
+        for (attachment, file) in outgoing.draft.attachments.iter().zip(files) {
+            match file {
+                Some(file) => {
+                    bytes.push(file);
+                    present.push(attachment.clone());
+                }
+                None => missing.push(attachment.name.clone()),
+            }
         }
-        let raw = build_message(&outgoing.draft, from_name, &header, &bytes);
-        Ok(Ok(Built {
+        draft.attachments = present;
+        let raw = build_message(&draft, from_name, &header, &bytes);
+        Ok(Built {
             id: message_id(&outgoing.draft.account, &header),
             header,
             raw,
-        }))
-    }
-
-    /// Records how far sending a message got.
-    async fn set_stage(&self, id: u64, stage: SendStage) -> SyncResult<()> {
-        self.with_store(move |s| s.outgoing_stage(id, stage)).await
+            missing,
+        })
     }
 
     /// How a send looks for a message in Sent: with the waits when the
     /// provider files sent mail itself, otherwise once.
-    fn sent_waits(&self, settings: &ImapSettings) -> &[Duration] {
-        if settings.server_files_sent {
+    fn sent_waits(&self, server_files_sent: bool) -> &[Duration] {
+        if server_files_sent {
             &self.sent_lookup.waits
         } else {
             &[]

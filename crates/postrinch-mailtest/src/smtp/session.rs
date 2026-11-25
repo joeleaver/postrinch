@@ -372,6 +372,11 @@ impl Session {
             self.reply(501, "5.5.4 Syntax: RCPT TO:<address>").await?;
             return Ok(Next::Continue);
         };
+        let most = self.shared.lock().config.max_recipients;
+        if most.is_some_and(|most| self.transaction.to.len() >= most) {
+            self.reply(452, "4.5.3 Too many recipients").await?;
+            return Ok(Next::Continue);
+        }
         self.transaction.to.push(to);
         self.reply(250, "2.1.5 OK").await?;
         Ok(Next::Continue)

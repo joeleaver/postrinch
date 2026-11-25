@@ -67,6 +67,13 @@ pub struct Outgoing {
     /// How far sending it got; always [`SendStage::Queued`] for Google
     /// accounts.
     pub stage: SendStage,
+    /// The recipients the server took it for in earlier transactions,
+    /// when it was sent in parts because the server takes only so many
+    /// recipients at once: it never goes to them again.
+    pub delivered_to: Vec<EmailAddress>,
+    /// While it is [`SendStage::DataSent`]: the recipients of the
+    /// transaction whose data went without an answer.
+    pub sending_to: Vec<EmailAddress>,
 }
 
 impl Store {
@@ -141,10 +148,46 @@ impl Store {
         self.db_update(TYPE, id, fields.build())
     }
 
+    /// Its data is about to go to `to`: [`SendStage::DataSent`], for
+    /// them.
+    pub fn outgoing_sending(&self, id: u64, to: &[EmailAddress]) -> StoreResult<()> {
+        let fields = FieldsBuilder::new()
+            .json("stage", &SendStage::DataSent)
+            .json("sending_to", &to);
+        self.db_update(TYPE, id, fields.build())
+    }
+
+    /// The server took it for `delivered` (everyone it went to so far),
+    /// in one write with how far sending it got now: `stage` is
+    /// [`SendStage::Queued`] while some recipients are left,
+    /// [`SendStage::Delivered`] once none are.
+    pub fn outgoing_delivered(
+        &self,
+        id: u64,
+        delivered: &[EmailAddress],
+        stage: SendStage,
+    ) -> StoreResult<()> {
+        let fields = FieldsBuilder::new()
+            .json("stage", &stage)
+            .json("delivered_to", &delivered)
+            .null("sending_to");
+        self.db_update(TYPE, id, fields.build())
+    }
+
+    /// An attempt stopped before its data went: [`SendStage::Queued`],
+    /// keeping whom earlier transactions delivered it to.
+    pub fn outgoing_not_sent(&self, id: u64) -> StoreResult<()> {
+        let fields = FieldsBuilder::new()
+            .json("stage", &SendStage::Queued)
+            .null("sending_to");
+        self.db_update(TYPE, id, fields.build())
+    }
+
     /// The person asked for mail waiting for them to be tried again: its
-    /// error is forgotten and, if it may have gone, it is queued as new.
-    /// Mail the server took stays [`SendStage::Delivered`]: only filing
-    /// it is tried again, as it is never sent twice.
+    /// error is forgotten and, if it may have gone, it is queued as new,
+    /// for everyone earlier transactions did not deliver it to. Mail the
+    /// server took stays [`SendStage::Delivered`]: only filing it is
+    /// tried again, as it is never sent twice.
     pub fn outgoing_send_again(&self, id: u64) -> StoreResult<()> {
         let stage = decode(&self.get(TYPE, id)?)?.stage;
         let stage = match stage {
@@ -153,6 +196,7 @@ impl Store {
         };
         let fields = FieldsBuilder::new()
             .json("stage", &stage)
+            .null("sending_to")
             .null("error")
             .bool("refused", false);
         self.db_update(TYPE, id, fields.build())
@@ -179,6 +223,8 @@ fn decode(fields: &Fields) -> StoreResult<Outgoing> {
         error: fields.opt_str("error")?,
         refused: fields.bool("refused")?,
         stage: fields.opt_json("stage")?.unwrap_or_default(),
+        delivered_to: fields.opt_json("delivered_to")?.unwrap_or_default(),
+        sending_to: fields.opt_json("sending_to")?.unwrap_or_default(),
     })
 }
 
@@ -242,6 +288,43 @@ mod tests {
         assert_eq!(
             (again.stage, again.refused, again.error.as_deref()),
             (SendStage::Queued, false, None)
+        );
+        // Sent in parts: whom each part went to is kept.
+        let (ada, bob) = (draft.to[0].address.clone(), me.clone());
+        store
+            .outgoing_sending(first, std::slice::from_ref(&ada))
+            .unwrap();
+        let sending = &store.outgoing_for(&me).unwrap()[0];
+        assert_eq!(
+            (sending.stage, sending.sending_to.clone()),
+            (SendStage::DataSent, vec![ada.clone()])
+        );
+        store
+            .outgoing_delivered(first, std::slice::from_ref(&ada), SendStage::Queued)
+            .unwrap();
+        store
+            .outgoing_sending(first, std::slice::from_ref(&bob))
+            .unwrap();
+        store.outgoing_send_again(first).unwrap();
+        let parted = &store.outgoing_for(&me).unwrap()[0];
+        assert_eq!(
+            (
+                parted.stage,
+                parted.delivered_to.clone(),
+                parted.sending_to.clone()
+            ),
+            (SendStage::Queued, vec![ada.clone()], vec![])
+        );
+        store.outgoing_sending(first, &[bob]).unwrap();
+        store.outgoing_not_sent(first).unwrap();
+        let stopped = &store.outgoing_for(&me).unwrap()[0];
+        assert_eq!(
+            (
+                stopped.stage,
+                stopped.delivered_to.clone(),
+                stopped.sending_to.is_empty()
+            ),
+            (SendStage::Queued, vec![ada], true)
         );
         store.outgoing_stage(first, SendStage::Delivered).unwrap();
         store

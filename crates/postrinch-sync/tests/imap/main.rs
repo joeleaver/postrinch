@@ -15,6 +15,8 @@ mod oauth_tokens;
 mod secrets;
 mod send;
 mod send_drafts;
+mod send_filing;
+mod send_parts;
 mod send_support;
 mod smtp;
 mod smtp_limits;

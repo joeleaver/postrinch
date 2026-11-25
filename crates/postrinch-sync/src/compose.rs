@@ -24,7 +24,7 @@ pub const MARKER_HEADER: &str = "X-Postrinch-Id";
 /// The `Message-ID` (without brackets) a queued message goes out with:
 /// the same every attempt, so a send that may have gone through is found
 /// rather than sent again.
-pub(crate) fn outgoing_message_id(outgoing: &Outgoing) -> String {
+pub fn outgoing_message_id(outgoing: &Outgoing) -> String {
     format!(
         "postrinch.{}.{}@{}",
         outgoing.created.as_millis(),

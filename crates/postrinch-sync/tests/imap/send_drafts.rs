@@ -1,9 +1,10 @@
 //! Keeping drafts in an IMAP account's Drafts folder: kept, kept again in
 //! place of the old one, and deleted when the draft is sent.
 
-use postrinch_mailtest::NewMessage;
+use postrinch_mailtest::{ImapFault, NewMessage};
 use postrinch_store::OutgoingKind;
 use postrinch_sync::imap::message_id;
+use postrinch_sync::outgoing_message_id;
 
 use crate::send_support::{SendFixture, header_of, message_id_header, send_fixture};
 
@@ -101,4 +102,57 @@ async fn sending_a_draft_deletes_it() {
         assert_eq!(f.folder("Sent").len(), 1, "uidplus {uidplus}");
         assert_eq!(f.smtp.messages().len(), 1, "uidplus {uidplus}");
     }
+}
+
+#[tokio::test]
+async fn a_keep_the_server_refused_does_not_strand_the_draft_before_it() {
+    let f = send_fixture(true, false).await;
+    keep(&f, "Thursday", None).await;
+    let first = only_draft(&f);
+    f.sync().await;
+
+    // Kept again, but the server is full: it waits for the person.
+    let mut draft = f.draft("Thursday, later");
+    draft.replaces = Some(message_id(&f.me, &first));
+    f.queue(&draft, OutgoingKind::Keep);
+    let full = ImapFault::No("[OVERQUOTA] Mailbox is full".into());
+    f.imap.fail_next("APPEND", 1, full);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    let refused = f.waiting();
+    assert!(refused.refused);
+    assert_eq!(only_draft(&f), first);
+
+    // Kept once more, in place of the one the window last kept, which
+    // never got there: the one that did is deleted.
+    let never_kept = outgoing_message_id(&refused);
+    keep(&f, "Thursday, last", Some(&never_kept)).await;
+    let last = only_draft(&f);
+    assert!(last != first && last != never_kept);
+    assert!(f.outgoing().is_empty(), "the refused Keep is out of date");
+}
+
+#[tokio::test]
+async fn sending_in_place_of_a_refused_keep_deletes_the_draft_before_it() {
+    let f = send_fixture(true, false).await;
+    keep(&f, "Thursday", None).await;
+    let first = only_draft(&f);
+    f.sync().await;
+    let mut draft = f.draft("Thursday, later");
+    draft.replaces = Some(message_id(&f.me, &first));
+    f.queue(&draft, OutgoingKind::Keep);
+    f.imap.fail_next(
+        "APPEND",
+        1,
+        ImapFault::No("[OVERQUOTA] Mailbox is full".into()),
+    );
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    let never_kept = outgoing_message_id(&f.waiting());
+
+    let mut send = f.draft("Thursday, sent");
+    send.replaces = Some(message_id(&f.me, &never_kept));
+    f.queue(&send, OutgoingKind::Send);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert!(f.folder("Drafts").is_empty());
+    assert_eq!(f.folder("Sent").len(), 1);
+    assert!(f.outgoing().is_empty());
 }

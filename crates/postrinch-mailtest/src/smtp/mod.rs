@@ -96,6 +96,7 @@ pub struct SmtpConfig {
     mechanisms: BTreeSet<Mechanism>,
     users: Vec<SmtpUser>,
     challenges_again: bool,
+    max_recipients: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -115,6 +116,7 @@ impl Default for SmtpConfig {
             mechanisms: Mechanism::DEFAULT.into_iter().collect(),
             users: Vec::new(),
             challenges_again: false,
+            max_recipients: None,
         }
     }
 }
@@ -194,11 +196,21 @@ impl SmtpConfig {
         self.max_size = bytes;
         self
     }
+
+    /// Takes at most `count` recipients in one transaction, answering
+    /// any RCPT beyond them `452 4.5.3 Too many recipients` (RFC 5321
+    /// 4.5.3.1.10). By default there is no limit.
+    pub fn max_recipients(mut self, count: usize) -> Self {
+        self.max_recipients = Some(count);
+        self
+    }
 }
 
 #[derive(Debug)]
 struct PendingFault {
     stage: SmtpStage,
+    /// How many submissions reach `stage` unharmed first.
+    skip: usize,
     remaining: usize,
     fault: SmtpFault,
 }
@@ -221,6 +233,10 @@ impl SmtpState {
             .iter()
             .position(|f| f.stage == stage && f.remaining > 0)?;
         let pending = &mut self.faults[i];
+        if pending.skip > 0 {
+            pending.skip -= 1;
+            return None;
+        }
         pending.remaining -= 1;
         let fault = pending.fault.clone();
         if pending.remaining == 0 {
@@ -368,12 +384,24 @@ impl SmtpServer {
     /// If `fault` is [`SmtpFault::StoreThenDisconnect`] and `stage` is not
     /// [`SmtpStage::Data`]: only DATA has a message to store.
     pub fn fail_next(&self, stage: SmtpStage, times: usize, fault: SmtpFault) {
+        self.fail_after(stage, 0, times, fault);
+    }
+
+    /// As [`SmtpServer::fail_next`], once `skip` submissions have reached
+    /// `stage` unharmed: `fail_after(SmtpStage::Mail, 1, 1, ...)` fails
+    /// the second MAIL only.
+    ///
+    /// # Panics
+    ///
+    /// As [`SmtpServer::fail_next`].
+    pub fn fail_after(&self, stage: SmtpStage, skip: usize, times: usize, fault: SmtpFault) {
         assert!(
             stage == SmtpStage::Data || fault != SmtpFault::StoreThenDisconnect,
             "StoreThenDisconnect only applies at SmtpStage::Data"
         );
         self.shared.lock().faults.push(PendingFault {
             stage,
+            skip,
             remaining: times,
             fault,
         });

@@ -3,10 +3,12 @@
 //! synced the folders once, and the sync, which looks in Sent briefly.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use postrinch_mailtest::{
-    Extension, ImapConfig, ImapServer, MessageInfo, NewMessage, SmtpConfig, SmtpServer, UserHandle,
+    Extension, ImapConfig, ImapServer, MessageInfo, NewMessage, SmtpConfig, SmtpFault, SmtpServer,
+    UserHandle,
 };
 use postrinch_model::{
     Account, Draft, EmailAddress, ImapSettings, Mailbox, Provider, ProviderMessageId, Security,
@@ -22,6 +24,7 @@ use postrinch_sync::imap::{
 use super::support::{PASSWORD, Tokens, USER, account, server, settings};
 
 pub const TO: &str = "bob@example.net";
+pub const CC: &str = "carol@example.net";
 pub const BCC: &str = "eve@example.net";
 
 pub struct SendFixture {
@@ -37,6 +40,16 @@ pub struct SendFixture {
 /// A send fixture whose IMAP server offers everything (`uidplus`), or
 /// everything but UIDPLUS; `server_files_sent` is the account's setting.
 pub async fn send_fixture(uidplus: bool, server_files_sent: bool) -> SendFixture {
+    send_fixture_with(uidplus, server_files_sent, SmtpConfig::new()).await
+}
+
+/// As [`send_fixture`], with the SMTP server set up as `smtp` says (its
+/// user is added).
+pub async fn send_fixture_with(
+    uidplus: bool,
+    server_files_sent: bool,
+    smtp: SmtpConfig,
+) -> SendFixture {
     let mut config = ImapConfig::new();
     if !uidplus {
         config = config.without(Extension::Uidplus);
@@ -44,9 +57,7 @@ pub async fn send_fixture(uidplus: bool, server_files_sent: bool) -> SendFixture
     let imap = ImapServer::start(config.user(USER, PASSWORD))
         .await
         .unwrap();
-    let smtp = SmtpServer::start(SmtpConfig::new().user(USER, PASSWORD))
-        .await
-        .unwrap();
+    let smtp = SmtpServer::start(smtp.user(USER, PASSWORD)).await.unwrap();
     let user = imap.user(USER);
     user.create_standard_folders().unwrap();
     let me = account();
@@ -112,6 +123,13 @@ impl SendFixture {
         draft
     }
 
+    /// A draft to [`TO`], copied to [`CC`] and blind-copied to [`BCC`].
+    pub fn draft_for_three(&self, subject: &str) -> Draft {
+        let mut draft = self.draft(subject);
+        draft.cc = vec![Mailbox::new(None, EmailAddress::parse(CC).unwrap())];
+        draft
+    }
+
     pub fn queue(&self, draft: &Draft, kind: OutgoingKind) -> u64 {
         self.store.queue_outgoing(draft, kind).unwrap()
     }
@@ -153,8 +171,17 @@ impl SendFixture {
 
     /// Plays a provider that files the mail it sends in Sent itself.
     pub fn files_sent_mail(&self) {
+        self.files_sent_mail_while(Arc::new(AtomicBool::new(true)));
+    }
+
+    /// Plays a provider that files the mail it sends in Sent itself while
+    /// `on` is.
+    pub fn files_sent_mail_while(&self, on: Arc<AtomicBool>) {
         let user = self.user.clone();
         self.smtp.on_accept(move |message| {
+            if !on.load(Ordering::SeqCst) {
+                return;
+            }
             user.append(
                 "Sent",
                 NewMessage::new(message.data.clone()).flags(&["\\Seen"]),
@@ -171,6 +198,14 @@ impl SendFixture {
             .iter()
             .filter(|c| c.starts_with(verb))
             .count()
+    }
+}
+
+/// A programmed SMTP answer.
+pub fn reply(code: u16, text: &str) -> SmtpFault {
+    SmtpFault::Reply {
+        code,
+        text: text.into(),
     }
 }
 

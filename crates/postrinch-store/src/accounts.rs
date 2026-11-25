@@ -40,6 +40,7 @@ impl Store {
     /// Add an account, or replace what is stored about it. Its labels,
     /// messages and sync position are kept.
     pub fn put_account(&self, account: &Account) -> StoreResult<()> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
         let key = account.address.key();
         let fields = || {
             FieldsBuilder::new()
@@ -82,11 +83,14 @@ impl Store {
     }
 
     /// Replace an IMAP account's settings, and nothing else about it.
+    /// Sending changes one of them by itself with
+    /// [`Store::sent_copy_filed`] and [`Store::server_files_sent`].
     pub fn set_imap_settings(
         &self,
         address: &EmailAddress,
         settings: &ImapSettings,
     ) -> StoreResult<()> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
         let id = self.account_id(address)?;
         let fields = FieldsBuilder::new().json("imap", settings).build();
         self.db_update(TYPE, id, fields)?;

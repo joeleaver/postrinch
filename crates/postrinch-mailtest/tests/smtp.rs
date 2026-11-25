@@ -314,3 +314,25 @@ async fn ehlo_and_starttls_replies() {
     assert_eq!(plain.ask("EHLO client").await, "421 4.7.0 Try again later");
     assert_eq!(plain.line().await, None);
 }
+
+#[tokio::test]
+async fn too_many_recipients_in_one_transaction() {
+    let config = SmtpConfig::new().user("bob", "hunter2").max_recipients(1);
+    let server = SmtpServer::start(config).await.unwrap();
+    let t = transport(&server, Port::Implicit, "bob", "hunter2", Mechanism::Plain);
+    // lettre gives up at the 452 rather than send in parts.
+    let error = send(&t).await.unwrap_err();
+    assert_eq!(error.status().map(u16::from), Some(452), "{error}");
+    assert!(server.messages().is_empty());
+}
+
+#[tokio::test]
+async fn a_fault_after_some_submissions_went_through() {
+    let server = server().await;
+    let t = transport(&server, Port::Implicit, "bob", "hunter2", Mechanism::Plain);
+    server.fail_after(SmtpStage::Mail, 1, 1, reply(451, "4.3.0 Not now"));
+    send(&t).await.unwrap();
+    assert!(send(&t).await.unwrap_err().is_transient());
+    send(&t).await.unwrap();
+    assert_eq!(server.messages().len(), 2);
+}

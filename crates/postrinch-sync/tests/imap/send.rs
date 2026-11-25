@@ -5,14 +5,7 @@ use postrinch_mailtest::{SmtpFault, SmtpStage};
 use postrinch_store::{OutgoingKind, SendStage};
 use postrinch_sync::SyncError;
 
-use crate::send_support::{BCC, TO, header, send_fixture};
-
-fn reply(code: u16, text: &str) -> SmtpFault {
-    SmtpFault::Reply {
-        code,
-        text: text.into(),
-    }
-}
+use crate::send_support::{BCC, TO, header, reply, send_fixture};
 
 /// The header block of a message.
 fn head(raw: &[u8]) -> String {
@@ -69,24 +62,8 @@ async fn a_server_that_files_sent_mail_is_not_given_a_second_copy() {
 }
 
 #[tokio::test]
-async fn a_server_said_to_file_sent_mail_that_does_not_gets_the_copy_and_the_setting_off() {
-    let f = send_fixture(true, true).await;
-    f.queue(&f.draft("Thursday"), OutgoingKind::Send);
-    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
-    assert_eq!(f.folder("Sent").len(), 1);
-    assert!(!f.settings().server_files_sent);
-
-    // From now on it is filed without looking first.
-    let searches = f.imap_commands("UID SEARCH");
-    f.queue(&f.draft("Friday"), OutgoingKind::Send);
-    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
-    assert_eq!(f.folder("Sent").len(), 2);
-    assert_eq!(f.imap_commands("UID SEARCH"), searches);
-}
-
-#[tokio::test]
-async fn a_busy_server_before_the_data_is_taken_is_tried_again() {
-    for stage in [SmtpStage::Mail, SmtpStage::Rcpt, SmtpStage::Data] {
+async fn a_busy_server_before_the_data_is_tried_again() {
+    for stage in [SmtpStage::Mail, SmtpStage::Rcpt] {
         let f = send_fixture(true, false).await;
         f.queue(&f.draft("Thursday"), OutgoingKind::Send);
         f.smtp
@@ -198,5 +175,72 @@ async fn a_delivered_message_whose_filing_failed_is_only_filed() {
     assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
     assert_eq!(f.smtp.command_count("MAIL"), 0, "never sent again");
     assert_eq!(f.folder("Sent").len(), 1);
+    assert!(f.outgoing().is_empty());
+}
+
+#[tokio::test]
+async fn a_busy_answer_after_the_end_of_the_data_is_tried_again() {
+    let f = send_fixture(true, false).await;
+    f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    f.smtp
+        .fail_next(SmtpStage::Data, 1, reply(451, "4.3.0 Try again later"));
+    let failed = f.sync.send_outgoing(&f.me).await;
+    assert!(
+        matches!(
+            failed,
+            Err(SyncError::Busy {
+                service: "SMTP",
+                ..
+            })
+        ),
+        "{failed:?}"
+    );
+    let waiting = f.waiting();
+    assert_eq!(
+        (waiting.attempts, waiting.refused, waiting.stage),
+        (1, false, SendStage::Queued)
+    );
+    assert!(f.smtp.messages().is_empty());
+    assert!(f.folder("Sent").is_empty());
+
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.smtp.messages().len(), 1, "delivered once");
+    assert_eq!(f.folder("Sent").len(), 1);
+    assert!(f.outgoing().is_empty());
+}
+
+#[tokio::test]
+async fn a_refusal_after_the_end_of_the_data_waits_for_the_person() {
+    let f = send_fixture(true, false).await;
+    f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    f.smtp.fail_next(
+        SmtpStage::Data,
+        1,
+        reply(554, "5.7.1 Message refused as spam"),
+    );
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    let waiting = f.waiting();
+    assert_eq!(
+        (waiting.attempts, waiting.refused, waiting.stage),
+        (1, true, SendStage::Queued)
+    );
+    let error = waiting.error.unwrap();
+    assert!(error.contains("refused as spam"), "{error}");
+    assert!(f.smtp.messages().is_empty());
+
+    let datas = f.smtp.command_count("DATA");
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    assert_eq!(f.smtp.command_count("DATA"), datas, "not tried again");
+    assert!(f.folder("Sent").is_empty());
+}
+
+#[tokio::test]
+async fn two_deliveries_at_once_send_a_message_once() {
+    let f = send_fixture(true, false).await;
+    f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    let (one, two) = tokio::join!(f.sync.send_outgoing(&f.me), f.sync.send_outgoing(&f.me));
+    assert_eq!(one.unwrap() + two.unwrap(), 1);
+    assert_eq!(f.smtp.messages().len(), 1, "sent once");
+    assert_eq!(f.folder("Sent").len(), 1, "filed once");
     assert!(f.outgoing().is_empty());
 }

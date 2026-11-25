@@ -244,6 +244,12 @@ pub(super) async fn find(conn: &mut Conn, header: &str) -> SyncResult<Vec<u32>> 
 /// Deletes the copies `uids` in the selected folder: `\Deleted`, then
 /// `UID EXPUNGE` (UIDPLUS); without UIDPLUS a plain `EXPUNGE`, but only
 /// when no other copy there is marked `\Deleted`.
+///
+/// Without UIDPLUS this has a race no client can close: another client
+/// may mark a message `\Deleted` between the `UID SEARCH DELETED` and the
+/// `EXPUNGE`, which then takes it too. It only goes sooner than its owner
+/// would have expunged it, as that client meant it to go (docs/imap.md,
+/// "Writing and sending").
 pub(super) async fn delete(conn: &mut Conn, uids: &[u32]) -> SyncResult<Deleted> {
     let set = uid_set(uids);
     let mark = Command::plain(format!("UID STORE {set} +FLAGS.SILENT (\\Deleted)"));

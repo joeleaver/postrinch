@@ -1,7 +1,9 @@
-//! One message over SMTP, in two steps so the caller can record when its
+//! One SMTP transaction, in two steps so the caller can record when its
 //! data is about to go ([`begin`]: MAIL, RCPT, DATA; then [`data`]), and
 //! with what each answer means for sending it again (docs/imap.md,
-//! "Writing and sending").
+//! "Writing and sending"). A server that takes only so many recipients at
+//! once says so at RCPT; [`begin`] then goes on with those it took, and
+//! the caller sends to the rest in another transaction.
 //!
 //! lettre's own `send` cannot be used: it reports every failure alike, and
 //! the one thing that matters here is whether the message may have
@@ -11,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use lettre::Address;
-use lettre::transport::smtp::commands::{Data, Mail, Rcpt};
+use lettre::transport::smtp::commands::{Data, Mail, Rcpt as Command};
 use lettre::transport::smtp::extension::{Extension, MailBodyParameter, MailParameter};
 use lettre::transport::smtp::response::{Response, Severity};
 use postrinch_model::{EmailAddress, Server};
@@ -38,17 +40,26 @@ pub(super) enum Submitted {
     Uncertain(String),
 }
 
+/// "Too many recipients" (RFC 5321 4.5.3.1.10), the answer to a RCPT
+/// beyond what the server takes in one transaction.
+const TOO_MANY_RECIPIENTS: u16 = 452;
+
 /// MAIL FROM `from`, RCPT TO each of `to`, DATA, up to the server's 354.
-/// `Err` is [`Submitted::Failed`] or [`Submitted::Refused`]: nothing has
-/// gone. Any refused recipient refuses the message, naming the address,
-/// so it never goes to some of its recipients only.
+/// Returns how many of `to`, from the first, the transaction is for: all
+/// of them, or fewer when the server answered a RCPT with "too many
+/// recipients" (452) after taking some, as RFC 5321 4.5.3.1.10 has a
+/// client then send to those and the rest in another transaction. `Err`
+/// is [`Submitted::Failed`] or [`Submitted::Refused`]: nothing has gone
+/// in this transaction. Any refused recipient refuses the message, naming
+/// the address, so this transaction never goes to some of its recipients
+/// only.
 pub(super) async fn begin(
     smtp: &mut SmtpConnection,
     limit: Duration,
     from: &EmailAddress,
     to: &[EmailAddress],
     message: &[u8],
-) -> Result<(), Submitted> {
+) -> Result<usize, Submitted> {
     let server = smtp.server().clone();
     let info = smtp.inner().server_info();
     let mut parameters = Vec::new();
@@ -72,12 +83,24 @@ pub(super) async fn begin(
         parameters.push(MailParameter::Body(MailBodyParameter::EightBitMime));
     }
     let mail = Mail::new(Some(address(from)?), parameters);
-    step(smtp, &server, limit, mail, None).await?;
+    step(smtp, &server, limit, mail).await?;
+    let mut taken = 0;
     for recipient in to {
-        let rcpt = Rcpt::new(address(recipient)?, Vec::new());
-        step(smtp, &server, limit, rcpt, Some(recipient)).await?;
+        match rcpt(smtp, &server, limit, recipient).await? {
+            Rcpt::Taken => taken += 1,
+            // None taken: the server can take nobody now, which is it
+            // busy (a 4xx), to try again later.
+            Rcpt::TooMany if taken == 0 => {
+                return Err(Submitted::Failed(SyncError::Busy {
+                    service: "SMTP",
+                    server: describe(&server),
+                    message: format!("{recipient}: too many recipients"),
+                }));
+            }
+            Rcpt::TooMany => break,
+        }
     }
-    let answer = step(smtp, &server, limit, Data, None).await?;
+    let answer = step(smtp, &server, limit, Data).await?;
     if !answer.has_code(354) {
         return Err(Submitted::Failed(SyncError::Server {
             service: "SMTP",
@@ -85,7 +108,7 @@ pub(super) async fn begin(
             message: format!("DATA was answered {}", answer.code()),
         }));
     }
-    Ok(())
+    Ok(taken)
 }
 
 /// Sends the message's data, after [`begin`].
@@ -130,13 +153,40 @@ pub(super) async fn data(smtp: &mut SmtpConnection, limit: Duration, message: &[
     }
 }
 
+/// How the server answered one RCPT, short of refusing it.
+enum Rcpt {
+    Taken,
+    /// "Too many recipients": the transaction takes no more.
+    TooMany,
+}
+
+/// RCPT TO `recipient`.
+async fn rcpt(
+    smtp: &mut SmtpConnection,
+    server: &Server,
+    limit: Duration,
+    recipient: &EmailAddress,
+) -> Result<Rcpt, Submitted> {
+    let command = Command::new(address(recipient)?, Vec::new());
+    let connection = smtp.inner();
+    let answered = within(limit, server, "starting the message", async {
+        Ok(connection.command(command).await)
+    })
+    .await;
+    match answered {
+        Ok(Ok(_)) => Ok(Rcpt::Taken),
+        Ok(Err(e)) if e.status().map(u16::from) == Some(TOO_MANY_RECIPIENTS) => Ok(Rcpt::TooMany),
+        Ok(Err(e)) => Err(refused_or_failed(server, e, Some(recipient))),
+        Err(e) => Err(Submitted::Failed(e)),
+    }
+}
+
 /// Sends one command of the envelope and reads its answer.
 async fn step(
     smtp: &mut SmtpConnection,
     server: &Server,
     limit: Duration,
     command: impl std::fmt::Display,
-    recipient: Option<&EmailAddress>,
 ) -> Result<Response, Submitted> {
     let connection = smtp.inner();
     let answered = within(limit, server, "starting the message", async {
@@ -145,7 +195,7 @@ async fn step(
     .await;
     match answered {
         Ok(Ok(answer)) => Ok(answer),
-        Ok(Err(e)) => Err(refused_or_failed(server, e, recipient)),
+        Ok(Err(e)) => Err(refused_or_failed(server, e, None)),
         Err(e) => Err(Submitted::Failed(e)),
     }
 }

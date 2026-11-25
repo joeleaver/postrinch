@@ -1,33 +1,33 @@
-//! Sending a message and filing it in Sent (docs/imap.md, "Writing and
-//! sending").
+//! Filing a delivered message in Sent, and looking there for one whose
+//! data went without an answer (docs/imap.md, "Writing and sending").
 //!
-//! How far an attempt got is recorded with the message ([`SendStage`]):
-//! `DataSent` just before its data goes, `Delivered` once the server took
-//! it. A message whose data went without an answer (the connection lost,
-//! or the app stopped) is looked for in Sent by its `Message-ID`; found,
-//! it was delivered, otherwise it waits for the person, as it may have
-//! gone. A delivered message is filed in Sent (APPEND, `\Seen`) unless
-//! the provider files it itself; a provider said to, that has not a
-//! moment later, gets the copy and its setting turned off. Then the draft
-//! it came from is deleted.
+//! A message whose data went without an answer (the connection lost, or
+//! the app stopped) is looked for in Sent by its `Message-ID`; found, it
+//! was delivered, otherwise it waits for the person, as it may have gone.
+//! A delivered message is filed in Sent (APPEND, `\Seen`) unless the
+//! provider files it itself. A provider said to that has not a moment
+//! later gets the copy, and after several such misses in a row its
+//! setting is turned off; one whose setting is off that files the
+//! message all the same is seen to, and its setting comes back on
+//! (`Store::sent_copy_filed`, `Store::server_files_sent`). Then the
+//! drafts it came from are deleted, whether or not Sent kept the copy:
+//! the message went.
 
 use std::time::Duration;
 
 use postrinch_model::{EmailAddress, ImapSettings, SystemLabel};
-use postrinch_store::{Outgoing, SendStage};
 
 use super::super::places::SEEN;
 use super::super::wire::Conn;
+use super::drafts::Replaced;
 use super::mailbox::{self, Appended, Target};
-use super::submit::{self, Submitted};
-use super::{Built, Delivery};
+use super::{Built, Delivery, SENT_MISSES_ALLOWED};
 use crate::SyncResult;
-use crate::imap::SmtpConnection;
 use crate::imap::sync::{ImapSync, Lane};
 
 /// How a delivered message is filed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Filing {
+pub(super) enum Filing {
     /// Just delivered: appended, unless the provider files it.
     New,
     /// Delivered on an earlier attempt that did not finish: looked for
@@ -37,133 +37,88 @@ enum Filing {
     Found,
 }
 
-impl ImapSync {
-    /// Sends `outgoing` (or finishes what an earlier attempt began) and
-    /// files it.
-    pub(super) async fn send_message(
-        &self,
-        account: &EmailAddress,
-        settings: &ImapSettings,
-        outgoing: &Outgoing,
-        built: &Built,
-    ) -> SyncResult<Delivery> {
-        match outgoing.stage {
-            SendStage::Delivered => {
-                return self
-                    .after_delivery(account, settings, outgoing, built, Filing::Again)
-                    .await;
-            }
-            SendStage::DataSent => {
-                let why = "an earlier attempt sent it and heard no answer";
-                return self.settle(account, settings, outgoing, built, why).await;
-            }
-            SendStage::Queued => {}
-        }
-        let mut recipients: Vec<EmailAddress> = outgoing
-            .draft
-            .recipients()
-            .map(|m| m.address.clone())
-            .collect();
-        recipients.sort_by_key(EmailAddress::key);
-        recipients.dedup_by_key(|a| a.key());
-        let transmitted = submit::without_bcc(&built.raw);
-        let secret = self.secrets.get(account).await?;
-        let tokens = self.tokens.as_ref();
-        let mut smtp =
-            SmtpConnection::open(&self.connector, account, settings, &secret, tokens).await?;
-        let limit = self.connector.timeouts().command;
-        let submitted =
-            match submit::begin(&mut smtp, limit, account, &recipients, &transmitted).await {
-                Err(stopped) => stopped,
-                Ok(()) => match self.set_stage(outgoing.id, SendStage::DataSent).await {
-                    Ok(()) => submit::data(&mut smtp, limit, &transmitted).await,
-                    Err(e) => Submitted::Failed(e),
-                },
-            };
-        let server = crate::imap::connect::describe(smtp.server());
-        if let Err(e) = smtp.quit().await {
-            tracing::debug!("SMTP: leaving {server} failed: {e}");
-        }
-        match submitted {
-            Submitted::Accepted => {
-                self.set_stage(outgoing.id, SendStage::Delivered).await?;
-                self.after_delivery(account, settings, outgoing, built, Filing::New)
-                    .await
-            }
-            Submitted::Failed(e) => {
-                self.set_stage(outgoing.id, SendStage::Queued).await?;
-                Err(e)
-            }
-            Submitted::Refused(why) => {
-                self.set_stage(outgoing.id, SendStage::Queued).await?;
-                Ok(Delivery::Refused(why))
-            }
-            Submitted::Uncertain(detail) => {
-                tracing::warn!(
-                    "SMTP: {server} gave no answer to a message from {account}: {detail}"
-                );
-                let why = format!("the connection to {server} was lost as it went ({detail})");
-                self.settle(account, settings, outgoing, built, &why).await
-            }
-        }
-    }
+/// What looking in Sent for a transaction that went without an answer
+/// showed.
+#[derive(Debug)]
+pub(super) enum Settled {
+    /// Sent has it: the transaction went.
+    Went,
+    /// It may have gone: the message waits for the person.
+    Waits(Delivery),
+}
 
-    /// A message whose data went without an answer: delivered if Sent
-    /// has it, otherwise waiting for the person, saying `why`.
-    async fn settle(
+impl ImapSync {
+    /// A transaction to `sending` whose data went without an answer: it
+    /// went if Sent has the message, otherwise the message waits for the
+    /// person, saying `why`. When earlier transactions delivered it (to
+    /// `delivered`), Sent has it from them, which says nothing of this
+    /// one: it waits for the person.
+    pub(super) async fn settle(
         &self,
         account: &EmailAddress,
         settings: &ImapSettings,
-        outgoing: &Outgoing,
         built: &Built,
+        (delivered, sending): (&[EmailAddress], &[EmailAddress]),
         why: &str,
-    ) -> SyncResult<Delivery> {
-        let waits = self.sent_waits(settings);
+    ) -> SyncResult<Settled> {
+        if !delivered.is_empty() {
+            return Ok(Settled::Waits(Delivery::MayHaveGone(format!(
+                "It went to {}; to {} it may have gone: {why}.",
+                list(delivered),
+                list(sending)
+            ))));
+        }
         let found = self
             .over(account, Lane::Outgoing, async |conn| {
                 let sent = self
                     .target(conn, account, settings, SystemLabel::Sent)
                     .await?;
-                match sent {
-                    Some(sent) => look(conn, &sent, &built.header, waits).await,
-                    None => Ok(false),
-                }
+                let Some(sent) = sent else {
+                    return Ok(false);
+                };
+                let files = self.files_sent(account, &sent).await?;
+                look(conn, &sent, &built.header, self.sent_waits(files)).await
             })
             .await?;
         if !found {
-            return Ok(Delivery::MayHaveGone(format!(
+            return Ok(Settled::Waits(Delivery::MayHaveGone(format!(
                 "It may have gone: {why}, and it is not in Sent."
-            )));
+            ))));
         }
-        self.set_stage(outgoing.id, SendStage::Delivered).await?;
-        self.after_delivery(account, settings, outgoing, built, Filing::Found)
-            .await
+        let a = account.clone();
+        self.with_store(move |s| s.sent_copy_found(&a)).await?;
+        Ok(Settled::Went)
     }
 
-    /// Files a delivered message in Sent and deletes the draft it came
-    /// from. A failure here leaves it [`SendStage::Delivered`]: the next
-    /// attempt does only this.
-    async fn after_delivery(
+    /// Files a delivered message in Sent and deletes the drafts it came
+    /// from. A failure here leaves it delivered: the next attempt does
+    /// only this.
+    pub(super) async fn after_delivery(
         &self,
         account: &EmailAddress,
         settings: &ImapSettings,
-        outgoing: &Outgoing,
         built: &Built,
+        replaced: &Replaced,
         filing: Filing,
     ) -> SyncResult<Delivery> {
         self.over(account, Lane::Outgoing, async |conn| {
-            if filing != Filing::Found
-                && let Some(refused) = self.file(conn, account, settings, built, filing).await?
-            {
-                return Ok(Delivery::Refused(refused));
-            }
-            if let Some(old) = &outgoing.draft.replaces {
-                let drafts = self.target(conn, account, settings, SystemLabel::Drafts);
-                if let Some(drafts) = drafts.await? {
-                    self.delete_draft(conn, account, &drafts, old).await?;
+            let refused = match filing {
+                Filing::Found => None,
+                Filing::New | Filing::Again => {
+                    self.file(conn, account, settings, built, filing).await?
                 }
+            };
+            let drafts = if replaced.is_empty() {
+                None
+            } else {
+                self.target(conn, account, settings, SystemLabel::Drafts)
+                    .await?
+            };
+            if let Some(drafts) = drafts {
+                self.delete_replaced(conn, account, &drafts, built, replaced)
+                    .await?;
             }
-            Ok(Delivery::Done)
+            Ok(refused.map_or(Delivery::Done, Delivery::Refused))
         })
         .await
     }
@@ -185,9 +140,19 @@ impl ImapSync {
             tracing::warn!("IMAP: {account} has no Sent folder: a sent message is not filed");
             return Ok(None);
         };
-        let look_first = settings.server_files_sent || filing == Filing::Again;
-        if look_first && look(conn, &sent, &built.header, self.sent_waits(settings)).await? {
+        let files = self.files_sent(account, &sent).await?;
+        let look_first = files || filing == Filing::Again;
+        if look_first && look(conn, &sent, &built.header, self.sent_waits(files)).await? {
+            let a = account.clone();
+            self.with_store(move |s| s.sent_copy_found(&a)).await?;
             return Ok(None);
+        }
+        if !built.missing.is_empty() {
+            tracing::warn!(
+                "IMAP: {account}: a sent message is filed in Sent without {} of its \
+                 attachments, no longer on this computer",
+                built.missing.len()
+            );
         }
         match mailbox::append(conn, &sent.name, SEEN, &built.raw).await? {
             Appended::Kept(at) => {
@@ -200,19 +165,36 @@ impl ImapSync {
                 )));
             }
         }
-        if settings.server_files_sent {
+        let (a, id) = (account.clone(), built.id.clone());
+        let turned_off = self
+            .with_store(move |s| s.sent_copy_filed(&a, &id, files, SENT_MISSES_ALLOWED))
+            .await?;
+        if turned_off {
             tracing::info!(
-                "IMAP: {account}'s server did not file a sent message in Sent; \
-                 Postrinch files them from now on"
+                "IMAP: {account}'s server did not file {SENT_MISSES_ALLOWED} sent messages \
+                 in a row in Sent; Postrinch files them from now on"
             );
-            let mut changed = settings.clone();
-            changed.server_files_sent = false;
-            let a = account.clone();
-            self.with_store(move |s| s.set_imap_settings(&a, &changed))
-                .await?;
         }
         Ok(None)
     }
+
+    /// Whether the provider files sent mail in `sent` itself, as the
+    /// account's settings say now (turned back on first if it was seen
+    /// to).
+    async fn files_sent(&self, account: &EmailAddress, sent: &Target) -> SyncResult<bool> {
+        let (a, label) = (account.clone(), sent.label.clone());
+        self.with_store(move |s| s.server_files_sent(&a, label.as_deref()))
+            .await
+    }
+}
+
+/// Addresses, for the person to read.
+pub(super) fn list(addresses: &[EmailAddress]) -> String {
+    addresses
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Whether `target` holds the message whose `Message-ID` is `header`:

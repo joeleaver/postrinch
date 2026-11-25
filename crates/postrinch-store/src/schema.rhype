@@ -22,6 +22,9 @@ type Account {
     // The provider's sync position (Gmail's historyId), written only after
     // everything before it has been stored.
     sync_cursor: String
+    // What sends have shown about whether an IMAP account's provider files
+    // sent mail in Sent itself (sent_filing.rs); null until a send has.
+    sent_filing: Json
     labels: [Label] @inverse(Label.account)
     threads: [Thread] @inverse(Thread.account)
     imap_folders: [ImapFolder] @inverse(ImapFolder.account)
@@ -162,6 +165,11 @@ type Outgoing {
     refused: Bool
     // SendStage: how far an IMAP account's send got; null for queued.
     stage: Json
+    // The recipients (EmailAddress list) the server took it for in earlier
+    // transactions of a send split by the server's limit; null for none.
+    delivered_to: Json
+    // While `stage` is data_sent: the recipients that transaction was for.
+    sending_to: Json
 }
 
 // One account's mail rules (postrinch-rules): `settings` as the account's
