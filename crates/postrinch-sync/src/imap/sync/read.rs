@@ -15,13 +15,17 @@
 //! what it did answer is applied, and the read is marked stale, so the
 //! folder's position does not move and the next pass reads the same
 //! changes again. Nothing is taken for gone from a listing that did not
-//! come.
+//! come. Mail at or above the position that an earlier such pass (or one
+//! the server was busy in) already stored is not fetched by its headers
+//! again: it is told from new mail by the places kept, as when a folder
+//! is read whole, and only its flags are read.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use postrinch_model::{EmailAddress, ImapFolder, ImapPlace};
 
 use super::ImapSync;
+use super::folder_error::FolderResult;
 use super::headers::folder;
 use super::pending;
 use super::places::{self, Applied, FlagChange};
@@ -75,7 +79,7 @@ impl ImapSync {
         selected: &Selected,
         silent: &BTreeMap<u32, u32>,
         report: &mut SyncReport,
-    ) -> SyncResult<Read> {
+    ) -> FolderResult<Read> {
         let mut read = Read::default();
         let uids = if selected.exists == 0 {
             Vec::new()
@@ -115,25 +119,21 @@ impl ImapSync {
         selected: &Selected,
         silent: &BTreeMap<u32, u32>,
         report: &mut SyncReport,
-    ) -> SyncResult<Read> {
+    ) -> FolderResult<Read> {
         let mut read = Read::default();
         let known_end = state.uidnext - 1;
-        // New mail.
-        let more = selected.uidnext.is_none_or(|next| next > state.uidnext);
-        if selected.exists > 0 && more {
-            let listing = conn
-                .uid_fetch(&format!("{}:*", state.uidnext), "(UID)", None)
-                .await?;
-            read.stale |= listing.refused.is_some();
-            let new: Vec<u32> = listing
-                .messages
-                .iter()
-                .map(|m| m.uid)
-                .filter(|&uid| uid >= state.uidnext)
-                .collect();
-            read.highest = new.iter().copied().max();
-            read.want(new, silent);
-        }
+        let (a, s) = (account.clone(), state.clone());
+        let (kept, _) = self
+            .blocking(move |store| places::folder_places(store, &a, folder(&s)))
+            .await?;
+        // New mail, and mail at or above the position stored by a pass
+        // that did not move it.
+        let new = self.read_new(conn, account, state, selected, kept).await?;
+        let kept = new.kept;
+        read.highest = new.highest;
+        read.stale |= new.stale;
+        report.relabelled += new.relabelled;
+        read.want(new.fetch, silent);
         // Mail asked for in vain before, if it is still there.
         if selected.exists > 0 && !silent.is_empty() {
             let asked: Vec<u32> = silent.keys().copied().collect();
@@ -147,10 +147,6 @@ impl ImapSync {
             }
         }
         // Changed flags, and mail gone.
-        let (a, s) = (account.clone(), state.clone());
-        let (kept, _) = self
-            .blocking(move |store| places::folder_places(store, &a, folder(&s)))
-            .await?;
         let applied = if known_end == 0 {
             // Nothing was kept before: there is nothing to compare.
             Applied::default()
@@ -189,6 +185,73 @@ impl ImapSync {
         Ok(read)
     }
 
+    /// Lists the mail at or above the folder's position (`UIDNEXT`):
+    /// what is not kept is to be fetched by its headers, and what is (an
+    /// earlier pass stored it, then could not move the position) only
+    /// has its flags read. Kept places there that the listing does not
+    /// name are gone.
+    async fn read_new(
+        &self,
+        conn: &mut Conn,
+        account: &EmailAddress,
+        state: &ImapFolder,
+        selected: &Selected,
+        kept: Kept,
+    ) -> FolderResult<New> {
+        let from = state.uidnext;
+        if selected.exists == 0 {
+            // Nothing at or above the position is on the server.
+            let kept = self.forget_gone(account, kept, |uid| uid >= from).await?;
+            return Ok(New::none(kept));
+        }
+        // Listed only when UIDNEXT says there is new mail, or a copy is
+        // kept up there to be told present or gone (by the listing, not
+        // by UIDNEXT alone).
+        let more = selected.uidnext.is_none_or(|next| next > from);
+        if !more && !kept.keys().any(|&uid| uid >= from) {
+            return Ok(New::none(kept));
+        }
+        let listing = conn.uid_fetch(&format!("{from}:*"), "(UID)", None).await?;
+        let listed: Vec<u32> = listing
+            .messages
+            .iter()
+            .map(|m| m.uid)
+            .filter(|&uid| uid >= from)
+            .collect();
+        let highest = listed.iter().copied().max();
+        let mut stale = listing.refused.is_some();
+        let kept = if stale {
+            kept
+        } else {
+            let here: HashSet<u32> = listed.iter().copied().collect();
+            self.forget_gone(account, kept, |uid| uid >= from && !here.contains(&uid))
+                .await?
+        };
+        let (stored, mut fetch): (Vec<u32>, Vec<u32>) =
+            listed.into_iter().partition(|uid| kept.contains_key(uid));
+        if stored.is_empty() {
+            return Ok(New {
+                kept,
+                highest,
+                fetch,
+                stale,
+                relabelled: 0,
+            });
+        }
+        let (kept, applied, refused) = self.read_flags(conn, account, &stored, kept).await?;
+        stale |= refused;
+        // A copy kept without its message (it went from the store) is
+        // fetched again, as anywhere else.
+        fetch.extend(applied.fetch.into_iter().filter(|&uid| uid >= from));
+        Ok(New {
+            kept,
+            highest,
+            fetch,
+            stale,
+            relabelled: applied.relabelled,
+        })
+    }
+
     /// Reads changed flags by `CHANGEDSINCE`, and gone mail by QRESYNC's
     /// `VANISHED` (or by listing the folder's UIDs without it).
     async fn read_condstore(
@@ -199,7 +262,7 @@ impl ImapSync {
         selected: &Selected,
         kept: Kept,
         read: &mut Read,
-    ) -> SyncResult<Applied> {
+    ) -> FolderResult<Applied> {
         let known_end = state.uidnext - 1;
         let mut changes = Vec::new();
         let mut gone = UidSet::default();
@@ -266,7 +329,7 @@ impl ImapSync {
         account: &EmailAddress,
         uids: &[u32],
         mut kept: Kept,
-    ) -> SyncResult<(Kept, Applied, bool)> {
+    ) -> FolderResult<(Kept, Applied, bool)> {
         let items = flag_items(conn);
         let mut applied = Applied::default();
         let mut refused = false;
@@ -299,6 +362,33 @@ impl ImapSync {
             Ok((kept, applied))
         })
         .await
+    }
+}
+
+/// What listing the mail at or above a folder's position found.
+struct New {
+    /// The kept places left, those found gone forgotten.
+    kept: Kept,
+    /// The highest UID listed.
+    highest: Option<u32>,
+    /// The UIDs to fetch by their headers.
+    fetch: Vec<u32>,
+    /// Whether the server refused a command.
+    stale: bool,
+    /// How many stored messages changed by their flags.
+    relabelled: usize,
+}
+
+impl New {
+    /// Nothing at or above the position.
+    fn none(kept: Kept) -> Self {
+        Self {
+            kept,
+            highest: None,
+            fetch: Vec::new(),
+            stale: false,
+            relabelled: 0,
+        }
     }
 }
 

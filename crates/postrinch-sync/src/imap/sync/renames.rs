@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use postrinch_model::ImapFolder;
 
 use super::ImapSync;
+use super::folder_error::FolderError;
 use super::folders::syncable;
 use super::wire::{Conn, Selected};
 use crate::SyncResult;
@@ -53,8 +54,17 @@ impl ImapSync {
             if stored.iter().any(|s| s.name == folder.name) {
                 continue;
             }
-            if let Some(selected) = conn.examine(&folder.name).await? {
-                came.push((folder.name.clone(), selected));
+            match conn.examine(&folder.name).await {
+                Ok(Some(selected)) => came.push((folder.name.clone(), selected)),
+                // Not opened, it is matched with none: a folder of its
+                // own, read whole, as one that refuses EXAMINE.
+                Ok(None) => {}
+                Err(FolderError::Busy(message)) => tracing::info!(
+                    "IMAP: {} is busy for the folder {:?}: {message}",
+                    conn.describe(),
+                    folder.name
+                ),
+                Err(FolderError::Sync(e)) => return Err(e),
             }
         }
         Ok(match_renames(&went, &came))

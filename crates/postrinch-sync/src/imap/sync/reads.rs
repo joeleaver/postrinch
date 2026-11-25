@@ -29,8 +29,9 @@ use crate::SyncResult;
 pub(super) const STUCK_AFTER: u32 = 5;
 
 /// Passes a message may go unanswered before it is stored as one that
-/// cannot be read. A server too busy to answer stops the pass instead
-/// ([`crate::SyncError::Busy`]), so being busy never counts.
+/// cannot be read. A server too busy to answer stops the folder
+/// ([`super::folder_error::FolderError::Busy`]) or the pass
+/// ([`crate::SyncError::Busy`]) instead, so being busy never counts.
 pub(super) const SILENT_TRIES: u32 = 3;
 
 /// Notes how pass `pass` read a folder: whole, or not.

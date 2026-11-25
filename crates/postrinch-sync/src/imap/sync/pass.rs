@@ -18,12 +18,19 @@
 //! position back: it is asked for again by its UID ([`super::reads`]).
 //! Messages that went are removed once every folder has been read whole
 //! since, and folders once two LISTs left them out ([`super::pending`]).
+//!
+//! A server busy for one folder (`NO [INUSE] Mailbox is locked`) stops
+//! only that folder: it counts as not read this pass, as a refused
+//! `SELECT` does, and the pass goes on to the others. A server busy for
+//! the account ([`crate::SyncError::Busy`]) stops the pass
+//! ([`crate::imap::refusal::BusyScope`]).
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use postrinch_model::{EmailAddress, ImapFolder};
 
 use super::ImapSync;
+use super::folder_error::{FolderError, FolderResult};
 use super::folders::{Planned, plan};
 use super::names::sendable;
 use super::wire::Conn;
@@ -66,9 +73,22 @@ impl ImapSync {
                 total: planned.len(),
             });
             let state = folder.state.clone();
-            let whole = self
+            let whole = match self
                 .folder(conn, account, state, progress, &mut report)
-                .await?;
+                .await
+            {
+                Ok(whole) => whole,
+                Err(FolderError::Busy(message)) => {
+                    tracing::info!(
+                        "IMAP: {} is busy for the folder {:?} of {account}; it is read \
+                         next pass: {message}",
+                        conn.describe(),
+                        folder.state.name
+                    );
+                    false
+                }
+                Err(FolderError::Sync(e)) => return Err(e),
+            };
             let (a, label) = (account.clone(), folder.state.label_id.clone());
             self.blocking(move |s| reads::note(s, &a, &label, number, whole))
                 .await?;
@@ -101,7 +121,9 @@ impl ImapSync {
 
     /// Reads one folder. Returns whether it was read whole: `false` when
     /// the server refused to open it or a command in it, or a message in
-    /// it went unanswered.
+    /// it went unanswered. A server busy for the folder stops it where it
+    /// is ([`FolderError::Busy`]): its position does not move, and no
+    /// message counts as unanswered.
     async fn folder(
         &self,
         conn: &mut Conn,
@@ -109,7 +131,7 @@ impl ImapSync {
         mut state: ImapFolder,
         progress: &ProgressFn,
         report: &mut SyncReport,
-    ) -> SyncResult<bool> {
+    ) -> FolderResult<bool> {
         let Some(selected) = conn.select(&state.name).await? else {
             return Ok(false);
         };

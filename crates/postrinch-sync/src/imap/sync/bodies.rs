@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use postrinch_model::{EmailAddress, ImapPlace, Message, ProviderMessageId};
 use postrinch_store::Store;
 
+use super::folder_error::{FolderError, FolderResult};
 use super::places::first_copy;
 use super::wire::{Conn, Fetched, uid_set};
 use super::{ImapSync, Lane};
@@ -103,27 +104,46 @@ impl ImapSync {
         }
         let mut stored = 0;
         for (name, places) in by_folder {
-            let Some(selected) = conn.select(&name).await? else {
-                continue;
-            };
-            let current: Vec<ImapPlace> = places
-                .into_iter()
-                .filter(|p| p.uidvalidity == selected.uidvalidity)
-                .collect();
-            if current.is_empty() {
-                continue;
+            match self.download_in(conn, account, &name, places).await {
+                Ok(n) => stored += n,
+                // The bodies of that folder wait for a later download.
+                Err(FolderError::Busy(message)) => tracing::info!(
+                    "IMAP: {} is busy for the folder {name:?}: {message}",
+                    conn.describe()
+                ),
+                Err(FolderError::Sync(e)) => return Err(e),
             }
-            let uids: Vec<u32> = current.iter().map(|p| p.uid).collect();
-            let fetched = conn
-                .uid_fetch(&uid_set(&uids), "(UID BODY.PEEK[])", None)
-                .await?
-                .messages;
-            let a = account.clone();
-            stored += self
-                .blocking(move |s| store_bodies(s, &a, &name, &current, fetched))
-                .await?;
         }
         Ok(stored)
+    }
+
+    /// Downloads the bodies of these copies in one folder.
+    async fn download_in(
+        &self,
+        conn: &mut Conn,
+        account: &EmailAddress,
+        name: &str,
+        places: Vec<ImapPlace>,
+    ) -> FolderResult<usize> {
+        let Some(selected) = conn.select(name).await? else {
+            return Ok(0);
+        };
+        let current: Vec<ImapPlace> = places
+            .into_iter()
+            .filter(|p| p.uidvalidity == selected.uidvalidity)
+            .collect();
+        if current.is_empty() {
+            return Ok(0);
+        }
+        let uids: Vec<u32> = current.iter().map(|p| p.uid).collect();
+        let fetched = conn
+            .uid_fetch(&uid_set(&uids), "(UID BODY.PEEK[])", None)
+            .await?
+            .messages;
+        let (a, name) = (account.clone(), name.to_owned());
+        Ok(self
+            .blocking(move |s| store_bodies(s, &a, &name, &current, fetched))
+            .await?)
     }
 }
 

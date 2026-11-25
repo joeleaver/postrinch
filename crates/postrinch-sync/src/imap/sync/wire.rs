@@ -8,16 +8,22 @@
 //! the command timeout, so a long listing of a big folder is not cut off
 //! while the server keeps answering, and a server that stops answering
 //! cannot hang the account.
+//!
+//! A `NO` saying the server is busy ([`busy_after_sign_in`]) ends the
+//! pass when it is the account's ([`SyncError::Busy`]), and only the
+//! folder when it is the folder's ([`FolderError::Busy`]): the commands
+//! sent in a folder return a [`FolderResult`].
 
 use async_imap::imap_proto::{MailboxDatum, Response, ResponseCode, Status};
 use postrinch_model::Server;
 
 use super::fetch::Collector;
 pub(super) use super::fetch::{FetchReply, Fetched};
+use super::folder_error::{FolderError, FolderResult};
 use super::names::Command;
 pub(super) use super::uids::uid_set;
 use crate::imap::connect::{describe, within};
-use crate::imap::refusal::is_busy;
+use crate::imap::refusal::{BusyScope, busy_after_sign_in};
 use crate::imap::reply::Tagged;
 use crate::imap::session::{ImapSession, imap_error};
 use crate::{SyncError, SyncResult};
@@ -44,11 +50,24 @@ pub(super) struct Selected {
 enum Done {
     Ok,
     No(Refusal),
+    /// A `NO` saying the server is busy for the folder the command was
+    /// in ([`BusyScope::Folder`]), with its text.
+    FolderBusy(String),
 }
 
-/// A tagged `NO` that is not the server busy (that is
-/// [`SyncError::Busy`], and stops the pass to be tried again later): the
-/// server would not, or could not, do all of it.
+impl Done {
+    /// A folder's busy answer as the folder's error; the rest as it is.
+    fn in_folder(self) -> FolderResult<Self> {
+        match self {
+            Self::FolderBusy(text) => Err(FolderError::Busy(text)),
+            done => Ok(done),
+        }
+    }
+}
+
+/// A tagged `NO` that is not the server busy (that stops the folder, or
+/// the pass, to be tried again later): the server would not, or could
+/// not, do all of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Refusal {
     /// The server's text, with its response code.
@@ -101,25 +120,37 @@ impl Conn {
         let done = self
             .command("enabling QRESYNC", &enable, |_| Ok(()))
             .await?;
-        // A server refusing it is read the CONDSTORE way.
-        self.qresync = matches!(done, Done::Ok);
+        match done {
+            Done::Ok => self.qresync = true,
+            // A server refusing it is read the CONDSTORE way.
+            Done::No(_) => {}
+            // ENABLE is about the connection, not a folder.
+            Done::FolderBusy(message) => {
+                return Err(SyncError::Busy {
+                    service: "IMAP",
+                    server: self.describe(),
+                    message,
+                });
+            }
+        }
         Ok(())
     }
 
     /// `SELECT`s a folder by its name on the server, with `(CONDSTORE)`
     /// where offered. `Ok(None)` when the server refuses it (it was
     /// deleted since it was listed, or cannot be opened now), or when its
-    /// name cannot be sent back: the pass then counts the folder unread.
-    pub(super) async fn select(&mut self, name: &str) -> SyncResult<Option<Selected>> {
+    /// name cannot be sent back: the pass then counts the folder unread,
+    /// as it does a folder the server is busy for ([`FolderError::Busy`]).
+    pub(super) async fn select(&mut self, name: &str) -> FolderResult<Option<Selected>> {
         self.open("SELECT", name).await
     }
 
     /// `EXAMINE`s a folder (a read-only `SELECT`), as [`Self::select`].
-    pub(super) async fn examine(&mut self, name: &str) -> SyncResult<Option<Selected>> {
+    pub(super) async fn examine(&mut self, name: &str) -> FolderResult<Option<Selected>> {
         self.open("EXAMINE", name).await
     }
 
-    async fn open(&mut self, verb: &str, name: &str) -> SyncResult<Option<Selected>> {
+    async fn open(&mut self, verb: &str, name: &str) -> FolderResult<Option<Selected>> {
         let Some(mut command) = Command::with_mailbox(verb, name) else {
             tracing::warn!(
                 "IMAP: {} lists a folder whose name cannot be sent back: {name:?}",
@@ -154,7 +185,8 @@ impl Conn {
                 }
                 Ok(())
             })
-            .await?;
+            .await?
+            .in_folder()?;
         if let Done::No(refusal) = done {
             tracing::info!(
                 "IMAP: {} refused to open the folder {name:?}: {}",
@@ -178,12 +210,14 @@ impl Conn {
     /// messages of `set` the server answered, each once, however many
     /// responses it took ([`Collector`]). A `NO` is not an error: the
     /// reply says so ([`FetchReply::refused`]) and carries what did come.
+    /// A server busy for the folder is [`FolderError::Busy`], and what
+    /// came is not used.
     pub(super) async fn uid_fetch(
         &mut self,
         set: &str,
         items: &str,
         modifiers: Option<&str>,
-    ) -> SyncResult<FetchReply> {
+    ) -> FolderResult<FetchReply> {
         let mut command = format!("UID FETCH {set} {items}");
         if let Some(modifiers) = modifiers {
             command.push_str(&format!(" ({modifiers})"));
@@ -201,7 +235,8 @@ impl Conn {
                 }
                 Ok(())
             })
-            .await?;
+            .await?
+            .in_folder()?;
         let mut reply = collector.finish();
         if let Done::No(refusal) = done {
             tracing::info!(
@@ -216,7 +251,7 @@ impl Conn {
 
     /// `UID SEARCH <criteria>` in the selected folder, the UIDs in order;
     /// `None` when the server refuses it.
-    pub(super) async fn uid_search(&mut self, criteria: &str) -> SyncResult<Option<Vec<u32>>> {
+    pub(super) async fn uid_search(&mut self, criteria: &str) -> FolderResult<Option<Vec<u32>>> {
         let mut found = Vec::new();
         let search = Command::plain(format!("UID SEARCH {criteria}"));
         let done = self
@@ -226,7 +261,8 @@ impl Conn {
                 }
                 Ok(())
             })
-            .await?;
+            .await?
+            .in_folder()?;
         if let Done::No(refusal) = done {
             tracing::info!(
                 "IMAP: {} refused a UID SEARCH: {}",
@@ -284,12 +320,15 @@ impl Conn {
                     let text = outcome.information.as_deref().unwrap_or("").to_owned();
                     return match status {
                         Status::Ok => Ok(Done::Ok),
-                        Status::No if busy(outcome.code.as_ref(), &text) => Err(SyncError::Busy {
-                            service: "IMAP",
-                            server: describe(&server),
-                            message: text,
-                        }),
-                        Status::No => Ok(Done::No(Refusal { text })),
+                        Status::No => match busy(outcome.code.as_ref(), &text) {
+                            Some(BusyScope::Account) => Err(SyncError::Busy {
+                                service: "IMAP",
+                                server: describe(&server),
+                                message: text,
+                            }),
+                            Some(BusyScope::Folder) => Ok(Done::FolderBusy(text)),
+                            None => Ok(Done::No(Refusal { text })),
+                        },
                         _ => Err(server_error(&server, &format!("{verb} refused: {text}"))),
                     };
                 }
@@ -342,16 +381,17 @@ fn server_error(server: &Server, message: &str) -> SyncError {
     }
 }
 
-/// Whether a tagged `NO` says the server is busy ([`is_busy`]). imap-proto
-/// takes `[ALERT]` out of the text; codes it does not know (RFC 5530's
-/// among them) stay at the start of the text.
-fn busy(code: Option<&ResponseCode<'_>>, text: &str) -> bool {
+/// Whether a tagged `NO` says the server is busy, and for what
+/// ([`busy_after_sign_in`]). imap-proto takes `[ALERT]` out of the text;
+/// codes it does not know (RFC 5530's among them) stay at the start of
+/// the text.
+fn busy(code: Option<&ResponseCode<'_>>, text: &str) -> Option<BusyScope> {
     match code {
-        Some(ResponseCode::Alert) => is_busy(Some("ALERT"), text),
-        Some(_) => false,
+        Some(ResponseCode::Alert) => busy_after_sign_in(Some("ALERT"), text),
+        Some(_) => None,
         None => {
             let parsed = Tagged::parse_text(text);
-            is_busy(parsed.code.as_deref(), &parsed.text)
+            busy_after_sign_in(parsed.code.as_deref(), &parsed.text)
         }
     }
 }
@@ -372,25 +412,32 @@ mod tests {
 
     #[test]
     fn busy_refusals_are_told_from_partial_ones() {
+        use BusyScope::{Account, Folder};
         let busy_ones = [
-            (None, "[UNAVAILABLE] Try later"),
-            (None, "[LIMIT] Too many"),
-            (None, "[INUSE] Locked"),
+            (None, "[UNAVAILABLE] Try later", Folder),
+            (None, "[INUSE] Locked", Folder),
             (
                 Some(ResponseCode::Alert),
                 "Account exceeded command or bandwidth limits. (Failure)",
+                Account,
+            ),
+            (
+                None,
+                "Too many simultaneous connections. (Failure)",
+                Account,
             ),
         ];
-        for (code, text) in busy_ones {
-            assert!(busy(code.as_ref(), text), "{text}");
+        for (code, text, scope) in busy_ones {
+            assert_eq!(busy(code.as_ref(), text), Some(scope), "{text}");
         }
         let partial = [
             (None, "Some messages could not be FETCHed (Failure)"),
             (None, "[SERVERBUG] Internal error occurred"),
+            (None, "[LIMIT] Too many UIDs"),
             (Some(ResponseCode::Alert), "Mailbox is broken"),
         ];
         for (code, text) in partial {
-            assert!(!busy(code.as_ref(), text), "{text}");
+            assert_eq!(busy(code.as_ref(), text), None, "{text}");
         }
     }
 

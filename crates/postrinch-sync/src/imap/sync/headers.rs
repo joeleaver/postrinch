@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use postrinch_model::{EmailAddress, ImapFolder};
 
 use super::ImapSync;
+use super::folder_error::FolderResult;
 use super::places::{self, Folder, Stored};
 use super::reads::SILENT_TRIES;
 use super::wire::{Conn, Fetched, uid_set};
@@ -17,11 +18,15 @@ const HEADER_BATCH: usize = 100;
 
 impl ImapSync {
     /// Fetches and stores copies by their headers, newest first: each UID
-    /// with how many passes it went unanswered in before this one. Returns the UIDs still unanswered, with their new counts: a UID
+    /// with how many passes it went unanswered in before this one.
+    /// Returns the UIDs still unanswered, with their new counts: a UID
     /// that reaches [`SILENT_TRIES`] is stored as a message that cannot
     /// be read instead. A `NO` ends only its batch: what came is stored,
-    /// and the rest is unanswered (a server too busy to answer stops the
-    /// pass instead, [`crate::SyncError::Busy`]).
+    /// and the rest is unanswered. A server too busy to answer stops the
+    /// folder or the pass instead, keeping the batches already stored
+    /// and counting nothing against the messages
+    /// ([`super::folder_error::FolderError::Busy`],
+    /// [`crate::SyncError::Busy`]).
     pub(super) async fn fetch_headers(
         &self,
         conn: &mut Conn,
@@ -30,7 +35,7 @@ impl ImapSync {
         wanted: BTreeMap<u32, u32>,
         progress: &ProgressFn,
         report: &mut SyncReport,
-    ) -> SyncResult<BTreeMap<u32, u32>> {
+    ) -> FolderResult<BTreeMap<u32, u32>> {
         let uids: Vec<u32> = wanted.keys().rev().copied().collect();
         let total = uids.len();
         let items = if conn.condstore() {

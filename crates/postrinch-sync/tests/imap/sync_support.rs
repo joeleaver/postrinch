@@ -146,3 +146,22 @@ impl Fixture {
         self.store.message_ids(&self.me).unwrap().len()
     }
 }
+
+/// The UIDs asked for by their headers in these commands (as
+/// `ImapServer::commands` shows them), once for each time asked, in
+/// order.
+pub fn header_fetches(commands: &[String]) -> Vec<u32> {
+    let mut uids = Vec::new();
+    for command in commands.iter().filter(|c| c.contains("BODY.PEEK[HEADER]")) {
+        let set = command
+            .strip_prefix("UID FETCH ")
+            .and_then(|rest| rest.split(' ').next())
+            .unwrap_or_else(|| panic!("not a UID FETCH: {command}"));
+        for range in set.split(',') {
+            let (a, b) = range.split_once(':').unwrap_or((range, range));
+            let (a, b): (u32, u32) = (a.parse().unwrap(), b.parse().unwrap());
+            uids.extend(a.min(b)..=a.max(b));
+        }
+    }
+    uids
+}

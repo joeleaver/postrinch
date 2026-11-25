@@ -14,6 +14,7 @@
 mod bodies;
 mod cursor;
 mod fetch;
+mod folder_error;
 mod folders;
 mod headers;
 mod names;
