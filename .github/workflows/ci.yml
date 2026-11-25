@@ -61,5 +61,5 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/postrinch/greenmail
-          key: greenmail-${{ hashFiles('tools/greenmail-smoke.sh') }}
+          key: greenmail-${{ hashFiles('tools/greenmail.pin') }}
       - run: tools/greenmail-smoke.sh
