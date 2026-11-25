@@ -3,7 +3,8 @@
 //! `send`. Each lookup carries the dialog's generation: one for a dialog
 //! since closed or gone back from is dropped. An add's answer is never
 //! dropped: it goes to the dialog, or to a notice once the person has
-//! left it (`add_account_runs`).
+//! left it (`add_account_runs`), and comes even when the add's task
+//! panics or is dropped (`add_account_run_end`).
 
 use postrinch_discover::{Progress, Step as LookStep, StepState};
 use postrinch_model::{EmailAddress, ImapSettings};
@@ -13,6 +14,7 @@ use rinch::prelude::*;
 use crate::actions::{Notice, sync};
 use crate::add_account::{AddForm, Kind, ServerForm, Step, Way};
 use crate::add_account_flow::{Outcome, look_up, outcome};
+use crate::add_account_run_end::RunEnd;
 use crate::add_account_runs::{Answer, Run, cancel_browser, done_text, keep_canceller};
 use crate::state::{SettingsSection, State, View};
 
@@ -122,7 +124,7 @@ impl AddUi {
             Ok(run) => run,
             Err(error) => return self.error.set(Some(error)),
         };
-        let ui = self;
+        let end = self.run_end(state, run);
         let runtime = sync.runtime.clone();
         runtime.spawn(async move {
             let result = sync
@@ -134,7 +136,7 @@ impl AddUi {
             if matches!(done, Outcome::Done(_)) {
                 sync.accounts_changed();
             }
-            rinch::run_on_main_thread(move || ui.ended(state, &run, done));
+            end.end(done);
         });
     }
 
@@ -255,6 +257,7 @@ impl AddUi {
             Ok(run) => run,
             Err(error) => return self.error.set(Some(error)),
         };
+        let end = self.run_end(state, run.clone());
         let ui = self;
         let sign_in = match how {
             How::Browser(provider) => {
@@ -289,7 +292,7 @@ impl AddUi {
             if matches!(done, Outcome::Done(_)) {
                 sync.accounts_changed();
             }
-            rinch::run_on_main_thread(move || ui.ended(state, &run, done));
+            end.end(done);
         });
     }
 
@@ -316,13 +319,27 @@ impl AddUi {
         state.sign_in(address);
     }
 
-    /// `run` ended with `done`: the dialog shows it if the person is
-    /// still waiting on it there, and a notice says it otherwise.
-    fn ended(self, state: State, run: &Run, done: Outcome) {
-        if matches!(done, Outcome::Done(_)) {
+    /// The end of `run`, which comes however its task ends, and is
+    /// shown on the window's thread.
+    fn run_end(self, state: State, run: Run) -> RunEnd {
+        RunEnd::new(run, move |run, done| {
+            rinch::run_on_main_thread(move || self.ended(state, &run, done));
+        })
+    }
+
+    /// `run` ended with `done`, or without an answer (its task panicked
+    /// or was dropped): the dialog shows it if the person is still
+    /// waiting on it there, and a notice says it otherwise.
+    fn ended(self, state: State, run: &Run, done: Option<Outcome>) {
+        // An add that stopped part way may have changed the accounts.
+        if !matches!(done, Some(Outcome::Failed { .. } | Outcome::Cancelled)) {
             state.revision.update(|n| *n += 1);
         }
-        match self.answer(run, done) {
+        let answer = match done {
+            Some(done) => self.answer(run, done),
+            None => self.unanswered(run),
+        };
+        match answer {
             Answer::Dialog(done) => self.finish(state, run, done),
             Answer::Away(Some(notice)) => state.notice.set(Some(notice)),
             Answer::Away(None) => {}

@@ -200,3 +200,43 @@ fn an_abandoned_lookups_progress_stays_out_of_a_new_one() {
         [(LookStep::DomainSettings, StepState::Found)]
     );
 }
+
+#[test]
+fn an_add_that_stopped_without_an_answer_lets_the_address_go() {
+    // The person is still waiting on it: the dialog leaves Checking for
+    // where they asked from, and says it stopped.
+    let ui = AddUi::new();
+    ui.go(Step::Found);
+    let run = ui.start(ada(), Step::Found, Step::Checking, false).unwrap();
+    let Answer::Dialog(Outcome::Failed { step, error }) = ui.unanswered(&run) else {
+        panic!("not shown in the dialog");
+    };
+    assert_eq!(step, Step::Found);
+    assert!(error.starts_with("Postrinch stopped before this finished"));
+    assert!(ui.under_way.get().is_empty());
+    assert!(ui.start(ada(), Step::Found, Step::Checking, false).is_ok());
+}
+
+#[test]
+fn an_add_that_stopped_after_the_person_left_gives_one_notice() {
+    let ui = AddUi::new();
+    let run = waiting_on_the_browser(ui);
+    ui.close();
+    let Answer::Away(Some(notice)) = ui.unanswered(&run) else {
+        panic!("no notice");
+    };
+    assert_eq!(
+        notice.text,
+        "Postrinch stopped before it finished adding ada@example.org. \
+         Settings › Accounts shows whether it is there."
+    );
+    assert!(notice.trouble);
+    assert!(!has_canceller(run.generation));
+    assert!(ui.start(ada(), Step::Found, Step::Checking, false).is_ok());
+
+    let changing = Run {
+        changing: true,
+        ..run
+    };
+    assert!(unfinished_text(&changing).contains("changing ada@example.org's servers"));
+}

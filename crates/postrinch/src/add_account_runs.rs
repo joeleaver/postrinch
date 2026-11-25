@@ -103,6 +103,30 @@ impl AddUi {
         }
     }
 
+    /// `run`'s task ended without an answer (it panicked or was dropped):
+    /// it is no longer under way all the same, and the person is told it
+    /// stopped, in the dialog if they are still waiting on it there and
+    /// by a notice otherwise. Whether it went through is not known, so
+    /// neither says it did or did not.
+    pub fn unanswered(self, run: &Run) -> Answer {
+        let error = "Postrinch stopped before this finished, so it may not have gone through. \
+                     Try again."
+            .to_owned();
+        match self.answer(
+            run,
+            Outcome::Failed {
+                step: run.from,
+                error,
+            },
+        ) {
+            Answer::Away(_) => Answer::Away(Some(Notice {
+                text: unfinished_text(run),
+                trouble: true,
+            })),
+            dialog => dialog,
+        }
+    }
+
     /// Discovery's `progress`, for the lookup at `generation`: dropped
     /// once the person has gone back from it, so an abandoned lookup's
     /// steps never show in a new one.
@@ -141,6 +165,23 @@ pub fn done_text(run: &Run) -> String {
         format!("{}'s servers are changed.", run.address)
     } else {
         format!("{} is added. Its mail is on the way.", run.address)
+    }
+}
+
+/// What the person is told of `run` once they have left it, when it
+/// stopped without saying how it went.
+pub fn unfinished_text(run: &Run) -> String {
+    let address = &run.address;
+    if run.changing {
+        format!(
+            "Postrinch stopped before it finished changing {address}'s servers. \
+             Its server settings show what they are now."
+        )
+    } else {
+        format!(
+            "Postrinch stopped before it finished adding {address}. \
+             Settings › Accounts shows whether it is there."
+        )
     }
 }
 
