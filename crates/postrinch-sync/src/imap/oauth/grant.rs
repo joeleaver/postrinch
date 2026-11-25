@@ -17,6 +17,7 @@ use postrinch_model::{EmailAddress, Provider, SignInMethod, SignInReason};
 use super::access::AccessToken;
 use super::sign_in::OAuthSignIn;
 use super::{ImapOAuth, OAuthProvider};
+use crate::google::UnderWay;
 use crate::imap::{AccessTokens, ImapSecret, TokenFuture};
 use crate::{SyncError, SyncResult};
 
@@ -29,6 +30,10 @@ pub(crate) struct OAuthGrant {
     pub(super) refresh_token: String,
     pub(super) access: AccessToken,
     pub(super) signed_in: OAuthSignIn,
+    /// A Google grant's sign-in counts as under way until the grant is
+    /// kept or given back, so a Google account's give-back does not
+    /// withdraw it meanwhile; none for other providers.
+    pub(super) _under_way: Option<UnderWay>,
 }
 
 impl OAuthGrant {

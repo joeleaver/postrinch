@@ -21,6 +21,7 @@ fn setup() -> (tempfile::TempDir, Store, EmailAddress) {
         sign_in: SignInMethod::Password,
         roles: FolderRoles::default(),
         server_files_sent: true,
+        server_files_sent_chosen: false,
     });
     store.put_account(&account).unwrap();
     (dir, store, address)
@@ -212,7 +213,7 @@ fn a_clock_set_back_starts_the_wait_again() {
 }
 
 #[test]
-fn a_setting_the_person_turned_off_comes_back_at_once() {
+fn a_setting_off_with_no_time_kept_comes_back_at_once() {
     let (_dir, store, me) = setup();
     let mut off = settings(&store, &me);
     off.server_files_sent = false;
@@ -241,4 +242,56 @@ fn copies_under_an_old_uidvalidity_do_not_count() {
     assert!(!sent(2));
     copy_in_sent(&store, &me, &id(4), (2, 2));
     assert!(sent(2));
+}
+
+#[test]
+fn a_setting_the_person_turned_off_stays_off() {
+    let (_dir, store, me) = setup();
+    let chosen = store.choose_server_files_sent(&me, Some(false)).unwrap();
+    assert!(!chosen.server_files_sent && chosen.server_files_sent_chosen);
+    // The provider's copy beside Postrinch's, send after send, hours
+    // apart: the person's choice is not overridden.
+    for n in 1..=3 {
+        let now = i64::from(n) * DAY;
+        assert!(!send_filed_late(&store, &me, n, now), "{n}");
+        assert!(!files_sent(&store, &me, now + HOUR), "{n}");
+    }
+    assert!(settings(&store, &me).server_files_sent_chosen);
+}
+
+#[test]
+fn a_setting_the_person_turned_on_stays_on() {
+    let (_dir, store, me) = setup();
+    store.choose_server_files_sent(&me, Some(true)).unwrap();
+    for n in 1..=5 {
+        assert!(!filed(&store, &me, n, true, 0), "{n}: never turned off");
+    }
+    assert!(settings(&store, &me).server_files_sent);
+    assert!(files_sent(&store, &me, 0));
+}
+
+#[test]
+fn a_setting_handed_back_is_learned_again_from_where_it_is() {
+    let (_dir, store, me) = setup();
+    filed(&store, &me, 1, true, 0);
+    filed(&store, &me, 2, true, 0);
+    store.choose_server_files_sent(&me, Some(true)).unwrap();
+    let back = store.choose_server_files_sent(&me, None).unwrap();
+    assert!(back.server_files_sent && !back.server_files_sent_chosen);
+    // The misses from before the person chose are forgotten: three new
+    // ones turn it off.
+    assert!(!filed(&store, &me, 3, true, 0));
+    assert!(!filed(&store, &me, 4, true, 0));
+    assert!(filed(&store, &me, 5, true, 0));
+    assert!(!settings(&store, &me).server_files_sent);
+}
+
+#[test]
+fn choosing_needs_imap_settings() {
+    let (_dir, store, _) = setup();
+    let bob = EmailAddress::parse("bob@example.org").unwrap();
+    store
+        .put_account(&Account::new(bob.clone(), Provider::Google))
+        .unwrap();
+    assert!(store.choose_server_files_sent(&bob, Some(true)).is_err());
 }

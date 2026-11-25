@@ -1,6 +1,8 @@
 //! The window: a header over the sidebar, the thread list and the reader.
 
 mod about;
+mod add_account;
+mod add_account_servers;
 mod agent_dialogs;
 mod agents_settings;
 mod attachment_cards;
@@ -16,6 +18,7 @@ mod event_editor;
 mod event_notes;
 mod event_pane;
 mod icons;
+mod imap_account;
 mod invitation_card;
 mod keys;
 mod label_edit;
@@ -42,6 +45,7 @@ mod search;
 mod settings;
 mod share_card;
 mod sidebar;
+mod sign_in_again;
 mod splitter;
 mod style;
 pub(crate) mod thread_actions;
@@ -142,7 +146,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {compose::CSS} }
                 style { {search::CSS} }
                 style { {outgoing::CSS} }
-                style { {about::CSS} }
+                style { {about::CSS} {add_account::CSS} {add_account_servers::CSS} {imap_account::CSS} }
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {share_card::CSS} {compose_files::CSS} {label_new::CSS} }
@@ -150,6 +154,8 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {calendar_side::CSS} {calendar_view::CSS} {calendar_month::CSS} {event_pane::CSS} {event_notes::CSS} {calendar_pane::CSS} {event_editor::CSS} {notices_settings::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}
+                {add_account::add_account_dialog(__scope, state)}
+                {sign_in_again::sign_in_again_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}
                 if state.view.get() == View::Mail {
                     div { class: "panes",

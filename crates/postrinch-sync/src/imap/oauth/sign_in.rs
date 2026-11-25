@@ -64,6 +64,10 @@ impl ImapOAuth {
         self.grants
             .refuse_other_kind(address, Provider::Imap)
             .await?;
+        // Checked again when the grant is kept (`Replacing::write`): a
+        // Google account may be added while the browser is open.
+        let under_way = (provider == OAuthProvider::Google)
+            .then(|| self.grants.under_way(address, Provider::Imap));
         let Granted {
             tokens,
             refresh_token,
@@ -90,6 +94,7 @@ impl ImapOAuth {
                 method: provider.sign_in_method(),
                 display_name: who.name,
             },
+            _under_way: under_way,
         })
     }
 

@@ -82,6 +82,7 @@ fn fixture() -> Fixture {
             sign_in: SignInMethod::Password,
             roles: FolderRoles::default(),
             server_files_sent: true,
+            server_files_sent_chosen: false,
         });
         store.put_account(&account).unwrap();
         let secrets = ImapSecrets::new(Arc::new(MemorySecrets::default()));

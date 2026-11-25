@@ -414,7 +414,7 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .account-detail h2 { margin: 0; font-size: 18px; font-weight: 600; }
 .facts { display: grid; grid-template-columns: 140px minmax(0, 1fr); row-gap: 10px; column-gap: 16px; }
 .fact-name { color: var(--muted); }
-.account-actions { display: flex; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.account-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 .account-actions .spacer { flex: 1; }
 .settings-hint { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
 .notice {
@@ -442,4 +442,15 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .choice.chosen { border-color: var(--accent); background: var(--accent-tint); }
 .choice-name { font-weight: 600; }
 .choice-about { font-size: 13px; color: var(--muted); }
+/* Too narrow for the accounts and the chosen one side by side: the list
+   above, the account under it, the page scrolling as one. */
+@media (max-width: 1000px) {
+    .settings-page { flex-direction: column; min-height: 0; overflow-y: auto; }
+    .settings-accounts { width: auto; padding: 24px 20px 16px; border-right: none; border-bottom: 1px solid var(--line-soft); }
+    .settings-main { flex: none; overflow-y: visible; padding: 20px; }
+}
+@media (max-width: 720px) {
+    .settings-nav { width: 160px; }
+    .facts { grid-template-columns: 110px minmax(0, 1fr); }
+}
 "#;

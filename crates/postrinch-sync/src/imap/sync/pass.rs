@@ -67,6 +67,7 @@ impl ImapSync {
         let stored = self.with_store(move |s| s.imap_folders(&a)).await?;
         let renames = self.renames(conn, &listed, &stored).await?;
         let planned = plan(&listed, &stored, &roles, &renames);
+        let superseded = superseded(&stored, &planned);
         self.keep_folders(account, &planned).await?;
         for (i, folder) in planned.iter().enumerate() {
             progress(Progress::Working {
@@ -100,7 +101,9 @@ impl ImapSync {
             .iter()
             .map(|p| p.label.provider_id.clone())
             .collect();
-        report.removed += self.blocking(move |s| finish(s, &a, &keep, number)).await?;
+        report.removed += self
+            .blocking(move |s| finish(s, &a, &keep, &superseded, number))
+            .await?;
         Ok(report)
     }
 
@@ -207,14 +210,30 @@ impl ImapSync {
     }
 }
 
+/// The labels of kept folders that LIST still gives, under a label the
+/// pass no longer gives them: their role changed (an ordinary folder the
+/// person made Sent, or Sent made ordinary), so their label did. They are
+/// not missing, and go at once rather than after a second LIST.
+fn superseded(stored: &[ImapFolder], planned: &[Planned]) -> BTreeSet<String> {
+    stored
+        .iter()
+        .filter(|s| {
+            planned.iter().all(|p| p.state.label_id != s.label_id)
+                && planned.iter().any(|p| p.state.name == s.name)
+        })
+        .map(|s| s.label_id.clone())
+        .collect()
+}
+
 /// The end of pass `pass`, which listed the folders `keep`: folders
-/// missing from LIST twice go, and messages that stayed without a copy
-/// since a pass before every folder was last read whole go. Returns how
-/// many messages went.
+/// missing from LIST twice go, and so do the labels `superseded` gave up
+/// for others; messages that stayed without a copy since a pass before
+/// every folder was last read whole go. Returns how many messages went.
 fn finish(
     store: &postrinch_store::Store,
     account: &EmailAddress,
     keep: &HashSet<String>,
+    superseded: &BTreeSet<String>,
     pass: u64,
 ) -> SyncResult<usize> {
     let labels: BTreeSet<String> = store
@@ -229,12 +248,13 @@ fn finish(
         .collect();
     let missing: BTreeSet<String> = labels
         .union(&folders)
-        .filter(|id| !keep.contains(*id))
+        .filter(|id| !keep.contains(*id) && !superseded.contains(*id))
         .cloned()
         .collect();
-    let gone: BTreeSet<String> = pending::note_missing(store, account, &missing, pass)?
+    let mut gone: BTreeSet<String> = pending::note_missing(store, account, &missing, pass)?
         .into_iter()
         .collect();
+    gone.extend(superseded.iter().cloned());
     for id in &gone {
         pending::forget_folder(store, account, id)?;
         if labels.contains(id) {

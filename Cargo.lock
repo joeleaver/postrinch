@@ -4596,6 +4596,7 @@ dependencies = [
  "open",
  "postrinch-agents",
  "postrinch-commands",
+ "postrinch-discover",
  "postrinch-log",
  "postrinch-mailtest",
  "postrinch-model",

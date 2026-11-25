@@ -38,7 +38,10 @@ pub use reply::ImapStream;
 pub use secret::{ImapSecret, ImapSecrets};
 pub use session::ImapSession;
 pub use smtp::SmtpConnection;
-pub use sync::{Added, ImapSync, NewImapAccount, NewSignIn, OpenBrowser, SentLookup};
+pub use sync::{
+    AccountFolder, Added, ImapSync, NewImapAccount, NewSignIn, OnGrant, OpenBrowser, SentLookup,
+    SignInAgain, SignInCancel, SignInCanceller, sign_in_cancel,
+};
 pub use threading::{Own, thread_for};
 pub use tls::{Timeouts, TlsConfig};
 pub use tokens::{AccessTokens, TokenFuture};

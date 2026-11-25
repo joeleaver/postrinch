@@ -340,6 +340,7 @@ mod tests {
             sign_in: SignInMethod::Password,
             roles: FolderRoles::default(),
             server_files_sent: true,
+            server_files_sent_chosen: false,
         };
         let mut account = Account::new(address.clone(), Provider::Imap);
         account.display_name = Some("Ada".into());

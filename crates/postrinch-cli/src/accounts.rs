@@ -3,7 +3,7 @@
 
 use postrinch_model::{AccountState, EmailAddress, Provider, SignInMethod};
 use postrinch_sync::google::{remove_google_account, sign_in_google};
-use postrinch_sync::imap::{Added, ImapSecret, NewImapAccount, NewSignIn};
+use postrinch_sync::imap::{Added, ImapSecret, SignInAgain};
 
 use crate::add_imap::{Passwords, Terminal};
 use crate::commands::Result;
@@ -50,35 +50,24 @@ pub async fn sign_in(cx: &Context, address: Option<EmailAddress>) -> Result<()> 
     let imap = cx.imap(&oauth)?;
     let settings = stored
         .imap
-        .clone()
+        .as_ref()
         .ok_or_else(|| format!("{} has no IMAP settings", stored.address))?;
     let address = stored.address.clone();
     let mut terminal = Terminal { from_stdin: false };
-    let secret = match settings.sign_in {
-        SignInMethod::OAuth2 { .. } => {
-            let open_browser = Box::new(|url: &str| {
-                eprintln!("Opening your browser to sign in. If it does not open, visit:\n{url}\n");
-                open::that_detached(url)
-            });
-            imap.sign_in_again(&oauth, &address, open_browser).await?;
-            println!("Signed in as {address}.");
-            return Ok(());
+    let how = match settings.sign_in {
+        SignInMethod::OAuth2 { .. } => SignInAgain::Browser(Box::new(|url: &str| {
+            eprintln!("Opening your browser to sign in. If it does not open, visit:\n{url}\n");
+            open::that_detached(url)
+        })),
+        SignInMethod::Password => {
+            SignInAgain::Password(ImapSecret::password(terminal.password("IMAP and SMTP")?))
         }
-        SignInMethod::Password => ImapSecret::password(terminal.password("IMAP and SMTP")?),
-        SignInMethod::SeparateSmtpPassword => ImapSecret::Password {
+        SignInMethod::SeparateSmtpPassword => SignInAgain::Password(ImapSecret::Password {
             password: terminal.password("IMAP")?,
             smtp_password: Some(terminal.password("SMTP")?),
-        },
+        }),
     };
-    let new = NewImapAccount {
-        address: address.clone(),
-        display_name: stored.display_name,
-        settings,
-    };
-    match imap
-        .add_account(&oauth, new, NewSignIn::Password(secret))
-        .await?
-    {
+    match imap.sign_in_again(&oauth, &address, how).await? {
         Added::Account(_) => {
             println!("Signed in as {address}.");
             Ok(())

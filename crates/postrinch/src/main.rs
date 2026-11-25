@@ -1,6 +1,11 @@
 //! Postrinch: an agent-first desktop mail client.
 
 mod actions;
+mod add_account;
+mod add_account_flow;
+mod add_account_run;
+mod add_account_run_end;
+mod add_account_runs;
 mod agents;
 mod appearance;
 mod attachments;
@@ -14,6 +19,7 @@ mod calendar_ui;
 mod changes;
 mod conversations;
 mod dates;
+mod imap_settings_run;
 mod invitations;
 mod links;
 mod loader;

@@ -242,7 +242,10 @@ fn redirect_result(target: &str, expected_state: &str, provider: &str) -> Redire
     }
 }
 
-/// The target of a `GET` request line, or `None` for anything else.
+/// The target of a `GET` request line, or `None` for anything else. A
+/// connection that closes before its request's headers end sent no
+/// request: that is an error, and listening goes on (its request line may
+/// have been cut short, state and all, before the code).
 async fn read_request_target(stream: &mut TcpStream) -> std::io::Result<Option<String>> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 2048];
@@ -252,7 +255,10 @@ async fn read_request_target(stream: &mut TcpStream) -> std::io::Result<Option<S
         }
         let n = stream.read(&mut chunk).await?;
         if n == 0 {
-            break;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "the connection closed before its request ended",
+            ));
         }
         buf.extend_from_slice(&chunk[..n]);
     }

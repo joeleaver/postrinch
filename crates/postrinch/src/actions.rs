@@ -8,10 +8,15 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use postrinch_commands::Commands;
-use postrinch_model::{EmailAddress, LabelPrefs, Provider, ProviderMessageId, SignInMethod};
+use postrinch_model::{
+    AccountState, EmailAddress, ImapSettings, LabelPrefs, Provider, ProviderMessageId, SignInMethod,
+};
 use postrinch_sync::google::{GoogleAuth, remove_google_account, sign_in_google};
+use postrinch_sync::imap::{Added, SignInAgain};
 use postrinch_sync::{SyncError, SyncResult};
 
+use crate::add_account::Found;
+use crate::add_account_flow::check_text;
 use crate::state::State;
 use crate::sync::SyncHandle;
 
@@ -91,6 +96,13 @@ impl State {
             return self.notice(sync_off());
         };
         let route = match sign_in_route(&sync, again.as_ref()) {
+            Ok(SignInRoute::Password {
+                account,
+                reason,
+                method,
+            }) => {
+                return self.imap.open_sign_in_again(account, reason, &method);
+            }
             Ok(route) => route,
             Err(refused) => return self.notice(refused),
         };
@@ -107,12 +119,21 @@ impl State {
                     })
                     .await
                 }
-                SignInRoute::Imap(account) => {
+                SignInRoute::Imap { account, settings } => {
                     let browser = Box::new(|url: &str| open::that_detached(url));
                     let imap = sync.mail().imap();
-                    imap.sign_in_again(&sync.imap_oauth, &account, browser)
-                        .await
+                    let how = SignInAgain::Browser(browser);
+                    match imap.sign_in_again(&sync.imap_oauth, &account, how).await {
+                        Ok(Added::Account(account)) => Ok(*account),
+                        Ok(Added::CheckFailed(check)) => {
+                            let (text, _) = check_text(&check, &settings, &Found::default());
+                            Err(SyncError::SignIn(text))
+                        }
+                        Err(e) => Err(e),
+                    }
                 }
+                // Answered on the window's thread above.
+                SignInRoute::Password { .. } => return,
             };
             let text = match opened {
                 Ok(account) => {
@@ -211,8 +232,19 @@ fn google_off() -> Notice {
 enum SignInRoute {
     /// Google's sign-in: a new account, or a Google account again.
     Google(Arc<GoogleAuth>),
-    /// An IMAP account's provider, in the browser, again.
-    Imap(EmailAddress),
+    /// An IMAP account's provider, in the browser, again; its servers
+    /// name what refused.
+    Imap {
+        account: EmailAddress,
+        settings: Box<ImapSettings>,
+    },
+    /// An IMAP account that signs in with a password: the window's
+    /// password dialog, saying `reason`.
+    Password {
+        account: EmailAddress,
+        reason: String,
+        method: SignInMethod,
+    },
 }
 
 /// Where `again` (or a new account) signs in; a notice saying why it
@@ -229,21 +261,27 @@ fn sign_in_route(sync: &SyncHandle, again: Option<&EmailAddress>) -> Result<Sign
     };
     match stored {
         Some(account) if account.provider == Provider::Imap => {
-            let oauth = account
-                .imap
-                .as_ref()
-                .is_some_and(|s| matches!(s.sign_in, SignInMethod::OAuth2 { .. }));
-            if oauth {
-                Ok(SignInRoute::Imap(account.address))
-            } else {
-                Err(Notice {
-                    text: format!(
-                        "{0} signs in with a password. Give it again with `postrinch-cli sign-in {0}`.",
-                        account.address
-                    ),
+            let Some(settings) = account.imap else {
+                return Err(Notice {
+                    text: format!("{} has no IMAP settings.", account.address),
                     trouble: true,
-                })
+                });
+            };
+            if matches!(settings.sign_in, SignInMethod::OAuth2 { .. }) {
+                return Ok(SignInRoute::Imap {
+                    account: account.address,
+                    settings: Box::new(settings),
+                });
             }
+            let reason = match &account.state {
+                AccountState::NeedsSignIn(reason) => reason.to_string(),
+                AccountState::Active => "give the password again".to_owned(),
+            };
+            Ok(SignInRoute::Password {
+                account: account.address,
+                reason,
+                method: settings.sign_in,
+            })
         }
         _ => sync
             .auth
