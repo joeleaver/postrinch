@@ -6,7 +6,8 @@
 use std::collections::{HashMap, HashSet};
 
 use postrinch_model::{
-    EmailAddress, LabelKind, Message, ProviderMessageId, ProviderThreadId, ThreadSummary, Timestamp,
+    EmailAddress, LabelKind, Message, Provider, ProviderMessageId, ProviderThreadId, ThreadSummary,
+    Timestamp,
 };
 use postrinch_store::PersonEntry;
 use serde::{Deserialize, Serialize};
@@ -123,8 +124,19 @@ impl Commands {
         }
         if query.has_words() {
             let waiting = self.store.undownloaded_counts()?;
+            // Gmail is asked; an IMAP account's server is not (its
+            // search stays local until searching on the server comes),
+            // so its mail is found once its bodies are here.
+            let google: HashSet<String> = self
+                .store
+                .accounts()?
+                .into_iter()
+                .filter(|a| a.provider == Provider::Google)
+                .map(|a| a.address.key())
+                .collect();
             let ask: Vec<(EmailAddress, usize)> = accounts
                 .iter()
+                .filter(|a| google.contains(&a.key()))
                 .filter_map(|a| waiting.get(&a.key()).map(|&n| (a.clone(), n)))
                 .filter(|(_, n)| *n > 0)
                 .collect();

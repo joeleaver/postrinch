@@ -41,6 +41,46 @@ impl Store {
     /// messages and sync position are kept.
     pub fn put_account(&self, account: &Account) -> StoreResult<()> {
         let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
+        self.write_account(account)
+    }
+
+    /// Reads the account as it is now (none when it is not here), and
+    /// stores what `change` makes of it, with no other change to the
+    /// account in between: what sending learned about an IMAP account's
+    /// settings meanwhile ([`Store::server_files_sent`]) is read, never
+    /// overwritten. `change` must not write accounts. Returns what was
+    /// stored.
+    pub fn change_account(
+        &self,
+        address: &EmailAddress,
+        change: impl FnOnce(Option<Account>) -> Account,
+    ) -> StoreResult<Account> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let account = change(self.account(address)?);
+        self.write_account(&account)?;
+        Ok(account)
+    }
+
+    /// Changes the account only if it is here, with no other change to it
+    /// in between, as [`Store::change_account`]: none when it is not here,
+    /// and nothing is written. `change` must not write accounts. Returns
+    /// what was stored.
+    pub fn update_account(
+        &self,
+        address: &EmailAddress,
+        change: impl FnOnce(&mut Account),
+    ) -> StoreResult<Option<Account>> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut account) = self.account(address)? else {
+            return Ok(None);
+        };
+        change(&mut account);
+        self.write_account(&account)?;
+        Ok(Some(account))
+    }
+
+    /// [`Store::put_account`], the account lock held by the caller.
+    fn write_account(&self, account: &Account) -> StoreResult<()> {
         let key = account.address.key();
         let fields = || {
             FieldsBuilder::new()
@@ -180,6 +220,50 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path()).unwrap();
         (dir, store)
+    }
+
+    #[test]
+    fn changing_an_account_reads_it_as_it_is_now() {
+        let (_dir, store) = store();
+        let address = EmailAddress::parse("ada@example.org").unwrap();
+        let added = store
+            .change_account(&address, |before| {
+                assert_eq!(before, None);
+                Account::new(address.clone(), Provider::Imap)
+            })
+            .unwrap();
+        assert_eq!(store.account(&address).unwrap(), Some(added.clone()));
+
+        let changed = store
+            .change_account(&address, |before| {
+                let mut account = before.unwrap();
+                account.display_name = Some("Ada".into());
+                account
+            })
+            .unwrap();
+        assert_eq!(changed.display_name.as_deref(), Some("Ada"));
+        assert_eq!(store.account(&address).unwrap(), Some(changed));
+    }
+
+    #[test]
+    fn updating_changes_only_an_account_that_is_here() {
+        let (_dir, store) = store();
+        let address = EmailAddress::parse("ada@example.org").unwrap();
+        let missing = store
+            .update_account(&address, |_| panic!("there is no account to change"))
+            .unwrap();
+        assert_eq!(missing, None);
+        assert_eq!(store.account(&address).unwrap(), None, "nothing written");
+
+        let mut account = Account::new(address.clone(), Provider::Imap);
+        account.needs_sign_in(SignInReason::NoCredential);
+        store.put_account(&account).unwrap();
+        let changed = store
+            .update_account(&address, Account::signed_in)
+            .unwrap()
+            .unwrap();
+        assert!(changed.is_active());
+        assert_eq!(store.account(&address).unwrap(), Some(changed));
     }
 
     #[test]

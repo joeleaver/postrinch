@@ -7,7 +7,7 @@ use postrinch_commands::Commands;
 use postrinch_model::{CalendarRole, ShareWho};
 use serde_json::{Value, json};
 
-use crate::gmail::Gmail;
+use crate::remote::Remote;
 use crate::views::say;
 use crate::wire::Call;
 
@@ -17,7 +17,7 @@ const NO_GOOGLE: &str =
 pub(crate) fn run(
     commands: &Commands,
     call: Call,
-    gmail: Option<&dyn Gmail>,
+    remote: Option<&dyn Remote>,
 ) -> Result<Value, String> {
     match call {
         Call::CalendarShares { account, calendar } => {
@@ -37,7 +37,7 @@ pub(crate) fn run(
                         .into(),
                 );
             }
-            let shares = gmail
+            let shares = remote
                 .ok_or(NO_GOOGLE)?
                 .calendar_shares(&account, &calendar)?;
             Ok(json!({
@@ -69,7 +69,7 @@ pub(crate) fn run(
                                   "why": "it is among the account's calendars already" }),
                 );
             }
-            let info = gmail.ok_or(NO_GOOGLE)?.add_calendar(&account, &calendar)?;
+            let info = remote.ok_or(NO_GOOGLE)?.add_calendar(&account, &calendar)?;
             Ok(json!({
                 "account": account,
                 "calendar": info.id,

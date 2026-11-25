@@ -134,6 +134,6 @@ pub async fn mock_history(server: &MockServer, start: &str, body: serde_json::Va
         .await;
 }
 
-pub fn quiet() -> postrinch_sync::google::ProgressFn {
+pub fn quiet() -> postrinch_sync::ProgressFn {
     Arc::new(|_| {})
 }

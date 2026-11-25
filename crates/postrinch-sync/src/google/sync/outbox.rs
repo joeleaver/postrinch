@@ -15,19 +15,10 @@ use tokio::sync::RwLock;
 use super::GmailSync;
 use crate::google::labels::{STARRED, TRASH, UNREAD};
 use crate::outbox_runs::{merged, runs};
-use crate::{SyncError, SyncResult};
+use crate::{SendReport, SyncError, SyncResult};
 
 /// `messages.batchModify` takes at most this many messages a call.
 const BATCH: usize = 1000;
-
-/// What sending an account's outbox did.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct SendReport {
-    pub sent: usize,
-    /// Why Gmail refused the changes it would never take. Each was dropped
-    /// and its messages read again from Gmail.
-    pub refused: Vec<String>,
-}
 
 /// Now, as the store keeps times.
 pub(super) fn now() -> Timestamp {

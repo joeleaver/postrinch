@@ -63,7 +63,13 @@ impl State {
     fn ask_gmail(self, results: &SearchResults, remote: Remote) {
         let waiting = remote.accounts.iter().map(|(_, n)| n).sum();
         let query = results.query.clone();
-        let Some(sync) = sync() else {
+        // Only Google accounts are asked (the commands list no others), so
+        // without Google sign-in there is no one to ask.
+        let asked = sync().and_then(|sync| {
+            let gmail = sync.mail().gmail()?.clone();
+            Some((sync, gmail))
+        });
+        let Some((sync, gmail)) = asked else {
             self.remote.set(Some(RemoteSearch {
                 query,
                 status: RemoteStatus::Offline { waiting },
@@ -91,8 +97,7 @@ impl State {
             let mut rows: Vec<ThreadRow> = Vec::new();
             let mut trouble: Option<RemoteStatus> = None;
             for (account, _) in &remote.accounts {
-                let ids = match sync
-                    .sync_engine()
+                let ids = match gmail
                     .search_remote(account, &remote.query, REMOTE_MAX)
                     .await
                 {

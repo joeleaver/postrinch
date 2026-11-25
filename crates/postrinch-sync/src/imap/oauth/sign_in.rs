@@ -1,8 +1,10 @@
 //! Signing an IMAP account in with OAuth in the browser, again, and out.
+//! The grant a sign-in makes, before it is kept, is [`OAuthGrant`].
 
 use postrinch_model::{EmailAddress, Provider, SignInMethod};
 
 use super::access::AccessToken;
+use super::grant::OAuthGrant;
 use super::{ImapOAuth, OAuthProvider};
 use crate::imap::ImapSecret;
 use crate::oauth::{Granted, browser_sign_in};
@@ -43,6 +45,21 @@ impl ImapOAuth {
         address: &EmailAddress,
         open_browser: impl FnOnce(&str) -> std::io::Result<()>,
     ) -> SyncResult<OAuthSignIn> {
+        let grant = self.grant(provider, address, open_browser).await?;
+        self.keep(grant).await
+    }
+
+    /// [`Self::sign_in`]'s browser sign-in alone: the grant it makes,
+    /// kept nowhere yet. Adding an account checks the servers with it
+    /// first, then keeps it ([`Self::keep`]) or gives it back
+    /// ([`Self::give_back`]), so a failed check leaves the keychain as it
+    /// was.
+    pub(crate) async fn grant(
+        &self,
+        provider: OAuthProvider,
+        address: &EmailAddress,
+        open_browser: impl FnOnce(&str) -> std::io::Result<()>,
+    ) -> SyncResult<OAuthGrant> {
         let flow = self.flow(provider)?;
         self.grants
             .refuse_other_kind(address, Provider::Imap)
@@ -64,23 +81,29 @@ impl ImapOAuth {
                 "{address} is not a verified address"
             )));
         }
-
-        // Held while the secret changes, so no refresh runs on the old one
-        // meanwhile and caches what it got after the new token is in.
-        let slot = self.slot(address);
-        let mut cached = slot.lock().await;
-        let secret = ImapSecret::OAuth2 {
-            provider: provider.id().to_owned(),
+        Ok(OAuthGrant {
+            provider,
             refresh_token,
-        };
-        self.secrets.set(address, &secret).await?;
-        *cached = Some(AccessToken::from_tokens(&tokens));
-
-        Ok(OAuthSignIn {
-            address: address.clone(),
-            method: provider.sign_in_method(),
-            display_name: who.name,
+            access: AccessToken::from_tokens(&tokens),
+            signed_in: OAuthSignIn {
+                address: address.clone(),
+                method: provider.sign_in_method(),
+                display_name: who.name,
+            },
         })
+    }
+
+    /// Keeps a grant as its account's secret, replacing any it had, and
+    /// its access token for the account's next connections. No refresh
+    /// runs on the old secret meanwhile ([`Replacing`]).
+    ///
+    /// [`Replacing`]: super::replace::Replacing
+    pub(crate) async fn keep(&self, grant: OAuthGrant) -> SyncResult<OAuthSignIn> {
+        let mut replacing = self.replacing(&grant.signed_in.address).await?;
+        replacing.write(&grant.secret()).await?;
+        let signed_in = grant.signed_in.clone();
+        replacing.finish(Some(grant));
+        Ok(signed_in)
     }
 
     /// Sign an existing account in again, as its settings say: "Sign in
@@ -118,22 +141,8 @@ impl ImapOAuth {
             provider,
             refresh_token,
         }) = self.secrets.get(account).await
-            && let Some(provider) = OAuthProvider::from_id(&provider)
-            && let Ok(flow) = self.flow(provider)
         {
-            match provider {
-                OAuthProvider::Google => {
-                    self.grants
-                        .revoke_unless_shared(&flow, &refresh_token, account, Provider::Imap)
-                        .await;
-                }
-                OAuthProvider::Microsoft => {
-                    if let Err(e) = flow.revoke(&refresh_token).await {
-                        // The token goes unused either way.
-                        tracing::warn!("could not revoke {account}'s refresh token: {e}");
-                    }
-                }
-            }
+            self.revoke(&provider, &refresh_token, account).await;
         }
         self.secrets.delete(account).await
     }

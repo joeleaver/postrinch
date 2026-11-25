@@ -1,39 +1,16 @@
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use postrinch_model::{AccountState, EmailAddress, Provider, ProviderMessageId};
+use postrinch_model::{EmailAddress, ProviderMessageId};
 use postrinch_store::Store;
-use postrinch_sync::Keychain;
-use postrinch_sync::google::{
-    ClientConfig, GmailApi, GmailSync, GoogleAuth, Phase, Progress, ProgressFn,
-    remove_google_account, sign_in_google,
-};
-use postrinch_sync::imap::ImapSecrets;
+use postrinch_sync::{Phase, Progress, ProgressFn};
 
+use crate::accounts::{accounts, remove_account, sign_in};
+use crate::add_imap::{Terminal, add_imap};
+use crate::context::Context;
 use crate::{Cli, Command};
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-
-struct Context {
-    store: Store,
-    client: Option<PathBuf>,
-}
-
-impl Context {
-    fn auth(&self) -> Result<Arc<GoogleAuth>> {
-        let path = match &self.client {
-            Some(path) => path.clone(),
-            None => ClientConfig::default_path().ok_or("no config directory; pass --client")?,
-        };
-        let config = ClientConfig::load(&path)?;
-        Ok(Arc::new(GoogleAuth::new(
-            config,
-            Arc::new(Keychain::GOOGLE),
-            ImapSecrets::keychain(),
-        )?))
-    }
-}
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 pub(crate) async fn run(cli: Cli) -> Result<()> {
     let data_dir = match cli.data_dir {
@@ -50,6 +27,13 @@ pub(crate) async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Accounts => accounts(&cx),
         Command::AddGoogle => sign_in(&cx, None).await,
+        Command::AddImap(args) => {
+            let mut terminal = Terminal {
+                from_stdin: args.password_stdin(),
+            };
+            let oauth = cx.imap_oauth()?;
+            add_imap(&cx.imap(&oauth)?, &oauth, args, &mut terminal).await
+        }
         Command::SignIn { address } => sign_in(&cx, Some(parse(&address)?)).await,
         Command::RemoveAccount { address } => remove_account(&cx, &parse(&address)?).await,
         Command::Sync {
@@ -93,49 +77,6 @@ fn parse(address: &str) -> Result<EmailAddress> {
     Ok(EmailAddress::parse(address)?)
 }
 
-fn accounts(cx: &Context) -> Result<()> {
-    let accounts = cx.store.accounts()?;
-    if accounts.is_empty() {
-        println!("No accounts. Add one with `postrinch-cli add-google`.");
-    }
-    for account in accounts {
-        let state = match &account.state {
-            AccountState::Active => "signed in".to_owned(),
-            AccountState::NeedsSignIn(reason) => format!("must sign in again: {reason}"),
-        };
-        let name = account.display_name.as_deref().unwrap_or("");
-        println!("{}\t{name}\t{state}", account.address);
-    }
-    Ok(())
-}
-
-async fn sign_in(cx: &Context, address: Option<EmailAddress>) -> Result<()> {
-    let auth = cx.auth()?;
-    let account = sign_in_google(&auth, &cx.store, address.as_ref(), |url| {
-        eprintln!("Opening your browser to sign in. If it does not open, visit:\n{url}\n");
-        open::that_detached(url)
-    })
-    .await?;
-    println!("Signed in as {}.", account.address);
-    Ok(())
-}
-
-async fn remove_account(cx: &Context, address: &EmailAddress) -> Result<()> {
-    let account = cx
-        .store
-        .account(address)?
-        .ok_or_else(|| format!("no account {address}"))?;
-    let removed = match account.provider {
-        Provider::Google => remove_google_account(&*cx.auth()?, &cx.store, address).await?,
-        Provider::Imap => {
-            cx.store.remove_account(address)?;
-            cx.store.collect_garbage(std::time::Duration::ZERO)?
-        }
-    };
-    println!("Removed {address} and {removed} stored messages' raw copies.");
-    Ok(())
-}
-
 async fn resync(cx: &Context, address: EmailAddress) -> Result<()> {
     let removed = cx.store.clear_mail(&address)?;
     eprintln!("{address}: cleared {removed} messages; syncing again");
@@ -153,17 +94,15 @@ async fn sync(cx: &Context, only: Option<EmailAddress>, backfill: bool) -> Resul
         .store
         .accounts()?
         .into_iter()
-        .filter(|a| a.provider == Provider::Google)
         .filter(|a| only.as_ref().is_none_or(|o| o.key() == a.address.key()))
         .collect();
     if accounts.is_empty() {
         return Err(match only {
-            Some(address) => format!("no Google account {address}").into(),
-            None => "no Google accounts; add one with `postrinch-cli add-google`".into(),
+            Some(address) => format!("no account {address}").into(),
+            None => "no accounts; add one with `postrinch-cli add-google` or `add-imap`".into(),
         });
     }
-    let auth = cx.auth()?;
-    let sync = GmailSync::new(Arc::new(GmailApi::new(auth)), cx.store.clone());
+    let sync = cx.mail()?;
     let mut failed = false;
     for account in accounts {
         let address = &account.address;

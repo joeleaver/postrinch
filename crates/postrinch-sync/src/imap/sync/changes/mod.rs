@@ -42,7 +42,7 @@ use self::plan::Folders;
 use super::folders::GMAIL;
 use super::wire::Conn;
 use super::{ImapSync, Lane};
-use crate::google::SendReport;
+use crate::SendReport;
 use crate::outbox_runs::{merged, runs};
 use crate::{SyncError, SyncResult};
 

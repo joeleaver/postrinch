@@ -36,4 +36,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 debug = ["rinch/debug"]
 
 [dev-dependencies]
+postrinch-mailtest = { path = "../postrinch-mailtest" }
 tempfile = { workspace = true }

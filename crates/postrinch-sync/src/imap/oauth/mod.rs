@@ -7,12 +7,15 @@
 
 mod access;
 mod clients;
+mod grant;
 mod microsoft;
 mod provider;
+mod replace;
 mod sign_in;
 
 pub use access::ImapOAuth;
 pub use clients::OAuthClients;
+pub(crate) use grant::OAuthGrant;
 pub use microsoft::MicrosoftClient;
 pub use provider::OAuthProvider;
 pub use sign_in::OAuthSignIn;

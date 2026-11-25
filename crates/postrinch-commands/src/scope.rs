@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use postrinch_model::{Account, EmailAddress, SavedView};
+use postrinch_model::{Account, EmailAddress, Provider, SavedView};
 
 use crate::{CommandError, CommandResult, Commands};
 
@@ -37,6 +37,26 @@ impl Commands {
             Ok(())
         } else {
             Err(CommandError::UnknownAccount(account.clone()))
+        }
+    }
+
+    /// The account, when this caller sees it and the store has it.
+    pub fn account(&self, account: &EmailAddress) -> CommandResult<Account> {
+        self.check(account)?;
+        self.store
+            .account(account)?
+            .ok_or_else(|| CommandError::UnknownAccount(account.clone()))
+    }
+
+    /// An error for an account with no calendars: calendars are Google
+    /// Calendar's, so an IMAP account has none to read, change or answer
+    /// invitations in.
+    pub fn check_calendars(&self, account: &EmailAddress) -> CommandResult<()> {
+        match self.account(account)?.provider {
+            Provider::Google => Ok(()),
+            Provider::Imap => Err(CommandError::Invalid(format!(
+                "calendars are Google accounts' only, and {account} is an IMAP account"
+            ))),
         }
     }
 

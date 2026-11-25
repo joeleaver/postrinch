@@ -18,7 +18,4 @@ pub use config::ClientConfig;
 pub(crate) use grant::GoogleGrants;
 pub(crate) use oauth::imap_spec;
 pub use oauth::{Endpoints, SCOPES, SETTINGS_SCOPE};
-pub use sync::{
-    Answered, CalendarReport, GmailSync, KeepOptions, Phase, Progress, ProgressFn, RulesReport,
-    SETTINGS_LABEL, SendReport, SyncEvent, SyncEventFn, SyncReport,
-};
+pub use sync::{Answered, CalendarReport, GmailSync, RulesReport, SETTINGS_LABEL};

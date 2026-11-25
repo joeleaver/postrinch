@@ -8,7 +8,7 @@ use super::auth::{self, Signed};
 use super::capabilities::Capabilities;
 use super::connect::{Connector, describe};
 use super::folders::ListedFolder;
-use super::refusal::is_temporary_limit;
+use super::refusal::{is_busy, is_temporary_limit};
 use super::reply::{ImapStream, Recorder, Status, Tagged};
 use super::secret::{ImapSecret, Service};
 use super::tokens::AccessTokens;
@@ -163,14 +163,30 @@ fn after_sign_in<T>(
     }
 }
 
-/// A `NO` or `BAD` to one of the first commands after signing in. A
-/// `BAD` naming a known temporary limit is the server busy: Microsoft 365
-/// accepts the sign-in and then answers the next command `BAD User is
-/// authenticated but not connected.` while it sheds sessions opened too
-/// fast ([`super::refusal::TEMPORARY_LIMITS`]). Anything else is the
-/// server's, in its words.
+/// A `NO` or `BAD` to one of the first commands after signing in
+/// (CAPABILITY, LIST), which touch no folder. It is the server busy
+/// ([`SyncError::Busy`]) when:
+///
+/// - a `BAD` names a known temporary limit: Microsoft 365 accepts the
+///   sign-in and then answers the next command `BAD User is
+///   authenticated but not connected.` while it sheds sessions opened
+///   too fast ([`super::refusal::TEMPORARY_LIMITS`]);
+/// - a `NO` says "not now" as it would at sign-in ([`is_busy`]):
+///   `[UNAVAILABLE]`, `[INUSE]` or `[LIMIT]`, or a known limit's words
+///   under `[ALERT]` or no code. These commands name no folder for
+///   `[INUSE]` or `[UNAVAILABLE]` to be about, and ask nothing a fixed
+///   implementation `[LIMIT]` could cap, so each is the connection being
+///   turned away, the account's (as `busy_after_sign_in` has it for a
+///   known limit).
+///
+/// Anything else is the server's, in its words.
 fn refused_after_sign_in(server: &Server, answer: Tagged) -> SyncError {
-    if answer.status == Status::Bad && is_temporary_limit(&answer.text) {
+    let busy = match answer.status {
+        Status::Bad => is_temporary_limit(&answer.text),
+        Status::No => is_busy(answer.code.as_deref(), &answer.text),
+        Status::Ok => false,
+    };
+    if busy {
         return SyncError::Busy {
             service: "IMAP",
             server: describe(server),

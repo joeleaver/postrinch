@@ -3,7 +3,7 @@
 //! the next sync agrees with the store without downloading anything again.
 
 use postrinch_model::{MessageChange, ProviderMessageId};
-use postrinch_sync::google::SendReport;
+use postrinch_sync::SendReport;
 
 use super::sync_support::{Fixture, header_fetches, mail};
 

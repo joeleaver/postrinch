@@ -7,6 +7,7 @@
 //! ([`ImapSync`]).
 
 mod auth;
+mod busy;
 mod capabilities;
 mod check;
 mod connect;
@@ -25,17 +26,19 @@ mod threading;
 mod tls;
 mod tokens;
 
+pub(crate) use busy::BusyGate;
 pub use capabilities::Capabilities;
 pub use check::{AccountCheck, CheckFailure, check_account};
 pub use connect::Connector;
 pub use folders::{ListedFolder, SpecialUse};
 pub use ids::{message_id, message_id_without_header, mint_folder_label_id, named_by_message_id};
+pub(crate) use oauth::OAuthGrant;
 pub use oauth::{ImapOAuth, MicrosoftClient, OAuthClients, OAuthProvider, OAuthSignIn};
 pub use reply::ImapStream;
 pub use secret::{ImapSecret, ImapSecrets};
 pub use session::ImapSession;
 pub use smtp::SmtpConnection;
-pub use sync::{ImapSync, SentLookup};
+pub use sync::{Added, ImapSync, NewImapAccount, NewSignIn, OpenBrowser, SentLookup};
 pub use threading::{Own, thread_for};
 pub use tls::{Timeouts, TlsConfig};
 pub use tokens::{AccessTokens, TokenFuture};

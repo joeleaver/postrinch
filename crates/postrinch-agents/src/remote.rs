@@ -1,7 +1,10 @@
-//! What an agent asks of Gmail itself rather than of what is kept here:
-//! making, renaming and deleting labels. These are done at once, so the
-//! agent's next call can use what it made; the app gives the server a
-//! [`Gmail`] when sync runs.
+//! What an agent asks of the account's provider itself rather than of
+//! what is kept here: making, renaming and deleting labels (an IMAP
+//! account's folders), and changing Google accounts' calendars. These are
+//! done at once, so the agent's next call can use what it made; the app
+//! gives the server a [`Remote`] when sync runs. Calendars are Google
+//! accounts' only: a calendar call for an IMAP account is refused before
+//! it gets here ([`Commands::check_calendars`]).
 
 use postrinch_commands::Commands;
 use postrinch_model::EmailAddress;
@@ -10,8 +13,9 @@ use serde_json::{Value, json};
 use crate::views::say;
 use crate::wire::Call;
 
-/// Gmail's label calls, each answering in a sentence when it fails.
-pub trait Gmail: Send + Sync {
+/// The provider's calls, for Google and IMAP accounts alike, each
+/// answering in a sentence when it fails.
+pub trait Remote: Send + Sync {
     /// Make a label; returns its id.
     fn create_label(&self, account: &EmailAddress, name: &str) -> Result<String, String>;
     fn rename_label(&self, account: &EmailAddress, id: &str, name: &str) -> Result<(), String>;
@@ -46,12 +50,13 @@ pub trait Gmail: Send + Sync {
     ) -> Result<postrinch_model::CalendarInfo, String>;
 }
 
-const NO_GMAIL: &str = "Postrinch can't reach Gmail now (sync is off), so it can't change labels.";
+const NO_REMOTE: &str =
+    "Postrinch can't reach the account's mail server now (sync is off), so it can't change labels.";
 
 pub(crate) fn run(
     commands: &Commands,
     call: Call,
-    gmail: Option<&dyn Gmail>,
+    remote: Option<&dyn Remote>,
 ) -> Result<Value, String> {
     match call {
         Call::CreateLabel { account, name } => {
@@ -61,7 +66,7 @@ pub(crate) fn run(
             if let Some(same) = find(commands, &account, &name)? {
                 return Ok(json!({ "label": same.0, "name": same.1, "made": false }));
             }
-            let id = gmail.ok_or(NO_GMAIL)?.create_label(&account, &name)?;
+            let id = remote.ok_or(NO_REMOTE)?.create_label(&account, &name)?;
             Ok(json!({ "label": id, "name": name, "made": true }))
         }
         Call::RenameLabel {
@@ -76,7 +81,9 @@ pub(crate) fn run(
             {
                 return Err(format!("{account} already has a label named {name:?}."));
             }
-            gmail.ok_or(NO_GMAIL)?.rename_label(&account, &id, &name)?;
+            remote
+                .ok_or(NO_REMOTE)?
+                .rename_label(&account, &id, &name)?;
             Ok(json!({ "label": id, "name": name }))
         }
         Call::DeleteLabel { account, label } => {
@@ -88,14 +95,14 @@ pub(crate) fn run(
                     rule.id, rule.name
                 ));
             }
-            gmail.ok_or(NO_GMAIL)?.delete_label(&account, &id)?;
+            remote.ok_or(NO_REMOTE)?.delete_label(&account, &id)?;
             Ok(json!({ "deleted": id, "name": name }))
         }
         _ => unreachable!("only label calls come here"),
     }
 }
 
-/// A label's name as Gmail takes it: `Parent/Child` nests.
+/// A label's name as the provider takes it: `Parent/Child` nests.
 fn label_name(name: &str) -> Result<String, String> {
     let parts: Vec<&str> = name.split('/').map(str::trim).collect();
     if parts.iter().any(|p| p.is_empty()) {

@@ -1,19 +1,15 @@
-//! Running sync in the background and reporting it to the window.
+//! Running sync in the background and reporting it to the window. Sync
+//! itself starts in `sync_start`.
 
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use postrinch_model::EmailAddress;
-use postrinch_store::Store;
-use postrinch_sync::Keychain;
-use postrinch_sync::google::{
-    ClientConfig, GmailApi, GmailSync, GoogleAuth, KeepOptions, Phase, Progress, SyncEvent,
-};
-use postrinch_sync::imap::ImapSecrets;
+use postrinch_sync::{Phase, Progress, SyncEvent};
 use rinch::prelude::*;
-use tokio::runtime::Handle;
 use tokio::sync::Notify;
+
+pub use crate::sync_start::{SyncHandle, start};
 
 /// One account's sync, as the sidebar shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,114 +22,9 @@ pub struct AccountSync {
     pub trouble: bool,
 }
 
-/// What the window needs to act on accounts while sync runs.
-#[derive(Clone)]
-pub struct SyncHandle {
-    pub auth: Arc<GoogleAuth>,
-    pub store: Store,
-    /// The runtime sync runs on, for sign-ins and removals.
-    pub runtime: Handle,
-    /// Starts sync's next pass at once.
-    pub wake: Arc<Notify>,
-    /// Sends the changes made here at once.
-    pub send: Arc<Notify>,
-    sync: GmailSync,
-}
-
-impl SyncHandle {
-    /// The sync itself, for downloads the person asks for.
-    pub fn sync_engine(&self) -> &GmailSync {
-        &self.sync
-    }
-}
-
-/// Why sync is not running: a sentence for the sidebar, and the detail
-/// for the log.
-#[derive(Debug)]
-pub struct SyncOff {
-    pub said: &'static str,
-    pub detail: String,
-}
-
-impl SyncOff {
-    fn new(said: &'static str, detail: impl Into<String>) -> Self {
-        Self {
-            said,
-            detail: detail.into(),
-        }
-    }
-}
-
-/// Start keeping every account in sync, and sending the changes made here,
-/// on a thread of its own. `status` follows what each account's sync is
-/// doing; `revision` is bumped when the store changed. Fails, saying why,
-/// when sync cannot run at all.
-pub fn start(
-    store: Store,
-    status: Signal<Vec<AccountSync>>,
-    revision: Signal<u64>,
-) -> Result<SyncHandle, SyncOff> {
-    let Some(path) = ClientConfig::default_path() else {
-        return Err(SyncOff::new(
-            "Sync is off: this computer has no settings folder.",
-            "no configuration directory",
-        ));
-    };
-    let config = ClientConfig::load(&path).map_err(|e| {
-        let said = if path.exists() {
-            "Sync is off: the Google sign-in settings could not be read."
-        } else {
-            "Sync is off: Google sign-in is not set up on this computer."
-        };
-        SyncOff::new(said, format!("{}: {e}", path.display()))
-    })?;
-    let auth = GoogleAuth::new(config, Arc::new(Keychain::GOOGLE), ImapSecrets::keychain())
-        .map_err(|e| SyncOff::new("Sync is off: it could not start.", format!("sign-in: {e}")))?;
-    let auth = Arc::new(auth);
-    let sync = GmailSync::new(Arc::new(GmailApi::new(auth.clone())), store.clone());
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| {
-            SyncOff::new(
-                "Sync is off: it could not start.",
-                format!("its runtime: {e}"),
-            )
-        })?;
-    let (wake, send) = (Arc::new(Notify::new()), Arc::new(Notify::new()));
-    let fetch = wake.clone();
-    let events = Arc::new(move |event: SyncEvent| report(event, status, revision, &fetch));
-    let handle = SyncHandle {
-        auth,
-        store,
-        runtime: runtime.handle().clone(),
-        wake: wake.clone(),
-        send: send.clone(),
-        sync: sync.clone(),
-    };
-    let options = KeepOptions::default();
-    thread::Builder::new()
-        .name("sync".into())
-        .spawn(move || {
-            runtime.block_on(async {
-                tokio::join!(
-                    sync.keep_in_sync(options, events.clone(), wake),
-                    sync.keep_sending(options, events, send),
-                )
-            })
-        })
-        .map_err(|e| {
-            SyncOff::new(
-                "Sync is off: it could not start.",
-                format!("its thread: {e}"),
-            )
-        })?;
-    Ok(handle)
-}
-
 /// Turn a sync event into the sidebar's line for the account, from the
 /// sync thread.
-fn report(
+pub(crate) fn report(
     event: SyncEvent,
     status: Signal<Vec<AccountSync>>,
     revision: Signal<u64>,
@@ -201,7 +92,7 @@ fn report(
             tracing::info!("{account}: server busy: {message}");
             (account, busy_line(&message, retry_in), None, true, false)
         }
-        // Mail that went: show what is left to send, and fetch Gmail's
+        // Mail that went: show what is left to send, and fetch the server's
         // copy into Sent now rather than at the next check.
         SyncEvent::Sent { report, mail, .. } if report.refused.is_empty() && mail > 0 => {
             revision.update_send(|n| *n += 1);
@@ -214,10 +105,13 @@ fn report(
         SyncEvent::Sent {
             account, report, ..
         } => {
-            tracing::warn!("{account}: Gmail refused changes: {:?}", report.refused);
+            tracing::warn!(
+                "{account}: the server refused changes: {:?}",
+                report.refused
+            );
             let line = match report.refused.len() {
-                1 => "Gmail refused a change; showing Gmail's mail".to_owned(),
-                n => format!("Gmail refused {n} changes; showing Gmail's mail"),
+                1 => "The server refused a change; showing its mail".to_owned(),
+                n => format!("The server refused {n} changes; showing its mail"),
             };
             (account, line, None, true, true)
         }

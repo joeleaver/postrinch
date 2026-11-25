@@ -2,6 +2,8 @@
 //! servers of `postrinch-mailtest` on loopback ports, and OAuth sign-in
 //! against mock providers. No test touches a real mailbox or provider.
 
+mod add;
+mod add_secrets;
 mod changes;
 mod changes_attempts;
 mod changes_fallbacks;
@@ -14,8 +16,12 @@ mod changes_stale;
 mod changes_support;
 mod changes_waiting;
 mod check;
+#[path = "../common/mod.rs"]
+mod common;
 mod connect;
 mod limits;
+mod mail_keep;
+mod mail_routing;
 mod misbehaving;
 mod oauth;
 mod oauth_grant;

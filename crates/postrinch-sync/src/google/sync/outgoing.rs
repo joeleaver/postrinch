@@ -10,7 +10,7 @@ use crate::{SyncError, SyncResult, build_message};
 
 impl GmailSync {
     /// How much of the account's mail waits to be delivered.
-    pub(super) async fn outgoing_waiting(&self, account: &EmailAddress) -> SyncResult<usize> {
+    pub(crate) async fn outgoing_waiting(&self, account: &EmailAddress) -> SyncResult<usize> {
         let account = account.clone();
         self.with_store(move |s| {
             Ok(s.outgoing_for(&account)?

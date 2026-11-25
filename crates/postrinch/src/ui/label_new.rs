@@ -1,13 +1,14 @@
 //! Making a label, after its mockup: from the "+" by Labels in the
-//! sidebar, or "New label inside…" on a label's menu. It is made in Gmail
-//! at once, so it shows on the person's phone and the web too.
+//! sidebar, or "New label inside…" on a label's menu. It is made at the
+//! account's provider at once (a folder, for an IMAP account), so it shows
+//! on the person's phone and the web too.
 
-use postrinch_agents::Gmail;
+use postrinch_agents::Remote;
 use postrinch_model::EmailAddress;
 use rinch::prelude::*;
 
 use crate::actions::{commands, sync};
-use crate::gmail_labels::GmailLabels;
+use crate::remote_mail::RemoteMail;
 use crate::state::State;
 
 /// The label being made.
@@ -84,7 +85,7 @@ fn create(state: State) {
     }
     let Some(sync) = sync() else {
         return refuse(
-            "Postrinch can\u{2019}t reach Gmail now (sync is off), so it can\u{2019}t make labels."
+            "Postrinch can\u{2019}t reach the account\u{2019}s mail server now (sync is off), so it can\u{2019}t make labels."
                 .into(),
         );
     };
@@ -93,7 +94,7 @@ fn create(state: State) {
         .update(|m| m.iter_mut().for_each(|m| m.busy = true));
     let (making_signal, revision) = (state.making, state.revision);
     std::thread::spawn(
-        move || match GmailLabels(sync).create_label(&making.account, &full) {
+        move || match RemoteMail::of(&sync).create_label(&making.account, &full) {
             Ok(_) => {
                 making_signal.send(None);
                 revision.update_send(|n| *n += 1);

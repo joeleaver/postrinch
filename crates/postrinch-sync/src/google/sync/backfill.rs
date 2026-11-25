@@ -5,9 +5,10 @@ use std::sync::Arc;
 use postrinch_model::{EmailAddress, ProviderMessageId};
 use tokio::sync::RwLock;
 
-use super::{GmailSync, Phase, ProgressFn, SyncReport};
+use super::GmailSync;
 use crate::SyncResult;
 use crate::google::api::Priority;
+use crate::{Phase, ProgressFn, SyncReport};
 
 impl GmailSync {
     /// Download every message the store has only headers for, newest

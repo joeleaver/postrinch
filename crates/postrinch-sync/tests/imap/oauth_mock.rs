@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::support::account;
+use crate::support::{USER, account};
 
 pub const MICROSOFT_SCOPES: &str =
     "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send";
@@ -165,6 +165,38 @@ pub async fn mock_token(
         .and(path(token_path))
         .and(body_string_contains(format!("grant_type={grant}")))
         .respond_with(ResponseTemplate::new(status).set_body_json(body))
+        .mount(server)
+        .await;
+}
+
+/// Google's answers to a sign-in as `USER` with `scope`: its refresh
+/// token is `g-new`, its access token `g-access`.
+pub async fn mock_google_sign_in(server: &MockServer, scope: &str) {
+    mock_token(
+        server,
+        "/g/token",
+        "authorization_code",
+        200,
+        json!({"access_token": "g-access", "expires_in": 3599,
+               "refresh_token": "g-new", "scope": scope}),
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path("/g/userinfo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "email": USER, "email_verified": true, "name": "Ada"
+        })))
+        .mount(server)
+        .await;
+}
+
+/// Expects `times` revocations of `token` at Google.
+pub async fn expect_revoke(server: &MockServer, token: &str, times: u64) {
+    Mock::given(method("POST"))
+        .and(path("/g/revoke"))
+        .and(body_string_contains(format!("token={token}")))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(times)
         .mount(server)
         .await;
 }

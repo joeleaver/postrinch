@@ -23,12 +23,11 @@
 //! its step) keeps the clients of several accounts on one server, or one
 //! account's IMAP and SMTP, from all knocking at the same moment.
 //!
-//! Nothing uses it yet. The IMAP keep-in-sync loop, a later unit (IMAP
-//! 8), must keep one `Backoff` per account and server, take
-//! [`Backoff::next_delay`] on each
+//! The IMAP keep-in-sync and sending loops (`imap::busy`) keep one
+//! `Backoff` per account and server, take [`Backoff::next_delay`] on each
 //! [`SyncError::Busy`](crate::SyncError::Busy), [`Backoff::reset`] it on
 //! the next pass that signs in, and send
-//! [`SyncEvent::Busy`](crate::google::SyncEvent::Busy) with that wait
+//! [`SyncEvent::Busy`](crate::SyncEvent::Busy) with that wait
 //! (docs/imap.md, "Sync").
 
 use std::time::Duration;
