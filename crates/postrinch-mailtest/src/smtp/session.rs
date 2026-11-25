@@ -417,12 +417,12 @@ impl Session {
                 return Ok(after_reply(code));
             }
             Some(SmtpFault::StoreThenDisconnect) => {
-                self.shared.lock().messages.push(message);
+                self.shared.accept(message);
                 return Ok(Next::Close);
             }
             None => {}
         }
-        self.shared.lock().messages.push(message);
+        self.shared.accept(message);
         self.reply(250, "2.0.0 OK queued").await?;
         Ok(Next::Continue)
     }

@@ -203,11 +203,15 @@ struct PendingFault {
     fault: SmtpFault,
 }
 
+/// What a test has done with each message the server accepts.
+type OnAccept = Arc<dyn Fn(&ReceivedMessage) + Send + Sync>;
+
 pub(crate) struct SmtpState {
     config: SmtpConfig,
     faults: Vec<PendingFault>,
     messages: Vec<ReceivedMessage>,
     log: Vec<String>,
+    on_accept: Option<OnAccept>,
 }
 
 impl SmtpState {
@@ -251,6 +255,19 @@ impl SmtpShared {
             .lock()
             .expect("a session panicked while changing the fake SMTP server's state")
     }
+
+    /// Keeps an accepted message, then hands it to the test's hook (with
+    /// the state unlocked, so the hook may use the server).
+    fn accept(&self, message: ReceivedMessage) {
+        let hook = {
+            let mut state = self.lock();
+            state.messages.push(message.clone());
+            state.on_accept.clone()
+        };
+        if let Some(hook) = hook {
+            hook(&message);
+        }
+    }
 }
 
 /// A running fake SMTP server. Dropping it stops the server and every
@@ -284,6 +301,7 @@ impl SmtpServer {
                 faults: Vec::new(),
                 messages: Vec::new(),
                 log: Vec::new(),
+                on_accept: None,
             }),
             acceptor: certificate.acceptor()?,
         });
@@ -331,6 +349,15 @@ impl SmtpServer {
     /// Every message accepted so far, in order.
     pub fn messages(&self) -> Vec<ReceivedMessage> {
         self.shared.lock().messages.clone()
+    }
+
+    /// Calls `hook` with each message the server accepts from now on,
+    /// before it answers the data (also for
+    /// [`SmtpFault::StoreThenDisconnect`]): to play a provider that files
+    /// sent mail in Sent itself, by appending it there on the fake IMAP
+    /// server.
+    pub fn on_accept(&self, hook: impl Fn(&ReceivedMessage) + Send + Sync + 'static) {
+        self.shared.lock().on_accept = Some(Arc::new(hook));
     }
 
     /// Makes the next `times` submissions reaching `stage` fail as `fault`

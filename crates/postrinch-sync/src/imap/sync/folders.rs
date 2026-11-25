@@ -184,6 +184,21 @@ pub(super) fn syncable(folder: &ListedFolder) -> bool {
         )
 }
 
+/// The listed folder playing `role` (the person's choice, SPECIAL-USE or
+/// the usual names, as a pass gives it out), for sending before the
+/// first pass has kept the account's folders.
+pub(super) fn role_folder<'a>(
+    listed: &'a [ListedFolder],
+    roles: &FolderRoles,
+    role: FolderRole,
+) -> Option<&'a ListedFolder> {
+    let wanted: Vec<&ListedFolder> = listed.iter().filter(|f| syncable(f)).collect();
+    roles_by_index(&wanted, roles)
+        .into_iter()
+        .zip(wanted)
+        .find_map(|(r, folder)| (r == Some(role)).then_some(folder))
+}
+
 /// The folders to sync, in the order to sync them, from what LIST gave,
 /// the folders kept from earlier passes and the renames found among them
 /// (a renamed folder is the kept one under its new name).

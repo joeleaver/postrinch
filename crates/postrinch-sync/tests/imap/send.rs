@@ -1,0 +1,202 @@
+//! Sending an IMAP account's mail over SMTP and filing it in Sent, against
+//! the fake servers: each message goes once, whatever the servers do.
+
+use postrinch_mailtest::{SmtpFault, SmtpStage};
+use postrinch_store::{OutgoingKind, SendStage};
+use postrinch_sync::SyncError;
+
+use crate::send_support::{BCC, TO, header, send_fixture};
+
+fn reply(code: u16, text: &str) -> SmtpFault {
+    SmtpFault::Reply {
+        code,
+        text: text.into(),
+    }
+}
+
+/// The header block of a message.
+fn head(raw: &[u8]) -> String {
+    let text = String::from_utf8_lossy(raw);
+    text.split("\r\n\r\n")
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[tokio::test]
+async fn a_message_goes_to_everyone_and_is_filed_in_sent() {
+    for uidplus in [true, false] {
+        let f = send_fixture(uidplus, false).await;
+        f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+        assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+
+        let sent = f.smtp.messages();
+        assert_eq!(sent.len(), 1, "uidplus {uidplus}");
+        let mut to = sent[0].rcpt_to.clone();
+        to.sort();
+        assert_eq!(to, [TO, BCC]);
+        assert!(!head(&sent[0].data).contains(BCC), "Bcc is not shown");
+        assert!(f.outgoing().is_empty());
+
+        let filed = f.folder("Sent");
+        assert_eq!(filed.len(), 1, "uidplus {uidplus}");
+        assert!(filed[0].has_flag("\\Seen"));
+        assert!(head(&filed[0].body).contains(BCC), "Sent keeps the Bcc");
+        assert_eq!(
+            header(&filed[0].body, "Message-ID"),
+            header(&sent[0].data, "Message-ID")
+        );
+        let id = f.id_of(&filed[0]);
+        // Recorded from APPENDUID, or left to sync.
+        assert_eq!(f.places(&id), usize::from(uidplus));
+        let before = f.message_count();
+        f.sync().await;
+        assert_eq!(f.message_count(), before + 1, "stored once");
+        assert_eq!(f.places(&id), 1);
+    }
+}
+
+#[tokio::test]
+async fn a_server_that_files_sent_mail_is_not_given_a_second_copy() {
+    let f = send_fixture(true, true).await;
+    f.files_sent_mail();
+    f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.folder("Sent").len(), 1);
+    assert_eq!(f.imap_commands("APPEND"), 0);
+    assert!(f.settings().server_files_sent);
+    assert!(f.outgoing().is_empty());
+}
+
+#[tokio::test]
+async fn a_server_said_to_file_sent_mail_that_does_not_gets_the_copy_and_the_setting_off() {
+    let f = send_fixture(true, true).await;
+    f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.folder("Sent").len(), 1);
+    assert!(!f.settings().server_files_sent);
+
+    // From now on it is filed without looking first.
+    let searches = f.imap_commands("UID SEARCH");
+    f.queue(&f.draft("Friday"), OutgoingKind::Send);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.folder("Sent").len(), 2);
+    assert_eq!(f.imap_commands("UID SEARCH"), searches);
+}
+
+#[tokio::test]
+async fn a_busy_server_before_the_data_is_taken_is_tried_again() {
+    for stage in [SmtpStage::Mail, SmtpStage::Rcpt, SmtpStage::Data] {
+        let f = send_fixture(true, false).await;
+        f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+        f.smtp
+            .fail_next(stage, 1, reply(451, "4.3.0 Try again later"));
+        let failed = f.sync.send_outgoing(&f.me).await;
+        assert!(
+            matches!(
+                failed,
+                Err(SyncError::Busy {
+                    service: "SMTP",
+                    ..
+                })
+            ),
+            "{stage:?}: {failed:?}"
+        );
+        let waiting = f.waiting();
+        assert_eq!(
+            (waiting.attempts, waiting.refused, waiting.stage),
+            (1, false, SendStage::Queued),
+            "{stage:?}"
+        );
+        assert!(f.smtp.messages().is_empty(), "{stage:?}");
+        assert!(f.folder("Sent").is_empty(), "{stage:?}");
+
+        assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1, "{stage:?}");
+        assert_eq!(f.smtp.messages().len(), 1, "{stage:?}");
+        assert_eq!(f.folder("Sent").len(), 1, "{stage:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_refused_message_waits_for_the_person() {
+    let f = send_fixture(true, false).await;
+    f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    f.smtp
+        .fail_next(SmtpStage::Rcpt, 1, reply(550, "5.1.1 No such user"));
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    let waiting = f.waiting();
+    assert!(waiting.refused);
+    let error = waiting.error.unwrap();
+    assert!(error.contains("No such user"), "{error}");
+    assert_eq!(waiting.stage, SendStage::Queued);
+    assert!(f.smtp.messages().is_empty());
+
+    // Not tried again until the person says so.
+    let mails = f.smtp.command_count("MAIL");
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    assert_eq!(f.smtp.command_count("MAIL"), mails);
+    assert!(f.folder("Sent").is_empty());
+}
+
+#[tokio::test]
+async fn a_message_lost_after_its_data_and_found_in_sent_was_delivered() {
+    let f = send_fixture(true, true).await;
+    f.files_sent_mail();
+    f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    f.smtp
+        .fail_next(SmtpStage::Data, 1, SmtpFault::StoreThenDisconnect);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.smtp.messages().len(), 1, "sent once");
+    assert_eq!(f.folder("Sent").len(), 1, "filed once");
+    assert!(f.outgoing().is_empty());
+}
+
+#[tokio::test]
+async fn a_message_lost_after_its_data_and_not_in_sent_waits_and_is_never_sent_blind() {
+    let f = send_fixture(true, false).await;
+    let id = f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    f.smtp.fail_next(SmtpStage::Data, 1, SmtpFault::Disconnect);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    let waiting = f.waiting();
+    assert_eq!(
+        (waiting.refused, waiting.stage),
+        (true, SendStage::DataSent)
+    );
+    let error = waiting.error.unwrap();
+    assert!(error.contains("may have gone"), "{error}");
+
+    let datas = f.smtp.command_count("DATA");
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    assert_eq!(f.smtp.command_count("DATA"), datas, "not sent again");
+
+    // The person sends it again.
+    f.store.outgoing_send_again(id).unwrap();
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.smtp.messages().len(), 1);
+    assert_eq!(f.folder("Sent").len(), 1);
+}
+
+#[tokio::test]
+async fn a_message_left_without_an_answer_when_the_app_stopped_is_never_sent_blind() {
+    let f = send_fixture(true, true).await;
+    let id = f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    f.store.outgoing_stage(id, SendStage::DataSent).unwrap();
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0);
+    assert_eq!(f.smtp.command_count("MAIL"), 0);
+    let waiting = f.waiting();
+    assert_eq!(
+        (waiting.refused, waiting.stage),
+        (true, SendStage::DataSent)
+    );
+}
+
+#[tokio::test]
+async fn a_delivered_message_whose_filing_failed_is_only_filed() {
+    let f = send_fixture(true, false).await;
+    let id = f.queue(&f.draft("Thursday"), OutgoingKind::Send);
+    f.store.outgoing_stage(id, SendStage::Delivered).unwrap();
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.smtp.command_count("MAIL"), 0, "never sent again");
+    assert_eq!(f.folder("Sent").len(), 1);
+    assert!(f.outgoing().is_empty());
+}

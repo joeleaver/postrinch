@@ -160,6 +160,8 @@ type Outgoing {
     error: String
     // Whether the provider refused it for good.
     refused: Bool
+    // SendStage: how far an IMAP account's send got; null for queued.
+    stage: Json
 }
 
 // One account's mail rules (postrinch-rules): `settings` as the account's

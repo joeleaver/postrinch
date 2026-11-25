@@ -45,7 +45,7 @@ pub use error::{StoreError, StoreResult};
 pub use find::{Find, Found};
 pub use mailboxes::{LabelStats, MessageEntry, ThreadEntry};
 pub use outbox::OutboxEntry;
-pub use outgoing::{Outgoing, OutgoingKind};
+pub use outgoing::{Outgoing, OutgoingKind, SendStage};
 pub use people::PersonEntry;
 
 /// Label stats by account key, each with the write count it was read at.
