@@ -43,6 +43,14 @@ impl SyncHandle {
         &self.mail
     }
 
+    /// Wakes both of sync's loops, after an account signed in or was
+    /// removed: its mail comes at once, and what waited to be sent goes
+    /// (an account that had to sign in sent nothing meanwhile); a removed
+    /// account's loops end rather than wait out their turn.
+    pub fn accounts_changed(&self) {
+        wake_both(&self.wake, &self.send);
+    }
+
     /// Runs `call` on the account's Google Calendar on sync's runtime,
     /// waiting for it, from a thread of the window's own (never one of the
     /// runtime's). An IMAP account has no calendar
@@ -172,4 +180,33 @@ fn google() -> Result<Arc<GoogleAuth>, SyncOff> {
             )
         })?;
     Ok(Arc::new(auth))
+}
+
+/// Wakes the sync loop and the sending loop.
+fn wake_both(wake: &Notify, send: &Notify) {
+    wake.notify_one();
+    send.notify_one();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn an_account_change_wakes_both_loops() {
+        let (wake, send) = (Notify::new(), Notify::new());
+        wake_both(&wake, &send);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let both = async { tokio::join!(wake.notified(), send.notified()) };
+            tokio::time::timeout(Duration::from_secs(5), both)
+                .await
+                .expect("both loops are woken");
+        });
+    }
 }

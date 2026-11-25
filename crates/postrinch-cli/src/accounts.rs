@@ -75,7 +75,10 @@ pub async fn sign_in(cx: &Context, address: Option<EmailAddress>) -> Result<()> 
         display_name: stored.display_name,
         settings,
     };
-    match imap.add_account(new, NewSignIn::Password(secret)).await? {
+    match imap
+        .add_account(&oauth, new, NewSignIn::Password(secret))
+        .await?
+    {
         Added::Account(_) => {
             println!("Signed in as {address}.");
             Ok(())

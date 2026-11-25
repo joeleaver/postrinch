@@ -147,6 +147,32 @@ async fn a_refused_password_adds_nothing_and_says_which_server() {
     assert!(f.secrets.get(&ada()).await.is_err());
 }
 
+#[tokio::test]
+async fn adding_again_keeps_what_the_account_learned() {
+    let f = fixture().await;
+    f.add(vec![PASSWORD]).await.unwrap();
+    // The person picked an archive folder; sending found the provider
+    // does not file sent mail.
+    let mut learned = f.store.account(&ada()).unwrap().unwrap().imap.unwrap();
+    learned.roles.archive = Some("Old".into());
+    learned.server_files_sent = false;
+    f.store.set_imap_settings(&ada(), &learned).unwrap();
+
+    // Added again, now with SMTP's own password.
+    let mut words = f.servers();
+    words.push("--separate-smtp-password".into());
+    let words: Vec<&str> = words.iter().map(String::as_str).collect();
+    let passwords = &mut Given(vec![PASSWORD, PASSWORD]);
+    add_imap(&f.sync, &f.oauth, args(&words), passwords)
+        .await
+        .unwrap();
+    let settings = f.store.account(&ada()).unwrap().unwrap().imap.unwrap();
+    assert_eq!(settings.sign_in, SignInMethod::SeparateSmtpPassword);
+    assert_eq!(settings.roles, learned.roles, "the person's folders stay");
+    assert!(!settings.server_files_sent, "what sending learned stays");
+    assert_eq!((settings.imap, settings.smtp), (learned.imap, learned.smtp));
+}
+
 #[test]
 fn a_password_is_never_an_argument() {
     let line = ["postrinch-cli", "add-imap", USER, "--password", "x"];

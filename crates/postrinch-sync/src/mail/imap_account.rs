@@ -5,9 +5,12 @@
 //!   ([`SyncError::Busy`]) is waited out: the account's server's
 //!   [`Backoff`](crate::Backoff) gives the wait (`BusyGate`),
 //!   [`SyncEvent::Busy`] says so with the server's words, and nothing is
-//!   asked of that server until the wait is over, a wake included. Its
-//!   sign-in is fine, so it is never marked as needing to sign in. A pass
-//!   or send that signs in resets the wait.
+//!   asked of that server until the wait is over, a wake included: a
+//!   wake only makes the loop look at the wait again. Its sign-in is
+//!   fine, so it is never marked as needing to sign in. A pass or send
+//!   that signs in resets the wait; so does the account's removal, or its
+//!   servers' check when it is added again, and the next wake then finds
+//!   the account gone, or no wait left.
 //! - A refused sign-in ([`SyncError::NeedsSignIn`], which the engine has
 //!   recorded on the account) ends the loop: the account is left alone
 //!   until it signs in again, when its keeper starts a loop anew.
@@ -38,7 +41,9 @@ enum Next {
     Pause(Duration),
     /// Wait until woken.
     UntilWoken,
-    /// Wait this long, wake or no wake: a busy server.
+    /// Wait this long, or until woken, and then look at the busy
+    /// server's wait again: a wake never cuts the wait short, but one that
+    /// was forgotten meanwhile (the account removed, or added again) ends.
     WaitOut(Duration),
     /// The account must sign in again (or is gone): the loop ends.
     Stop,
@@ -81,14 +86,15 @@ impl ImapKeeper {
     /// Waits as `next` says. Returns whether the loop goes on.
     async fn wait(&self, next: Next, wake: &Notify) -> bool {
         match next {
-            Next::Pause(pause) => {
+            // A busy server's wait is looked at again at the start of the
+            // next turn, before the server is asked anything.
+            Next::Pause(pause) | Next::WaitOut(pause) => {
                 tokio::select! {
                     () = tokio::time::sleep(pause) => {}
                     () = wake.notified() => {}
                 }
             }
             Next::UntilWoken => wake.notified().await,
-            Next::WaitOut(wait) => tokio::time::sleep(wait).await,
             Next::Stop => return false,
         }
         true

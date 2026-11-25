@@ -1,8 +1,8 @@
 //! Keeping IMAP accounts in sync through [`MailSync`]: a server that is
 //! busy is waited out with a growing wait, said with
 //! [`SyncEvent::Busy`], and never taken for a refused sign-in; a pass
-//! that signs in ends the wait; changes made here are sent when the loop
-//! is woken.
+//! that signs in ends the wait, and so does adding the account again or
+//! removing it; changes made here are sent when the loop is woken.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -12,7 +12,9 @@ use postrinch_model::MessageChange;
 use postrinch_sync::{KeepOptions, MailSync, SyncEvent};
 use tokio::sync::Notify;
 
+use super::add::{Adding, adding};
 use super::changes_support::record;
+use super::support::{PASSWORD, USER, account};
 use super::sync_support::{Fixture, fixture, mail};
 
 /// Gmail's answer to any command once the account's daily limit is hit.
@@ -208,4 +210,65 @@ async fn a_busy_server_holds_changes_back_without_losing_them() {
     let kinds = kinds(&events);
     assert_eq!(kinds, ["busy", "sent"], "waited out, then sent");
     assert!(f.user.messages("INBOX").unwrap()[0].has_flag("\\Flagged"));
+}
+
+/// An account added with both fakes, a message waiting, and its next
+/// `UID FETCH` answered busy; the façade waits out a busy server for an
+/// hour.
+async fn busy_for_an_hour() -> (Adding, MailSync) {
+    let a = adding().await;
+    let sync = MailSync::new(a.store.clone(), None, a.sync.clone())
+        .with_busy_backoff(Duration::from_secs(3600), Duration::from_secs(3600));
+    a.add_over(sync.imap(), PASSWORD).await;
+    a.fakes
+        .imap
+        .user(USER)
+        .append("INBOX", mail(Some("a@x"), "A", ""))
+        .unwrap();
+    a.fakes
+        .imap
+        .fail_next("UID FETCH", 1, ImapFault::No(BANDWIDTH.into()));
+    (a, sync)
+}
+
+#[tokio::test]
+async fn adding_the_account_again_ends_a_busy_wait() {
+    let (a, sync) = busy_for_an_hour().await;
+    let (events, log) = recorder();
+    let wake = Arc::new(Notify::new());
+    let keeping = sync.keep_in_sync(FAST, log, wake.clone());
+    let watched = async {
+        until(&events, |k| k.contains(&"busy")).await;
+        // Its servers checked again (as when they change): the wait goes.
+        a.add_over(sync.imap(), PASSWORD).await;
+        wake.notify_one();
+        until(&events, |k| k.contains(&"done")).await;
+    };
+    tokio::select! {
+        () = keeping => panic!("the loop ended"),
+        () = watched => {}
+    }
+}
+
+#[tokio::test]
+async fn an_account_removed_and_added_again_does_not_wait_out_the_old_wait() {
+    let (a, sync) = busy_for_an_hour().await;
+    let (events, log) = recorder();
+    let wake = Arc::new(Notify::new());
+    let keeping = sync.keep_in_sync(FAST, log, wake.clone());
+    let watched = async {
+        until(&events, |k| k.contains(&"busy")).await;
+        sync.imap()
+            .remove_account(&a.oauth, &account())
+            .await
+            .unwrap();
+        wake.notify_one();
+        a.add_over(sync.imap(), PASSWORD).await;
+        wake.notify_one();
+        until(&events, |k| k.contains(&"done")).await;
+    };
+    tokio::select! {
+        () = keeping => panic!("the loop ended"),
+        () = watched => {}
+    }
 }

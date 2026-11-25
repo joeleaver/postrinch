@@ -38,6 +38,19 @@ impl Fakes {
         .await
     }
 
+    /// Taking the password, and `token` as an OAuth access token.
+    pub async fn with_password_and_token(token: &str) -> Self {
+        Self::start(
+            ImapConfig::new()
+                .user(USER, PASSWORD)
+                .oauth_token(USER, token),
+            SmtpConfig::new()
+                .user(USER, PASSWORD)
+                .oauth_token(USER, token),
+        )
+        .await
+    }
+
     pub fn imap_server(&self) -> Server {
         server(self.imap.tls_addr().unwrap(), Security::Tls)
     }

@@ -20,8 +20,7 @@ use postrinch_store::Store;
 use tokio::sync::Notify;
 use tokio::task::JoinSet;
 
-use super::busy::BusyGate;
-use crate::imap::ImapSync;
+use crate::imap::{BusyGate, ImapSync};
 use crate::{KeepOptions, SyncEventFn};
 
 /// What a keeper's tasks do.

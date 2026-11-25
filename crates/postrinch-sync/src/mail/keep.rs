@@ -68,7 +68,7 @@ impl MailSync {
         ImapKeeper {
             sync: self.imap.clone(),
             store: self.store.clone(),
-            busy: self.busy.clone(),
+            busy: self.imap.busy().clone(),
             options,
             events,
         }

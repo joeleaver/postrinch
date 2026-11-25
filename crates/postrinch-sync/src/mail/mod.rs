@@ -7,9 +7,8 @@
 //! Keeping every account in sync, and sending what is made here, is
 //! [`MailSync::keep_in_sync`] and [`MailSync::keep_sending`] (`keep`):
 //! Gmail's loops as they were, and per IMAP account loops that wait out a
-//! busy server (`imap_keep`, `busy`).
+//! busy server (`imap_keep`, and the IMAP engine's `BusyGate`).
 
-mod busy;
 mod imap_account;
 mod imap_keep;
 mod keep;
@@ -17,7 +16,6 @@ mod keep;
 use postrinch_model::{Account, EmailAddress, Label, Provider, ProviderMessageId};
 use postrinch_store::{Store, StoreResult};
 
-use self::busy::BusyGate;
 use crate::google::GmailSync;
 use crate::imap::ImapSync;
 use crate::{ProgressFn, SendReport, SyncError, SyncReport, SyncResult};
@@ -28,7 +26,6 @@ pub struct MailSync {
     store: Store,
     gmail: Option<GmailSync>,
     imap: ImapSync,
-    busy: BusyGate,
 }
 
 /// The engine an account's calls go to.
@@ -42,22 +39,18 @@ impl MailSync {
     /// not set up in this copy: Google accounts then fail with
     /// [`SyncError::OAuthNotSetUp`]) and `imap` for IMAP accounts.
     pub fn new(store: Store, gmail: Option<GmailSync>, imap: ImapSync) -> Self {
-        Self {
-            store,
-            gmail,
-            imap,
-            busy: BusyGate::default(),
-        }
+        Self { store, gmail, imap }
     }
 
     /// Waits out busy servers from `first`, doubling up to `cap`, in place
-    /// of [`crate::Backoff::new`]'s (for tests).
+    /// of [`crate::Backoff::new`]'s (for tests; see
+    /// [`ImapSync::with_busy_backoff`]).
     pub fn with_busy_backoff(
         mut self,
         first: std::time::Duration,
         cap: std::time::Duration,
     ) -> Self {
-        self.busy = BusyGate::with_policy(first, cap);
+        self.imap = self.imap.with_busy_backoff(first, cap);
         self
     }
 

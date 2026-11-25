@@ -127,7 +127,6 @@ pub async fn add_imap(
     };
     let sign_in = match args.oauth {
         Some(provider) => NewSignIn::OAuth {
-            oauth,
             provider: provider.into(),
             open_browser: Box::new(|url: &str| {
                 eprintln!("Opening your browser to sign in. If it does not open, visit:\n{url}\n");
@@ -151,7 +150,7 @@ pub async fn add_imap(
         display_name: args.name.clone(),
         settings,
     };
-    match sync.add_account(new, sign_in).await? {
+    match sync.add_account(oauth, new, sign_in).await? {
         Added::Account(account) => {
             println!(
                 "Added {}. `postrinch-cli sync {}` fetches its mail.",

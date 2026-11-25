@@ -7,6 +7,7 @@
 //! ([`ImapSync`]).
 
 mod auth;
+mod busy;
 mod capabilities;
 mod check;
 mod connect;
@@ -25,6 +26,7 @@ mod threading;
 mod tls;
 mod tokens;
 
+pub(crate) use busy::BusyGate;
 pub use capabilities::Capabilities;
 pub use check::{AccountCheck, CheckFailure, check_account};
 pub use connect::Connector;

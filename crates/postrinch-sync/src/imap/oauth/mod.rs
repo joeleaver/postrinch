@@ -7,6 +7,7 @@
 
 mod access;
 mod clients;
+mod grant;
 mod microsoft;
 mod provider;
 mod sign_in;

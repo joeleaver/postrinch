@@ -32,6 +32,11 @@ impl AccessToken {
         }
     }
 
+    /// The token, however old.
+    pub(super) fn token(&self) -> &str {
+        &self.token
+    }
+
     fn fresh(&self) -> Option<&str> {
         (self.expires > Instant::now() + EXPIRY_MARGIN).then_some(self.token.as_str())
     }

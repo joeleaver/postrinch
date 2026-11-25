@@ -10,6 +10,11 @@
 //! connection, turned away too) does not count again, so two loops never
 //! double the wait between them. Both wait until the moment passes before
 //! asking the server anything; a pass that signs in resets it.
+//!
+//! [`ImapSync`](super::ImapSync) holds the gate, so an account that is
+//! removed, or added again (its servers checked, perhaps new ones), has
+//! its waits forgotten ([`BusyGate::forget`]): it never waits out a
+//! server it no longer has, nor a back-off from before it was removed.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -89,6 +94,13 @@ impl BusyGate {
         self.lock().remove(&(account.key(), service));
     }
 
+    /// The account is gone, or its servers were just checked: forgets
+    /// both its servers' waits.
+    pub(crate) fn forget(&self, account: &EmailAddress) {
+        let key = account.key();
+        self.lock().retain(|(account, _), _| *account != key);
+    }
+
     fn backoff(&self) -> Backoff {
         match self.policy {
             Some((first, cap)) => Backoff::with(first, cap),
@@ -130,6 +142,25 @@ mod tests {
         assert_eq!(gate.remaining(&ada(), "IMAP"), None);
         let again = gate.busy(&ada(), "IMAP");
         assert!(again <= Duration::from_millis(40), "{again:?}");
+    }
+
+    #[test]
+    fn forgetting_an_account_ends_both_its_waits_and_no_one_elses() {
+        let gate = BusyGate::with_policy(Duration::from_secs(30), Duration::from_secs(900));
+        let bob = EmailAddress::parse("bob@example.org").unwrap();
+        for service in ["IMAP", "SMTP"] {
+            gate.busy(&ada(), service);
+            gate.busy(&ada(), service);
+            gate.busy(&bob, service);
+        }
+        gate.forget(&EmailAddress::parse("Ada@Example.org").unwrap());
+        assert_eq!(gate.remaining(&ada(), "IMAP"), None);
+        assert_eq!(gate.remaining(&ada(), "SMTP"), None);
+        assert!(gate.remaining(&bob, "IMAP").is_some());
+        assert!(gate.remaining(&bob, "SMTP").is_some());
+        // The back-off starts again from its first step.
+        let again = gate.busy(&ada(), "IMAP");
+        assert!(again <= Duration::from_secs(30), "{again:?}");
     }
 
     #[test]

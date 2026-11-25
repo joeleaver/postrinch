@@ -120,7 +120,7 @@ impl State {
                     if let Some(gmail) = sync.mail().gmail() {
                         gmail.recheck_rules(&account.address);
                     }
-                    sync.wake.notify_one();
+                    sync.accounts_changed();
                     Notice {
                         text: format!("{} is signed in. Its mail is on the way.", account.address),
                         trouble: false,
@@ -144,10 +144,13 @@ impl State {
         let (notice, revision) = (self.notice, self.revision);
         sync.runtime.clone().spawn(async move {
             let text = match remove(&sync, &account).await {
-                Ok(_) => Notice {
-                    text: format!("{account} is removed from this computer."),
-                    trouble: false,
-                },
+                Ok(_) => {
+                    sync.accounts_changed();
+                    Notice {
+                        text: format!("{account} is removed from this computer."),
+                        trouble: false,
+                    }
+                }
                 Err(e) => Notice {
                     text: format!("{account} could not be removed: {e}"),
                     trouble: true,

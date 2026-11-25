@@ -39,6 +39,7 @@ mod wire;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use postrinch_model::{AccountState, EmailAddress, ImapSettings};
 use postrinch_store::{Store, StoreResult};
@@ -47,7 +48,7 @@ use tokio::sync::Mutex as AsyncMutex;
 pub use self::accounts::{Added, NewImapAccount, NewSignIn, OpenBrowser};
 pub use self::send::SentLookup;
 use self::wire::Conn;
-use super::{AccessTokens, Connector, ImapSecrets, ImapSession};
+use super::{AccessTokens, BusyGate, Connector, ImapSecrets, ImapSession};
 use crate::{ProgressFn, SyncReport};
 use crate::{SyncError, SyncResult};
 
@@ -100,6 +101,8 @@ pub struct ImapSync {
     tokens: Arc<dyn AccessTokens>,
     lanes: Arc<Mutex<HashMap<String, Lanes>>>,
     sent_lookup: SentLookup,
+    /// The accounts' busy servers' waits, for the keep-in-sync loops.
+    busy: BusyGate,
 }
 
 impl ImapSync {
@@ -118,7 +121,21 @@ impl ImapSync {
             tokens,
             lanes: Arc::default(),
             sent_lookup: SentLookup::default(),
+            busy: BusyGate::default(),
         }
+    }
+
+    /// Waits out busy servers from `first`, doubling up to `cap`, in place
+    /// of [`crate::Backoff::new`]'s (for tests). Clones made before this
+    /// keep the waits they had.
+    pub fn with_busy_backoff(mut self, first: Duration, cap: Duration) -> Self {
+        self.busy = BusyGate::with_policy(first, cap);
+        self
+    }
+
+    /// The accounts' busy servers' waits.
+    pub(crate) fn busy(&self) -> &BusyGate {
+        &self.busy
     }
 
     /// Looks for sent mail in Sent as `lookup` says, in place of the

@@ -23,7 +23,7 @@
 //! its step) keeps the clients of several accounts on one server, or one
 //! account's IMAP and SMTP, from all knocking at the same moment.
 //!
-//! The IMAP keep-in-sync and sending loops (`mail::busy`) keep one
+//! The IMAP keep-in-sync and sending loops (`imap::busy`) keep one
 //! `Backoff` per account and server, take [`Backoff::next_delay`] on each
 //! [`SyncError::Busy`](crate::SyncError::Busy), [`Backoff::reset`] it on
 //! the next pass that signs in, and send
