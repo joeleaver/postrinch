@@ -9,10 +9,11 @@
 //! while the server keeps answering, and a server that stops answering
 //! cannot hang the account.
 //!
-//! A `NO` saying the server is busy ([`busy`]) ends the pass when it is
-//! the account's ([`SyncError::Busy`]), and only the folder when it is
-//! the folder's ([`FolderError::Busy`]): the commands sent in a folder
-//! return a [`FolderResult`].
+//! A `NO` saying the server is busy
+//! ([`crate::imap::refusal::busy_after_sign_in`]) ends the pass when it
+//! is the account's ([`SyncError::Busy`]), and only the
+//! folder when it is the folder's ([`FolderError::Busy`]): the commands
+//! sent in a folder return a [`FolderResult`].
 
 use std::time::Duration;
 
@@ -21,7 +22,7 @@ use postrinch_model::Server;
 use tokio::io::AsyncWriteExt;
 
 pub(super) use super::answers::Completed;
-use super::answers::busy;
+use super::answers::{busy, code_name, mailbox_id_of};
 use super::fetch::Collector;
 pub(super) use super::fetch::{FetchReply, Fetched};
 use super::folder_error::{FolderError, FolderResult};
@@ -77,6 +78,9 @@ impl Done {
 pub(super) struct Refusal {
     /// The server's text, with its response code.
     pub text: String,
+    /// The response code, upper case without its arguments
+    /// (`TRYCREATE`, `NONEXISTENT`), where the server gave one.
+    pub code: Option<String>,
 }
 
 impl Conn {
@@ -156,12 +160,36 @@ impl Conn {
     }
 
     async fn open(&mut self, verb: &str, name: &str) -> FolderResult<Option<Selected>> {
+        match self.open_or_refusal(verb, name).await? {
+            Ok(selected) => Ok(Some(selected)),
+            Err(Some(refusal)) => {
+                tracing::info!(
+                    "IMAP: {} refused to open the folder {name:?}: {}",
+                    self.describe(),
+                    refusal.text
+                );
+                Ok(None)
+            }
+            Err(None) => {
+                tracing::warn!(
+                    "IMAP: {} lists a folder whose name cannot be sent back: {name:?}",
+                    self.describe()
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    /// `SELECT`s (or `EXAMINE`s) a folder, keeping the server's refusal,
+    /// so the outbox can tell a folder that is gone from one that may
+    /// open later. `Err(None)` when the name cannot be sent.
+    pub(super) async fn open_or_refusal(
+        &mut self,
+        verb: &str,
+        name: &str,
+    ) -> FolderResult<Result<Selected, Option<Refusal>>> {
         let Some(mut command) = Command::with_mailbox(verb, name) else {
-            tracing::warn!(
-                "IMAP: {} lists a folder whose name cannot be sent back: {name:?}",
-                self.describe()
-            );
-            return Ok(None);
+            return Ok(Err(None));
         };
         if self.condstore() {
             command = command.then(" (CONDSTORE)");
@@ -193,16 +221,11 @@ impl Conn {
             .await?
             .in_folder()?;
         if let Done::No(refusal) = done {
-            tracing::info!(
-                "IMAP: {} refused to open the folder {name:?}: {}",
-                self.describe(),
-                refusal.text
-            );
-            return Ok(None);
+            return Ok(Err(Some(refusal)));
         }
         let uidvalidity = uidvalidity.ok_or_else(|| self.protocol("SELECT gave no UIDVALIDITY"))?;
         let objectid = self.session.capabilities().has("OBJECTID");
-        Ok(Some(Selected {
+        Ok(Ok(Selected {
             uidvalidity,
             uidnext,
             highest_modseq: highest_modseq.filter(|_| self.condstore()),
@@ -282,9 +305,10 @@ impl Conn {
     }
 
     /// Sends a command and reads every response up to its tagged one,
-    /// handing each untagged one to `each`. A literal the server must
-    /// agree to first (without LITERAL+) is sent after its `+`; a literal
-    /// may take longer to send than a command ([`for_bytes`]).
+    /// handing each untagged one to `each`, and the tagged `OK` too, for
+    /// its response code (`COPYUID`). A literal the server must agree to
+    /// first (without LITERAL+) is sent after its `+`; a literal may take
+    /// longer to send than a command ([`for_bytes`]).
     pub(super) async fn command(
         &mut self,
         what: &str,
@@ -328,7 +352,10 @@ impl Conn {
                 } if *done == tag => {
                     let text = outcome.information.as_deref().unwrap_or("").to_owned();
                     return match status {
-                        Status::Ok => Ok(Done::Ok(Completed::of(outcome.code.as_ref()))),
+                        Status::Ok => {
+                            each(response.parsed())?;
+                            Ok(Done::Ok(Completed::of(outcome.code.as_ref())))
+                        }
                         Status::No => match busy(outcome.code.as_ref(), &text) {
                             Some(BusyScope::Account) => Err(SyncError::Busy {
                                 service: "IMAP",
@@ -336,7 +363,10 @@ impl Conn {
                                 message: text,
                             }),
                             Some(BusyScope::Folder) => Ok(Done::FolderBusy(text)),
-                            None => Ok(Done::No(Refusal { text })),
+                            None => Ok(Done::No(Refusal {
+                                code: code_name(outcome.code.as_ref(), &text),
+                                text,
+                            })),
                         },
                         _ => Err(server_error(&server, &format!("{verb} refused: {text}"))),
                     };
@@ -411,29 +441,5 @@ fn server_error(server: &Server, message: &str) -> SyncError {
         service: "IMAP",
         server: describe(server),
         message: message.to_owned(),
-    }
-}
-
-/// The id in an untagged `OK [MAILBOXID (<id>)]`'s text.
-fn mailbox_id_of(text: &str) -> Option<String> {
-    let code = text
-        .get(..11)
-        .filter(|p| p.eq_ignore_ascii_case("[MAILBOXID "))?;
-    let inner = text[code.len()..].strip_prefix('(')?;
-    let id = &inner[..inner.find(')')?];
-    (!id.is_empty()).then(|| id.to_owned())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mailbox_ids_are_read_from_the_text() {
-        let id = mailbox_id_of("[MAILBOXID (F2212ea87)] Ok");
-        assert_eq!(id.as_deref(), Some("F2212ea87"));
-        assert_eq!(mailbox_id_of("[mailboxid (x)]").as_deref(), Some("x"));
-        assert_eq!(mailbox_id_of("[MAILBOXID ()] Ok"), None);
-        assert_eq!(mailbox_id_of("Ok"), None);
     }
 }

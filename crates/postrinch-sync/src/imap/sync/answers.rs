@@ -1,6 +1,7 @@
-//! What a command's tagged answer says beyond its status: whether a `NO`
-//! is the server busy, and for what ([`busy`]), and the codes of an `OK`
-//! that sync reads ([`Completed`]).
+//! What a server's answers say beyond their status: whether a `NO` is
+//! the server busy, and for what ([`busy`]); a refusal's code by name
+//! ([`code_name`]); the codes of an `OK` that sync reads ([`Completed`]);
+//! a folder's RFC 8474 `MAILBOXID` ([`mailbox_id_of`]).
 
 use async_imap::imap_proto::ResponseCode;
 use async_imap::imap_proto::rfc4315::UidSetMember;
@@ -42,6 +43,29 @@ pub(super) fn busy(code: Option<&ResponseCode<'_>>, text: &str) -> Option<BusySc
             busy_after_sign_in(parsed.code.as_deref(), &parsed.text)
         }
     }
+}
+
+/// A tagged answer's response code by name: imap-proto parses a few
+/// (`TRYCREATE`, `READ-ONLY`), and leaves the others at the start of the
+/// text.
+pub(super) fn code_name(code: Option<&ResponseCode<'_>>, text: &str) -> Option<String> {
+    match code {
+        Some(ResponseCode::TryCreate) => Some("TRYCREATE".to_owned()),
+        Some(ResponseCode::ReadOnly) => Some("READ-ONLY".to_owned()),
+        Some(ResponseCode::Alert) => Some("ALERT".to_owned()),
+        Some(_) => None,
+        None => Tagged::parse_text(text).code,
+    }
+}
+
+/// The id in an untagged `OK [MAILBOXID (<id>)]`'s text.
+pub(super) fn mailbox_id_of(text: &str) -> Option<String> {
+    let code = text
+        .get(..11)
+        .filter(|p| p.eq_ignore_ascii_case("[MAILBOXID "))?;
+    let inner = text[code.len()..].strip_prefix('(')?;
+    let id = &inner[..inner.find(')')?];
+    (!id.is_empty()).then(|| id.to_owned())
 }
 
 #[cfg(test)]
@@ -86,5 +110,14 @@ mod tests {
         let many = ResponseCode::AppendUid(7, vec![UidSetMember::UidRange(1..=2)]);
         assert_eq!(Completed::of(Some(&many)).appended, None);
         assert_eq!(Completed::of(None), Completed::default());
+    }
+
+    #[test]
+    fn mailbox_ids_are_read_from_the_text() {
+        let id = mailbox_id_of("[MAILBOXID (F2212ea87)] Ok");
+        assert_eq!(id.as_deref(), Some("F2212ea87"));
+        assert_eq!(mailbox_id_of("[mailboxid (x)]").as_deref(), Some("x"));
+        assert_eq!(mailbox_id_of("[MAILBOXID ()] Ok"), None);
+        assert_eq!(mailbox_id_of("Ok"), None);
     }
 }

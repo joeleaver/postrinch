@@ -75,10 +75,12 @@ The outbox stays as it is: a `MessageChange` per set of messages, applied here a
 | remove `TRASH` (restore) | `UID MOVE` back to the inbox, or the folders the change adds |
 | add/remove `SPAM` | as for Trash, with Junk |
 
-- Without `MOVE` (RFC 6851), a move is `COPY`, `\Deleted`, `UID EXPUNGE`; without UIDPLUS's `UID EXPUNGE`, a plain `EXPUNGE` only when no other copy in that folder is marked `\Deleted` by someone else (otherwise the change waits and says why).
-- The places a command makes (COPYUID/APPENDUID from UIDPLUS) are recorded at once; without UIDPLUS the next sync finds them.
-- **Refused for good** (a `NO` naming a missing folder or message): dropped and the messages read again, as Gmail's 400/404. Anything else waits and keeps the order.
-- **Labels**: making one is `CREATE` (and `SUBSCRIBE`); renaming is `RENAME`; deleting is `DELETE`. A label with `/` in its name is a nested folder, written with the server's delimiter.
+- Without `MOVE` (RFC 6851), a move is `COPY`, `\Deleted`, `UID EXPUNGE`. Without UIDPLUS's `UID EXPUNGE`, a plain `EXPUNGE` is sent only when `UID SEARCH DELETED` finds nothing but ours, checked before the copy and again before the expunge (should another client's mail be marked by then, our mark comes off); otherwise the change waits and says why.
+- The places a command makes (COPYUID from UIDPLUS) are recorded at once, so the next sync reads only their flags. Without UIDPLUS, the destination's UIDNEXT is read (`STATUS`) before the command and the new copies found from it by `Message-ID`; a copy of a message without one is left to sync, the message pending meanwhile, so it is neither lost nor shown twice.
+- Removing a message's last folder never deletes it: it moves to the archive (one named `Archive` is made where there is none), or, from Trash or Junk, to the inbox. A folder that holds every message (`\All`, Gmail's All Mail) is never deleted or moved from, except into Trash or Junk: there archiving deletes only the inbox copy.
+- Changes go over the connection passes use, so a change and a pass never cross in one folder. Runs of the same change go together, up to 1000 messages, 500 UIDs to a command.
+- **Refused for good** (a `NO` with `TRYCREATE`, `NONEXISTENT`, `NOPERM`, `CANNOT`, `READ-ONLY`, `ALREADYEXISTS`, `LIMIT`, `OVERQUOTA` and the like): dropped with its reason and the messages shown as their copies are, as Gmail's 400/404. Busy (`INUSE`, `UNAVAILABLE`) or out of reach: tried again, keeping the order. Any other `NO` or `BAD`: tried again, and dropped after 5 failed sends, so one change cannot hold the outbox back for ever. In a run that fails so, each change is sent alone, so only the one refused is dropped.
+- **Labels**: making one is `CREATE` (one there already will do) and `SUBSCRIBE`; renaming is `RENAME`, the folders under it following, the label keeping its id; deleting is `DELETE`, after copying the mail only in that folder to the archive (not needed where the archive is `\All`). A label with `/` in its name is a nested folder, each level in modified UTF-7 and joined by the server's delimiter, under `INBOX` where every folder is (Courier). The special folders are not renamed or deleted.
 
 ## Writing and sending
 
