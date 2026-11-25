@@ -209,16 +209,14 @@ pub(super) async fn select(conn: &mut Conn, folder: &str) -> SyncResult<Selected
     }
 }
 
-/// `EXAMINE`s a folder, to look in it.
-pub(super) async fn examine(conn: &mut Conn, folder: &str) -> SyncResult<Selected> {
-    match conn.examine(folder).await {
-        Ok(Some(selected)) => Ok(selected),
-        Ok(None) => Err(refused(
-            conn,
-            format!("the server would not open {folder:?}"),
-        )),
-        Err(e) => Err(folder_error(conn, e)),
-    }
+/// `EXAMINE`s a folder, to look in it. `None` when the server refuses to
+/// open it (deleted on the server since the store saw it): there is
+/// nothing in it to find or count, and what is filed there is refused in
+/// its turn. A busy answer is the server busy.
+pub(super) async fn examine(conn: &mut Conn, folder: &str) -> SyncResult<Option<Selected>> {
+    conn.examine(folder)
+        .await
+        .map_err(|e| folder_error(conn, e))
 }
 
 /// The UIDs of the copies in the selected folder whose `Message-ID` is

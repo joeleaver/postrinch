@@ -100,8 +100,11 @@ impl ImapSync {
                 "the account has no Drafts folder to keep it in".into(),
             ));
         };
-        mailbox::examine(conn, &drafts.name).await?;
-        if mailbox::find(conn, &built.header).await?.is_empty() {
+        let kept = match mailbox::examine(conn, &drafts.name).await? {
+            Some(_) => !mailbox::find(conn, &built.header).await?.is_empty(),
+            None => false,
+        };
+        if !kept {
             let flags = format!("{DRAFT} {SEEN}");
             match mailbox::append(conn, &drafts.name, &flags, &built.raw).await? {
                 Appended::Kept(at) => {

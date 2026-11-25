@@ -14,7 +14,7 @@ use postrinch_model::{
     Account, Draft, EmailAddress, ImapSettings, Mailbox, Provider, ProviderMessageId, Security,
     SignInMethod,
 };
-use postrinch_store::{Outgoing, OutgoingKind, Store};
+use postrinch_store::{Outgoing, OutgoingKind, SentBackOff, Store};
 use postrinch_sync::MemorySecrets;
 use postrinch_sync::google::ProgressFn;
 use postrinch_sync::imap::{
@@ -106,11 +106,8 @@ async fn fixture(
             connect: Duration::from_secs(5),
             command: Duration::from_secs(5),
         });
-    let lookup = SentLookup {
-        waits: vec![Duration::from_millis(50)],
-    };
     let sync = ImapSync::new(store.clone(), connector, secrets, Arc::new(Tokens::none()))
-        .with_sent_lookup(lookup);
+        .with_sent_lookup(lookup(SentBackOff::default()));
     let fixture = SendFixture {
         imap,
         smtp,
@@ -128,7 +125,22 @@ fn quiet() -> ProgressFn {
     Arc::new(|_| {})
 }
 
+/// Looks in Sent briefly, and gives a provider's setting back after
+/// `back_off`.
+fn lookup(back_off: SentBackOff) -> SentLookup {
+    SentLookup {
+        waits: vec![Duration::from_millis(50)],
+        back_off,
+    }
+}
+
 impl SendFixture {
+    /// The fixture, giving a provider's setting back after `back_off`.
+    pub fn backing_off(mut self, back_off: SentBackOff) -> Self {
+        self.sync = self.sync.with_sent_lookup(lookup(back_off));
+        self
+    }
+
     pub async fn sync(&self) {
         self.sync.sync(&self.me, quiet()).await.unwrap();
     }

@@ -52,6 +52,7 @@ pub use outbox::OutboxEntry;
 pub use outgoing::{Outgoing, OutgoingKind, SendStage};
 pub use outgoing_put_off::PutOff;
 pub use people::PersonEntry;
+pub use sent_filing::SentBackOff;
 
 /// Label stats by account key, each with the write count it was read at.
 /// Undownloaded messages by account key, and when they were counted.

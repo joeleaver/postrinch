@@ -181,3 +181,18 @@ async fn sending_in_place_of_a_keep_refused_for_want_of_drafts_retires_it() {
     assert_eq!(f.folder("Sent").len(), 1);
     assert!(f.outgoing().is_empty(), "the refused Keep is out of date");
 }
+
+#[tokio::test]
+async fn a_drafts_folder_deleted_on_the_server_does_not_stop_the_outbox() {
+    let f = send_fixture(true, false).await;
+    // Deleted there since sync last saw it.
+    f.user.delete_folder("Drafts").unwrap();
+    f.queue(&f.draft("Thursday"), OutgoingKind::Keep);
+    f.queue(&f.draft("Friday"), OutgoingKind::Send);
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.smtp.messages().len(), 1, "the next message went");
+    let waiting = f.waiting();
+    assert!(waiting.refused);
+    let error = waiting.error.unwrap();
+    assert!(error.contains("would not keep the draft"), "{error}");
+}

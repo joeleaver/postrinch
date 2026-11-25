@@ -22,7 +22,7 @@ mod transmit;
 use std::time::Duration;
 
 use postrinch_model::{EmailAddress, ProviderMessageId};
-use postrinch_store::{Outgoing, OutgoingKind};
+use postrinch_store::{Outgoing, OutgoingKind, SentBackOff};
 
 use super::{ImapSync, Lane};
 use crate::compose::outgoing_message_id;
@@ -32,16 +32,21 @@ use crate::{SyncError, SyncResult, build_message};
 /// How a send looks in Sent for a message the provider files itself: at
 /// once, then after each of `waits` (by default 1, 2, 4 and 8 seconds, 15
 /// in all), since a provider may take a moment to file it. A message the
-/// provider does not file is looked for once.
+/// provider does not file is looked for once. Once Postrinch has turned
+/// the provider's setting off, a provider seen to file sent mail all the
+/// same gets it back only after `back_off` (by default an hour, doubling
+/// each time it goes off again, at most a week).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SentLookup {
     pub waits: Vec<Duration>,
+    pub back_off: SentBackOff,
 }
 
 impl Default for SentLookup {
     fn default() -> Self {
         Self {
             waits: [1, 2, 4, 8].map(Duration::from_secs).to_vec(),
+            back_off: SentBackOff::default(),
         }
     }
 }

@@ -4,10 +4,12 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use postrinch_mailtest::{ImapFault, NewMessage};
 use postrinch_model::DraftAttachment;
-use postrinch_store::{OutgoingKind, SendStage};
+use postrinch_store::{OutgoingKind, SendStage, SentBackOff};
+use postrinch_sync::SyncError;
 use postrinch_sync::imap::message_id;
 
 use crate::send_support::{SendFixture, header_of, send_fixture};
@@ -61,7 +63,8 @@ async fn a_provider_that_files_sent_mail_only_after_the_look_is_given_up_on() {
     assert!(!f.settings().server_files_sent);
     files_late(&f).await;
 
-    // Off, and known to file late: its second copies leave it off.
+    // Off, and within the back-off (an hour): its second copies leave it
+    // off.
     for subject in ["Four", "Five"] {
         let searches = f.imap_commands("UID SEARCH");
         send(&f, subject).await;
@@ -73,6 +76,34 @@ async fn a_provider_that_files_sent_mail_only_after_the_look_is_given_up_on() {
         files_late(&f).await;
         assert!(!f.settings().server_files_sent, "{subject}");
     }
+}
+
+#[tokio::test]
+async fn a_provider_late_only_during_an_outage_gets_its_setting_back() {
+    let back_off = SentBackOff {
+        first: Duration::from_millis(300),
+        longest: Duration::from_secs(1),
+    };
+    let f = send_fixture(true, true).await.backing_off(back_off);
+    // An outage: three sends in a row are filed only after the look.
+    for subject in ["One", "Two", "Three"] {
+        send(&f, subject).await;
+        files_late(&f).await;
+    }
+    assert!(!f.settings().server_files_sent);
+
+    // It files promptly again; once the back-off has passed, its second
+    // copy of the last one gives it its setting back, and the duplicates
+    // stop.
+    f.files_sent_mail();
+    tokio::time::sleep(back_off.first).await;
+    let appends = f.imap_commands("APPEND");
+    for subject in ["Four", "Five", "Six"] {
+        send(&f, subject).await;
+        assert!(f.settings().server_files_sent, "{subject}");
+    }
+    assert_eq!(f.imap_commands("APPEND"), appends, "no second copies");
+    assert_eq!(f.folder("Sent").len(), 2 * 3 + 3);
 }
 
 #[tokio::test]
@@ -165,6 +196,44 @@ async fn a_copy_sent_refuses_still_takes_the_draft_away() {
     assert_eq!(f.smtp.messages().len(), 1);
     assert_eq!(f.folder("Sent").len(), 1);
     assert!(f.outgoing().is_empty());
+}
+
+#[tokio::test]
+async fn a_sent_folder_deleted_on_the_server_does_not_stop_the_outbox() {
+    for files in [false, true] {
+        let f = send_fixture(true, files).await;
+        // Deleted there since sync last saw it.
+        f.user.delete_folder("Sent").unwrap();
+        f.queue(&f.draft("One"), OutgoingKind::Send);
+        f.queue(&f.draft("Two"), OutgoingKind::Send);
+        assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 0, "{files}");
+        assert_eq!(f.smtp.messages().len(), 2, "{files}: both went");
+        let waiting = f.outgoing();
+        assert_eq!(waiting.len(), 2, "{files}");
+        for message in waiting {
+            assert_eq!(
+                (message.stage, message.refused),
+                (SendStage::Delivered, true),
+                "{files}"
+            );
+            let error = message.error.unwrap();
+            assert!(error.contains("would not keep a copy"), "{files}: {error}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_busy_answer_to_opening_sent_is_the_server_busy() {
+    let f = send_fixture(true, false).await;
+    f.queue(&f.draft("One"), OutgoingKind::Send);
+    let busy = ImapFault::No("[INUSE] Mailbox is locked".into());
+    f.imap.fail_next_matching("EXAMINE", "Sent", 1, busy);
+    let failed = f.sync.send_outgoing(&f.me).await;
+    assert!(matches!(failed, Err(SyncError::Busy { .. })), "{failed:?}");
+    // Delivered, and only filed next time.
+    assert_eq!(f.sync.send_outgoing(&f.me).await.unwrap(), 1);
+    assert_eq!(f.smtp.messages().len(), 1);
+    assert_eq!(f.folder("Sent").len(), 1);
 }
 
 #[tokio::test]

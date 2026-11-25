@@ -8,8 +8,11 @@
 //! provider files it itself. A provider said to that has not a moment
 //! later gets the copy, and after several such misses in a row its
 //! setting is turned off; one whose setting is off that files the
-//! message all the same is seen to, and its setting comes back on
-//! (`Store::sent_copy_filed`, `Store::server_files_sent`). Then the
+//! message all the same is seen to, and its setting comes back on, once
+//! a back-off that grows each time Postrinch turned it off has passed
+//! (`Store::sent_copy_filed`, `Store::server_files_sent`). A Sent folder
+//! the server will not open (deleted there) holds nothing to find or
+//! count, and refuses the copy, which then waits for the person. Then the
 //! drafts it came from are deleted, whether or not Sent kept the copy:
 //! the message went.
 
@@ -17,7 +20,7 @@ use std::time::Duration;
 
 use postrinch_model::{EmailAddress, ImapSettings, SystemLabel};
 
-use super::super::places::SEEN;
+use super::super::places::{SEEN, now};
 use super::super::wire::Conn;
 use super::drafts::Replaced;
 use super::mailbox::{self, Appended, Target};
@@ -168,7 +171,7 @@ impl ImapSync {
         }
         let (a, id) = (account.clone(), built.id.clone());
         let turned_off = self
-            .with_store(move |s| s.sent_copy_filed(&a, &id, files, SENT_MISSES_ALLOWED))
+            .with_store(move |s| s.sent_copy_filed(&a, &id, files, SENT_MISSES_ALLOWED, now()))
             .await?;
         if turned_off {
             tracing::info!(
@@ -188,17 +191,17 @@ impl ImapSync {
         account: &EmailAddress,
         sent: &Target,
     ) -> SyncResult<bool> {
+        // A Sent the server will not open has no copies to count.
         let kept = match &sent.label {
-            Some(label) => {
-                let uidvalidity = mailbox::examine(conn, &sent.name).await?.uidvalidity;
-                Some((label.clone(), uidvalidity))
-            }
+            Some(label) => mailbox::examine(conn, &sent.name)
+                .await?
+                .map(|opened| (label.clone(), opened.uidvalidity)),
             None => None,
         };
-        let a = account.clone();
+        let (a, back_off) = (account.clone(), self.sent_lookup.back_off);
         self.with_store(move |s| {
             let kept = kept.as_ref().map(|(label, v)| (label.as_str(), *v));
-            s.server_files_sent(&a, kept)
+            s.server_files_sent(&a, kept, &back_off, now())
         })
         .await
     }
@@ -214,7 +217,8 @@ pub(super) fn list(addresses: &[EmailAddress]) -> String {
 }
 
 /// Whether `target` holds the message whose `Message-ID` is `header`:
-/// looked for at once, then after each of `waits`.
+/// looked for at once, then after each of `waits`. A folder the server
+/// will not open does not.
 async fn look(
     conn: &mut Conn,
     target: &Target,
@@ -224,7 +228,9 @@ async fn look(
     for wait in std::iter::once(&Duration::ZERO).chain(waits) {
         tokio::time::sleep(*wait).await;
         // Opened again each time, to see what came meanwhile.
-        mailbox::examine(conn, &target.name).await?;
+        if mailbox::examine(conn, &target.name).await?.is_none() {
+            return Ok(false);
+        }
         if !mailbox::find(conn, header).await?.is_empty() {
             return Ok(true);
         }
