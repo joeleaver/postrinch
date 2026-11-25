@@ -38,8 +38,10 @@ impl std::fmt::Debug for SmtpConnection {
 
 impl SmtpConnection {
     /// Connects to the account's SMTP server and signs in with `secret`,
-    /// as the account's settings say. A refused sign-in (535) is
-    /// [`SyncError::NeedsSignIn`] with the server's words; a server
+    /// as the account's settings say. A refused sign-in (535, 534, or 432
+    /// for a password to change) is [`SyncError::NeedsSignIn`] with the
+    /// server's words; any other 4xx ("try again later"), at the greeting,
+    /// EHLO, STARTTLS or AUTH, is [`SyncError::Busy`]; a server
     /// offering no encryption is [`SyncError::Insecure`], and gets no
     /// credentials.
     pub async fn open(
@@ -277,23 +279,45 @@ fn is_enhanced_code(word: &str) -> bool {
             .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// A refused AUTH: 535 (credentials invalid) and 534 (this way of signing
+/// A refused AUTH: 535 (credentials invalid), 534 (this way of signing
 /// in is not allowed, as Google's "application-specific password
-/// required") are the account's to fix; anything else is the server's.
+/// required") and 432 (RFC 4954 6, `432 4.7.12 A password transition is
+/// needed`: the person must change the password before it is taken
+/// again) are the account's to fix, with the server's words. Any other
+/// 4xx is the server busy ([`server_error`]); anything else is the
+/// server's.
 fn refusal(server: &Server, error: &lettre::transport::smtp::Error) -> SyncError {
     match error.status().map(u16::from) {
-        Some(534 | 535) => SyncError::NeedsSignIn(SignInReason::CredentialRejected {
+        Some(432 | 534 | 535) => SyncError::NeedsSignIn(SignInReason::CredentialRejected {
             detail: reply_text(error),
         }),
         _ => server_error(server, error),
     }
 }
 
+/// An answer the server gave, or a TLS failure. A 4xx reply (RFC 5321
+/// 4.2.1: "the action may be requested again") is [`SyncError::Busy`]:
+/// Gmail's `421 4.7.0 Try again later, closing connection`, `454 4.7.0
+/// Too many sign-in attempts, try again later` and `454 4.7.0 Cannot
+/// sign in due to a temporary system problem` (Google Workspace, "Gmail
+/// SMTP errors and codes",
+/// <https://knowledge.workspace.google.com/admin/support/troubleshooting/gmail-smtp-errors-and-codes>),
+/// at the greeting, EHLO, STARTTLS (`454 4.7.0 TLS not available due to
+/// temporary reason`, RFC 3207 4) or AUTH alike. None of them is the
+/// credential's fault, so none is retried with a fresh token. (AUTH's 432
+/// is the person's to act on; [`refusal`] takes it first.)
 fn server_error(server: &Server, error: &lettre::transport::smtp::Error) -> SyncError {
     if error.is_tls() {
         return SyncError::Tls {
             server: describe(server),
             detail: reply_text(error),
+        };
+    }
+    if error.is_transient() {
+        return SyncError::Busy {
+            service: "SMTP",
+            server: describe(server),
+            message: reply_text(error),
         };
     }
     SyncError::Server {

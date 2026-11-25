@@ -73,6 +73,20 @@ pub enum SyncError {
         server: String,
         message: String,
     },
+    /// A mail server turned the account away for now: too many
+    /// connections, a bandwidth or command limit, a sign-in service that
+    /// is down. Nothing is wrong with the credential, so the account is
+    /// not asked to sign in and no fresh token is fetched; it is to be
+    /// tried again later, as [`Backoff`](crate::Backoff) says (the IMAP
+    /// keep-in-sync loop, a later unit, must do so; today the account
+    /// check reports it as `CheckFailure::Busy`). The message is the
+    /// server's own sentence.
+    #[error("{service} server {server} is busy: {message}")]
+    Busy {
+        service: &'static str,
+        server: String,
+        message: String,
+    },
     #[error("store: {0}")]
     Store(#[from] StoreError),
     #[error("{0}")]

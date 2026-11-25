@@ -4,6 +4,7 @@
 
 mod check;
 mod connect;
+mod limits;
 mod misbehaving;
 mod oauth;
 mod oauth_grant;
@@ -13,4 +14,5 @@ mod oauth_sign_in;
 mod oauth_tokens;
 mod secrets;
 mod smtp;
+mod smtp_limits;
 mod support;

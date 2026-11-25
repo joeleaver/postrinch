@@ -25,8 +25,22 @@ use crate::sasl::Mechanism;
 use crate::tls::TestCertificate;
 
 /// A point in a submission where a failure can be programmed.
+///
+/// A [`SmtpFault::Reply`] with code 421 closes the connection after the
+/// reply at every stage, as RFC 5321 3.8 has a server shutting down do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmtpStage {
+    /// The greeting, sent once as a connection opens. A reply takes the
+    /// place of the 220: with 421 the server then closes; with any other
+    /// code (554, RFC 5321 3.1) it stays, answering every command but QUIT
+    /// with 503. A disconnect closes without a greeting.
+    Greeting,
+    /// The EHLO command (before or after STARTTLS alike).
+    Ehlo,
+    /// The STARTTLS command, on the port that offers it. A reply (454,
+    /// "TLS not available due to temporary reason", RFC 3207 4) leaves
+    /// the connection in plain text.
+    StartTls,
     /// The AUTH command.
     Auth,
     /// MAIL FROM.

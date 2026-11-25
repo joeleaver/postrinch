@@ -9,6 +9,7 @@
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use super::capabilities::Capabilities;
+use super::refusal::is_busy_bye;
 use super::reply::{Status, Tagged};
 use crate::{SyncError, SyncResult};
 
@@ -37,6 +38,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreAuth<S> {
             server: self.server.clone(),
             message: message.into(),
         }
+    }
+
+    /// What a `BYE` before sign-in means: the account turned away for
+    /// now ([`SyncError::Busy`], [`is_busy_bye`]), or the server failing.
+    fn bye(&self, rest: &str) -> SyncError {
+        let bye = Tagged::parse_text(rest);
+        if is_busy_bye(bye.code.as_deref(), &bye.text) {
+            return SyncError::Busy {
+                service: "IMAP",
+                server: self.server.clone(),
+                message: bye.text,
+            };
+        }
+        self.error(bye.text)
     }
 
     async fn read_line(&mut self) -> SyncResult<String> {
@@ -68,7 +83,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreAuth<S> {
             // do, which async-imap cannot follow, and Postrinch would not
             // know whose mail it was.
             "PREAUTH" => Err(self.error("the server signed in on its own, before being asked")),
-            "BYE" => Err(self.error(Tagged::parse_text(rest).text)),
+            // RFC 9051 7.1.5: the server will not serve this connection.
+            "BYE" => Err(self.bye(rest)),
             _ => Err(self.error(format!("the server greeted with {line:?}"))),
         }
     }
@@ -91,7 +107,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreAuth<S> {
             }
             if let Some(rest) = line.strip_prefix("* ") {
                 if let Some(text) = rest.strip_prefix("BYE ") {
-                    return Err(self.error(Tagged::parse_text(text).text));
+                    return Err(self.bye(text));
                 }
                 untagged.push(rest.to_owned());
             } else {
@@ -182,17 +198,42 @@ mod tests {
         assert_eq!(&sent[..n], b"p1 STARTTLS\r\n");
     }
 
+    async fn greeted_with(greeting: &[u8]) -> SyncError {
+        let (client, mut server) = tokio::io::duplex(4096);
+        let mut pre = PreAuth::new(client, "imap.example.org");
+        server.write_all(greeting).await.unwrap();
+        pre.greeting().await.err().unwrap()
+    }
+
     #[tokio::test]
     async fn bye_and_preauth_greetings_are_refused() {
         for (greeting, expected) in [
-            (&b"* BYE [UNAVAILABLE] Too busy\r\n"[..], "Too busy"),
+            (&b"* BYE Shutting down\r\n"[..], "Shutting down"),
+            (
+                b"* BYE [SERVERBUG] Too many simultaneous connections\r\n",
+                "Too many",
+            ),
             (b"* PREAUTH welcome\r\n", "signed in on its own"),
         ] {
-            let (client, mut server) = tokio::io::duplex(4096);
-            let mut pre = PreAuth::new(client, "imap.example.org");
-            server.write_all(greeting).await.unwrap();
-            let err = pre.greeting().await.err().unwrap();
+            let err = greeted_with(greeting).await;
+            assert!(matches!(err, SyncError::Server { .. }), "{err:?}");
             assert!(err.to_string().contains(expected), "{err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_bye_greeting_at_a_limit_is_busy() {
+        for (greeting, expected) in [
+            (&b"* BYE [UNAVAILABLE] Too busy\r\n"[..], "Too busy"),
+            (
+                b"* BYE Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)\r\n",
+                "Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)",
+            ),
+        ] {
+            match greeted_with(greeting).await {
+                SyncError::Busy { message, .. } => assert_eq!(message, expected),
+                other => panic!("expected busy, got {other:?}"),
+            }
         }
     }
 }

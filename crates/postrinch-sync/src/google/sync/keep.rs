@@ -42,6 +42,20 @@ pub enum SyncEvent {
     /// Gmail no longer accepts the account's sign-in. It is marked so in
     /// the store and left alone until it signs in again.
     NeedsSignIn { account: EmailAddress },
+    /// A mail server turned the account away for now
+    /// ([`SyncError::Busy`]): too many connections, a bandwidth limit.
+    /// Its sign-in is fine, so it is not marked as needing to sign in; it
+    /// is tried again after `retry_in`, which grows while the server stays
+    /// busy ([`crate::Backoff`]). `message` is the server's own sentence.
+    /// The window already shows it, but nothing sends it yet: Gmail's API
+    /// sync has no such state, and the IMAP keep-in-sync loop that must
+    /// send it, with one `Backoff` per account and server, is a later
+    /// unit (IMAP 8; docs/imap.md, "Sync").
+    Busy {
+        account: EmailAddress,
+        message: String,
+        retry_in: Duration,
+    },
     /// Changes made here reached Gmail; any it refused for good were
     /// dropped, and their messages read again.
     Sent {
