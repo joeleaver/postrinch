@@ -7,7 +7,7 @@ use chrono::{DateTime, FixedOffset};
 use postrinch_mailtest::{ImapConfig, ImapFault, SpecialUse};
 use postrinch_model::{FolderRoles, ImapAlternative, ImapSearch, SearchKey};
 use postrinch_sync::SyncError;
-use postrinch_sync::imap::ServerFound;
+use postrinch_sync::imap::{Holds, ServerFound};
 
 use super::sync_support::{Fixture, fixture, fixture_with, mail};
 
@@ -42,11 +42,21 @@ impl Fixture {
         search: &ImapSearch,
         max: usize,
     ) -> Result<ServerFound, SyncError> {
-        self.sync.search_server(&self.me, search, max).await
+        self.search_checked(search, &Holds::every(), max).await
+    }
+
+    /// A search whose finds are checked by `holds`.
+    pub(super) async fn search_checked(
+        &self,
+        search: &ImapSearch,
+        holds: &Holds,
+        max: usize,
+    ) -> Result<ServerFound, SyncError> {
+        self.sync.search_server(&self.me, search, holds, max).await
     }
 
     /// How many commands the server has had: where to count from.
-    fn mark(&self) -> usize {
+    pub(super) fn mark(&self) -> usize {
         self.server.commands().len()
     }
 

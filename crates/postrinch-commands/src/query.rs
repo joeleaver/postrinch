@@ -51,6 +51,15 @@ pub struct Query {
     /// The query to give Gmail: what was typed, less Postrinch's own
     /// operators.
     pub gmail: String,
+    /// [`Query::gmail`] less the words and people it leaves out (`-word`,
+    /// `-from:`, `-to:`, `-cc:`, `-bcc:`): what an IMAP server speaking
+    /// Gmail's language (`X-GM-RAW`) is asked. It is asked for at least
+    /// what the query matches, as every IMAP server is (imap_search.rs),
+    /// and Gmail matches its own way (it folds accents, so `-from:jose`
+    /// would leave out "José", whom search here keeps); the check made on
+    /// what it finds leaves them out as search here does. Labels left out
+    /// stay: a label is matched by name, as here.
+    pub gmail_superset: String,
 }
 
 /// Who wrote a conversation's latest message, as `last:` asks.
@@ -82,14 +91,22 @@ impl Query {
     pub fn parse(text: &str, now: Timestamp) -> CommandResult<Self> {
         let mut query = Query::default();
         let mut gmail = Vec::new();
+        let mut superset = Vec::new();
         for token in tokens(text)? {
             let Some((negated, operator, value)) = operator(&token) else {
                 query.words.push(token.clone());
+                if !token.starts_with('-') {
+                    superset.push(token.clone());
+                }
                 gmail.push(token);
                 continue;
             };
             if !matches!(operator, "account" | "last") {
                 gmail.push(token.clone());
+                let person = matches!(operator, "from" | "to" | "cc" | "bcc");
+                if !(negated && person) {
+                    superset.push(token.clone());
+                }
             }
             let value = unquote(value);
             if value.is_empty() {
@@ -150,6 +167,7 @@ impl Query {
             }
         }
         query.gmail = gmail.join(" ");
+        query.gmail_superset = superset.join(" ");
         Ok(query)
     }
 

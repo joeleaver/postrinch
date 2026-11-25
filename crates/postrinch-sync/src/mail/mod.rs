@@ -18,7 +18,7 @@ use postrinch_model::{Account, EmailAddress, ImapSearch, Label, Provider, Provid
 use postrinch_store::{Store, StoreResult};
 
 use crate::google::GmailSync;
-use crate::imap::{ImapSync, ServerFound};
+use crate::imap::{Holds, ImapSync, ServerFound};
 use crate::{ProgressFn, SendReport, SyncError, SyncReport, SyncResult};
 
 /// Sync for every account, routed by provider. Cheap to clone.
@@ -118,24 +118,25 @@ impl MailSync {
     }
 
     /// Asks the account's server to search, for mail not downloaded yet:
-    /// Gmail with `gmail` (Gmail's search language), an IMAP server with
-    /// `imap` (none asks nothing; docs/imap.md, "Searching the server").
-    /// At most `max` messages, newest first, each stored by its headers
-    /// at least.
+    /// Gmail with `gmail` (Gmail's search language, whose answer holds),
+    /// an IMAP server with `imap` (none asks nothing; docs/imap.md,
+    /// "Searching the server"), what it finds checked by `holds`. At most
+    /// `max` messages, newest first, each stored by its headers at least.
     pub async fn search_server(
         &self,
         account: &EmailAddress,
         gmail: &str,
         imap: Option<&ImapSearch>,
+        holds: &Holds,
         max: usize,
     ) -> SyncResult<ServerFound> {
         match self.engine(account).await? {
             Engine::Gmail(sync) => Ok(ServerFound {
                 ids: sync.search_remote(account, gmail, max).await?,
-                incomplete: None,
+                ..ServerFound::default()
             }),
             Engine::Imap(sync) => match imap {
-                Some(search) => sync.search_server(account, search, max).await,
+                Some(search) => sync.search_server(account, search, holds, max).await,
                 None => Ok(ServerFound::default()),
             },
         }

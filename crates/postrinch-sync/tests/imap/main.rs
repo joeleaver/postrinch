@@ -36,6 +36,7 @@ mod oauth_robust;
 mod oauth_sign_in;
 mod oauth_tokens;
 mod search;
+mod search_checked;
 mod search_open;
 mod secrets;
 mod send;

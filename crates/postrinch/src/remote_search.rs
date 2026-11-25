@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use postrinch_commands::{Commands, Remote, SearchResults, ThreadRow};
 use postrinch_model::EmailAddress;
 use postrinch_sync::SyncError;
+use postrinch_sync::imap::Holds;
 use rinch::{Effect, untracked};
 
 use crate::actions::sync;
@@ -17,7 +18,8 @@ use crate::state::State;
 
 pub use crate::remote_line::remote_line;
 
-/// How many messages each account's server is asked for.
+/// How many messages each account's server is asked for: messages that
+/// hold for the search, as search here reads it.
 const REMOTE_MAX: usize = 50;
 
 /// The servers' part of the search being shown.
@@ -152,11 +154,20 @@ impl State {
             let mut notes: Vec<Note> = Vec::new();
             let mut answered = 0;
             for (account, _) in &remote.accounts {
+                let holds = {
+                    let (q, a) = (query.clone(), account.clone());
+                    Holds::new(move |store, ids| {
+                        Commands::new(store.clone())
+                            .server_found_holds(&q, &a, ids)
+                            .map_err(|e| e.to_string())
+                    })
+                };
                 let found = mail
                     .search_server(
                         account,
                         &remote.query,
                         remote.imap_search(account),
+                        &holds,
                         REMOTE_MAX,
                     )
                     .await;
@@ -207,6 +218,12 @@ impl State {
                         what: Trouble::Incomplete(why),
                     });
                 }
+                if let Some(most) = found.looked_through {
+                    notes.push(Note {
+                        account: account.clone(),
+                        what: Trouble::Incomplete(looked_through(most)),
+                    });
+                }
             }
             rows.sort_by_key(|r| std::cmp::Reverse(r.summary.latest));
             let status = if answered > 0 {
@@ -227,6 +244,12 @@ impl State {
             });
         });
     }
+}
+
+/// What a search that stopped at its bound says: the server found more
+/// than were checked.
+fn looked_through(most: usize) -> String {
+    format!("only the newest {most} messages it found were checked")
 }
 
 /// The status when no server searched: one server's trouble as it is,
@@ -277,6 +300,14 @@ mod tests {
             account: EmailAddress::parse(account).unwrap(),
             what,
         }
+    }
+
+    #[test]
+    fn a_search_stopped_at_its_bound_says_so() {
+        assert_eq!(
+            looked_through(500),
+            "only the newest 500 messages it found were checked"
+        );
     }
 
     #[test]

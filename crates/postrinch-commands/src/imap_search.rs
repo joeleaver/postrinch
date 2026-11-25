@@ -9,7 +9,9 @@
 //! dates go a few days wider (a server dates mail in its own zone), and
 //! terms the headers here can answer but IMAP cannot ask (a second label,
 //! `last:`, anything left out: `-word`, `-from:`, `-to:`) are left to the
-//! check made on what is found ([`Commands::remote_rows`]). The one term neither can answer,
+//! check made on what is found ([`Commands::server_found_holds`]). The
+//! alternative in Gmail's language leaves the same words and people
+//! unasked (`Query::gmail_superset`). The one term neither can answer,
 //! `has:attachment`, is named in [`ImapAlternative::inexact`], so a server
 //! without Gmail's own language refuses the search rather than answer it
 //! wrongly.
@@ -84,7 +86,7 @@ pub(crate) fn alternative(
         not_in,
         set_aside_too: query.set_aside_too,
         key,
-        gmail: query.gmail.clone(),
+        gmail: query.gmail_superset.clone(),
         inexact,
     })
 }

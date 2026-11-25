@@ -9,12 +9,21 @@
 //! ([`SyncError::SearchSuperseded`]), keeping the connection, and the
 //! newer one goes next. Only the newest is the one the person waits for.
 //!
-//! What is found is kept to a page ([`search_page`](super::search_page)),
-//! newest first, each message once. The copies the store does not have
-//! yet are fetched by their headers and stored as a pass stores them, so
-//! they show in the results and open normally (their bodies come when
-//! opened, or by backfill); a pass that reads the folder later finds them
-//! kept.
+//! The server is asked for at least what the search matches, never less
+//! (docs/imap.md), so what it finds is checked against the whole search
+//! as search here reads it ([`Holds`], which the caller gives: the
+//! command layer's check). What is found is kept to a page of messages
+//! that hold ([`search_page`](super::search_page)), newest first, each
+//! message once: the found are walked newest first, a batch at a time,
+//! the copies the store does not have yet fetched by their headers and
+//! stored as a pass stores them, then checked, until a page holds or the
+//! found run out. Stored, they show in the results and open normally
+//! (their bodies come when opened, or by backfill); a pass that reads the
+//! folder later finds them kept. The walk looks through at most
+//! [`LOOKED_PER_SLOT`](super::search_page::LOOKED_PER_SLOT) found
+//! messages for each slot of the page, so a search the check narrows
+//! hard (`ALL` with only `-from:` to say) cannot fetch a whole mailbox;
+//! when that stopped it short, [`ServerFound::looked_through`] says so.
 //!
 //! A server busy for the account is [`SyncError::Busy`], never a sign-in
 //! prompt, and a server whose busy wait is still running is not asked. A
@@ -25,10 +34,13 @@
 //! [`SyncError::Busy`]: busy for those folders, so the account's busy
 //! wait does not start, and the next search asks again.
 
+use std::collections::HashSet;
+use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use postrinch_model::{EmailAddress, ImapFolder, ImapSearch, ProviderMessageId};
+use postrinch_store::Store;
 
 use super::folder_error::{FolderError, FolderResult};
 use super::folders::GMAIL;
@@ -47,13 +59,60 @@ pub struct ServerFound {
     /// Why some folders were not searched, in the server's words, when
     /// some were not.
     pub incomplete: Option<String>,
+    /// When fewer than were asked for hold and the walk stopped at its
+    /// bound with found messages left unchecked: how many it looked
+    /// through at most.
+    pub looked_through: Option<usize>,
+}
+
+/// The check what a server finds must pass to be shown: of the stored
+/// messages given, those the whole search holds for, as search here
+/// reads it. The server is asked for a superset; this narrows it.
+/// Runs on a blocking thread, with the store.
+#[derive(Clone)]
+pub struct Holds(Arc<CheckFn>);
+
+type CheckFn = dyn Fn(&Store, &[ProviderMessageId]) -> Result<HashSet<ProviderMessageId>, String>
+    + Send
+    + Sync;
+
+impl Holds {
+    pub fn new(
+        check: impl Fn(&Store, &[ProviderMessageId]) -> Result<HashSet<ProviderMessageId>, String>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        Self(Arc::new(check))
+    }
+
+    /// No check: everything found holds (a search the server answers
+    /// exactly).
+    pub fn every() -> Self {
+        Self::new(|_, ids| Ok(ids.iter().cloned().collect()))
+    }
+
+    /// Of `ids`, those that hold.
+    pub(super) fn check(
+        &self,
+        store: &Store,
+        ids: &[ProviderMessageId],
+    ) -> SyncResult<HashSet<ProviderMessageId>> {
+        (self.0)(store, ids).map_err(SyncError::SearchCheck)
+    }
+}
+
+impl fmt::Debug for Holds {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Holds")
+    }
 }
 
 /// A folder's answer to its search.
 pub(super) struct Hits {
     pub folder: ImapFolder,
     pub uidvalidity: u32,
-    /// The highest UIDs found, at most a page of them.
+    /// Every UID found, ascending: the walk takes them from the top.
     pub uids: Vec<u32>,
 }
 
@@ -85,11 +144,12 @@ impl Turn {
 impl ImapSync {
     /// Searches the account's server, and stores by their headers the
     /// copies of what it finds that the store does not have. At most
-    /// `max` messages, newest first.
+    /// `max` messages that `holds` holds for, newest first.
     pub async fn search_server(
         &self,
         account: &EmailAddress,
         search: &ImapSearch,
+        holds: &Holds,
         max: usize,
     ) -> SyncResult<ServerFound> {
         let turn = Turn::begin(self.searches(account));
@@ -110,7 +170,8 @@ impl ImapSync {
         }
         let result = self
             .over(account, Lane::Search, async |conn| {
-                self.search_in(conn, account, search, max, &turn).await
+                self.search_in(conn, account, search, holds, max, &turn)
+                    .await
             })
             .await;
         self.note_sign_in(account, &result).await?;
@@ -122,6 +183,7 @@ impl ImapSync {
         conn: &mut Conn,
         account: &EmailAddress,
         search: &ImapSearch,
+        holds: &Holds,
         max: usize,
         turn: &Turn,
     ) -> SyncResult<ServerFound> {
@@ -141,7 +203,7 @@ impl ImapSync {
         for FolderSearch { folder, command } in plan(&folders, search, gmail) {
             turn.go_on()?;
             let name = folder.name.clone();
-            match self.search_folder(conn, folder, &command, max).await {
+            match self.search_folder(conn, folder, &command).await {
                 Ok(Ok(found)) => hits.push(found),
                 Ok(Err(why)) => refused.push(why),
                 Err(FolderError::Busy(text)) => busy.push(format!("busy for {name:?}: {text}")),
@@ -168,22 +230,25 @@ impl ImapSync {
             }
         }
         turn.go_on()?;
-        let ids = self.page(conn, account, hits, max, turn).await?;
+        let page = self.page(conn, account, &hits, holds, max, turn).await?;
         refused.extend(busy);
         let incomplete = refused.first().map(|why| match refused.len() {
             1 => format!("1 folder was not searched ({why})"),
             n => format!("{n} folders were not searched ({why})"),
         });
-        Ok(ServerFound { ids, incomplete })
+        Ok(ServerFound {
+            ids: page.ids,
+            incomplete,
+            looked_through: page.looked_through,
+        })
     }
 
-    /// Searches one folder: its highest `max` UIDs found, or why not.
+    /// Searches one folder: every UID found, or why not.
     async fn search_folder(
         &self,
         conn: &mut Conn,
         folder: ImapFolder,
         command: &super::names::Command,
-        max: usize,
     ) -> FolderResult<Result<Hits, String>> {
         let Some(selected) = conn.examine(&folder.name).await? else {
             return Ok(Err(format!("{:?} could not be opened", folder.name)));
@@ -201,8 +266,8 @@ impl ImapSync {
                 Err(e) => return Err(e),
             }
         };
-        let keep_from = uids.len().saturating_sub(max);
-        uids.drain(..keep_from);
+        uids.sort_unstable();
+        uids.dedup();
         Ok(Ok(Hits {
             folder,
             uidvalidity: selected.uidvalidity,
