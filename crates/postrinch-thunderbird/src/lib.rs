@@ -8,8 +8,10 @@
 //! passwords and certificates (`logins.json`, `key4.db`, `key3.db`,
 //! `signons.sqlite`, `cert9.db`) are never opened, read or looked at:
 //! every read goes through [`files::read_settings_file`], which refuses
-//! any other file before touching it, and the [`Files`] seam lets tests
-//! see each file asked for. Passwords and tokens are never imported.
+//! any other file before touching it; the disk refuses a settings file
+//! that is a link rather than follow it (a `user.js` linked to
+//! `logins.json`); and the [`Files`] seam lets tests see each file asked
+//! for. Passwords and tokens are never imported.
 
 mod accounts;
 pub mod files;
@@ -44,14 +46,33 @@ pub const INSTALLS: [(Install, &str); 3] = [
     ),
 ];
 
-/// Why a profile's settings were not all read.
+/// Why a profile's settings were not all read, by the settings file
+/// (`prefs.js` or `user.js`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Problem {
-    /// A settings file could not be read: the system's words.
-    Unreadable(String),
-    /// Some prefs did not parse (and were skipped): how many, and the
-    /// first one's line. The rest were read.
-    Malformed { prefs: usize, first_line: usize },
+    /// The file was refused unread: why, as the person is told it
+    /// ("user.js is a link, so Postrinch didn't read it").
+    Refused { file: &'static str, why: String },
+    /// The file could not be read: the system's words.
+    Unreadable { file: &'static str, why: String },
+    /// Some of the file's prefs did not parse (and were skipped): how
+    /// many, and the first one's line. The rest were read.
+    Malformed {
+        file: &'static str,
+        prefs: usize,
+        first_line: usize,
+    },
+}
+
+impl Problem {
+    /// The problem reading `file`, from the error its read gave.
+    fn of_read(file: &'static str, error: &std::io::Error) -> Self {
+        let why = error.to_string();
+        match files::refusal(error) {
+            Some(_) => Self::Refused { file, why },
+            None => Self::Unreadable { file, why },
+        }
+    }
 }
 
 /// One Thunderbird profile and the accounts in it.
@@ -63,7 +84,9 @@ pub struct Profile {
     /// Thunderbird opens this profile when it starts.
     pub default: bool,
     pub accounts: Vec<Account>,
-    pub problem: Option<Problem>,
+    /// What could not be read of its settings, file by file in the order
+    /// they are read.
+    pub problems: Vec<Problem>,
 }
 
 /// What [`find`] found.
@@ -117,29 +140,24 @@ pub fn find_with(home: &Path, files: &dyn Files) -> Found {
 /// whose folder is gone: it is left out.
 fn read_profile(install: Install, entry: ProfileEntry, files: &dyn Files) -> Option<Profile> {
     let ProfileEntry { name, dir, default } = entry;
-    let mut problem = None;
-    let mut prefs = match files::read_settings_file(files, &dir.join("prefs.js")) {
-        Ok(Some(text)) => Prefs::parse(&text),
-        Ok(None) => return None,
-        Err(e) => {
-            problem = Some(Problem::Unreadable(e.to_string()));
-            Prefs::default()
+    let mut problems = Vec::new();
+    let mut prefs = Prefs::default();
+    for file in ["prefs.js", "user.js"] {
+        let before = prefs.errors.len();
+        match files::read_settings_file(files, &dir.join(file)) {
+            Ok(Some(text)) => prefs.read(&text),
+            Ok(None) if file == "prefs.js" => return None,
+            Ok(None) => {}
+            Err(e) => problems.push(Problem::of_read(file, &e)),
         }
-    };
-    match files::read_settings_file(files, &dir.join("user.js")) {
-        Ok(Some(text)) => prefs.read(&text),
-        Ok(None) => {}
-        Err(e) => {
-            problem.get_or_insert(Problem::Unreadable(e.to_string()));
+        // The errors this file's prefs added.
+        if let Some(first) = prefs.errors.get(before) {
+            problems.push(Problem::Malformed {
+                file,
+                prefs: prefs.errors.len() - before,
+                first_line: first.line,
+            });
         }
-    }
-    if problem.is_none()
-        && let Some(first) = prefs.errors.first()
-    {
-        problem = Some(Problem::Malformed {
-            prefs: prefs.errors.len(),
-            first_line: first.line,
-        });
     }
     Some(Profile {
         install,
@@ -147,6 +165,6 @@ fn read_profile(install: Install, entry: ProfileEntry, files: &dyn Files) -> Opt
         dir,
         default,
         accounts: accounts::accounts(&prefs),
-        problem,
+        problems,
     })
 }

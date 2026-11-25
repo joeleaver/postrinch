@@ -265,6 +265,196 @@ fn nothing_picked_starts_nothing() {
     assert!(import.current().is_none());
 }
 
+#[test]
+fn an_address_here_matches_whatever_its_case() {
+    let listing = normal(true, &["ADA@FastMail.COM"]);
+    let fastmail = listing.rows().next().unwrap();
+    assert_eq!(fastmail.how, "Already in Postrinch");
+    assert!(fastmail.route.is_none());
+}
+
+#[test]
+fn an_address_in_two_profiles_matches_whatever_its_case() {
+    let found = tb::Found {
+        profiles: vec![
+            profile(
+                "one",
+                vec![account("Grace@iCloud.com", tb::SignIn::Password)],
+            ),
+            profile(
+                "two",
+                vec![account("grace@ICLOUD.com", tb::SignIn::Password)],
+            ),
+        ],
+        unreadable: vec![],
+    };
+    let listing = listing(&found, &[], |_| false).unwrap();
+    let hows: Vec<&str> = listing.rows().map(|r| r.how.as_str()).collect();
+    assert_eq!(hows, vec!["Password", "Listed above"]);
+}
+
+#[test]
+fn each_problem_names_its_settings_file() {
+    let mut damaged = profile("one", vec![]);
+    damaged.problems = vec![
+        tb::Problem::Malformed {
+            file: "prefs.js",
+            prefs: 2,
+            first_line: 7,
+        },
+        tb::Problem::Refused {
+            file: "user.js",
+            why: "user.js is a link, so Postrinch didn't read it".into(),
+        },
+    ];
+    let mut unreadable = profile("two", vec![]);
+    unreadable.problems = vec![tb::Problem::Malformed {
+        file: "user.js",
+        prefs: 1,
+        first_line: 3,
+    }];
+    let found = tb::Found {
+        profiles: vec![damaged, unreadable],
+        unreadable: vec![],
+    };
+    let listing = listing(&found, &[], |_| false).unwrap();
+    let problems: Vec<&str> = listing
+        .groups
+        .iter()
+        .map(|g| g.problem.as_deref().unwrap())
+        .collect();
+    assert_eq!(
+        problems,
+        vec![
+            "2 of this profile's settings could not be read (the first on line 7 of prefs.js), so they are left out. user.js is a link, so Postrinch didn't read it.",
+            "1 of this profile's settings could not be read (the first on line 3 of user.js), so they are left out.",
+        ]
+    );
+}
+
+#[test]
+fn a_sign_in_postrinch_cannot_do_is_not_supported() {
+    let mut no_smtp_sign_in = account("c@example.org", tb::SignIn::Password);
+    no_smtp_sign_in.outgoing.as_mut().unwrap().sign_in = tb::SignIn::None;
+    let accounts = vec![
+        account("a@example.org", tb::SignIn::Kerberos),
+        account("b@example.org", tb::SignIn::Ntlm),
+        no_smtp_sign_in,
+        account("d@example.org", tb::SignIn::Certificate),
+        account("e@example.org", tb::SignIn::None),
+        account("f@example.org", tb::SignIn::Other(42)),
+        // Passwords as they are; OAuth 2 elsewhere than Google and
+        // Microsoft is Postrinch's own sign-in: the password.
+        account("g@example.org", tb::SignIn::Password),
+        account("h@example.org", tb::SignIn::OAuth2),
+    ];
+    let found = tb::Found {
+        profiles: vec![profile("one", accounts)],
+        unreadable: vec![],
+    };
+    let listing = listing(&found, &[], |_| false).unwrap();
+    let rows: Vec<(&str, bool)> = listing
+        .rows()
+        .map(|r| (r.how.as_str(), r.route.is_some()))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "Its incoming server signs in with Kerberos, which Postrinch doesn't support",
+                false
+            ),
+            (
+                "Its incoming server signs in with NTLM, which Postrinch doesn't support",
+                false
+            ),
+            (
+                "Its outgoing server takes no sign-in, which Postrinch doesn't support",
+                false
+            ),
+            (
+                "Its incoming server signs in with a certificate, which Postrinch doesn't support",
+                false
+            ),
+            (
+                "Its incoming server takes no sign-in, which Postrinch doesn't support",
+                false
+            ),
+            (
+                "Its incoming server signs in a way Postrinch doesn't know (Thunderbird's method 42)",
+                false
+            ),
+            ("Password", true),
+            ("Password", true),
+        ]
+    );
+}
+
+#[test]
+fn a_refused_address_is_not_taken_as_listed() {
+    // The first profile's copy cannot come in, so the second's can.
+    let found = tb::Found {
+        profiles: vec![
+            profile("one", vec![account("a@example.org", tb::SignIn::Ntlm)]),
+            profile("two", vec![account("a@example.org", tb::SignIn::Password)]),
+        ],
+        unreadable: vec![],
+    };
+    let listing = listing(&found, &[], |_| false).unwrap();
+    let addable: Vec<bool> = listing.rows().map(|r| r.route.is_some()).collect();
+    assert_eq!(addable, vec![false, true]);
+}
+
+#[test]
+fn google_and_microsoft_sign_in_their_own_way_whatever_thunderbird_says() {
+    let mut gmail = account("ada@gmail.com", tb::SignIn::Ntlm);
+    gmail.incoming.as_mut().unwrap().host = "imap.gmail.com".into();
+    let mut outlook = account("ada@outlook.com", tb::SignIn::Kerberos);
+    outlook.incoming.as_mut().unwrap().host = "outlook.office365.com".into();
+    let found = tb::Found {
+        profiles: vec![profile("one", vec![gmail, outlook])],
+        unreadable: vec![],
+    };
+    let listing = listing(&found, &[], |p| p == OAuthProvider::Microsoft).unwrap();
+    let hows: Vec<&str> = listing.rows().map(|r| r.how.as_str()).collect();
+    assert_eq!(hows, vec!["Sign in with Google", "Sign in with Microsoft"]);
+}
+
+/// A profile of a native Thunderbird holding `accounts`.
+fn profile(name: &str, accounts: Vec<tb::Account>) -> tb::Profile {
+    tb::Profile {
+        install: tb::Install::Native,
+        name: name.to_owned(),
+        dir: PathBuf::from("/nowhere").join(name),
+        default: false,
+        accounts,
+        problems: vec![],
+    }
+}
+
+/// An IMAP account of `address` on example.org's servers, its incoming
+/// server signing in by `sign_in` and its outgoing one by password.
+fn account(address: &str, sign_in: tb::SignIn) -> tb::Account {
+    let server = |host: &str, port: u16, sign_in: tb::SignIn| tb::Server {
+        host: host.to_owned(),
+        port,
+        security: tb::Security::Tls,
+        username: None,
+        sign_in,
+    };
+    tb::Account {
+        key: "account1".to_owned(),
+        kind: tb::AccountKind::Imap,
+        label: None,
+        incoming: Some(server("imap.example.org", 993, sign_in)),
+        identity: Some(tb::Identity {
+            address: Some(address.to_owned()),
+            ..tb::Identity::default()
+        }),
+        outgoing: Some(server("smtp.example.org", 465, tb::SignIn::Password)),
+    }
+}
+
 fn copy(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
     for entry in std::fs::read_dir(from).unwrap() {

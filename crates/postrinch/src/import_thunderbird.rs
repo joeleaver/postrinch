@@ -96,16 +96,21 @@ pub fn listing(
         .profiles
         .iter()
         .any(|p| p.install != found.profiles[0].install);
-    let mut listed: Vec<EmailAddress> = Vec::new();
+    // By their keys: an address is the same whatever its case.
+    let here: Vec<String> = here.iter().map(EmailAddress::key).collect();
+    let mut listed: Vec<String> = Vec::new();
     let mut id = 0;
     let mut groups = Vec::new();
     for profile in &found.profiles {
         let mut rows = Vec::new();
         for account in &profile.accounts {
-            rows.push(row(id, account, here, &mut listed, &oauth_ready));
+            rows.push(row(id, account, &here, &mut listed, &oauth_ready));
             id += 1;
         }
-        let problem = profile.problem.as_ref().map(problem_text);
+        let problem = (!profile.problems.is_empty()).then(|| {
+            let texts: Vec<String> = profile.problems.iter().map(problem_text).collect();
+            texts.join(" ")
+        });
         if rows.is_empty() && problem.is_none() {
             continue;
         }
@@ -138,11 +143,16 @@ fn profile_label(profile: &tb::Profile, mixed: bool) -> String {
 
 fn problem_text(problem: &tb::Problem) -> String {
     match problem {
-        tb::Problem::Unreadable(why) => {
-            format!("This profile's settings could not be read: {why}.")
+        tb::Problem::Refused { why, .. } => format!("{why}."),
+        tb::Problem::Unreadable { file, why } => {
+            format!("This profile's {file} could not be read: {why}.")
         }
-        tb::Problem::Malformed { prefs, first_line } => format!(
-            "{prefs} of this profile's settings could not be read (the first on line {first_line} of prefs.js), so they are left out."
+        tb::Problem::Malformed {
+            file,
+            prefs,
+            first_line,
+        } => format!(
+            "{prefs} of this profile's settings could not be read (the first on line {first_line} of {file}), so they are left out."
         ),
     }
 }
@@ -163,8 +173,8 @@ fn unsupported(kind: &tb::AccountKind) -> Option<(String, &'static str)> {
 fn row(
     id: usize,
     account: &tb::Account,
-    here: &[EmailAddress],
-    listed: &mut Vec<EmailAddress>,
+    here: &[String],
+    listed: &mut Vec<String>,
     oauth_ready: &impl Fn(OAuthProvider) -> bool,
 ) -> Row {
     let identity = account.identity.clone().unwrap_or_default();
@@ -208,16 +218,25 @@ fn row(
         row.how = "It has no email address".to_owned();
         return row;
     };
-    if here.contains(&address) {
+    let key = address.key();
+    if here.contains(&key) {
         row.how = "Already in Postrinch".to_owned();
         return row;
     }
-    if listed.contains(&address) {
+    if listed.contains(&key) {
         row.how = "Listed above".to_owned();
         return row;
     }
-    listed.push(address.clone());
     let known = known_host(&host);
+    // Google's and Microsoft's accounts sign in Postrinch's own way;
+    // any other must sign in to Thunderbird's servers the way they take.
+    if known.hosted_by.is_none()
+        && let Some(why) = sign_in_trouble(account)
+    {
+        row.how = why;
+        return row;
+    }
+    listed.push(key);
     match known.hosted_by {
         Some(HostedBy::Google) => {
             row.how = "Sign in with Google".to_owned();
@@ -237,6 +256,36 @@ fn row(
         }
     }
     row
+}
+
+/// Why Postrinch cannot sign in to an account's servers as Thunderbird
+/// does, or none when it can: a password, which Postrinch asks for, or
+/// OAuth 2, where Postrinch asks for the password (or app password)
+/// instead, having a browser sign-in only for Google and Microsoft.
+fn sign_in_trouble(account: &tb::Account) -> Option<String> {
+    let servers = [
+        ("incoming", account.incoming.as_ref()),
+        ("outgoing", account.outgoing.as_ref()),
+    ];
+    servers.into_iter().find_map(|(which, server)| {
+        let with = |way: &str| {
+            Some(format!(
+                "Its {which} server signs in with {way}, which Postrinch doesn't support"
+            ))
+        };
+        match server?.sign_in {
+            tb::SignIn::Password | tb::SignIn::OAuth2 => None,
+            tb::SignIn::None => Some(format!(
+                "Its {which} server takes no sign-in, which Postrinch doesn't support"
+            )),
+            tb::SignIn::Kerberos => with("Kerberos"),
+            tb::SignIn::Ntlm => with("NTLM"),
+            tb::SignIn::Certificate => with("a certificate"),
+            tb::SignIn::Other(code) => Some(format!(
+                "Its {which} server signs in a way Postrinch doesn't know (Thunderbird's method {code})"
+            )),
+        }
+    })
 }
 
 /// The add-account form for an IMAP account found in Thunderbird.

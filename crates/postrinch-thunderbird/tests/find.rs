@@ -26,7 +26,7 @@ fn a_usual_thunderbird_with_several_profiles() {
     assert!(found.profiles.iter().all(|p| p.install == Install::Native));
 
     let main = &found.profiles[0];
-    assert_eq!(main.problem, None);
+    assert_eq!(main.problems, vec![]);
     assert_eq!(
         main.dir,
         home.join(".thunderbird/x1.default-release"),
@@ -123,11 +123,12 @@ fn a_damaged_prefs_js_keeps_what_parses_and_says_so() {
     let found = find(&fixture("normal"));
     let broken = found.profiles.iter().find(|p| p.name == "Broken").unwrap();
     assert_eq!(
-        broken.problem,
-        Some(Problem::Malformed {
+        broken.problems,
+        vec![Problem::Malformed {
+            file: "prefs.js",
             prefs: 5,
             first_line: 6,
-        })
+        }]
     );
     let account = &broken.accounts[0];
     assert_eq!(account.kind, AccountKind::Imap);
@@ -159,11 +160,12 @@ fn the_snap_layout() {
     let imap = account.incoming.as_ref().unwrap();
     assert_eq!(imap.host, "mail.acme.co");
     assert_eq!(imap.username.as_deref(), Some("sam.jones"));
-    // No identity names an outgoing server: the default one.
+    // No identity names an outgoing server: the default one, on
+    // Thunderbird's usual port for it (no port is set).
     let smtp = account.outgoing.as_ref().unwrap();
     assert_eq!(
         (smtp.host.as_str(), smtp.port, smtp.security),
-        ("smtp.acme.co", 25, Security::StartTls)
+        ("smtp.acme.co", 587, Security::StartTls)
     );
 }
 
@@ -242,6 +244,83 @@ fn an_unreadable_profiles_ini_is_told() {
     let found = find(home.path());
     assert!(found.profiles.is_empty());
     assert_eq!(found.unreadable.len(), 1);
+}
+
+/// A home with one profile, "one", holding `prefs.js` and, if given,
+/// `user.js`.
+fn one_profile(prefs: &str, user: Option<&str>) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    let root = home.path().join(".thunderbird");
+    std::fs::create_dir_all(root.join("one")).unwrap();
+    std::fs::write(
+        root.join("profiles.ini"),
+        "[Profile0]\nName=one\nIsRelative=1\nPath=one\nDefault=1\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("one/prefs.js"), prefs).unwrap();
+    if let Some(user) = user {
+        std::fs::write(root.join("one/user.js"), user).unwrap();
+    }
+    home
+}
+
+#[test]
+fn each_problem_names_its_file() {
+    let home = one_profile(
+        "user_pref(\"a\", 1);\nuser_pref(\"b\" 2);\n",
+        Some("user_pref(\"c\", 3);\nuser_pref(\"d\", );\nuser_pref(\"e\" 5);\n"),
+    );
+    let found = find(home.path());
+    assert_eq!(
+        found.profiles[0].problems,
+        vec![
+            Problem::Malformed {
+                file: "prefs.js",
+                prefs: 1,
+                first_line: 2,
+            },
+            Problem::Malformed {
+                file: "user.js",
+                prefs: 2,
+                first_line: 2,
+            },
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_user_js_is_refused_and_the_profile_says_so() {
+    let home = one_profile("user_pref(\"a\", 1);\n", None);
+    let dir = home.path().join(".thunderbird/one");
+    std::fs::write(dir.join("logins.json"), "{}").unwrap();
+    std::os::unix::fs::symlink(dir.join("logins.json"), dir.join("user.js")).unwrap();
+    let found = find(home.path());
+    assert_eq!(
+        found.profiles[0].problems,
+        vec![Problem::Refused {
+            file: "user.js",
+            why: "user.js is a link, so Postrinch didn't read it".into(),
+        }]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_profiles_ini_is_refused() {
+    let home = one_profile("user_pref(\"a\", 1);\n", None);
+    let root = home.path().join(".thunderbird");
+    std::fs::rename(root.join("profiles.ini"), root.join("real.ini")).unwrap();
+    std::os::unix::fs::symlink(root.join("real.ini"), root.join("profiles.ini")).unwrap();
+    let found = find(home.path());
+    assert!(found.profiles.is_empty());
+    assert_eq!(
+        found.unreadable,
+        vec![(
+            root.join("profiles.ini"),
+            "profiles.ini is a link, so Postrinch didn't read it".to_owned()
+        )]
+    );
 }
 
 /// The files a search of `home` asks for.

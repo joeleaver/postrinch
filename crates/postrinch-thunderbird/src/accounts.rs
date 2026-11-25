@@ -56,17 +56,27 @@ impl Security {
     }
 }
 
-/// How a server signs in, from its `authMethod`.
+/// How a server signs in, from its `authMethod` (Thunderbird's
+/// `nsMsgAuthMethod`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignIn {
-    /// A password, sent as it is or hashed (2, 3, 4, 8, 9; 3 when unset).
+    /// A password: the protocol's own login (2), sent as it is (3),
+    /// hashed with CRAM-MD5 or DIGEST-MD5 (4), the old "secure" one (8)
+    /// or whatever the server offers (9). Unset is 3, Thunderbird's
+    /// default; 0 is no method of Thunderbird's and is read as unset.
     Password,
     /// OAuth 2 in the browser (10).
     OAuth2,
-    /// No sign-in (1).
+    /// No sign-in (1): the server lets the connection in as it is, by
+    /// its address, say.
     None,
-    /// Kerberos (5), NTLM (6) or a TLS certificate (7), or a number
-    /// Thunderbird does not have.
+    /// Kerberos, or GSSAPI (5).
+    Kerberos,
+    /// NTLM (6).
+    Ntlm,
+    /// A TLS client certificate (7, `External`).
+    Certificate,
+    /// A number Thunderbird does not have.
     Other(i32),
 }
 
@@ -74,8 +84,11 @@ impl SignIn {
     fn from_code(code: Option<i32>) -> Self {
         match code {
             None | Some(0 | 2 | 3 | 4 | 8 | 9) => Self::Password,
-            Some(10) => Self::OAuth2,
             Some(1) => Self::None,
+            Some(5) => Self::Kerberos,
+            Some(6) => Self::Ntlm,
+            Some(7) => Self::Certificate,
+            Some(10) => Self::OAuth2,
             Some(other) => Self::Other(other),
         }
     }
@@ -214,13 +227,13 @@ fn incoming(prefs: &Prefs, key: &str, kind: &AccountKind) -> Option<Server> {
     })
 }
 
-/// The outgoing server `key`. Thunderbird's own usual ports: 465 for
-/// TLS, 25 otherwise.
+/// The outgoing server `key`. Without a port, Thunderbird's own: 465
+/// for TLS and 587 (submission) otherwise, as its SMTP client picks.
 fn outgoing(prefs: &Prefs, key: &str) -> Option<Server> {
     let p = |field: &str| format!("mail.smtpserver.{key}.{field}");
     let host = text(prefs, &p("hostname"))?;
     let security = Security::from_code(prefs.int(&p("try_ssl")));
-    let usual = if security == Security::Tls { 465 } else { 25 };
+    let usual = if security == Security::Tls { 465 } else { 587 };
     Some(Server {
         host,
         port: port(prefs, &p("port"), usual),

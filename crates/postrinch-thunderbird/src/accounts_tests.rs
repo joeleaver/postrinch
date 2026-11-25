@@ -29,7 +29,11 @@ fn unset_ports_and_security_are_thunderbirds_defaults() {
     );
     assert_eq!(incoming.username, None);
     let outgoing = account.outgoing.unwrap();
-    assert_eq!((outgoing.port, outgoing.security), (25, Security::Plain));
+    // Thunderbird's SMTP client: 465 for TLS, else submission's 587.
+    assert_eq!(
+        (outgoing.port, outgoing.security, outgoing.sign_in),
+        (587, Security::Plain, SignIn::Password)
+    );
     // The first identity is the account's.
     assert_eq!(
         account.identity.unwrap().address.as_deref(),
@@ -49,6 +53,23 @@ fn tls_changes_the_usual_ports() {
 }
 
 #[test]
+fn starttls_keeps_the_usual_ports() {
+    let account = one(&format!(
+        "{IMAP}user_pref(\"mail.server.server1.socketType\", 2);\nuser_pref(\"mail.identity.id1.smtpServer\", \"smtp1\");\nuser_pref(\"mail.smtpserver.smtp1.hostname\", \"smtp.example.org\");\nuser_pref(\"mail.smtpserver.smtp1.try_ssl\", 2);"
+    ));
+    let incoming = account.incoming.unwrap();
+    assert_eq!(
+        (incoming.port, incoming.security),
+        (143, Security::StartTls)
+    );
+    let outgoing = account.outgoing.unwrap();
+    assert_eq!(
+        (outgoing.port, outgoing.security),
+        (587, Security::StartTls)
+    );
+}
+
+#[test]
 fn security_codes() {
     assert_eq!(Security::from_code(None), Security::Plain);
     assert_eq!(Security::from_code(Some(0)), Security::Plain);
@@ -65,9 +86,21 @@ fn sign_in_codes() {
     }
     assert_eq!(SignIn::from_code(Some(10)), SignIn::OAuth2);
     assert_eq!(SignIn::from_code(Some(1)), SignIn::None);
-    assert_eq!(SignIn::from_code(Some(5)), SignIn::Other(5));
-    assert_eq!(SignIn::from_code(Some(6)), SignIn::Other(6));
-    assert_eq!(SignIn::from_code(Some(7)), SignIn::Other(7));
+    assert_eq!(SignIn::from_code(Some(5)), SignIn::Kerberos);
+    assert_eq!(SignIn::from_code(Some(6)), SignIn::Ntlm);
+    assert_eq!(SignIn::from_code(Some(7)), SignIn::Certificate);
+    for code in [-1, 11, 99] {
+        assert_eq!(SignIn::from_code(Some(code)), SignIn::Other(code));
+    }
+}
+
+#[test]
+fn each_servers_sign_in_is_its_own() {
+    let account = one(&format!(
+        "{IMAP}user_pref(\"mail.server.server1.authMethod\", 5);\nuser_pref(\"mail.smtp.defaultserver\", \"smtp1\");\nuser_pref(\"mail.smtpserver.smtp1.hostname\", \"smtp.example.org\");\nuser_pref(\"mail.smtpserver.smtp1.authMethod\", 1);"
+    ));
+    assert_eq!(account.incoming.unwrap().sign_in, SignIn::Kerberos);
+    assert_eq!(account.outgoing.unwrap().sign_in, SignIn::None);
 }
 
 #[test]
