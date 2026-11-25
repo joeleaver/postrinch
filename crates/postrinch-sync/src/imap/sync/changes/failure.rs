@@ -12,8 +12,10 @@
 //!   for ever.
 //! - **Waits**: the change waits for something that comes in time: sync
 //!   to read a folder that changed (its UIDVALIDITY, or a copy whose UID
-//!   is not known yet), or other mail marked deleted to go before a plain
-//!   `EXPUNGE`. Tried again however long it takes.
+//!   is not known yet), a copy the server did not confirm, or other mail
+//!   marked deleted to go before a plain `EXPUNGE` (until sync has seen
+//!   it). Tried again however long it takes, holding back only the later
+//!   changes to its messages.
 //! - **Wait**: the server busy (for a folder or the account) or out of
 //!   reach. Waiting cures it, so it is tried again however long it takes.
 //!

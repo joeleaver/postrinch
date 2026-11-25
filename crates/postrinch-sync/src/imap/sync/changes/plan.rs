@@ -20,7 +20,8 @@
 //! sync. A `\All` folder elsewhere is a view of the other folders' mail
 //! ([`super::super::folders::view_of_all`]): its copies are never changed
 //! or counted as keeping a message, so archiving there moves the inbox
-//! copy to a real archive folder.
+//! copy to a real archive folder; and mail is never filed in one (a label
+//! kept from before the folder became a view): that change is refused.
 //!
 //! A message with a copy just made whose UID is not known yet
 //! ([`postrinch_model::ImapUnplacedCopy`]) takes only labels added until sync finds that
@@ -228,6 +229,13 @@ pub(super) fn plan(
         .collect();
     if adds.iter().any(|a| folders.get(a).is_none()) {
         return Planned::Refused("a folder this change files mail in is gone".to_owned());
+    }
+    if let Some(view) = adds.iter().find(|a| folders.is_view(a)) {
+        let name = folders.get(view).map_or("", |f| f.name.as_str());
+        return Planned::Refused(format!(
+            "{} is a view of the mail in the other folders, and mail cannot be filed in it",
+            shown(name)
+        ));
     }
     let bin = [SystemLabel::Trash, SystemLabel::Spam]
         .map(|l| l.provider_id())

@@ -1,31 +1,26 @@
 //! Carrying out one change's ops ([`super::plan`], gathered by
 //! [`super::change`]) folder by folder, many UIDs to a command, in phases:
-//! flags, then copies, then moves, then deletes, so a copy carries the
-//! flags just set and is made before its source moves. Deletes go only
-//! when nothing before them waited: a copy skipped because its folder
-//! changed on the server may be the one the delete counted on.
+//! flags, then copies, then moves ([`super::transfer`]), then deletes, so
+//! a copy carries the flags just set and is made before its source moves.
+//! Deletes go only when nothing before them waited: a copy skipped because
+//! its folder changed on the server may be the one the delete counted on.
+//! And a message's deletes go only once each copy its change made or
+//! moved is known to have been made (`COPYUID`, or found by its
+//! `Message-ID`): a `UID MOVE` or `UID COPY` of a UID another client has
+//! just expunged answers `OK` and does nothing, and the deletes after it
+//! would take the last real copy. Otherwise they wait, and the change,
+//! sent again, is planned from what the server then has.
 //!
-//! Without `MOVE`, a move is `COPY`, `STORE +FLAGS (\Deleted)` and an
-//! expunge. Without UIDPLUS there is no `UID EXPUNGE`, and a plain
-//! `EXPUNGE` removes every message marked `\Deleted` in the folder, so it
-//! is sent only when the server says the folder's only such messages are
-//! the ones being removed (checked before marking them and again before
-//! expunging); otherwise the change waits. Without UIDPLUS a server does
-//! not say where copies went (`COPYUID`): they are found among the
-//! folder's new mail by their `Message-ID`, from the UIDNEXT it had
-//! before; one not found is kept as a copy whose UID is not known
-//! ([`postrinch_model::ImapUnplacedCopy`]) until sync finds it, so the
-//! change sent again does not copy the message twice.
+//! Removing copies is [`super::expunge`]'s: `\Deleted` and an expunge.
 
 use std::collections::{BTreeMap, HashSet};
 
-use postrinch_model::{EmailAddress, ImapPlace, ImapUnplacedCopy, ProviderMessageId};
+use postrinch_model::{EmailAddress, ImapPlace, ProviderMessageId};
 
 use super::super::ImapSync;
 use super::super::names::Command;
-use super::super::places::{DELETED, Folder};
 use super::super::wire::Conn;
-use super::commands::{CHUNK, CopyUid, shown};
+use super::commands::{CHUNK, shown};
 use super::failure::{Failure, Outcome};
 use super::plan::{Folders, Op};
 use super::record;
@@ -35,7 +30,7 @@ use super::record;
 pub(super) struct Exec<'c> {
     pub conn: &'c mut Conn,
     pub uidplus: bool,
-    has_move: bool,
+    pub has_move: bool,
     /// The selected folder's label and UIDVALIDITY.
     selected: Option<(String, u32)>,
     /// Why part of the change waits, when it does.
@@ -80,6 +75,16 @@ impl<'c> Exec<'c> {
         self.selected.as_ref().map(|(label, _)| label.as_str())
     }
 
+    /// The label and UIDVALIDITY of the selected folder, if one is.
+    pub(super) fn selected_at(&self) -> Option<(String, u32)> {
+        self.selected.clone()
+    }
+
+    /// Notes why part of the change waits, unless something already did.
+    pub(super) fn wait_for(&mut self, reason: String) {
+        self.waits.get_or_insert(reason);
+    }
+
     /// Leaves the selected folder without expunging (`UNSELECT`), or, where
     /// that is not offered, with `CLOSE`, as before the folder is deleted.
     pub(super) async fn close(&mut self) -> Outcome<()> {
@@ -96,7 +101,7 @@ impl<'c> Exec<'c> {
 
     /// The copies whose UIDVALIDITY is the folder's: the others' UIDs name
     /// other messages now, so their part waits for sync to read the folder.
-    fn current(
+    pub(super) fn current(
         &mut self,
         folders: &Folders,
         validity: u32,
@@ -112,21 +117,6 @@ impl<'c> Exec<'c> {
             ));
         }
         now
-    }
-
-    /// Whether a plain `EXPUNGE` in the selected folder would remove only
-    /// `ours` (no UIDPLUS).
-    async fn expunge_is_safe(&mut self, ours: &[u32], name: &str) -> Outcome<()> {
-        let ours: HashSet<u32> = ours.iter().copied().collect();
-        let marked = self.conn.deleted_uids().await?;
-        if marked.iter().all(|uid| ours.contains(uid)) {
-            return Ok(());
-        }
-        Err(Failure::Waits(format!(
-            "other mail in {} is marked deleted, and the server cannot remove ours alone; \
-             the change waits until that mail is gone",
-            shown(name)
-        )))
     }
 }
 
@@ -192,19 +182,34 @@ impl ImapSync {
             self.flag(exec, account, folders, (&label, flag, add), places)
                 .await?;
         }
-        for ((from, to), places) in grouped.copies {
-            self.transfer(exec, account, folders, (&from, &to), places, false)
+        let mut unconfirmed: HashSet<ProviderMessageId> = HashSet::new();
+        let transfers = (grouped.copies.into_iter().map(|t| (t, false)))
+            .chain(grouped.moves.into_iter().map(|t| (t, true)));
+        for (((from, to), places), moving) in transfers {
+            let messages: Vec<ProviderMessageId> =
+                places.iter().map(|p| p.message.clone()).collect();
+            let landed = self
+                .transfer(exec, account, folders, (&from, &to), places, moving)
                 .await?;
-        }
-        for ((from, to), places) in grouped.moves {
-            self.transfer(exec, account, folders, (&from, &to), places, true)
-                .await?;
+            unconfirmed.extend(messages.into_iter().filter(|m| !landed.contains(m)));
         }
         if exec.waits.is_some() {
             return Ok(());
         }
         for (label, places) in grouped.deletes {
-            self.delete(exec, account, folders, &label, places).await?;
+            let (go, stay): (Vec<ImapPlace>, Vec<ImapPlace>) = places
+                .into_iter()
+                .partition(|p| !unconfirmed.contains(&p.message));
+            if !stay.is_empty() {
+                exec.wait_for(
+                    "the server did not say a copy of a message was made, so its other \
+                     copies stay; the change is tried again"
+                        .to_owned(),
+                );
+            }
+            if !go.is_empty() {
+                self.delete(exec, account, folders, &label, go).await?;
+            }
         }
         Ok(())
     }
@@ -229,159 +234,6 @@ impl ImapSync {
         Ok(())
     }
 
-    /// Copies (or moves) copies from the folder `from` into the folder
-    /// `to`, as the module says.
-    pub(super) async fn transfer(
-        &self,
-        exec: &mut Exec<'_>,
-        account: &EmailAddress,
-        folders: &Folders,
-        (from, to): (&str, &str),
-        places: Vec<ImapPlace>,
-        moving: bool,
-    ) -> Outcome<()> {
-        let dest = known(folders, to)?.name.clone();
-        let source = known(folders, from)?.name.clone();
-        let before = match exec.uidplus {
-            true => None,
-            false => match exec.conn.uid_next(&dest).await? {
-                Some(before) => Some(before),
-                None => {
-                    return Err(Failure::Declined(format!(
-                        "the server would not say where new mail goes in {}, which it must \
-                         for copies to be found without UIDPLUS",
-                        shown(&dest)
-                    )));
-                }
-            },
-        };
-        let validity = exec.open(folders, from).await?;
-        let places = exec.current(folders, validity, places);
-        if places.is_empty() {
-            return Ok(());
-        }
-        let native = moving && exec.has_move;
-        let fallback = moving && !exec.has_move;
-        if fallback && !exec.uidplus {
-            exec.expunge_is_safe(&uids(&places), &source).await?;
-        }
-        let mut told = true;
-        for chunk in places.chunks(CHUNK) {
-            match exec.conn.transfer(&uids(chunk), &dest, native).await? {
-                Some(copied) => self.keep_copies(account, to, chunk, copied).await?,
-                None => told = false,
-            }
-        }
-        let removed = match fallback {
-            true => self.remove(exec, account, &source, &places).await,
-            false => Ok(()),
-        };
-        if native || (fallback && removed.is_ok()) {
-            self.forget_copies(account, &places).await?;
-        }
-        let found = match (told, before) {
-            (false, Some(before)) => {
-                self.find_copies(exec, account, folders, to, before, &places)
-                    .await
-            }
-            _ => Ok(()),
-        };
-        removed.and(found)
-    }
-
-    /// Keeps the copies of `places` just made in `to` that were not found
-    /// as copies whose UID is not known, from the UIDVALIDITY and UIDNEXT
-    /// `to` had before.
-    async fn keep_unplaced(
-        &self,
-        account: &EmailAddress,
-        folders: &Folders,
-        to: &str,
-        (uidvalidity, uidnext): (u32, u32),
-        places: &[ImapPlace],
-        found: &HashSet<ProviderMessageId>,
-    ) -> Outcome<()> {
-        let read_uidvalidity = known(folders, to)?.uidvalidity;
-        let copies: Vec<ImapUnplacedCopy> = places
-            .iter()
-            .filter(|p| !found.contains(&p.message))
-            .map(|p| ImapUnplacedCopy {
-                folder: to.to_owned(),
-                message: p.message.clone(),
-                uidvalidity,
-                uidnext,
-                read_uidvalidity,
-            })
-            .collect();
-        if copies.is_empty() {
-            return Ok(());
-        }
-        let a = account.clone();
-        self.with_store(move |s| {
-            copies
-                .iter()
-                .try_for_each(|c| s.put_imap_unplaced_copy(&a, c))
-        })
-        .await?;
-        Ok(())
-    }
-
-    /// Keeps the copies `COPYUID` says were made of `chunk` in `to`.
-    async fn keep_copies(
-        &self,
-        account: &EmailAddress,
-        to: &str,
-        chunk: &[ImapPlace],
-        copied: CopyUid,
-    ) -> Outcome<()> {
-        let (a, to, chunk) = (account.clone(), to.to_owned(), chunk.to_vec());
-        self.blocking(move |s| {
-            for (source, uid) in copied.pairs {
-                if let Some(place) = chunk.iter().find(|p| p.uid == source) {
-                    record::add_copy(s, &a, place, &to, copied.uidvalidity, uid)?;
-                }
-            }
-            Ok(())
-        })
-        .await?;
-        Ok(())
-    }
-
-    /// Finds the copies just made in `to` among its mail from the UIDNEXT
-    /// it had before (`(uidvalidity, uidnext)`), by `Message-ID`.
-    async fn find_copies(
-        &self,
-        exec: &mut Exec<'_>,
-        account: &EmailAddress,
-        folders: &Folders,
-        to: &str,
-        (uidvalidity, from): (u32, u32),
-        places: &[ImapPlace],
-    ) -> Outcome<()> {
-        let validity = exec.open(folders, to).await?;
-        let found = match validity == uidvalidity {
-            true => {
-                let reply = exec.conn.copies_from(from).await?;
-                let name = known(folders, to)?.name.clone();
-                let wanted: HashSet<ProviderMessageId> =
-                    places.iter().map(|p| p.message.clone()).collect();
-                let (a, label) = (account.clone(), to.to_owned());
-                self.blocking(move |s| {
-                    let folder = Folder {
-                        label: &label,
-                        name: &name,
-                        uidvalidity,
-                    };
-                    record::found_copies(s, &a, folder, &reply.messages, &wanted)
-                })
-                .await?
-            }
-            false => HashSet::new(),
-        };
-        self.keep_unplaced(account, folders, to, (uidvalidity, from), places, &found)
-            .await
-    }
-
     /// Deletes copies in one folder.
     async fn delete(
         &self,
@@ -398,62 +250,12 @@ impl ImapSync {
             return Ok(());
         }
         if !exec.uidplus {
-            exec.expunge_is_safe(&uids(&places), &name).await?;
-        }
-        self.remove(exec, account, &name, &places).await?;
-        self.forget_copies(account, &places).await
-    }
-
-    /// Marks copies in the selected folder (`name`) `\Deleted` and
-    /// expunges them. Should other mail be marked by the time a plain
-    /// `EXPUNGE` would be sent, the mark is taken off again and the
-    /// change waits.
-    async fn remove(
-        &self,
-        exec: &mut Exec<'_>,
-        account: &EmailAddress,
-        name: &str,
-        places: &[ImapPlace],
-    ) -> Outcome<()> {
-        for chunk in places.chunks(CHUNK) {
-            exec.conn.store_flag(&uids(chunk), DELETED, true).await?;
-            let (a, chunk) = (account.clone(), chunk.to_vec());
-            self.blocking(move |s| record::set_flag(s, &a, &chunk, DELETED, true))
+            self.plain_expunge(exec, account, &uids(&places), &name)
                 .await?;
         }
-        if exec.uidplus {
-            for chunk in places.chunks(CHUNK) {
-                exec.conn.expunge(Some(&uids(chunk))).await?;
-            }
-            return Ok(());
+        if self.remove(exec, account, &name, &places).await? {
+            self.forget_copies(account, &places).await?;
         }
-        // What is checked here can change before the EXPUNGE arrives: mail
-        // another client marks `\Deleted` in between is expunged with ours.
-        // IMAP without UIDPLUS has no way to expunge only some messages,
-        // so the window can be made short, not closed; that mail was
-        // marked to be expunged, and the other client's own expunge would
-        // remove it too, unless it took the mark off again first.
-        if let Err(unsafe_now) = exec.expunge_is_safe(&uids(places), name).await {
-            for chunk in places.chunks(CHUNK) {
-                exec.conn.store_flag(&uids(chunk), DELETED, false).await?;
-                let (a, chunk) = (account.clone(), chunk.to_vec());
-                self.blocking(move |s| record::set_flag(s, &a, &chunk, DELETED, false))
-                    .await?;
-            }
-            return Err(unsafe_now);
-        }
-        exec.conn.expunge(None).await
-    }
-
-    /// Forgets copies the server no longer has.
-    async fn forget_copies(&self, account: &EmailAddress, places: &[ImapPlace]) -> Outcome<()> {
-        let (a, places) = (account.clone(), places.to_vec());
-        self.blocking(move |s| {
-            places
-                .iter()
-                .try_for_each(|p| record::remove_copy(s, &a, p))
-        })
-        .await?;
         Ok(())
     }
 }

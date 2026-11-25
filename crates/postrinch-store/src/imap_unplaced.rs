@@ -1,5 +1,5 @@
-//! Copies a change made on an IMAP server without UIDPLUS whose UID the
-//! server did not say and which were not found by `Message-ID`
+//! Copies a change made on an IMAP server whose UID the server did not
+//! say and which were not found by `Message-ID`
 //! ([`ImapUnplacedCopy`]; docs/imap.md, "Changing mail"). Each links to
 //! its folder, cascading, so removing the folder or the account removes
 //! it; one sync has read past means nothing and is removed when next met.
@@ -29,6 +29,7 @@ fn decode(
         uidvalidity: fields.u32("uidvalidity")?,
         uidnext: fields.u32("uidnext")?,
         read_uidvalidity: fields.u32("read_uidvalidity")?,
+        pass: fields.u64("pass")?,
     })
 }
 
@@ -53,6 +54,7 @@ impl Store {
                 .u32("uidvalidity", copy.uidvalidity)
                 .u32("uidnext", copy.uidnext)
                 .u32("read_uidvalidity", copy.read_uidvalidity)
+                .u64("pass", copy.pass)
         };
         let create = fields()
             .str("key", key.clone())

@@ -13,19 +13,26 @@
 //!
 //! Entries in a row that make the same change go together, as Gmail's
 //! do, so a thousand archives are a few commands. What becomes of one
-//! the server will not take is [`failure`]'s to say.
+//! the server will not take is [`failure`]'s to say. One that waits (for
+//! sync, for other mail to go) holds back only the later changes to its
+//! messages, so each message's changes keep their order and the rest of
+//! the outbox goes on.
 
 mod apply;
 mod change;
 mod commands;
 mod drop_label;
+mod expunge;
 mod failure;
 mod labels;
 mod plan;
 mod record;
+mod transfer;
 mod verify;
 
-use postrinch_model::EmailAddress;
+use std::collections::HashSet;
+
+use postrinch_model::{EmailAddress, ProviderMessageId};
 use postrinch_store::OutboxEntry;
 
 use self::failure::{Failure, GIVE_UP};
@@ -39,6 +46,32 @@ use crate::{SyncError, SyncResult};
 
 /// How many messages one run of identical changes names at most.
 const BATCH: usize = 1000;
+
+/// The changes that wait, as sending goes on past them.
+#[derive(Default)]
+struct Behind {
+    /// The messages whose earlier change waits: their later changes wait
+    /// behind it.
+    messages: HashSet<ProviderMessageId>,
+    /// Why the first change that waits does.
+    error: Option<SyncError>,
+}
+
+impl Behind {
+    /// Whether `entry` changes a message whose earlier change waits.
+    fn holds(&self, entry: &OutboxEntry) -> bool {
+        entry.messages.iter().any(|m| self.messages.contains(m))
+    }
+
+    /// `entry` waits, for `error`, and so do the later changes to its
+    /// messages.
+    fn wait(&mut self, entry: &OutboxEntry, error: Option<SyncError>) {
+        self.messages.extend(entry.messages.iter().cloned());
+        if self.error.is_none() {
+            self.error = error;
+        }
+    }
+}
 
 impl ImapSync {
     /// How many of the account's changes wait to be sent.
@@ -56,9 +89,12 @@ impl ImapSync {
     /// Sends the account's waiting changes, oldest first. One the server
     /// refuses for good, or has declined [`GIVE_UP`] times, is dropped
     /// with its reason in the report and its messages shown as the server
-    /// has them; one that may pass, or waits (for sync, for other mail to
-    /// go, for the server), stays to be tried again, the ones after it
-    /// wait behind it, and the error is returned.
+    /// has them. One that may pass, or waits for the server, stays to be
+    /// tried again, the ones after it wait behind it, and the error is
+    /// returned. One that waits for something that comes in time (sync,
+    /// other mail to go) stays too, and only the later changes to its
+    /// messages wait behind it: the rest are sent, and then its reason is
+    /// returned.
     pub async fn send_outbox(&self, account: &EmailAddress) -> SyncResult<SendReport> {
         let owner = account.clone();
         let entries = self.with_store(move |s| s.outbox(&owner)).await?;
@@ -70,11 +106,23 @@ impl ImapSync {
         let result = self
             .over(account, Lane::Sync, async |conn| {
                 let mut folders = self.folders(conn, account).await?;
+                let mut behind = Behind::default();
                 for run in runs(waiting, BATCH) {
-                    self.send_run(conn, account, &mut folders, &run, &mut report)
+                    let mut free = Vec::with_capacity(run.len());
+                    for entry in run {
+                        match behind.holds(&entry) {
+                            true => behind.wait(&entry, None),
+                            false => free.push(entry),
+                        }
+                    }
+                    if free.is_empty() {
+                        continue;
+                    }
+                    let sending = (&mut report, &mut behind);
+                    self.send_run(conn, account, &mut folders, &free, sending)
                         .await?;
                 }
-                Ok(())
+                behind.error.map_or(Ok(()), Err)
             })
             .await;
         self.note_sign_in(account, &result).await?;
@@ -99,10 +147,12 @@ impl ImapSync {
         account: &EmailAddress,
         folders: &mut Folders,
         run: &[OutboxEntry],
-        report: &mut SendReport,
+        (report, behind): (&mut SendReport, &mut Behind),
     ) -> SyncResult<()> {
         if run.len() == 1 {
-            return self.send_one(conn, account, folders, &run[0], report).await;
+            return self
+                .send_one(conn, account, folders, &run[0], (report, behind))
+                .await;
         }
         let together = merged(run);
         match self.make_change(conn, account, folders, &together).await {
@@ -115,7 +165,13 @@ impl ImapSync {
             }
             Err(Failure::Refused(_) | Failure::Declined(_) | Failure::Waits(_)) => {
                 for entry in run {
-                    self.send_one(conn, account, folders, entry, report).await?;
+                    match behind.holds(entry) {
+                        true => behind.wait(entry, None),
+                        false => {
+                            self.send_one(conn, account, folders, entry, (report, behind))
+                                .await?;
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -138,7 +194,7 @@ impl ImapSync {
         account: &EmailAddress,
         folders: &mut Folders,
         entry: &OutboxEntry,
-        report: &mut SendReport,
+        (report, behind): (&mut SendReport, &mut Behind),
     ) -> SyncResult<()> {
         let id = entry.id;
         let reason = match self.make_change(conn, account, folders, entry).await {
@@ -160,7 +216,8 @@ impl ImapSync {
             Err(Failure::Waits(reason)) => {
                 let error = reason.clone();
                 self.with_store(move |s| s.outbox_waits(id, &error)).await?;
-                return Err(server_said(conn, reason));
+                behind.wait(entry, Some(server_said(conn, reason)));
+                return Ok(());
             }
             Err(Failure::Wait(e)) => {
                 let error = e.to_string();

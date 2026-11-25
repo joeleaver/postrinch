@@ -85,11 +85,11 @@ pub struct ImapPlace {
     pub arrived: Option<Timestamp>,
 }
 
-/// A copy a change made on a server without UIDPLUS, which did not say
-/// the copy's UID, and which was not found by its `Message-ID` either. It
-/// stands for the copy until sync has read the folder past it, so the
-/// change, sent again meanwhile, does not copy the message twice
-/// (docs/imap.md, "Changing mail").
+/// A copy a change made whose UID the server did not say (no UIDPLUS),
+/// and which was not found by its `Message-ID` either. It stands for the
+/// copy until sync has read the folder past it, so the change, sent again
+/// meanwhile, does not copy the message twice (docs/imap.md, "Changing
+/// mail").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImapUnplacedCopy {
     /// The label id of the folder the copy was made in.
@@ -104,15 +104,25 @@ pub struct ImapUnplacedCopy {
     /// The folder's UIDVALIDITY as sync had read it then (0 for a folder
     /// not read yet).
     pub read_uidvalidity: u32,
+    /// The number of the last sync pass when the copy was made: a pass
+    /// after it that reads the folder whole has found the copy, or there
+    /// is none.
+    pub pass: u64,
 }
 
 impl ImapUnplacedCopy {
     /// Whether the copy still waits for sync to find it, given the folder
-    /// as sync has now read it: once sync has read the folder past the
-    /// copy's UIDNEXT, at the copy's UIDVALIDITY, the copy is a place (or
-    /// gone), and once the folder's UIDVALIDITY moves on to another one,
-    /// sync reads the folder whole.
-    pub fn waits(&self, read: &ImapFolder) -> bool {
+    /// as sync has now read it and the last pass that read it whole
+    /// (`read_whole_in`, 0 for none). Once a pass after the copy has read
+    /// the folder whole, the copy is a place or there is none (the
+    /// command copied nothing: its source was gone). Once sync has read
+    /// the folder past the copy's UIDNEXT, at the copy's UIDVALIDITY, the
+    /// copy is a place (or gone), and once the folder's UIDVALIDITY moves
+    /// on to another one, sync reads the folder whole.
+    pub fn waits(&self, read: &ImapFolder, read_whole_in: u64) -> bool {
+        if read_whole_in > self.pass {
+            return false;
+        }
         if read.uidvalidity == self.uidvalidity {
             return read.uidnext <= self.uidnext;
         }

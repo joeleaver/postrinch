@@ -274,7 +274,7 @@ type ImapPlace {
     arrived: DateTime
 }
 
-// A copy a change made on a server without UIDPLUS whose UID is not known
+// A copy a change made whose UID the server did not say (no UIDPLUS)
 // (imap_unplaced.rs): it stands for the copy until sync has read the folder
 // past it. Its one to-one relation is its folder, so removing the folder,
 // or the account, removes it.
@@ -292,4 +292,6 @@ type ImapUnplacedCopy {
     uidnext: u32
     // The folder's UIDVALIDITY as sync had read it then.
     read_uidvalidity: u32
+    // The number of the last sync pass then.
+    pass: u64
 }

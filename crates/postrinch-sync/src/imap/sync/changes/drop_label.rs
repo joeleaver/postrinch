@@ -6,8 +6,12 @@
 //! whose headers are owed, and mail just arrived are there too. Every
 //! message the folder holds (`UID SEARCH UNDELETED`) is copied to the
 //! archive, except one known to have a copy in another folder that the
-//! server still has ([`super::verify`]). Where the account keeps every
-//! message whatever its labels (Gmail's All Mail), nothing needs saving.
+//! server still has ([`super::verify`]), or a copy just made whose UID
+//! is not known yet. Mail the store does not know is read first (its
+//! headers, as sync reads new mail), so every copy made is kept as any
+//! change's are, and a deletion tried again copies nothing twice. Where
+//! the account keeps every message whatever its labels (Gmail's All
+//! Mail), nothing needs saving.
 //! Mail another client marked `\Deleted` in the folder goes with it, as
 //! that client's next expunge would take it.
 //!
@@ -21,7 +25,9 @@ use std::collections::{HashMap, HashSet};
 use postrinch_model::{EmailAddress, ImapPlace};
 
 use super::super::ImapSync;
+use super::super::places::Folder;
 use super::apply::{Exec, known};
+use super::change::{Held, held};
 use super::commands::{CHUNK, shown};
 use super::failure::{Failure, Outcome};
 use super::labels::{changeable, mailbox};
@@ -122,7 +128,8 @@ impl ImapSync {
 
     /// Of the UIDs `uids` in the folder `label` (at UIDVALIDITY
     /// `validity`), those to save: all but the ones whose message has a
-    /// copy in another folder the server still has.
+    /// copy in another folder the server still has, or a copy made in
+    /// another whose UID is not known yet.
     async fn only_here(
         &self,
         exec: &mut Exec<'_>,
@@ -133,13 +140,12 @@ impl ImapSync {
         uids: &[u32],
     ) -> Outcome<Vec<u32>> {
         let (a, l) = (account.clone(), label.to_owned());
-        let kept = self
+        let kept: HashMap<u32, Held> = self
             .blocking(move |s| {
                 let mut by_uid = HashMap::new();
                 for place in s.imap_folder_places(&a, &l)? {
                     if place.uidvalidity == validity {
-                        let copies = s.imap_message_places(&a, &place.message)?;
-                        by_uid.insert(place.uid, copies);
+                        by_uid.insert(place.uid, held(s, &a, &place.message)?);
                     }
                 }
                 Ok(by_uid)
@@ -148,24 +154,34 @@ impl ImapSync {
         let elsewhere = |uid: &u32| -> Vec<ImapPlace> {
             kept.get(uid)
                 .into_iter()
-                .flatten()
+                .flat_map(|h| &h.places)
                 .filter(|p| p.folder != label && counted(p, folders))
                 .cloned()
                 .collect()
         };
+        let made_elsewhere = |uid: &u32| {
+            kept.get(uid)
+                .is_some_and(|h| h.unplaced.iter().any(|f| f != label))
+        };
         let others: Vec<ImapPlace> = uids.iter().flat_map(elsewhere).collect();
-        let there = self.still_there(exec, account, folders, others).await?;
+        let there = self
+            .still_there(exec, account, folders, others)
+            .await?
+            .there;
         Ok(uids
             .iter()
             .copied()
+            .filter(|uid| !made_elsewhere(uid))
             .filter(|uid| !elsewhere(uid).iter().any(|p| there.contains(&where_of(p))))
             .collect())
     }
 
     /// Copies the UIDs `uids` of the folder `label` to the archive, making
-    /// one where there is none. The copies of messages the store knows are
-    /// kept as [`Self::transfer`] keeps them; the rest are new mail to
-    /// sync, which finds them in the archive.
+    /// one where there is none, as [`Self::transfer`] copies, once the
+    /// store knows each of them: mail it does not is read first. Should
+    /// the folder's UIDVALIDITY have changed since it was listed, or the
+    /// server not give some of that mail's headers, nothing is copied and
+    /// the deletion waits for sync.
     async fn save(
         &self,
         exec: &mut Exec<'_>,
@@ -180,37 +196,88 @@ impl ImapSync {
         }
         let archive = folders
             .archive()
-            .map(|f| (f.label_id.clone(), f.name.clone()))
+            .map(|f| f.label_id.clone())
             .ok_or_else(|| Failure::Refused("the account has no archive folder".to_owned()))?;
+        let name = known(folders, label)?.name.clone();
         let wanted: HashSet<u32> = uids.iter().copied().collect();
-        let (a, l) = (account.clone(), label.to_owned());
-        let places: Vec<ImapPlace> = self
-            .blocking(move |s| Ok(s.imap_folder_places(&a, &l)?))
-            .await?
-            .into_iter()
-            .filter(|p| p.uidvalidity == validity && wanted.contains(&p.uid))
-            .collect();
-        if !places.is_empty() {
-            self.transfer(
-                exec,
-                account,
-                folders,
-                (label, &archive.0),
-                places.clone(),
-                false,
-            )
-            .await?;
-        }
+        let mut places = self.kept_at(account, label, validity, &wanted).await?;
         let stored: HashSet<u32> = places.iter().map(|p| p.uid).collect();
         let unknown: Vec<u32> = uids
             .iter()
             .copied()
             .filter(|u| !stored.contains(u))
             .collect();
-        exec.open(folders, label).await?;
-        for chunk in unknown.chunks(CHUNK) {
-            exec.conn.transfer(chunk, &archive.1, false).await?;
+        if !unknown.is_empty() {
+            if exec.open(folders, label).await? != validity {
+                return Err(Failure::Waits(format!(
+                    "the folder {} changed on the server since it was listed; the label \
+                     is deleted once sync has read it",
+                    shown(&name)
+                )));
+            }
+            let read = self
+                .read_unknown(exec, account, (label, &name, validity), &unknown)
+                .await?;
+            if read.len() < unknown.len() {
+                return Err(Failure::Waits(format!(
+                    "the server gave no headers for some mail in {}; the label is deleted \
+                     once sync has read it",
+                    shown(&name)
+                )));
+            }
+            places = self.kept_at(account, label, validity, &wanted).await?;
+        }
+        if !places.is_empty() {
+            self.transfer(exec, account, folders, (label, &archive), places, false)
+                .await?;
         }
         Ok(())
+    }
+
+    /// The copies kept in the folder `label` at UIDVALIDITY `validity`
+    /// whose UIDs are `wanted`.
+    async fn kept_at(
+        &self,
+        account: &EmailAddress,
+        label: &str,
+        validity: u32,
+        wanted: &HashSet<u32>,
+    ) -> Outcome<Vec<ImapPlace>> {
+        let (a, l) = (account.clone(), label.to_owned());
+        Ok(self
+            .blocking(move |s| Ok(s.imap_folder_places(&a, &l)?))
+            .await?
+            .into_iter()
+            .filter(|p| p.uidvalidity == validity && wanted.contains(&p.uid))
+            .collect())
+    }
+
+    /// Reads the headers of the UIDs `uids` of the selected folder
+    /// (`(label, name, uidvalidity)`) and keeps them as sync keeps new
+    /// mail. Returns the UIDs kept.
+    async fn read_unknown(
+        &self,
+        exec: &mut Exec<'_>,
+        account: &EmailAddress,
+        (label, name, uidvalidity): (&str, &str, u32),
+        uids: &[u32],
+    ) -> Outcome<HashSet<u32>> {
+        let mut kept = HashSet::new();
+        for chunk in uids.chunks(CHUNK) {
+            let reply = exec.conn.headers_of(chunk).await?;
+            let (a, label, name) = (account.clone(), label.to_owned(), name.to_owned());
+            let stored = self
+                .blocking(move |s| {
+                    let folder = Folder {
+                        label: &label,
+                        name: &name,
+                        uidvalidity,
+                    };
+                    record::store_read(s, &a, folder, &reply.messages)
+                })
+                .await?;
+            kept.extend(stored);
+        }
+        Ok(kept)
     }
 }

@@ -140,6 +140,25 @@ pub(super) fn found_copies(
     Ok(found)
 }
 
+/// Keeps every copy read from a folder with its headers, as sync keeps
+/// new mail: how mail the store does not know yet becomes known before a
+/// label's deletion saves it. Returns the UIDs kept.
+pub(super) fn store_read(
+    store: &Store,
+    account: &EmailAddress,
+    folder: Folder<'_>,
+    fetched: &[Fetched],
+) -> SyncResult<HashSet<u32>> {
+    let mut kept = HashSet::new();
+    for copy in fetched {
+        if let Some(header) = copy.header.as_deref() {
+            places::store_copy(store, account, folder, copy, header)?;
+            kept.insert(copy.uid);
+        }
+    }
+    Ok(kept)
+}
+
 /// Brings each message's labels and flags in step with its copies, now
 /// that a change is done or stopped.
 pub(super) fn settle<'a>(

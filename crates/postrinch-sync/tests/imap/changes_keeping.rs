@@ -1,7 +1,7 @@
 //! A copy that only seems to keep a message never lets another go: a
 //! `\All` folder that is a view of the others (anywhere but Gmail), or a
 //! copy elsewhere that another client deleted or whose folder's
-//! UIDVALIDITY changed since sync read it.
+//! UIDVALIDITY changed since sync read it. Nor is mail filed in a view.
 
 use postrinch_mailtest::{ImapConfig, SpecialUse};
 use postrinch_model::{FolderRoles, MessageChange};
@@ -114,4 +114,22 @@ async fn a_copy_whose_folder_changed_since_sync_does_not_keep_the_message() {
     labels.sort();
     assert_eq!(f.labels("a@x"), labels);
     assert_eq!(f.message_count(), 1);
+}
+
+#[tokio::test]
+async fn mail_is_not_filed_in_a_folder_that_has_become_a_view() {
+    let f = fixture().await;
+    f.user.create_standard_folders().unwrap();
+    f.user.create_folder(VIEW).unwrap();
+    put(&f, "a@x", &["INBOX"]);
+    f.sync().await;
+    let view = f.label_id(VIEW);
+    // The folder is a view of all mail now, its label kept from before.
+    f.user.delete_folder(VIEW).unwrap();
+    f.user.create_special_folder(VIEW, SpecialUse::All).unwrap();
+    let report = change(&f, &["a@x"], MessageChange::add_label(view)).await;
+    assert_eq!((report.sent, report.refused.len()), (0, 1));
+    assert!(report.refused[0].contains("a view"), "{:?}", report.refused);
+    assert_eq!(count(&f, VIEW), 0, "nothing copied into the view");
+    assert_eq!(f.labels("a@x"), ["INBOX"]);
 }

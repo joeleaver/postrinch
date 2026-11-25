@@ -194,9 +194,18 @@ impl Conn {
     /// UID `from` on, to find the copies a command made without saying
     /// where (no UIDPLUS).
     pub(super) async fn copies_from(&mut self, from: u32) -> Outcome<FetchReply> {
+        self.headers(&format!("{from}:*")).await
+    }
+
+    /// The flags, dates and headers of these copies in the selected folder.
+    pub(super) async fn headers_of(&mut self, uids: &[u32]) -> Outcome<FetchReply> {
+        self.headers(&uid_set(uids)).await
+    }
+
+    async fn headers(&mut self, set: &str) -> Outcome<FetchReply> {
         let server = self.describe();
         self.uid_fetch(
-            &format!("{from}:*"),
+            set,
             "(UID FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[HEADER])",
             None,
         )

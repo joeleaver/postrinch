@@ -29,6 +29,26 @@ pub fn put(f: &Fixture, header: &str, folders: &[&str]) {
     }
 }
 
+/// The UID of the message with this `Message-ID` in a folder on the
+/// server.
+pub fn uid_of(f: &Fixture, folder: &str, header: &str) -> u32 {
+    let needle = format!("Message-ID: <{header}>");
+    f.user
+        .messages(folder)
+        .unwrap()
+        .into_iter()
+        .find(|m| String::from_utf8_lossy(&m.body).contains(&needle))
+        .unwrap_or_else(|| panic!("{header} is not in {folder}"))
+        .uid
+}
+
+/// Another client expunges the copy of the message with this
+/// `Message-ID` in a folder.
+pub fn expunge_copy(f: &Fixture, folder: &str, header: &str) {
+    let uid = uid_of(f, folder, header);
+    f.user.expunge(folder, uid).unwrap();
+}
+
 /// How many messages a folder on the server holds.
 pub fn count(f: &Fixture, folder: &str) -> usize {
     f.user.messages(folder).unwrap().len()

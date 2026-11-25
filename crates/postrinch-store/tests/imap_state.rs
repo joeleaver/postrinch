@@ -295,6 +295,7 @@ fn unplaced(folder: &str, message: &str) -> ImapUnplacedCopy {
         uidvalidity: 3,
         uidnext: 20,
         read_uidvalidity: 3,
+        pass: 7,
     }
 }
 
@@ -345,18 +346,31 @@ fn an_unplaced_copy_waits_until_sync_reads_past_it() {
     let mut read = ImapFolder::new("INBOX", "INBOX");
     read.uidvalidity = 3;
     read.uidnext = 20;
-    assert!(copy.waits(&read), "not read past it yet");
+    assert!(copy.waits(&read, 7), "not read past it yet");
     read.uidnext = 21;
-    assert!(!copy.waits(&read), "read past it");
+    assert!(!copy.waits(&read, 7), "read past it");
     let never_read = ImapUnplacedCopy {
         read_uidvalidity: 0,
         ..copy.clone()
     };
     read.uidvalidity = 0;
-    assert!(never_read.waits(&read), "the folder not read yet");
+    assert!(never_read.waits(&read, 0), "the folder not read yet");
     read.uidvalidity = 9;
     assert!(
-        !copy.waits(&read),
+        !copy.waits(&read, 7),
         "the folder read again at another UIDVALIDITY"
     );
+}
+
+#[test]
+fn an_unplaced_copy_stops_waiting_once_a_later_pass_reads_its_folder_whole() {
+    // The command copied nothing (its source was gone), so the folder's
+    // UIDNEXT never moves past the copy's: a pass after the copy that
+    // reads the folder whole is what says there is none.
+    let copy = unplaced("INBOX", "m1");
+    let mut read = ImapFolder::new("INBOX", "INBOX");
+    read.uidvalidity = 3;
+    read.uidnext = 20;
+    assert!(copy.waits(&read, 7), "read whole only before the copy");
+    assert!(!copy.waits(&read, 8), "read whole by a pass after it");
 }
