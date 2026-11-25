@@ -242,17 +242,14 @@ mod tests {
         );
     }
 
-    /// A profile folder holding the passwords, made unreadable: had a
-    /// link been followed, its open would fail with the system's
-    /// permission error (or, run as root, read it) rather than be
-    /// refused.
+    /// A profile folder holding a readable passwords file: had a link
+    /// been followed, its open would succeed and the read would return
+    /// the file, so the test below fails unless the link is refused.
     #[cfg(unix)]
     fn decoy() -> (tempfile::TempDir, PathBuf) {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let logins = dir.path().join("logins.json");
         std::fs::write(&logins, "{\"logins\":[\"secret\"]}").unwrap();
-        std::fs::set_permissions(&logins, std::fs::Permissions::from_mode(0o000)).unwrap();
         (dir, logins)
     }
 
@@ -270,17 +267,13 @@ mod tests {
                 format!("{name} is a link, so Postrinch didn't read it")
             );
         }
-        // The decoy is what the test says: reading it under a settings
-        // file's name fails with the system's error, not a refusal
-        // (unless run as root, who may read it).
+        // The decoy is what the test says: the same file under a settings
+        // file's name, not a link, is read, so only the link was refused.
         let plain = dir.path().join("elsewhere");
         std::fs::create_dir(&plain).unwrap();
         let prefs = plain.join("prefs.js");
-        std::fs::rename(&logins, &prefs).unwrap();
-        if let Err(e) = DiskFiles.read(&prefs) {
-            assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
-            assert_eq!(refusal(&e), None, "{e}");
-        }
+        std::fs::copy(&logins, &prefs).unwrap();
+        assert!(DiskFiles.read(&prefs).is_ok());
     }
 
     #[cfg(unix)]
