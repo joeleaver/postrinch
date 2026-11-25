@@ -1,0 +1,8 @@
+# The GreenMail release the smoke test runs (tools/greenmail-smoke.sh).
+# Kept apart from the script so CI's cache of the jar is keyed on this pin
+# alone, and a change to the script does not download the jar again.
+# To move to a newer GreenMail: change both, taking the SHA-256 from Maven
+# Central's `.sha256` beside the jar and checking it against the downloaded
+# file.
+version=2.1.15
+sha256=91d58798698cac357f015365240383b936ced2f2a1a9f7db37d9e3e1a31391b1
