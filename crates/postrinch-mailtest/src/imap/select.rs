@@ -274,6 +274,9 @@ impl Session {
                 folder.highest_modseq
             ));
         }
+        if state.has(Extension::ObjectId) {
+            text.push_str(&format!("* OK [MAILBOXID (F{})] Ok\r\n", folder.id));
+        }
         self.out.extend_from_slice(text.as_bytes());
         if let Some(q) = qresync.filter(|q| q.uid_validity == folder.uid_validity) {
             self.qresync_report(&selected, folder, &q);

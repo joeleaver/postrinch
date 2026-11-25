@@ -35,7 +35,11 @@ impl Session {
     pub(crate) fn capabilities(&self) -> String {
         let offers_starttls = self.offers_starttls();
         let state = self.shared.lock();
-        let mut caps = vec!["IMAP4rev1", "LITERAL+", "SASL-IR", "UNSELECT"];
+        let mut caps = vec!["IMAP4rev1"];
+        if state.config.literal_plus {
+            caps.push("LITERAL+");
+        }
+        caps.extend(["SASL-IR", "UNSELECT"]);
         if offers_starttls {
             caps.extend(["STARTTLS", "LOGINDISABLED"]);
         } else {

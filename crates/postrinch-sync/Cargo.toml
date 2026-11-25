@@ -43,6 +43,7 @@ url = "2"
 secret-service = { version = "5.2", features = ["crypto-rust"] }
 
 [dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 postrinch-mailtest = { path = "../postrinch-mailtest" }
 tempfile = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }

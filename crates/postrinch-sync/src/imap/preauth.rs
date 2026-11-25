@@ -9,7 +9,7 @@
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use super::capabilities::Capabilities;
-use super::refusal::is_busy_bye;
+use super::refusal::is_busy;
 use super::reply::{Status, Tagged};
 use crate::{SyncError, SyncResult};
 
@@ -41,10 +41,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PreAuth<S> {
     }
 
     /// What a `BYE` before sign-in means: the account turned away for
-    /// now ([`SyncError::Busy`], [`is_busy_bye`]), or the server failing.
+    /// now ([`SyncError::Busy`], [`is_busy`]), or the server failing.
     fn bye(&self, rest: &str) -> SyncError {
         let bye = Tagged::parse_text(rest);
-        if is_busy_bye(bye.code.as_deref(), &bye.text) {
+        if is_busy(bye.code.as_deref(), &bye.text) {
             return SyncError::Busy {
                 service: "IMAP",
                 server: self.server.clone(),

@@ -8,8 +8,10 @@
 //! limits under `[ALERT]`, and some send no code for either.
 //!
 //! The same limits turn up outside the answer to LOGIN or AUTHENTICATE:
-//! as a `BYE` instead of the greeting ([`is_busy_bye`]), and as a `BAD`
-//! to the first commands after signing in (`session.rs`).
+//! as a `BYE` instead of the greeting ([`is_busy`]), as a `BAD` to the
+//! first commands after signing in (`session.rs`), and as a `NO` to a
+//! command sync sends once signed in ([`busy_after_sign_in`]), where how
+//! far the "not now" reaches matters: the account, or one folder.
 
 /// What a tagged NO to LOGIN or AUTHENTICATE means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,11 +116,59 @@ pub(crate) fn is_temporary_limit(text: &str) -> bool {
 /// now rather than saying the server failed: RFC 5530's "try again
 /// later" codes, or, with `[ALERT]` or no code, a known temporary limit.
 /// Any other code, or other words, is the server's.
-pub(crate) fn is_busy_bye(code: Option<&str>, text: &str) -> bool {
+pub(crate) fn is_busy(code: Option<&str>, text: &str) -> bool {
     match code {
         Some("UNAVAILABLE" | "INUSE" | "LIMIT") => true,
         None | Some("ALERT") => is_temporary_limit(text),
         Some(_) => false,
+    }
+}
+
+/// How far a server's "not now" to a command after signing in reaches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BusyScope {
+    /// The account, on every connection: nothing more is to be asked of
+    /// the server until it has been waited out (the pass stops, backing
+    /// off).
+    Account,
+    /// The one folder the command was in: it counts as a folder that
+    /// could not be read this pass, and the pass goes on to the others.
+    Folder,
+}
+
+/// Whether a tagged `NO` to a command once signed in (a `SELECT`, a
+/// `UID SEARCH`, a `UID FETCH`) says the server is busy, and for what.
+///
+/// - Words naming a known temporary limit ([`TEMPORARY_LIMITS`]) under
+///   `[ALERT]`, no code, `[UNAVAILABLE]` or `[INUSE]` are the account's.
+///   Every phrase in that table is about the account or its connections
+///   (its connection count, its daily bandwidth, its sign-in service),
+///   none about a folder: Gmail answers any command
+///   `NO [ALERT] Account exceeded command or bandwidth limits.` once the
+///   account's daily limit is reached, and every other folder would get
+///   the same answer.
+/// - `[UNAVAILABLE]` and `[INUSE]` otherwise are the folder's. Once
+///   signed in, the server answers them about what the command touched:
+///   Dovecot's `NO [INUSE] Mailbox is locked` names one folder whose lock
+///   is held (or stale), Gmail's `NO [UNAVAILABLE] Temporary System
+///   Error` one backend that failed for the command. Stopping the pass
+///   for it would stop every pass at that folder for as long as it
+///   lasts: the folders after it never read, and nothing removed. As a
+///   folder that could not be read, it counts towards giving up on it
+///   holding removals back (`sync::reads::STUCK_AFTER`), and the
+///   other folders are read.
+/// - `[LIMIT]` is never busy after signing in. RFC 5530 means it for a
+///   fixed implementation limit ("too many UIDs in one command"), which
+///   waiting does not lift; it is busy only at sign-in, where Dovecot
+///   sends it for its connection limit ([`RefusalKind::of`], [`is_busy`]).
+/// - Anything else is a refusal of that command alone.
+pub(crate) fn busy_after_sign_in(code: Option<&str>, text: &str) -> Option<BusyScope> {
+    match code {
+        None | Some("ALERT" | "UNAVAILABLE" | "INUSE") if is_temporary_limit(text) => {
+            Some(BusyScope::Account)
+        }
+        Some("UNAVAILABLE" | "INUSE") => Some(BusyScope::Folder),
+        _ => None,
     }
 }
 
@@ -198,22 +248,51 @@ mod tests {
 
     #[test]
     fn busy_byes() {
-        assert!(is_busy_bye(Some("UNAVAILABLE"), "Too busy"));
-        assert!(is_busy_bye(Some("INUSE"), ""));
-        assert!(is_busy_bye(Some("LIMIT"), "Try later"));
-        assert!(is_busy_bye(
+        assert!(is_busy(Some("UNAVAILABLE"), "Too busy"));
+        assert!(is_busy(Some("INUSE"), ""));
+        assert!(is_busy(Some("LIMIT"), "Try later"));
+        assert!(is_busy(
             None,
             "Maximum number of connections from user+IP exceeded (mail_max_userip_connections=10)"
         ));
-        assert!(is_busy_bye(
-            Some("ALERT"),
-            "Too many simultaneous connections"
-        ));
-        assert!(!is_busy_bye(None, "Server shutting down"));
-        assert!(!is_busy_bye(
+        assert!(is_busy(Some("ALERT"), "Too many simultaneous connections"));
+        assert!(!is_busy(None, "Server shutting down"));
+        assert!(!is_busy(
             Some("SERVERBUG"),
             "Too many simultaneous connections"
         ));
+    }
+
+    #[test]
+    fn how_far_busy_reaches_after_sign_in() {
+        use BusyScope::{Account, Folder};
+        let cases = [
+            (Some("INUSE"), "Mailbox is locked", Some(Folder)),
+            (Some("UNAVAILABLE"), "Temporary System Error", Some(Folder)),
+            (
+                Some("ALERT"),
+                "Account exceeded command or bandwidth limits. (Failure)",
+                Some(Account),
+            ),
+            (None, "Too many simultaneous connections", Some(Account)),
+            (
+                Some("UNAVAILABLE"),
+                "Too many simultaneous connections",
+                Some(Account),
+            ),
+            (Some("LIMIT"), "Too many UIDs in the command", None),
+            (Some("LIMIT"), "Too many simultaneous connections", None),
+            (Some("ALERT"), "Mailbox is broken", None),
+            (None, "Some messages could not be FETCHed (Failure)", None),
+            (
+                Some("SERVERBUG"),
+                "Account exceeded command or bandwidth limits",
+                None,
+            ),
+        ];
+        for (code, text, scope) in cases {
+            assert_eq!(busy_after_sign_in(code, text), scope, "{code:?} {text}");
+        }
     }
 
     #[test]

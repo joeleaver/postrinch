@@ -223,6 +223,15 @@ impl UserHandle {
         })
     }
 
+    /// Hides a folder from LIST (or shows it again), as a server that
+    /// briefly leaves one out of a listing does. It can still be selected.
+    pub fn hide_folder(&self, name: &str, hidden: bool) -> Result<(), Error> {
+        self.change(|a, _| {
+            Self::folder_mut(a, name)?.listed = !hidden;
+            Ok(())
+        })
+    }
+
     /// Every folder, in name order.
     pub fn folders(&self) -> Result<Vec<FolderInfo>, Error> {
         self.read(|a| Ok(a.folders.values().map(FolderInfo::from).collect()))
@@ -294,6 +303,22 @@ impl UserHandle {
     /// Removes flags from a message.
     pub fn remove_flags(&self, folder: &str, uid: u32, flags: &[&str]) -> Result<(), Error> {
         self.flags(folder, uid, FlagOp::Remove, flags)
+    }
+
+    /// Makes FETCH leave out a message's header and body (or give them
+    /// again): it still lists, and answers for its flags, but a FETCH
+    /// asking for its header or body ends `NO Some messages could not be
+    /// FETCHed (Failure)`, as Gmail's does for a message it cannot read.
+    pub fn withhold(&self, folder: &str, uid: u32, withheld: bool) -> Result<(), Error> {
+        self.change(|a, _| {
+            let folder = Self::folder_mut(a, folder)?;
+            if withheld {
+                folder.withheld.insert(uid);
+            } else {
+                folder.withheld.remove(&uid);
+            }
+            Ok(())
+        })
     }
 
     /// Removes a message, as another client's expunge would.

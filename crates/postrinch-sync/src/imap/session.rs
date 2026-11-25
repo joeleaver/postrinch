@@ -85,6 +85,11 @@ impl ImapSession {
         &self.server
     }
 
+    /// How this session reaches its server: the TLS trust and timeouts.
+    pub(crate) fn connector(&self) -> &Connector {
+        &self.connector
+    }
+
     /// The async-imap session, for the commands sync sends.
     pub fn inner(&mut self) -> &mut async_imap::Session<ImapStream> {
         &mut self.session

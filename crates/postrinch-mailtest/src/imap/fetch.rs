@@ -208,14 +208,19 @@ impl Session {
             items.insert(0, Item::Uid);
         }
         self.sync_selected(false);
-        let changed = self.run_fetch(&set, &items, &modifiers, uid_mode, with_uid);
+        let (changed, withheld) = self.run_fetch(&set, &items, &modifiers, uid_mode, with_uid);
         if changed {
             self.shared.notify();
+        }
+        if withheld {
+            return Reply::No("Some messages could not be FETCHed (Failure)".into());
         }
         Reply::Ok("FETCH completed".into())
     }
 
-    /// Writes the FETCH responses; returns whether it set `\Seen` anywhere.
+    /// Writes the FETCH responses; returns whether it set `\Seen` anywhere,
+    /// and whether it left out a message withheld from header and body
+    /// FETCHes.
     /// `with_uid` says whether a response that sets `\Seen` must carry the
     /// UID (see [`Session::fetch_carries_uid`]).
     fn run_fetch(
@@ -225,19 +230,23 @@ impl Session {
         modifiers: &Modifiers,
         uid_mode: bool,
         with_uid: bool,
-    ) -> bool {
+    ) -> (bool, bool) {
         let shared = self.shared.clone();
         let mut state = shared.lock();
         let user = self.user.clone().unwrap_or_default();
+        let (splits, unsolicited) = (
+            state.config.splits_fetches,
+            state.config.unsolicited_fetches,
+        );
         let Some(selected) = self.selected.as_mut() else {
-            return false;
+            return (false, false);
         };
         let Some(folder) = state
             .accounts
             .get_mut(&user)
             .and_then(|a| a.folder_by_id_mut(selected.folder_id))
         else {
-            return false;
+            return (false, false);
         };
         if modifiers.vanished {
             let since = modifiers.changed_since.unwrap_or(0);
@@ -262,7 +271,23 @@ impl Session {
             .collect();
         let seen: BTreeSet<String> = ["\\Seen".to_string()].into();
         let mut changed = false;
-        for (seq, uid) in targets {
+        let wants_body = items.iter().any(|i| matches!(i, Item::Body { .. }));
+        let mut withheld = false;
+        if unsolicited && wants_body {
+            // Another client's flag changes, for messages not asked for.
+            let asked: BTreeSet<u32> = targets.iter().map(|&(_, uid)| uid).collect();
+            for (i, uid) in selected.uids.iter().enumerate() {
+                if let Some(message) = folder.find(*uid).filter(|m| !asked.contains(&m.uid)) {
+                    let update = flag_update(self.condstore);
+                    respond(&mut self.out, i + 1, &update, message);
+                }
+            }
+        }
+        for (n, (seq, uid)) in targets.into_iter().enumerate() {
+            if wants_body && folder.withheld.contains(&uid) {
+                withheld = true;
+                continue;
+            }
             let marks_seen = items
                 .iter()
                 .any(|i| matches!(i, Item::Body { peek: false, .. }));
@@ -289,18 +314,51 @@ impl Session {
             if items.contains(&Item::Flags) {
                 selected.known.insert(uid, message.modseq);
             }
-            self.out
-                .extend_from_slice(format!("* {seq} FETCH (").as_bytes());
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    self.out.push(b' ');
-                }
-                render(&mut self.out, item, message);
+            if unsolicited && wants_body && n == 0 {
+                respond(&mut self.out, seq, &flag_update(self.condstore), message);
             }
-            self.out.extend_from_slice(b")\r\n");
+            if splits && items.len() > 1 {
+                // UID first, and in the first response only.
+                let (first, rest): (Vec<Item>, Vec<Item>) = {
+                    let half = items.len().div_ceil(2);
+                    let (uid, others): (Vec<Item>, Vec<Item>) =
+                        items.iter().cloned().partition(|i| *i == Item::Uid);
+                    let take = half.saturating_sub(uid.len());
+                    let mut first = uid;
+                    first.extend(others.iter().take(take).cloned());
+                    (first, others.into_iter().skip(take).collect())
+                };
+                respond(&mut self.out, seq, &first, message);
+                if !rest.is_empty() {
+                    respond(&mut self.out, seq, &rest, message);
+                }
+            } else {
+                respond(&mut self.out, seq, &items, message);
+            }
         }
-        changed
+        (changed, withheld)
     }
+}
+
+/// The items of an unsolicited flag update.
+fn flag_update(condstore: bool) -> Vec<Item> {
+    let mut items = vec![Item::Uid, Item::Flags];
+    if condstore {
+        items.push(Item::ModSeq);
+    }
+    items
+}
+
+/// Writes one FETCH response with these items.
+fn respond(out: &mut Vec<u8>, seq: usize, items: &[Item], message: &super::mailbox::Message) {
+    out.extend_from_slice(format!("* {seq} FETCH (").as_bytes());
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            out.push(b' ');
+        }
+        render(out, item, message);
+    }
+    out.extend_from_slice(b")\r\n");
 }
 
 fn render(out: &mut Vec<u8>, item: &Item, message: &super::mailbox::Message) {
