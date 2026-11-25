@@ -203,6 +203,7 @@ fn label_menu(state: State) -> NodeHandle {
             PopoverDropdown {
                 div { class: "label-menu",
                     input {
+                        spellcheck: "false",
                         class: "label-filter",
                         placeholder: "Find a label",
                         aria-label: "Find a label",

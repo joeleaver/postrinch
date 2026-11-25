@@ -137,6 +137,7 @@ fn shared_with(state: State, account: EmailAddress) -> NodeHandle {
             }
             span { class: "cal-pane-head", "Share with someone" }
             TextInput {
+                spellcheck: false,
                 placeholder: "Address",
                 value_fn: move || state.panel.who.get(),
                 oninput: move |v: String| state.panel.who.set(v),

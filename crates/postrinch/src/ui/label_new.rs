@@ -158,6 +158,7 @@ fn body(state: State, account: EmailAddress) -> NodeHandle {
         div { class: "new-label-fields",
             h2 { class: "dialog-title", "New label" }
             TextInput {
+                spellcheck: false,
                 label: "Name",
                 value_fn: move || read(|m| m.name.clone()),
                 oninput: move |v: String| change(state, |m| m.name = v),

@@ -199,6 +199,7 @@ fn title_status(state: State) -> NodeHandle {
             }
             div { class: "title-search",
                 TextInput {
+                    spellcheck: false,
                     size: "xs",
                     placeholder: "Search all mail",
                     value_fn: move || state.search_draft.get(),

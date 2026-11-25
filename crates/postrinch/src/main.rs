@@ -29,6 +29,7 @@ mod rule_draft;
 mod rule_run_now;
 mod rules;
 mod rules_ui;
+mod spelling;
 mod state;
 mod sync;
 mod ui;
@@ -123,6 +124,7 @@ fn main() -> ExitCode {
         .window_props(window)
         .fonts(FONTS)
         .theme(theme)
+        .spellcheck(spelling::config())
         .menu(menus::menus(state))
         .run();
     ExitCode::SUCCESS

@@ -192,7 +192,7 @@ fn form(state: State, compose: Compose, open: Signal<Option<Form>>) -> NodeHandl
                 }
                 div { class: "compose-row",
                     span { class: "compose-label", "To" }
-                    TextInput { value_fn: move || to.get(), oninput: move |v: String| to.set(v) }
+                    TextInput { spellcheck: false, value_fn: move || to.get(), oninput: move |v: String| to.set(v) }
                     if !show_cc.get() {
                         button { class: "compose-more", onclick: move || show_cc.set(true), "Cc" }
                     }
@@ -201,14 +201,15 @@ fn form(state: State, compose: Compose, open: Signal<Option<Form>>) -> NodeHandl
                     }
                 }
                 if show_cc.get() {
-                    {field(__scope, "Cc", "", cc)}
+                    {field(__scope, "Cc", "", false, cc)}
                 }
                 if show_bcc.get() {
-                    {field(__scope, "Bcc", "", bcc)}
+                    {field(__scope, "Bcc", "", false, bcc)}
                 }
-                {field(__scope, "", "Subject", subject)}
+                {field(__scope, "", "Subject", true, subject)}
             }
             Textarea {
+                spellcheck: true,
                 autosize: true,
                 min_rows: Some(14),
                 max_rows: Some(28),
@@ -228,12 +229,19 @@ fn form(state: State, compose: Compose, open: Signal<Option<Form>>) -> NodeHandl
     }
 }
 
+/// One line of the compose form. `spellcheck` is on for words people
+/// write (the subject), off for addresses.
 #[component]
-fn field(label: &'static str, placeholder: &'static str, value: Signal<String>) -> NodeHandle {
+fn field(
+    label: &'static str,
+    placeholder: &'static str,
+    spellcheck: bool,
+    value: Signal<String>,
+) -> NodeHandle {
     rsx! {
         div { class: "compose-row",
             span { class: "compose-label", {label} }
-            TextInput { placeholder: placeholder, value_fn: move || value.get(), oninput: move |v: String| value.set(v) }
+            TextInput { spellcheck: spellcheck, placeholder: placeholder, value_fn: move || value.get(), oninput: move |v: String| value.set(v) }
         }
     }
 }
