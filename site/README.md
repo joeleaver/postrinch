@@ -1,8 +1,9 @@
 # postrinch.jkbase.app
 
 Postrinch's public site: what it does, how to get it, and the privacy policy and terms. A plain
-static [jkbase](https://jkbase.app) site: the pages are `public/`, there is no build step, it sets no cookies and loads nothing from anyone else, except that the
-download box asks GitHub's API which release is the latest.
+static [jkbase](https://jkbase.app) site: the pages are `public/`, there is no build step, it
+sets no cookies and loads nothing from anyone else, except that the download box asks GitHub's
+API which release is the latest.
 
 | Page | What it is |
 |---|---|
@@ -66,6 +67,6 @@ PEM, or `deploy.sh` refuses:
 
 The features, the privacy policy and the terms describe the app. When a change makes them wrong
 (a new account type, something new Postrinch sends anywhere, a new scope, Google verification
-done so the "unverified app" warning in `index.html`'s download section is gone), change the page
-in the same PR and deploy it. The privacy policy promises that anything new sent anywhere is said in the app
-first, and its date changes with it.
+done so the "unverified app" warning in `index.html`'s download section is gone), change the
+page in the same PR and deploy it. The privacy policy promises that anything new sent anywhere
+is said in the app first, and its date changes with it.
