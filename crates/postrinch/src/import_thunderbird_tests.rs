@@ -125,7 +125,7 @@ fn an_imap_accounts_form_has_thunderbirds_servers_and_postrinchs_sign_in() {
     assert_eq!(fastmail.imap.line(), "imap.fastmail.com · 993 · TLS");
     assert_eq!(fastmail.smtp.line(), "smtp.fastmail.com · 465 · TLS");
     assert_eq!(fastmail.imap.username, "ada@fastmail.com");
-    assert_eq!(fastmail.way, Way::Password);
+    assert_eq!(fastmail.way(), Way::Password);
     assert_eq!(fastmail.found.provider.as_deref(), Some("Fastmail"));
     assert_eq!(fastmail.found.source, Some(FROM_THUNDERBIRD));
     assert!(fastmail.found.app_password_url.is_some());
@@ -135,7 +135,7 @@ fn an_imap_accounts_form_has_thunderbirds_servers_and_postrinchs_sign_in() {
     );
 
     let outlook = imap_form(listing.rows().find(|r| r.who == "ada@outlook.com").unwrap());
-    assert_eq!(outlook.way, Way::Browser(OAuthProvider::Microsoft));
+    assert_eq!(outlook.way(), Way::Browser(OAuthProvider::Microsoft));
     assert!(outlook.found.browser_only);
     assert!(!fastmail.found.browser_only);
     assert_eq!(outlook.smtp.line(), "smtp.office365.com · 587 · STARTTLS");

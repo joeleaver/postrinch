@@ -262,7 +262,7 @@ impl AddUi {
             Ok(add) => add,
             Err(error) => return self.error.set(Some(error)),
         };
-        let how = match (form.way, secret) {
+        let how = match (form.way(), secret) {
             (Way::Browser(provider), _) => How::Browser(provider),
             (Way::Password, Some(secret)) => How::Password(secret),
             (Way::Password, None) => return self.error.set(Some("Give the password.".into())),

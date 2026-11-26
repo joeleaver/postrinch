@@ -217,7 +217,7 @@ pub fn found_box(__scope: &mut RenderScope, ui: AddUi, form: &AddForm, back: Ste
     let domain = adding_address(form)
         .rsplit_once('@')
         .map_or(String::new(), |(_, d)| d.to_owned());
-    let who = form.found.provider.clone().unwrap_or(domain);
+    let who = form.provider().map_or(domain, str::to_owned);
     let source = form.found.source.unwrap_or("");
     let (imap, smtp) = (
         format!("Incoming  {}", form.imap.line()),
@@ -258,10 +258,7 @@ fn workspace(state: State) -> NodeHandle {
                     Button {
                         variant: "default",
                         size: "sm",
-                        onclick: move || {
-                            ui.edit(AddForm::use_imap_anyway);
-                            ui.go(Step::Found);
-                        },
+                        onclick: move || ui.go(Step::Found),
                         "Use IMAP anyway"
                     }
                 }

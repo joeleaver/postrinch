@@ -250,7 +250,7 @@ fn row(
         }
         _ => {
             let form = form_for(account, incoming, &address, known, oauth_ready);
-            row.how = match form.way {
+            row.how = match form.way() {
                 Way::Browser(_) => "Sign in with Microsoft".to_owned(),
                 Way::Password if form.found.app_password_url.is_some() => "App password".to_owned(),
                 Way::Password => "Password".to_owned(),
@@ -327,10 +327,6 @@ fn form_for(
         google: false,
         // The person's own Thunderbird vouches for its servers.
         confirm_servers: false,
-    };
-    form.way = match oauth {
-        Some(provider) => Way::Browser(provider),
-        None => Way::Password,
     };
     form
 }

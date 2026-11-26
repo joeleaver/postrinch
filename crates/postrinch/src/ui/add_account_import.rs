@@ -136,7 +136,7 @@ fn turn(__scope: &mut RenderScope, state: State) -> NodeHandle {
         let no_smtp = form.smtp.host.trim().is_empty().then(|| {
             rsx! { div { class: "add-warn", "Thunderbird has no outgoing server for this account: Change sets one." } }
         });
-        let (way, primary) = match form.way {
+        let (way, primary) = match form.way() {
             Way::Browser(provider) => {
                 let name = provider_name(provider);
                 (browser_hint(__scope, name), format!("Sign in with {name}"))

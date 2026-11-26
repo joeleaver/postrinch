@@ -32,7 +32,7 @@ pub fn found(state: State) -> NodeHandle {
     // the browser, without that sign-in here, is asked for no password.
     let way = Memo::new(move || {
         let form = ui.form.get();
-        (form.way, form.asks_password())
+        (form.way(), form.asks_password())
     });
     rsx! {
         div { class: "dialog",

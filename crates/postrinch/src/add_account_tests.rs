@@ -64,7 +64,7 @@ fn discovery_fills_in_the_servers_it_found() {
     assert_eq!(f.found.provider.as_deref(), Some("Fastmail"));
     assert_eq!(f.found.source, Some("From Thunderbird's list of providers"));
     assert!(f.found.app_password_url.is_some());
-    assert_eq!(f.way, Way::Password, "no browser sign-in for Fastmail");
+    assert_eq!(f.way(), Way::Password, "no browser sign-in for Fastmail");
     assert!(f.no_way_in().is_none());
     assert_eq!(f.step_after_discovery(), Step::Found);
 }
@@ -85,7 +85,7 @@ fn microsoft_signs_in_in_the_browser_when_it_can() {
     f.take_discovery(&Discovery::nothing(), every_sign_in);
     assert_eq!(f.imap.line(), "outlook.office365.com · 993 · TLS");
     assert_eq!(f.smtp.line(), "smtp.office365.com · 587 · STARTTLS");
-    assert_eq!(f.way, Way::Browser(OAuthProvider::Microsoft));
+    assert_eq!(f.way(), Way::Browser(OAuthProvider::Microsoft));
     assert_eq!(f.found.provider.as_deref(), Some("Microsoft"));
     assert!(f.found.browser_only, "Microsoft takes no passwords");
     assert!(f.no_way_in().is_none());
@@ -104,7 +104,7 @@ fn a_browser_sign_in_not_set_up_leaves_no_way_in() {
     found.hosted_by = Some(HostedBy::Microsoft);
     let mut f = form(Kind::Other, "di@contoso.com");
     f.take_discovery(&found, no_sign_in);
-    assert_eq!(f.way, Way::Password);
+    assert_eq!(f.way(), Way::Password);
     let why = f.no_way_in().unwrap();
     assert!(why.contains("only in the browser"), "{why}");
     assert!(!f.asks_password());
@@ -140,8 +140,7 @@ fn google_mail_offers_google_first_then_imap_in_the_browser() {
     let mut f = form(Kind::Other, "ed@workspace.example");
     f.take_discovery(&google(), every_sign_in);
     assert_eq!(f.step_after_discovery(), Step::Workspace);
-    f.use_imap_anyway();
-    assert_eq!(f.way, Way::Browser(OAuthProvider::Google));
+    assert_eq!(f.way(), Way::Browser(OAuthProvider::Google));
     assert!(f.found.browser_only, "no app password instead");
     assert_eq!(f.found.app_password_url, None);
     assert!(!f.asks_password());
@@ -162,7 +161,6 @@ fn google_mail_never_offers_a_password() {
         why.starts_with("Google signs mail apps in only in the browser"),
         "{why}"
     );
-    f.use_imap_anyway();
     assert!(!f.asks_password());
     f.password = "an app password".into();
     assert_eq!(f.to_add().err(), Some(why));
@@ -297,7 +295,7 @@ fn a_changed_address_forgets_what_was_found_for_the_old_one() {
 
     // The same address, typed again with a space, keeps it all.
     f.set_address("a@gmail.com ".into());
-    assert_eq!(f.way, Way::Browser(OAuthProvider::Google));
+    assert_eq!(f.way(), Way::Browser(OAuthProvider::Google));
     assert!(f.found.google && f.found.confirm_servers);
     assert_eq!(f.password, "secret");
 
@@ -305,7 +303,7 @@ fn a_changed_address_forgets_what_was_found_for_the_old_one() {
     assert_eq!(f.address, "b@example.org");
     assert_eq!(f.name, "Ada", "the name stays");
     assert_eq!(f.found, Found::default());
-    assert_eq!(f.way, Way::Password);
+    assert_eq!(f.way(), Way::Password);
     assert!(!f.trusted);
     assert!(f.password.is_empty(), "a password for the old address goes");
     assert!(f.imap.host.is_empty() && f.smtp.host.is_empty());
@@ -350,7 +348,7 @@ fn googles_servers_typed_by_hand_take_no_password() {
     let mut ready = f.clone();
     assert!(ready.take_google_servers(every_sign_in));
     assert_eq!(ready.step_after_discovery(), Step::Workspace);
-    assert_eq!(ready.way, Way::Browser(OAuthProvider::Google));
+    assert_eq!(ready.way(), Way::Browser(OAuthProvider::Google));
     assert!(!ready.take_google_servers(every_sign_in), "once");
     let (new, secret) = ready.to_add().unwrap();
     assert!(secret.is_none());
@@ -358,7 +356,66 @@ fn googles_servers_typed_by_hand_take_no_password() {
 
     // Without Google's sign-in over IMAP here, there is no way in over IMAP.
     assert!(f.take_google_servers(no_sign_in));
-    assert_eq!(f.way, Way::Password);
+    assert_eq!(f.way(), Way::Password);
+    let why = f.no_way_in().expect("no way in over IMAP");
+    assert_eq!(f.to_add().err(), Some(why));
+}
+
+#[test]
+fn a_google_host_typed_by_mistake_and_changed_brings_the_password_back() {
+    // Fastmail's mail, but Gmail's server typed by mistake: "Check and
+    // add" offers Google's own sign-in first.
+    let mut f = form(Kind::Other, "fay@fastmail.com");
+    f.take_discovery(&fastmail(), every_sign_in);
+    f.imap.host = "imap.gmail.com".into();
+    assert!(f.take_google_servers(every_sign_in));
+    assert_eq!(f.step_after_discovery(), Step::Workspace);
+    assert_eq!(f.way(), Way::Browser(OAuthProvider::Google));
+    assert_eq!(f.provider(), Some("Google"));
+
+    // "Use IMAP anyway" (or Back), then the host put right: the password
+    // way is back, with what discovery found for the address.
+    f.imap.host = "imap.fastmail.com".into();
+    assert!(!f.browser_only() && f.asks_password());
+    assert_eq!(f.way(), Way::Password);
+    assert_eq!(f.step_after_discovery(), Step::Found);
+    assert_eq!(f.provider(), Some("Fastmail"));
+    assert!(f.found.app_password_url.is_some(), "Fastmail's page stays");
+    assert_eq!(f.no_way_in(), None);
+    f.password = "an app password".into();
+    let (new, secret) = f.to_add().unwrap();
+    assert_eq!(new.settings.sign_in, SignInMethod::Password);
+    assert!(secret.is_some());
+
+    // Gmail's server typed again is Google's mail again, without asking
+    // twice.
+    f.imap.host = "imap.gmail.com".into();
+    assert!(f.browser_only() && !f.asks_password());
+    assert_eq!(f.way(), Way::Browser(OAuthProvider::Google));
+    assert!(!f.take_google_servers(every_sign_in), "once");
+}
+
+#[test]
+fn editing_the_host_never_undoes_discovery_finding_google() {
+    let mut f = form(Kind::Other, "ed@gmail.com");
+    f.take_discovery(&google(), every_sign_in);
+    f.imap.host = "imap.fastmail.com".into();
+    assert!(f.browser_only() && !f.asks_password());
+    assert!(f.google());
+    assert_eq!(f.step_after_discovery(), Step::Workspace);
+    assert_eq!(f.way(), Way::Browser(OAuthProvider::Google));
+    assert!(!f.take_google_servers(every_sign_in));
+    f.password = "an app password".into();
+    let (new, secret) = f.to_add().unwrap();
+    assert!(secret.is_none(), "never a password");
+    assert_eq!(new.settings.sign_in, OAuthProvider::Google.sign_in_method());
+
+    // Without Google's sign-in here, there is still no password way in.
+    let mut f = form(Kind::Other, "ed@gmail.com");
+    f.take_discovery(&google(), no_sign_in);
+    f.imap.host = "imap.fastmail.com".into();
+    assert!(!f.asks_password());
+    f.password = "an app password".into();
     let why = f.no_way_in().expect("no way in over IMAP");
     assert_eq!(f.to_add().err(), Some(why));
 }
