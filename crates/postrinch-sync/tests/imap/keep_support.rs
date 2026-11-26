@@ -54,9 +54,15 @@ pub fn busy_waits(events: &Events) -> Vec<(Duration, String)> {
         .collect()
 }
 
-/// Waits (up to 10 s) until `done` says the events are as wanted.
+/// How long the waits below give up after: only a hang ends one, so it is
+/// long enough for the slowest machine the tests run on. Windows' CI
+/// runner takes the whole suite about seven times as long as Linux's, and
+/// a sync of fifty messages there, beside the other tests, took over 10 s.
+const HUNG: Duration = Duration::from_secs(60);
+
+/// Waits (up to [`HUNG`]) until `done` says the events are as wanted.
 pub async fn until(events: &Events, done: impl Fn(&[&'static str]) -> bool) {
-    let waited = tokio::time::timeout(Duration::from_secs(10), async {
+    let waited = tokio::time::timeout(HUNG, async {
         while !done(&kinds(events)) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -65,7 +71,7 @@ pub async fn until(events: &Events, done: impl Fn(&[&'static str]) -> bool) {
     assert!(waited.is_ok(), "gave up waiting: {:?}", kinds(events));
 }
 
-/// Waits (up to 10 s) until at least `passes` passes are done. At
+/// Waits (up to [`HUNG`]) until at least `passes` passes are done. At
 /// least, not exactly: the waiting looks at the events only now and then,
 /// and a pass that follows at once (one the last woke) may be done before
 /// it looks again. A test that wants no more says so on its own.
@@ -76,9 +82,9 @@ pub async fn until_done(events: &Events, passes: usize) {
     .await;
 }
 
-/// Waits (up to 10 s) until `holds`, saying `what` if it never does.
+/// Waits (up to [`HUNG`]) until `holds`, saying `what` if it never does.
 pub async fn until_true(what: &str, holds: impl Fn() -> bool) {
-    let waited = tokio::time::timeout(Duration::from_secs(10), async {
+    let waited = tokio::time::timeout(HUNG, async {
         while !holds() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }

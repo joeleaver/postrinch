@@ -1,9 +1,8 @@
 name: CI
 
-# Every push and pull request is tested on Linux. Windows and macOS run
-# only on a major release tag (`v1.0.0`, `v2.0.0`…): early in development
-# their minutes (twice and ten times Linux's) are not worth spending on
-# every push.
+# Every push and pull request is tested on Linux and Windows, the systems
+# Postrinch ships for (release.yml). macOS runs only on a major release tag
+# (`v1.0.0`, `v2.0.0`…) until it ships too.
 on:
   push:
     branches: [main]
@@ -19,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(startsWith(github.ref, 'refs/tags/') && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
+        os: ${{ fromJSON(startsWith(github.ref, 'refs/tags/') && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest","windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +39,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      # Every failing test binary in one run, not only the first.
+      - run: cargo test --workspace --no-fail-fast
+      # The window is a GUI program on Windows (no console of its own): what
+      # it prints must still reach a pipe, as the Release workflow's version
+      # check and a terminal's `postrinch --version` read it.
+      - name: The window prints its version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build -p postrinch
+          . tools/windows/invoke.ps1
+          $run = Invoke-Program target/debug/postrinch.exe --version
+          if ($run.Code -ne 0 -or $run.Out -notmatch '^postrinch \d+\.\d+\.\d+$') {
+            throw "postrinch.exe --version exited $($run.Code), saying '$($run.Out)'"
+          }
 
   # The IMAP/SMTP smoke test against a real server, GreenMail, which the
   # test starts from its standalone jar (docs/imap.md, "Testing"). The

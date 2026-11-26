@@ -92,7 +92,7 @@ pub fn seed(root: &Path, now: &Zoned) -> DemoResult<Seeded> {
 /// Refuse a folder that holds anything, and the machine's own store even
 /// when empty: the demo is only ever written somewhere new.
 fn check_target(root: &Path) -> DemoResult<()> {
-    if let Some(own) = dirs::data_dir().map(|d| d.join("postrinch"))
+    if let Some(own) = Store::default_root()
         && same_place(&own, root)
     {
         return Err(DemoError::RealStore(root.to_owned()));

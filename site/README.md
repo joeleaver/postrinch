@@ -16,15 +16,17 @@ API which release is the latest.
 
 The download links come from GitHub, not from this site. Releases are GitHub releases of
 `joeleaver/postrinch`, made by the Release workflow on a `v*` tag; their files carry the
-version (`postrinch-<v>-linux-x86_64.tar.gz` and its `.sig`). `public/assets/download.js` asks
+version (`postrinch-<v>-linux-x86_64.tar.gz`, `postrinch-<v>-windows-x86_64-setup.exe` and
+`postrinch-<v>-windows-x86_64.zip`, each with its `.sig`). `public/assets/download.js` asks
 `api.github.com/repos/joeleaver/postrinch/releases/latest` from the visitor's browser and points
-the button and signature link at that release's files, picking the package by the same ending
-the app's updater does (`crates/postrinch-update/src/check.rs`). Without JavaScript, or when
+each system's box (`data-download="linux"`, `"windows"`) at that release's files, picking the
+packages by the same endings the app's updater does (`crates/postrinch-update/src/check.rs`); the
+Windows button is the Setup, which installs the zip's programs. Without JavaScript, or when
 GitHub can't be reached, the links go to the latest release's page on GitHub.
 
 So a new release shows on the site at once. Deploy only when a page changes.
 
-When Windows or macOS packages arrive, add their endings to `download.js` and a box for each to
+When macOS packages arrive, add their ending to `SYSTEMS` in `download.js` and a box to
 `index.html`.
 
 ## Deploy

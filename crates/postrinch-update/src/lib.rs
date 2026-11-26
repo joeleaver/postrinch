@@ -13,6 +13,7 @@ mod apply;
 mod check;
 mod desktop;
 mod install;
+mod process;
 
 pub use apply::{apply, at_start};
 pub use check::{check_and_stage, staged_version};

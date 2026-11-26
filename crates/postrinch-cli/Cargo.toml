@@ -19,7 +19,6 @@ postrinch-model = { workspace = true }
 postrinch-store = { workspace = true }
 postrinch-sync = { workspace = true }
 clap = { version = "4", features = ["derive"] }
-dirs = "7"
 jiff = "0.2"
 open = "5"
 rpassword = "7"

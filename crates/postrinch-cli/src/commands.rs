@@ -15,9 +15,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 pub(crate) async fn run(cli: Cli) -> Result<()> {
     let data_dir = match cli.data_dir {
         Some(dir) => dir,
-        None => dirs::data_dir()
-            .ok_or("no data directory; pass --data-dir")?
-            .join("postrinch"),
+        None => Store::default_root().ok_or("no data directory; pass --data-dir")?,
     };
     let store = Store::open(&data_dir)?;
     let cx = Context {

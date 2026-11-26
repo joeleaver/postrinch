@@ -113,4 +113,24 @@ mod tests {
             assert_eq!(mode & 0o777, 0o755);
         }
     }
+
+    /// What "Restart to update" does to the window that asks for it: the
+    /// program is replaced while it runs. Windows refuses to overwrite a
+    /// running program, so it is moved aside to `*.old` first.
+    #[test]
+    fn a_running_program_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join(exe("running"));
+        // This test binary, copied, running its own test that only sleeps.
+        std::fs::copy(std::env::current_exe().unwrap(), &dest).unwrap();
+        let mut running = crate::process::tests::sleeping(&dest);
+        let new = dir.path().join("new");
+        std::fs::write(&new, "new").unwrap();
+        let replaced = replace_file(&new, &dest);
+        running.kill().unwrap();
+        running.wait().unwrap();
+        replaced.unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new");
+        assert_eq!(dest.with_extension("old").exists(), cfg!(windows));
+    }
 }

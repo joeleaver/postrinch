@@ -26,7 +26,7 @@
 <main id="main" class="doc">
   <div class="wrap narrow">
     <h1>Privacy policy</h1>
-    <p class="updated">Last changed 25 November 2026.</p>
+    <p class="updated">Last changed 26 November 2026.</p>
 
     <p>Postrinch is a desktop mail and calendar app made by LBME Publishing ("we"). This page says what Postrinch does with your information, and what this website does.</p>
 
@@ -36,7 +36,7 @@
     <ul>
       <li><strong>Your Google mail and calendars.</strong> When you add a Google account, Postrinch asks Google for your account's email address (<code>openid</code>, <code>email</code>), so it knows which account signed in, and for permission to read, organise and send its mail (<code>https://mail.google.com/</code>), to see and change its calendars (<code>https://www.googleapis.com/auth/calendar</code>) and, optionally, to make Gmail filters for your rules (<code>gmail.settings.basic</code>). It downloads your mail, labels and events from Google and stores them, with a search index of them, in your own home folder.</li>
       <li><strong>Your other mail accounts</strong> (Fastmail, iCloud, a work server: any account with IMAP and SMTP). Postrinch signs in to the account's incoming (IMAP) and outgoing (SMTP) servers, downloads its folders and mail into your home folder, and sends your mail through its outgoing server. A Microsoft account (Outlook.com, Hotmail, Live, Microsoft 365), once Postrinch offers Microsoft's sign-in, signs in on Microsoft's own page and asks permission to read and change its mail over IMAP (<code>IMAP.AccessAsUser.All</code>), to send over SMTP (<code>SMTP.Send</code>), to stay signed in (<code>offline_access</code>) and to learn the account's address (<code>openid</code>, <code>email</code>). A Google account added over IMAP asks Google for its mail and address alone (<code>https://mail.google.com/</code>, <code>openid</code>, <code>email</code>). Other accounts sign in with the password, or app password, you give.</li>
-      <li><strong>Your sign-ins.</strong> The tokens Google and Microsoft give Postrinch, and the passwords you give it, are kept in your system's keychain (GNOME Keyring or KDE Wallet on Linux). Each is sent only to the provider or mail server it belongs to, and no agent you connect ever sees one.</li>
+      <li><strong>Your sign-ins.</strong> The tokens Google and Microsoft give Postrinch, and the passwords you give it, are kept in your system's keychain (GNOME Keyring or KDE Wallet on Linux, Credential Manager on Windows). Each is sent only to the provider or mail server it belongs to, and no agent you connect ever sees one.</li>
       <li><strong>Your Thunderbird settings</strong>, only when you choose Import from Thunderbird: Postrinch reads the account settings in your Thunderbird profiles on this computer (addresses, names and servers) to list them for you. It doesn't read Thunderbird's saved passwords, and nothing it reads leaves your computer except to sign in to the accounts you choose.</li>
       <li><strong>Your settings</strong> (views, rules, label colours, which senders' pictures to show, which agents you've connected) are files in your home folder.</li>
     </ul>

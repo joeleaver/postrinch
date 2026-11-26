@@ -1,5 +1,10 @@
 //! Postrinch: an agent-first desktop mail client.
 
+// A window program on Windows: started from the Start menu or a shortcut it
+// opens no console beside its window. Started from a terminal, it prints
+// there (`attach_parent_console`).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod actions;
 mod add_account;
 mod add_account_flow;
@@ -64,9 +69,10 @@ const FONTS: &[AppFont] = &[
 ];
 
 fn main() -> ExitCode {
+    attach_parent_console();
     // Before anything else: a window restarted into an update waits here
     // for the one it replaces to let go of the store.
-    postrinch_update::at_start();
+    let waited = postrinch_update::at_start();
     // Notices name the app as the desktop shows it.
     rinch::notification::set_app_name("Postrinch");
     match std::env::args().nth(1).as_deref() {
@@ -96,7 +102,10 @@ fn main() -> ExitCode {
                 .with_filter(postrinch_log::filter("postrinch=info,postrinch_sync=info")),
         )
         .init();
-    let Some(data_dir) = dirs::data_dir().map(|d| d.join("postrinch")) else {
+    if let Some(said) = waited {
+        tracing::warn!("{said}");
+    }
+    let Some(data_dir) = Store::default_root() else {
         eprintln!("postrinch: this system has no data directory");
         return ExitCode::FAILURE;
     };
@@ -140,6 +149,34 @@ fn main() -> ExitCode {
         .run();
     ExitCode::SUCCESS
 }
+
+/// Windows: borrow the console of the terminal this was started from, if it
+/// was, so `--install`, `--version`, a store that cannot open and the log
+/// print there. The shell does not wait for a window program, so its prompt
+/// comes back at once and the log follows it. A window program has no console of its
+/// own; started any other way there is none to borrow, and nothing prints.
+/// Output already sent somewhere (`postrinch --version > file`, a pipe) has
+/// handles of its own, which are kept.
+#[cfg(windows)]
+fn attach_parent_console() {
+    use windows_sys::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    // SAFETY: no pointers in; a handle is only compared, never used.
+    unsafe {
+        let unset = |which| {
+            let handle = GetStdHandle(which);
+            handle.is_null() || handle == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE
+        };
+        if unset(STD_OUTPUT_HANDLE) && unset(STD_ERROR_HANDLE) {
+            // Failing (no parent console) leaves things as they were.
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn attach_parent_console() {}
 
 /// The store's upkeep after it opens, on a thread of its own: the latest
 /// activity of threads stored before threads kept it filled in, and who

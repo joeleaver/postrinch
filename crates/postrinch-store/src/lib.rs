@@ -104,6 +104,17 @@ pub struct Store {
 }
 
 impl Store {
+    /// Where this person's store lives: `postrinch` in the local data
+    /// folder, `~/.local/share/postrinch` on Linux and
+    /// `%LOCALAPPDATA%\postrinch` on Windows. Local, never roaming: a
+    /// Windows roaming profile would copy gigabytes of mail to every machine
+    /// the person signs in to, while the keychain keeps its secrets on this
+    /// one (`postrinch_sync::Keychain`). `None` on a system with no such
+    /// folder.
+    pub fn default_root() -> Option<PathBuf> {
+        dirs::data_local_dir().map(|dir| dir.join("postrinch"))
+    }
+
     /// Open the store under `root`, creating it if it does not exist. A
     /// store in another format is refused ([`StoreError::OldFormat`]).
     pub fn open(root: impl AsRef<Path>) -> StoreResult<Self> {

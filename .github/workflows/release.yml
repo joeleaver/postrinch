@@ -15,9 +15,9 @@ permissions:
   contents: write
 
 jobs:
-  # Linux only for now (DESIGN.md, "Installing and updating"). The three
-  # programs ship together: the bridge and the app speak a wire format that
-  # must match. The window is built without the `debug` feature.
+  # One package per system (DESIGN.md, "Installing and updating"). The
+  # three programs ship together: the bridge and the app speak a wire format
+  # that must match. The window is built without the `debug` feature.
   build-linux:
     runs-on: ubuntu-24.04
     steps:
@@ -68,15 +68,119 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  # The zip the installed app updates itself from, and the per-user Setup
+  # (tools/windows/postrinch.iss) that installs it where the updater keeps
+  # it current. Nothing to install first: rinch's Windows shell needs only
+  # the MSVC toolchain the runner carries. Check a change locally with
+  # `cargo xwin check --workspace --target x86_64-pc-windows-msvc` (it needs
+  # `llvm-lib` on the PATH).
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The same Google client as Linux's build, and the same guard.
+      - name: Build (release)
+        shell: bash
+        env:
+          POSTRINCH_GOOGLE_CLIENT: ${{ secrets.POSTRINCH_GOOGLE_CLIENT }}
+        run: |
+          if [ -z "$POSTRINCH_GOOGLE_CLIENT" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "POSTRINCH_GOOGLE_CLIENT is not set: gh secret set POSTRINCH_GOOGLE_CLIENT < the client's JSON" >&2
+            exit 1
+          fi
+          cargo build --release --locked -p postrinch -p postrinch-mcp -p postrinch-cli
+
+      - name: Check the tag names the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          . tools/windows/invoke.ps1
+          $built = (Invoke-Program target/release/postrinch.exe --version).Out.Split(" ")[1]
+          if ("v$built" -ne $env:GITHUB_REF_NAME) {
+            throw "the tag is $env:GITHUB_REF_NAME but the programs are ${built}: bump [workspace.package] version"
+          }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          tools/windows/package.ps1 -BinDir target/release -OutDir dist
+          . tools/windows/invoke.ps1
+          $version = (Invoke-Program target/release/postrinch.exe --version).Out.Split(" ")[1]
+          if (-not $version) { throw "postrinch.exe --version named no version" }
+          "version=$version" >> $env:GITHUB_ENV
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:version" "/DStage=$PWD\dist\installer-stage" "/DOutDir=$PWD\dist" tools\windows\postrinch.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # The runner is a real Windows: install from the Setup and look, then
+      # uninstall and look again; then install from the zip as `--install`
+      # does, which writes the marker itself.
+      - name: Check the installer and the zip
+        shell: pwsh
+        run: |
+          . tools/windows/invoke.ps1
+          $app = "$env:LOCALAPPDATA\Programs\Postrinch"
+          $programs = "postrinch.exe", "postrinch-mcp.exe", "postrinch-cli.exe"
+          function Check-Install($how) {
+            foreach ($f in $programs + "postrinch-install.json") {
+              if (-not (Test-Path "$app\$f")) { throw "$how did not put $f in $app" }
+            }
+            $marker = Get-Content "$app\postrinch-install.json" | ConvertFrom-Json
+            if ($marker.version -ne $env:version) { throw "$how wrote a marker saying $($marker.version), not $env:version" }
+            $said = (Invoke-Program "$app\postrinch.exe" --version).Out
+            if ($said -ne "postrinch $env:version") { throw "the installed window says '$said'" }
+          }
+          $setup = "dist/postrinch-$env:version-windows-x86_64-setup.exe"
+          Start-Process -Wait -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          Check-Install "the Setup"
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Postrinch.lnk")) { throw "no Start-menu entry" }
+          # The uninstaller hands over to a copy of itself and returns at
+          # once, so wait (up to a minute) for it to have done its work.
+          Start-Process -Wait -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          $deadline = (Get-Date).AddSeconds(60)
+          while ((Test-Path "$app\postrinch.exe") -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+          if (Test-Path "$app\postrinch.exe") { throw "the uninstaller left postrinch.exe" }
+          $unpacked = "$env:RUNNER_TEMP\postrinch-zip"
+          New-Item -ItemType Directory -Force -Path $unpacked | Out-Null
+          & "$env:SystemRoot\System32\tar.exe" -xf "dist/postrinch-$env:version-windows-x86_64.zip" -C $unpacked
+          if ($LASTEXITCODE -ne 0) { throw "the system's tar could not unpack the zip" }
+          $run = Invoke-Program "$unpacked\postrinch.exe" --install
+          Write-Host $run.Out
+          if ($run.Code -ne 0) { throw "postrinch.exe --install failed ($($run.Code))" }
+          Check-Install "postrinch.exe --install"
+          Write-Host "Setup: installed, marker $env:version, Start-menu entry, uninstalled cleanly; the zip: --install"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
+          if-no-files-found: error
+
   release:
-    needs: [build-linux]
+    needs: [build-linux, build-windows]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: linux-package
-          path: release
+          path: packages
+
+      - name: Gather the packages
+        run: |
+          mkdir -p release
+          find packages -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*-setup.exe' \) -exec cp {} release/ \;
+          ls -la release
 
       # Each package gets a detached Ed25519 signature beside it, which the
       # installed app verifies before it stages an update. No key, no
@@ -92,7 +196,7 @@ jobs:
           key="$(mktemp)"
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$SIGNING_KEY" > "$key"
-          for package in release/*.tar.gz; do
+          for package in release/*.tar.gz release/*.zip release/*-setup.exe; do
             openssl pkeyutl -sign -rawin -inkey "$key" -in "$package" -out "$package.sig"
           done
           ls -la release

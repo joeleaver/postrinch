@@ -94,8 +94,9 @@ fn stage(dir: &Path, version: &str, package: &[u8]) -> Result<(), String> {
     std::fs::create_dir_all(&stage).map_err(|e| format!("creating {}: {e}", stage.display()))?;
     let archive = stage.join(format!("package{}", package_suffix()));
     std::fs::write(&archive, package).map_err(|e| format!("saving the package: {e}"))?;
-    // The system's tar (Windows 10 and later ship one that reads zip too).
-    let unpacked = std::process::Command::new("tar")
+    let mut command = std::process::Command::new(tar());
+    crate::process::no_console(&mut command);
+    let unpacked = command
         .arg("-xf")
         .arg(&archive)
         .arg("-C")
@@ -113,6 +114,22 @@ fn stage(dir: &Path, version: &str, package: &[u8]) -> Result<(), String> {
     let ready = serde_json::json!({ "version": version }).to_string();
     std::fs::write(stage.join("ready.json"), ready)
         .map_err(|e| format!("marking the update ready: {e}"))
+}
+
+/// The system's own `tar`. On Windows (10 and later) that is bsdtar in
+/// System32, which reads zip; named by its full path, because a GNU tar
+/// earlier on the PATH (Git for Windows puts one there) reads no zip and
+/// takes `C:` in a path for a remote host.
+fn tar() -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        std::path::Path::new(&root).join("System32").join("tar.exe")
+    }
+    #[cfg(not(windows))]
+    {
+        "tar".into()
+    }
 }
 
 /// Does `signature` sign `package` with `public_key`?
@@ -273,6 +290,46 @@ mod tests {
         assert_eq!(staged_version(dir.path()), None);
         std::fs::write(stage.join(exe("postrinch-cli")), "").unwrap();
         assert_eq!(staged_version(dir.path()).as_deref(), Some("9.0.0"));
+    }
+
+    /// A package as the Release workflow makes this system's (a zip on
+    /// Windows, a tar.gz elsewhere), made here by the same `tar` that
+    /// unpacks it, is staged whole.
+    #[test]
+    fn a_package_is_unpacked_into_the_stage() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = dir.path().join("files");
+        std::fs::create_dir_all(&files).unwrap();
+        let names: Vec<String> = PROGRAMS.iter().map(|n| exe(n)).collect();
+        for name in &names {
+            std::fs::write(files.join(name), name.as_bytes()).unwrap();
+        }
+        let archive = dir
+            .path()
+            .join(format!("postrinch-9.0.0{}", package_suffix()));
+        let made = std::process::Command::new(tar())
+            .arg("-a")
+            .arg("-cf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&files)
+            .args(&names)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let install = dir.path().join("install");
+        stage(&install, "9.0.0", &std::fs::read(&archive).unwrap()).unwrap();
+        assert_eq!(staged_version(&install).as_deref(), Some("9.0.0"));
+        let mcp = install.join(STAGE).join(exe("postrinch-mcp"));
+        assert_eq!(std::fs::read_to_string(mcp).unwrap(), exe("postrinch-mcp"));
+    }
+
+    #[test]
+    fn a_package_without_the_programs_is_not_staged() {
+        let dir = tempfile::tempdir().unwrap();
+        let refused = stage(dir.path(), "9.0.0", b"not an archive").unwrap_err();
+        assert!(refused.contains("does not hold all three"), "{refused}");
+        assert!(!dir.path().join(STAGE).exists());
     }
 
     #[test]

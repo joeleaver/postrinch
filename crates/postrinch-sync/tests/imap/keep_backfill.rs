@@ -6,7 +6,8 @@
 //! The server offers no IDLE, so every pass comes from the test's wake or
 //! the poll interval.
 
-use std::time::Duration;
+use std::cell::Cell;
+use std::time::{Duration, Instant};
 
 use postrinch_mailtest::Extension;
 use postrinch_sync::{KeepOptions, Phase, Progress, SyncEvent, SyncReport};
@@ -157,6 +158,10 @@ async fn a_sync_as_long_as_the_poll_interval_leaves_backfill_a_whole_one() {
         interval: Duration::from_secs(2),
         ..KEEP
     };
+    // When the headers were let go (backfill begins after), and when a
+    // second pass was first seen to start, if one did.
+    let released = Cell::new(None);
+    let second = Cell::new(None);
     let log = keeping(&mail_sync(&f), options, async |events, _| {
         until_true("the headers are asked for", || {
             f.server
@@ -166,15 +171,46 @@ async fn a_sync_as_long_as_the_poll_interval_leaves_backfill_a_whole_one() {
         })
         .await;
         tokio::time::sleep(options.interval).await;
+        released.set(Some(Instant::now()));
         headers.let_go();
-        until_done(events, 1).await;
+        until_true("backfill finishes", || {
+            let kinds = kinds(events);
+            let started = kinds.iter().filter(|k| **k == "started").count();
+            if started >= 2 && second.get().is_none() {
+                second.set(Some(Instant::now()));
+            }
+            kinds.contains(&"done")
+        })
+        .await;
     })
     .await;
-    assert_eq!(kinds(&log)[..3], ["started", "synced", "done"]);
     let counts = bodies(&log);
-    assert_eq!(
-        counts,
-        [(0, OLD), (20, OLD), (40, OLD), (OLD, OLD)],
-        "every batch in one pass"
-    );
+    match (second.get(), released.get()) {
+        // Backfill took less than the interval, as it does on most
+        // machines: one pass, every batch in it.
+        (None, _) => {
+            assert_eq!(kinds(&log)[..3], ["started", "synced", "done"]);
+            assert_eq!(
+                counts,
+                [(0, OLD), (20, OLD), (40, OLD), (OLD, OLD)],
+                "every batch in one pass"
+            );
+        }
+        // A machine slow enough that backfill itself outlasts the
+        // interval (Windows' CI runner): it may give way, but only once
+        // the interval has gone by since it began, not since the sync
+        // did, which would be straight after its first batch.
+        (Some(second), Some(released)) => {
+            assert!(
+                second - released >= options.interval,
+                "a pass {:?} after backfill began: the interval counted from the sync",
+                second - released
+            );
+            assert_eq!(kinds(&log)[..4], ["started", "synced", "started", "synced"]);
+            assert_eq!(counts[..2], [(0, OLD), (20, OLD)], "{counts:?}");
+            assert_eq!(counts.last(), Some(&(OLD, OLD)), "{counts:?}");
+        }
+        (Some(_), None) => panic!("a second pass before the headers were let go"),
+    }
+    assert!(f.store.undownloaded(&f.me).unwrap().is_empty());
 }

@@ -171,7 +171,15 @@ fn ask_agent(ask: &AgentAsk) {
     };
     let tools = format!("mcp__{entry}");
     let dir = std::env::temp_dir();
-    let child = Command::new("claude")
+    let mut command = Command::new("claude");
+    // The window is a GUI program on Windows: without this, Claude Code
+    // would open a console window of its own for the whole run.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    }
+    let child = command
         .args(["-p", &prompt(ask, &entry), "--allowedTools", &tools])
         .current_dir(&dir)
         .stdin(Stdio::null())

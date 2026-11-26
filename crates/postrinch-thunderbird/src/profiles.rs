@@ -114,25 +114,36 @@ pub fn profiles_in(root: &Path, text: &str) -> Vec<ProfileEntry> {
 mod tests {
     use super::*;
 
+    // Absolute paths as this system writes them: a path that is not one
+    // is passed over, as Thunderbird passes it over.
+    #[cfg(unix)]
     const ROOT: &str = "/home/ada/.thunderbird";
+    #[cfg(unix)]
+    const ELSEWHERE: &str = "/mnt/work/tb";
+    #[cfg(windows)]
+    const ROOT: &str = r"C:\Users\ada\AppData\Roaming\Thunderbird";
+    #[cfg(windows)]
+    const ELSEWHERE: &str = r"D:\work\tb";
 
     #[test]
     fn relative_and_absolute_paths() {
         let profiles = profiles_in(
             Path::new(ROOT),
-            "[General]\nStartWithLastProfile=1\n\n[Profile1]\nName=Work\nIsRelative=0\nPath=/mnt/work/tb\n\n[Profile0]\nName=default\nIsRelative=1\nPath=abcd.default\nDefault=1\n",
+            &format!(
+                "[General]\nStartWithLastProfile=1\n\n[Profile1]\nName=Work\nIsRelative=0\nPath={ELSEWHERE}\n\n[Profile0]\nName=default\nIsRelative=1\nPath=abcd.default\nDefault=1\n"
+            ),
         );
         assert_eq!(
             profiles,
             vec![
                 ProfileEntry {
                     name: "Work".into(),
-                    dir: "/mnt/work/tb".into(),
+                    dir: ELSEWHERE.into(),
                     default: false,
                 },
                 ProfileEntry {
                     name: "default".into(),
-                    dir: "/home/ada/.thunderbird/abcd.default".into(),
+                    dir: Path::new(ROOT).join("abcd.default"),
                     default: true,
                 },
             ]
@@ -157,7 +168,24 @@ mod tests {
     fn an_install_default_may_be_absolute() {
         let profiles = profiles_in(
             Path::new(ROOT),
-            "[InstallABC]\nDefault=/mnt/tb/profile\n\n[Profile0]\nName=elsewhere\nIsRelative=0\nPath=/mnt/tb/profile\n",
+            &format!(
+                "[InstallABC]\nDefault={ELSEWHERE}\n\n[Profile0]\nName=elsewhere\nIsRelative=0\nPath={ELSEWHERE}\n"
+            ),
+        );
+        assert!(profiles[0].default);
+    }
+
+    /// Thunderbird on Windows writes a relative path with forward
+    /// slashes, in a profile's `Path` and an install's `Default` alike.
+    #[test]
+    fn a_relative_path_with_slashes_is_under_the_root() {
+        let profiles = profiles_in(
+            Path::new(ROOT),
+            "[Install308046B0AF4A39CB]\nDefault=Profiles/w1.default-release\n\n[Profile0]\nName=default-release\nIsRelative=1\nPath=Profiles/w1.default-release\n",
+        );
+        assert_eq!(
+            profiles[0].dir,
+            Path::new(ROOT).join("Profiles").join("w1.default-release")
         );
         assert!(profiles[0].default);
     }
