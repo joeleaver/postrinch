@@ -8,7 +8,9 @@
 //! are fetched, and those that hold fill the page. A batch the check
 //! leaves out wholly is followed by the next, older one, so a page of 50
 //! is 50 that hold, not the 50 newest the server found less those that
-//! do not. The walk takes at most [`LOOKED_PER_SLOT`] UIDs for each slot.
+//! do not. The walk looks through at most [`LOOKED_PER_SLOT`] found
+//! messages for each slot: those walked into a batch, newest first across
+//! every folder, not the UIDs taken from each folder to be in hand.
 //!
 //! A message can be found in more than one folder (a copy in the inbox
 //! and one in an archive), and a page slot is a message's, not a copy's.
@@ -56,8 +58,9 @@ struct Walking<'a> {
 pub(super) struct Page {
     /// The messages that hold, newest first, each once.
     pub ids: Vec<ProviderMessageId>,
-    /// When the page is short because the walk reached its bound: the
-    /// bound.
+    /// When the page is short because the walk reached its bound with
+    /// found messages not walked yet: the bound, how many of the newest
+    /// found were walked and checked.
     pub looked_through: Option<usize>,
 }
 
@@ -80,23 +83,37 @@ impl ImapSync {
         // asking which messages the unknown ones are, and when they
         // arrived: within a folder, UIDs say which is newer.
         let identify = found > max && hits.iter().filter(|h| !h.uids.is_empty()).count() > 1;
-        let mut walk = Walk::new(hits, most);
+        let mut walk = Walk::new(hits);
         let w = Walking {
             account,
             hits,
             identify,
             turn,
         };
-        // Messages walked past: a slot is a message's, not a copy's.
-        let mut walked: HashSet<ProviderMessageId> = HashSet::new();
-        // Messages checked, so a copy stored as one already checked is not
-        // checked again.
+        // Messages checked, so a copy of one already checked (in another
+        // folder, or stored as one) is walked past. A message is marked
+        // only once a copy of it is stored and checked, so when its
+        // folder is busy, a copy in another folder can stand for it.
         let mut checked: HashSet<ProviderMessageId> = HashSet::new();
+        // How many found messages were walked into a batch: the bound is
+        // on these, never on UIDs only taken to be in hand.
+        let mut looked = 0;
+        // Whether the bound stopped the walk.
+        let mut bounded = false;
         let mut ids: Vec<ProviderMessageId> = Vec::new();
-        while ids.len() < max {
-            let mut batch = Vec::new();
+        while ids.len() < max && !bounded {
+            let mut batch: Vec<Candidate> = Vec::new();
+            // Messages in this batch whose copy the store has, so sure to
+            // be stored: another copy of one is walked past.
+            let mut sure: HashSet<ProviderMessageId> = HashSet::new();
             while batch.len() < max - ids.len() {
-                for (i, uids) in walk.take_next(max) {
+                if looked == most {
+                    bounded = true;
+                    break;
+                }
+                // Take no more than the batch or the bound could walk.
+                let step = (max - ids.len() - batch.len()).min(most - looked);
+                for (i, uids) in walk.take_next(step) {
                     let taken = self.taken(conn, &w, i, uids).await?;
                     walk.add(i, taken);
                 }
@@ -104,10 +121,14 @@ impl ImapSync {
                     break;
                 };
                 if let Some(message) = &c.message
-                    && !walked.insert(message.clone())
+                    && (checked.contains(message) || sure.contains(message))
                 {
                     continue;
                 }
+                if let Some(here) = &c.here {
+                    sure.insert(here.clone());
+                }
+                looked += 1;
                 batch.push(c);
             }
             if batch.is_empty() {
@@ -124,7 +145,7 @@ impl ImapSync {
             let hold = self.blocking(move |s| check.check(s, &asked)).await?;
             ids.extend(stored.into_iter().filter(|id| hold.contains(id)));
         }
-        let short = ids.len() < max && walk.cut();
+        let short = ids.len() < max && bounded && walk.has_more();
         Ok(Page {
             ids,
             looked_through: short.then_some(most),

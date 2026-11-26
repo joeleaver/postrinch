@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 
+use postrinch_mailtest::ImapFault;
 use postrinch_model::ProviderMessageId;
 use postrinch_sync::SyncError;
 use postrinch_sync::imap::Holds;
@@ -97,6 +98,62 @@ async fn the_walk_stops_at_its_bound_and_says_so() {
         .unwrap();
     assert_eq!(found.ids, [f.id("oldest@x")]);
     assert_eq!(found.looked_through, None);
+}
+
+#[tokio::test]
+async fn the_bound_is_on_what_is_walked_so_late_folders_compete() {
+    // A page of 2 looks through at most 20 found. With 25 folders each
+    // finding one, taking every folder's next to be in hand must not eat
+    // that bound: the newest two, in the last folders, are the page.
+    let f = fixture().await;
+    let names: Vec<String> = (0..25).map(|n| format!("F{n:02}")).collect();
+    for name in &names {
+        f.user.create_folder(name).unwrap();
+    }
+    f.sync().await;
+    for (day, name) in (1..).zip(&names) {
+        let m = mail(Some(&format!("{name}@x")), "Rota", "").internal_date(on(day));
+        f.user.append(name, m).unwrap();
+    }
+    let all = Holds::new(|_, ids| Ok(ids.iter().cloned().collect()));
+    let found = f.search_checked(&one(text("rota")), &all, 2).await.unwrap();
+    assert_eq!(found.ids, [f.id("F24@x"), f.id("F23@x")]);
+    assert_eq!(found.looked_through, None);
+    // With none holding, the bound stops the walk at the 20 newest, and
+    // says so: the five oldest were not walked.
+    let none = Holds::new(|_, _| Ok(HashSet::new()));
+    let found = f
+        .search_checked(&one(text("rota")), &none, 2)
+        .await
+        .unwrap();
+    assert_eq!(found.looked_through, Some(20));
+    assert!(f.message("F05@x").is_some(), "within the bound");
+    assert!(f.message("F04@x").is_none(), "past the bound, not fetched");
+}
+
+#[tokio::test]
+async fn a_copy_in_a_busy_folder_gives_way_to_another() {
+    let f = fixture().await;
+    f.user.create_folder("Work").unwrap();
+    f.sync().await;
+    // One message, its copy in Work the newer: walked first, but Work is
+    // busy when its headers are fetched.
+    let at = |day| mail(Some("both@x"), "Rota", "").internal_date(on(day));
+    f.user.append("INBOX", at(3)).unwrap();
+    f.user.append("Work", at(5)).unwrap();
+    f.server.fail_next_matching(
+        "UID FETCH",
+        "BODY.PEEK[HEADER]",
+        1,
+        ImapFault::No("[INUSE] Mailbox is locked".into()),
+    );
+    let all = Holds::new(|_, ids| Ok(ids.iter().cloned().collect()));
+    let found = f.search_checked(&one(text("rota")), &all, 1).await.unwrap();
+    assert_eq!(
+        found.ids,
+        [f.id("both@x")],
+        "the inbox's copy stands for it"
+    );
 }
 
 #[tokio::test]

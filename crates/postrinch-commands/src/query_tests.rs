@@ -38,15 +38,18 @@ fn quoted_values_and_gmail_text() {
 }
 
 #[test]
-fn gmails_superset_leaves_out_nothing_but_labels() {
+fn gmails_superset_leaves_nothing_out() {
     let q =
         parse(r#"invoice -from:billing -to:"Jo Ann" -cc:x -bcc:y -draft -in:inbox has:attachment"#);
     assert_eq!(
         q.gmail,
         r#"invoice -from:billing -to:"Jo Ann" -cc:x -bcc:y -draft -in:inbox has:attachment"#
     );
-    assert_eq!(q.gmail_superset, "invoice -in:inbox has:attachment");
+    assert_eq!(q.gmail_superset, "invoice has:attachment");
     assert_eq!(parse("-from:jose last:me").gmail_superset, "");
+    // Gmail folds case, `/`, `-` and spaces in label names.
+    let q = parse("rota -label:a-b -category:social in:inbox");
+    assert_eq!(q.gmail_superset, "rota in:inbox");
 }
 
 #[test]

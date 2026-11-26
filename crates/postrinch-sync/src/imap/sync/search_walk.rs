@@ -1,6 +1,6 @@
 //! The order a server search's page walks what was found in
 //! ([`super::search_page`]): newest first across the folders searched,
-//! taking UIDs from each folder's top a batch at a time, within a bound.
+//! taking UIDs from each folder's top a batch at a time.
 //!
 //! Within a folder, UIDs rise as mail arrives, so a folder's highest UIDs
 //! not yet walked are its newest; within each batch taken, when every
@@ -8,7 +8,10 @@
 //! but gets a new UID). Across folders, the walk takes the newest of each
 //! folder's next (by when it arrived, `INTERNALDATE`, or the store's date
 //! of a copy it has): a merge, which needs only each folder's next few in
-//! hand, never all it found.
+//! hand, never all it found. Every folder with UIDs left has some in hand
+//! before the newest is chosen, however many folders there are; how far
+//! the walk goes is the page's to bound, by what it walks
+//! ([`Walk::next`]), not by what is taken to be in hand.
 
 use std::collections::VecDeque;
 
@@ -39,38 +42,27 @@ pub(super) struct Walk {
     left: Vec<Vec<u32>>,
     /// Per folder, the candidates taken and not walked past, newest first.
     ready: Vec<VecDeque<Candidate>>,
-    /// How many more UIDs may be taken.
-    budget: usize,
-    /// Whether UIDs were left untaken for want of budget.
-    cut: bool,
 }
 
 impl Walk {
-    /// A walk of `hits` that takes at most `most` UIDs in all.
-    pub fn new(hits: &[Hits], most: usize) -> Self {
+    /// A walk of `hits`.
+    pub fn new(hits: &[Hits]) -> Self {
         Self {
             left: hits.iter().map(|h| h.uids.clone()).collect(),
             ready: hits.iter().map(|_| VecDeque::new()).collect(),
-            budget: most,
-            cut: false,
         }
     }
 
-    /// The UIDs to take next, newest first, up to `step` from each folder
-    /// with none ready and some left, while the budget lasts: what must
-    /// be in hand before [`Walk::next`] can say which is newest.
+    /// The UIDs to take next, newest first, up to `step` (at least one)
+    /// from each folder with none ready and some left: what must be in
+    /// hand before [`Walk::next`] can say which is newest.
     pub fn take_next(&mut self, step: usize) -> Vec<(usize, Vec<u32>)> {
         let mut out = Vec::new();
         for (i, left) in self.left.iter_mut().enumerate() {
             if !self.ready[i].is_empty() || left.is_empty() {
                 continue;
             }
-            if self.budget == 0 {
-                self.cut = true;
-                continue;
-            }
-            let n = step.max(1).min(left.len()).min(self.budget);
-            self.budget -= n;
+            let n = step.max(1).min(left.len());
             let mut taken = left.split_off(left.len() - n);
             taken.reverse();
             out.push((i, taken));
@@ -102,9 +94,9 @@ impl Walk {
         self.ready[folder].pop_front()
     }
 
-    /// Whether UIDs found were left unwalked for want of budget.
-    pub fn cut(&self) -> bool {
-        self.cut
+    /// Whether some UID found is not walked yet, in hand or not.
+    pub fn has_more(&self) -> bool {
+        self.left.iter().any(|l| !l.is_empty()) || self.ready.iter().any(|r| !r.is_empty())
     }
 }
 
@@ -156,19 +148,19 @@ mod tests {
     #[test]
     fn the_walk_is_newest_first_across_folders() {
         let found = hits(&[&[1, 2, 3], &[7, 8]]);
-        let mut walk = Walk::new(&found, 100);
+        let mut walk = Walk::new(&found);
         // Folder 0's UID n arrived at day n·10, folder 1's at n·3.
         let order = walk_all(&mut walk, 1, |i, u| {
             i64::from(u) * if i == 0 { 10 } else { 3 }
         });
         assert_eq!(order, [(0, 3), (1, 8), (1, 7), (0, 2), (0, 1)]);
-        assert!(!walk.cut());
+        assert!(!walk.has_more());
     }
 
     #[test]
     fn a_folder_is_taken_from_only_when_its_ready_run_out() {
         let found = hits(&[&[1, 2, 3, 4, 5], &[9]]);
-        let mut walk = Walk::new(&found, 100);
+        let mut walk = Walk::new(&found);
         assert_eq!(walk.take_next(2), [(0, vec![5, 4]), (1, vec![9])]);
         walk.add(0, vec![at(0, 5, 50), at(0, 4, 40)]);
         walk.add(1, vec![at(1, 9, 10)]);
@@ -179,27 +171,41 @@ mod tests {
     }
 
     #[test]
-    fn the_budget_bounds_the_walk_and_says_so() {
-        let found = hits(&[&[1, 2, 3, 4], &[5, 6]]);
-        let mut walk = Walk::new(&found, 3);
-        let order = walk_all(&mut walk, 2, |_, u| i64::from(u));
-        assert_eq!(order.len(), 3);
-        assert!(walk.cut());
-        // A walk that takes everything was not cut.
-        let mut whole = Walk::new(&found, 6);
-        assert_eq!(walk_all(&mut whole, 2, |_, u| i64::from(u)).len(), 6);
-        assert!(!whole.cut());
+    fn every_folder_has_some_in_hand_however_many_there_are() {
+        // More folders than any bound a page would set on what it walks:
+        // the newest, in the last folder, is still walked first.
+        let mut uids: Vec<Vec<u32>> = (0..30).map(|_| (1..=60).collect()).collect();
+        uids[29] = vec![1, 2];
+        let slices: Vec<&[u32]> = uids.iter().map(Vec::as_slice).collect();
+        let found = hits(&slices);
+        let mut walk = Walk::new(&found);
+        let taken = walk.take_next(50);
+        assert_eq!(taken.len(), 30, "one take from every folder");
+        assert_eq!(taken[29], (29, vec![2, 1]));
+        for (i, uids) in taken {
+            let when = |u: u32| {
+                if i == 29 {
+                    1000 + i64::from(u)
+                } else {
+                    i64::from(u)
+                }
+            };
+            walk.add(i, uids.into_iter().map(|u| at(i, u, when(u))).collect());
+        }
+        assert_eq!(walk.next().map(|c| (c.folder, c.uid)), Some((29, 2)));
+        assert_eq!(walk.next().map(|c| (c.folder, c.uid)), Some((29, 1)));
+        assert!(walk.has_more());
     }
 
     #[test]
     fn a_batch_is_ordered_by_arrival_when_each_ones_is_known() {
         let found = hits(&[&[1, 2]]);
-        let mut walk = Walk::new(&found, 10);
+        let mut walk = Walk::new(&found);
         walk.take_next(2);
         // UID 1 arrived later (a message moved in keeps its date).
         walk.add(0, vec![at(0, 2, 5), at(0, 1, 9)]);
         assert_eq!(walk.next().map(|c| c.uid), Some(1));
-        let mut walk = Walk::new(&found, 10);
+        let mut walk = Walk::new(&found);
         walk.take_next(2);
         let mut undated = at(0, 2, 0);
         undated.arrived = None;
@@ -210,7 +216,7 @@ mod tests {
     #[test]
     fn copies_of_unknown_arrival_come_last() {
         let found = hits(&[&[1], &[2]]);
-        let mut walk = Walk::new(&found, 10);
+        let mut walk = Walk::new(&found);
         walk.take_next(1);
         let mut undated = at(1, 2, 0);
         undated.arrived = None;

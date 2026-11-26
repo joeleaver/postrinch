@@ -51,14 +51,15 @@ pub struct Query {
     /// The query to give Gmail: what was typed, less Postrinch's own
     /// operators.
     pub gmail: String,
-    /// [`Query::gmail`] less the words and people it leaves out (`-word`,
-    /// `-from:`, `-to:`, `-cc:`, `-bcc:`): what an IMAP server speaking
-    /// Gmail's language (`X-GM-RAW`) is asked. It is asked for at least
-    /// what the query matches, as every IMAP server is (imap_search.rs),
-    /// and Gmail matches its own way (it folds accents, so `-from:jose`
-    /// would leave out "José", whom search here keeps); the check made on
-    /// what it finds leaves them out as search here does. Labels left out
-    /// stay: a label is matched by name, as here.
+    /// [`Query::gmail`] less everything it leaves out (`-word`, `-from:`,
+    /// `-to:`, `-cc:`, `-bcc:`, `-label:`, `-in:`, `-category:`): what an
+    /// IMAP server speaking Gmail's language (`X-GM-RAW`) is asked. It is
+    /// asked for at least what the query matches, as every IMAP server is
+    /// (imap_search.rs), and Gmail matches its own way: it folds accents,
+    /// so `-from:jose` would leave out "José", whom search here keeps, and
+    /// it folds case, `/`, `-` and spaces in label names, so `-label:a-b`
+    /// would leave out "a b" too. The check made on what it finds leaves
+    /// them out as search here does.
     pub gmail_superset: String,
 }
 
@@ -103,8 +104,7 @@ impl Query {
             };
             if !matches!(operator, "account" | "last") {
                 gmail.push(token.clone());
-                let person = matches!(operator, "from" | "to" | "cc" | "bcc");
-                if !(negated && person) {
+                if !negated {
                     superset.push(token.clone());
                 }
             }

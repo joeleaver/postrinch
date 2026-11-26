@@ -246,10 +246,13 @@ impl State {
     }
 }
 
-/// What a search that stopped at its bound says: the server found more
-/// than were checked.
+/// What a search that stopped at its bound says: the walk looked through
+/// the newest `most` messages the server found, across its folders, and
+/// stopped with older ones it found not looked at, any of which may match.
 fn looked_through(most: usize) -> String {
-    format!("only the newest {most} messages it found were checked")
+    format!(
+        "only the newest {most} of the messages it found were looked through; older ones may match too"
+    )
 }
 
 /// The status when no server searched: one server's trouble as it is,
@@ -306,7 +309,7 @@ mod tests {
     fn a_search_stopped_at_its_bound_says_so() {
         assert_eq!(
             looked_through(500),
-            "only the newest 500 messages it found were checked"
+            "only the newest 500 of the messages it found were looked through; older ones may match too"
         );
     }
 

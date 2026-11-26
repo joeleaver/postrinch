@@ -10,8 +10,8 @@
 //! terms the headers here can answer but IMAP cannot ask (a second label,
 //! `last:`, anything left out: `-word`, `-from:`, `-to:`) are left to the
 //! check made on what is found ([`Commands::server_found_holds`]). The
-//! alternative in Gmail's language leaves the same words and people
-//! unasked (`Query::gmail_superset`). The one term neither can answer,
+//! alternative in Gmail's language leaves everything left out unasked,
+//! labels too (`Query::gmail_superset`). The one term neither can answer,
 //! `has:attachment`, is named in [`ImapAlternative::inexact`], so a server
 //! without Gmail's own language refuses the search rather than answer it
 //! wrongly.
