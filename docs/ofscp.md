@@ -88,9 +88,10 @@ Rust provider, on rhypedb, still being built. In both cases the spec decides beh
   - media upload and access (16);
   - finding remote groups on a new device (3);
   - live reactions and edits on your own private messages (6);
-  - notifications for mentions on other providers, so they reach the person when Postrinch
-    isn't connected (8);
   - the echo of `clientMessageId` (28).
+- **Where each question stands** is at the end of the questions file, "Oracle answers".
+  Notifications for mentions in remote channels are deferred past v0.1 by the spec (§10.1,
+  §13), so Postrinch marks them locally only.
 - **Interop:** Forumall to start. re-ofscp, Joe's own provider, as it grows. And the spec
   itself, through shared vectors.
 
