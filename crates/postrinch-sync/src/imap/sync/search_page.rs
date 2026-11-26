@@ -145,7 +145,7 @@ impl ImapSync {
             let hold = self.blocking(move |s| check.check(s, &asked)).await?;
             ids.extend(stored.into_iter().filter(|id| hold.contains(id)));
         }
-        let short = ids.len() < max && bounded && walk.has_more();
+        let short = ids.len() < max && bounded && walk.has_more(&checked);
         Ok(Page {
             ids,
             looked_through: short.then_some(most),

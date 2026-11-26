@@ -13,7 +13,7 @@
 //! the walk goes is the page's to bound, by what it walks
 //! ([`Walk::next`]), not by what is taken to be in hand.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use postrinch_model::{ProviderMessageId, Timestamp};
 
@@ -94,9 +94,16 @@ impl Walk {
         self.ready[folder].pop_front()
     }
 
-    /// Whether some UID found is not walked yet, in hand or not.
-    pub fn has_more(&self) -> bool {
-        self.left.iter().any(|l| !l.is_empty()) || self.ready.iter().any(|r| !r.is_empty())
+    /// Whether some UID found is not walked yet and may be a message not
+    /// `checked`: one not taken yet (which message it is is not known), or
+    /// one in hand that is not a copy of a message checked.
+    pub fn has_more(&self, checked: &HashSet<ProviderMessageId>) -> bool {
+        self.left.iter().any(|l| !l.is_empty())
+            || self.ready.iter().flatten().any(|c| {
+                c.message
+                    .as_ref()
+                    .is_none_or(|message| !checked.contains(message))
+            })
     }
 }
 
@@ -154,7 +161,7 @@ mod tests {
             i64::from(u) * if i == 0 { 10 } else { 3 }
         });
         assert_eq!(order, [(0, 3), (1, 8), (1, 7), (0, 2), (0, 1)]);
-        assert!(!walk.has_more());
+        assert!(!walk.has_more(&HashSet::new()));
     }
 
     #[test]
@@ -194,7 +201,33 @@ mod tests {
         }
         assert_eq!(walk.next().map(|c| (c.folder, c.uid)), Some((29, 2)));
         assert_eq!(walk.next().map(|c| (c.folder, c.uid)), Some((29, 1)));
-        assert!(walk.has_more());
+        assert!(walk.has_more(&HashSet::new()));
+    }
+
+    #[test]
+    fn copies_in_hand_of_messages_checked_are_not_more() {
+        let found = hits(&[&[1], &[1]]);
+        let mut walk = Walk::new(&found);
+        walk.take_next(1);
+        let m = ProviderMessageId("m".into());
+        let copy = |folder| Candidate {
+            message: Some(m.clone()),
+            ..at(folder, 1, 5)
+        };
+        walk.add(0, vec![copy(0)]);
+        walk.add(1, vec![copy(1)]);
+        walk.next();
+        let checked = HashSet::from([m.clone()]);
+        // Folder 1's copy is the message checked: nothing more to find.
+        assert!(!walk.has_more(&checked));
+        // Unchecked, it may still be found.
+        assert!(walk.has_more(&HashSet::new()));
+        // A copy whose message is unknown may be a message of its own.
+        let mut walk = Walk::new(&found);
+        walk.take_next(1);
+        walk.add(0, vec![at(0, 1, 5)]);
+        walk.add(1, vec![copy(1)]);
+        assert!(walk.has_more(&checked));
     }
 
     #[test]
