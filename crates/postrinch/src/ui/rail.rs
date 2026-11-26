@@ -4,6 +4,9 @@
 //! its foot. It replaces the Mail | Calendar switch that stood atop the
 //! sidebar. Social joins it with its window (docs/ofscp.md, PR 15).
 
+use std::collections::HashMap;
+
+use postrinch_commands::ViewTally;
 use rinch::prelude::*;
 
 use crate::state::{State, View};
@@ -11,8 +14,8 @@ use crate::state::{State, View};
 /// How wide the rail is, in px: the panes beside it start here.
 pub const WIDTH: f32 = 68.0;
 
-/// The modes, top to bottom, then Settings at the foot.
-const MODES: [View; 2] = [View::Mail, View::Calendar];
+/// The built-in view whose unread threads Mail's badge counts.
+const INBOX: &str = "inbox";
 
 /// A mode's name, under its icon.
 fn mode_name(mode: View) -> &'static str {
@@ -33,13 +36,12 @@ fn badge_text(unread: usize) -> Option<String> {
     }
 }
 
-/// The unread threads a mode has: Mail's are the inbox's. Calendar has
-/// none to count, and Settings is not a mode with mail.
-fn unread(state: State, mode: View) -> usize {
+/// The unread threads a mode has, from the views' counts: Mail's are the
+/// inbox's (none until the inbox is counted). Calendar has none to
+/// count, and Settings is not a mode with mail.
+fn unread(counts: &HashMap<String, ViewTally>, mode: View) -> usize {
     match mode {
-        View::Mail => state
-            .view_counts
-            .with(|c| c.get("inbox").map_or(0, |t| t.unread)),
+        View::Mail => counts.get(INBOX).map_or(0, |t| t.unread),
         View::Calendar | View::Settings => 0,
     }
 }
@@ -56,9 +58,8 @@ fn spoken(mode: View, unread: usize) -> String {
 pub fn rail(state: State) -> NodeHandle {
     rsx! {
         nav { class: "rail", aria-label: "Modes", style: format!("width: {WIDTH}px"),
-            for mode in MODES {
-                div { key: format!("{mode:?}"), {mode_button(__scope, state, mode)} }
-            }
+            {mode_button(__scope, state, View::Mail)}
+            {mode_button(__scope, state, View::Calendar)}
             div { class: "rail-gap" }
             {mode_button(__scope, state, View::Settings)}
         }
@@ -67,7 +68,7 @@ pub fn rail(state: State) -> NodeHandle {
 
 #[component]
 fn mode_button(state: State, mode: View) -> NodeHandle {
-    let count = Memo::new(move || unread(state, mode));
+    let count = Memo::new(move || state.view_counts.with(|c| unread(c, mode)));
     rsx! {
         button {
             class: {move || if state.view.get() == mode { "rail-mode on" } else { "rail-mode" }},
@@ -141,8 +142,8 @@ pub const CSS: &str = r#"
 }
 .rail-badge {
     position: absolute; top: 2px; right: 6px;
-    padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--surface);
-    font-size: 10px; font-weight: 600; line-height: 16px;
+    padding: 0 6px; border-radius: 9px; background: var(--accent); color: var(--surface);
+    font-size: 11px; font-weight: 600; line-height: 17px;
 }
 "#;
 
@@ -150,11 +151,32 @@ pub const CSS: &str = r#"
 mod tests {
     use super::*;
 
+    fn tally(key: &str, all: usize, unread: usize) -> (String, ViewTally) {
+        let key = key.to_owned();
+        (key.clone(), ViewTally { key, all, unread })
+    }
+
     #[test]
-    fn the_rail_holds_mail_then_calendar_with_settings_at_its_foot() {
-        let names: Vec<_> = MODES.iter().map(|&m| mode_name(m)).collect();
-        assert_eq!(names, ["Mail", "Calendar"]);
+    fn each_mode_is_named_under_its_icon() {
+        assert_eq!(mode_name(View::Mail), "Mail");
+        assert_eq!(mode_name(View::Calendar), "Calendar");
         assert_eq!(mode_name(View::Settings), "Settings");
+    }
+
+    #[test]
+    fn mail_counts_the_inboxs_unread_threads_and_nothing_else() {
+        let counts: HashMap<_, _> =
+            [tally("inbox", 40, 7), tally("everything-else", 90, 30)].into();
+        assert_eq!(unread(&counts, View::Mail), 7);
+        assert_eq!(unread(&counts, View::Calendar), 0);
+        assert_eq!(unread(&counts, View::Settings), 0);
+    }
+
+    #[test]
+    fn mail_has_no_badge_until_the_inbox_is_counted() {
+        let counts: HashMap<_, _> = [tally("sent", 12, 3)].into();
+        assert_eq!(unread(&counts, View::Mail), 0);
+        assert_eq!(unread(&HashMap::new(), View::Mail), 0);
     }
 
     #[test]

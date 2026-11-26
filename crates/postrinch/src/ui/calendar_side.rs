@@ -1,6 +1,7 @@
-//! The calendar's sidebar, after the calendar mockup: a small month (a click shows that day's stretch)
-//! and each account's calendars, each with a tick to show or hide it, its
-//! colour, and its name (a click opens it in the right pane).
+//! The calendar's sidebar, after the calendar mockup: a small month (a
+//! click shows that day's stretch) and each account's calendars, each with
+//! a tick to show or hide it, its colour, and its name (a click opens it
+//! in the right pane).
 
 use jiff::civil::Date;
 use postrinch_model::{CalendarInfo, EmailAddress};
