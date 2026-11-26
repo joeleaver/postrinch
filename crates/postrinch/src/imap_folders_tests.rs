@@ -1,7 +1,7 @@
 //! The Folders section's list following the store: read when its page
-//! opens, and again when a pass of its account ends while it is open, over a store synced from
-//! the fake IMAP server of `postrinch-mailtest`. Nothing touches the
-//! keychain or a real server.
+//! opens, and again when a pass of its account ends while it is open,
+//! over a store synced from the fake IMAP server of `postrinch-mailtest`.
+//! Nothing touches the keychain or a real server.
 
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
