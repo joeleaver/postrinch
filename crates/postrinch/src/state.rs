@@ -133,6 +133,8 @@ pub struct State {
     /// Whether the order menu over the list is open; the window's own keys
     /// leave its arrows, Enter and Escape to it (keys.rs).
     pub ordering: Signal<bool>,
+    /// Whether the status line's detail is open.
+    pub status_open: Signal<bool>,
     /// Actions shown but not yet in every list loaded (see changes.rs).
     pub pending: Signal<Vec<Change>>,
     /// Ticks when an opened conversation may be due to be marked read.
@@ -245,6 +247,7 @@ impl State {
             label_choices: Signal::new(Vec::new()),
             labelling: Signal::new(false),
             ordering: Signal::new(false),
+            status_open: Signal::new(false),
             pending: Signal::new(Vec::new()),
             read_due: Signal::new(0),
             sidebar_width: Signal::new(settings.sidebar_width.unwrap_or(SIDEBAR_WIDTH)),

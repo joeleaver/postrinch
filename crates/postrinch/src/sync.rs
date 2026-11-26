@@ -11,7 +11,7 @@ use tokio::sync::Notify;
 
 pub use crate::sync_start::{SyncHandle, start};
 
-/// One account's sync, as the sidebar shows it.
+/// One account's sync, as the status line shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountSync {
     pub account: EmailAddress,
@@ -19,7 +19,29 @@ pub struct AccountSync {
     pub line: String,
     /// `done` of `total`, while downloading.
     pub progress: Option<(usize, usize)>,
-    pub trouble: bool,
+    pub how: SyncHow,
+}
+
+/// What the status line says of an account that has to sign in again.
+pub const NEEDS_SIGN_IN: &str = "Needs to sign in";
+
+/// Where an account's sync stands, for the status line's summary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncHow {
+    /// Checking, fetching or downloading.
+    Working,
+    /// Its last pass ended well.
+    Idle,
+    /// It cannot sync until the person signs it in again.
+    NeedsSignIn,
+    /// Anything else that went wrong; it is tried again on its own.
+    Trouble,
+}
+
+impl SyncHow {
+    pub fn trouble(self) -> bool {
+        matches!(self, SyncHow::NeedsSignIn | SyncHow::Trouble)
+    }
 }
 
 /// The last of the accounts' passes to end, numbered so that the same
@@ -39,7 +61,7 @@ pub fn pass_ended(ended: Signal<Option<PassEnd>>, account: EmailAddress) {
     });
 }
 
-/// Turn a sync event into the sidebar's line for the account, from the
+/// Turn a sync event into the status line's word on the account, from the
 /// sync thread. `ended` is told of each pass that ended: once its sync
 /// part is done ([`SyncEvent::Synced`], before the hours a first
 /// download can take), or when it stopped short.
@@ -57,12 +79,12 @@ pub(crate) fn report(
     {
         pass_ended(ended, account.clone());
     }
-    let (account, line, progress, trouble, changed) = match event {
+    let (account, line, progress, how, changed) = match event {
         SyncEvent::Started { account } => (
             account,
             "Checking for new mail".to_owned(),
             None,
-            false,
+            SyncHow::Working,
             false,
         ),
         SyncEvent::Progress { account, progress } => {
@@ -70,7 +92,7 @@ pub(crate) fn report(
             // which for a new account's first sync is hours away.
             let changed = adds_mail(progress) && refresh_due();
             let (line, progress) = describe(progress);
-            (account, line, progress, false, changed)
+            (account, line, progress, SyncHow::Working, changed)
         }
         // A pass that found nothing new changes nothing the window shows.
         SyncEvent::Synced { account, report } => {
@@ -80,7 +102,7 @@ pub(crate) fn report(
                 account,
                 "New mail up to date".to_owned(),
                 None,
-                false,
+                SyncHow::Idle,
                 changed,
             )
         }
@@ -91,7 +113,7 @@ pub(crate) fn report(
             account,
             "Up to date".to_owned(),
             None,
-            false,
+            SyncHow::Idle,
             downloaded > 0,
         ),
         SyncEvent::Failed {
@@ -104,11 +126,15 @@ pub(crate) fn report(
                 "Could not sync; trying again in {} s",
                 retry_in.as_secs().max(1)
             );
-            (account, line, None, true, false)
+            (account, line, None, SyncHow::Trouble, false)
         }
-        SyncEvent::NeedsSignIn { account } => {
-            (account, "Needs to sign in".to_owned(), None, true, true)
-        }
+        SyncEvent::NeedsSignIn { account } => (
+            account,
+            NEEDS_SIGN_IN.to_owned(),
+            None,
+            SyncHow::NeedsSignIn,
+            true,
+        ),
         // The server's limit, not the account's sign-in: say so in its
         // words, and when it is tried again; the account is left signed in.
         SyncEvent::Busy {
@@ -117,7 +143,13 @@ pub(crate) fn report(
             retry_in,
         } => {
             tracing::info!("{account}: server busy: {message}");
-            (account, busy_line(&message, retry_in), None, true, false)
+            (
+                account,
+                busy_line(&message, retry_in),
+                None,
+                SyncHow::Trouble,
+                false,
+            )
         }
         // Mail that went: show what is left to send, and fetch the server's
         // copy into Sent now rather than at the next check.
@@ -140,7 +172,7 @@ pub(crate) fn report(
                 1 => "The server refused a change; showing its mail".to_owned(),
                 n => format!("The server refused {n} changes; showing its mail"),
             };
-            (account, line, None, true, true)
+            (account, line, None, SyncHow::Trouble, true)
         }
         SyncEvent::SendFailed {
             account,
@@ -152,7 +184,7 @@ pub(crate) fn report(
                 "Could not send changes; trying again in {} s",
                 retry_in.as_secs().max(1)
             );
-            (account, line, None, true, false)
+            (account, line, None, SyncHow::Trouble, false)
         }
     };
     status.update_send(move |all| {
@@ -160,7 +192,7 @@ pub(crate) fn report(
             account: account.clone(),
             line,
             progress,
-            trouble,
+            how,
         };
         match all.iter_mut().find(|s| s.account == account) {
             Some(existing) => *existing = entry,
@@ -216,7 +248,7 @@ fn describe(progress: Progress) -> (String, Option<(usize, usize)>) {
     }
 }
 
-/// The sidebar's line for a busy server: when it is tried again, then
+/// An account's line for a busy server: when it is tried again, then
 /// the server's own sentence.
 fn busy_line(message: &str, retry_in: Duration) -> String {
     let message = message.trim();
@@ -228,7 +260,7 @@ fn busy_line(message: &str, retry_in: Duration) -> String {
     }
 }
 
-/// A wait as the sidebar says it: seconds under two minutes, else whole
+/// A wait in words: seconds under two minutes, else whole
 /// minutes, rounded up so it never promises sooner than it is.
 fn wait_in_words(wait: Duration) -> String {
     let secs = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
@@ -281,6 +313,66 @@ mod tests {
         assert_eq!(wait_in_words(Duration::from_secs(120)), "2 min");
         assert_eq!(wait_in_words(Duration::from_secs(121)), "3 min");
         assert_eq!(wait_in_words(Duration::from_secs(900)), "15 min");
+    }
+
+    /// Where each event leaves the account, as the status line sums it up.
+    #[test]
+    fn each_event_says_where_the_account_stands() {
+        use postrinch_model::EmailAddress;
+        use postrinch_sync::{Phase, Progress, SyncEvent};
+        use rinch::prelude::Signal;
+
+        use super::{NEEDS_SIGN_IN, SyncHow, report};
+
+        let status = Signal::new(Vec::new());
+        let (revision, ended) = (Signal::new(0), Signal::new(None));
+        let wake = tokio::sync::Notify::new();
+        let account = EmailAddress::parse("ada@example.org").unwrap();
+        let after = |event: SyncEvent| {
+            report(event, status, revision, ended, &wake);
+            let all = status.get();
+            assert_eq!(all.len(), 1, "one entry per account");
+            (all[0].how, all[0].line.clone(), all[0].progress)
+        };
+        let a = || account.clone();
+        assert_eq!(
+            after(SyncEvent::Started { account: a() }).0,
+            SyncHow::Working
+        );
+        let working = after(SyncEvent::Progress {
+            account: a(),
+            progress: Progress::Working {
+                phase: Phase::Bodies,
+                done: 3,
+                total: 10,
+            },
+        });
+        assert_eq!((working.0, working.2), (SyncHow::Working, Some((3, 10))));
+        assert_eq!(
+            after(SyncEvent::Done {
+                account: a(),
+                downloaded: 0
+            })
+            .0,
+            SyncHow::Idle
+        );
+        let failed = SyncEvent::Failed {
+            account: a(),
+            error: "no route".into(),
+            retry_in: Duration::from_secs(30),
+        };
+        assert_eq!(after(failed).0, SyncHow::Trouble);
+        let busy = SyncEvent::Busy {
+            account: a(),
+            message: String::new(),
+            retry_in: Duration::from_secs(30),
+        };
+        assert_eq!(after(busy).0, SyncHow::Trouble);
+        let signing = after(SyncEvent::NeedsSignIn { account: a() });
+        assert_eq!(
+            (signing.0, signing.1.as_str()),
+            (SyncHow::NeedsSignIn, NEEDS_SIGN_IN)
+        );
     }
 
     #[test]

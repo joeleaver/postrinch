@@ -52,6 +52,7 @@ mod share_card;
 mod sidebar;
 mod sign_in_again;
 mod splitter;
+mod status_line;
 mod style;
 pub(crate) mod thread_actions;
 
@@ -163,7 +164,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {share_card::CSS} {compose_files::CSS} {label_new::CSS} }
-                style { {rail::CSS} }
+                style { {rail::CSS} {status_line::CSS} }
                 style { {list_bar::CSS} {list_order::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
                 style { {calendar_side::CSS} {calendar_view::CSS} {calendar_month::CSS} {event_pane::CSS} {event_notes::CSS} {calendar_pane::CSS} {event_editor::CSS} {notices_settings::CSS} }
                 {label_edit::label_dialog(__scope, state)}
