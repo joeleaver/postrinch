@@ -39,7 +39,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      # Every failing test binary in one run, not only the first.
+      - run: cargo test --workspace --no-fail-fast
       # The window is a GUI program on Windows (no console of its own): what
       # it prints must still reach a pipe, as the Release workflow's version
       # check and a terminal's `postrinch --version` read it.
