@@ -241,8 +241,8 @@ provider**, not by provider or group.
   Postrinch keeps no copy of it. New protocol wire types go into it, through re-ofscp's own
   sessions: Postrinch sessions never edit re-ofscp, but hand over a patch or file an issue.
   - Postrinch pins it by rev:
-    `ofscp-core = { git = "https://github.com/joeleaver/re-ofscp", rev = "0b3a9eaf66a8e00454bc455a3c82a357bd0505cf" }`
-    (re-ofscp #26).
+    `ofscp-core = { git = "https://github.com/joeleaver/re-ofscp", rev = "1ede95513191a6233415609a5987c46cdaeba449" }`
+    (re-ofscp #28, after #26 added the WebSocket frames).
   - That commit holds:
     - identifiers, dmId and signing;
     - the REST wire types up to spec main 187acb9, spec #24 included;
@@ -251,7 +251,9 @@ provider**, not by provider or group.
     - Sending: every frame is written with `id`, `type`, `ts` and `data`. A command needs a
       `ts`, which the caller supplies; `encode` refuses a frame without one.
     - Receiving: a client that gets a malformed known event treats it as a local error and
-      never replies.
+      never replies. A standard type with missing or non-object `data`, `ping` and `pong`
+      included, is such an error, so always send `data: {}`. A `ts` that is not a valid time
+      decodes as absent.
   - `ofscp-core` needs rustc 1.99 (`rust-version`); the local stable toolchain is 1.98.1, so
     update it before PR 5.
 
@@ -337,7 +339,7 @@ CI. Rows marked *spec* depend on the spec changes above, all merged on 2026-11-2
 |---|---|---|
 | 1 | Modes rail for the whole window; the sidebar's Mail \| Calendar switch removed | — |
 | 2 | `postrinch-sync-core` extracted (no behaviour change) | — |
-| 3 | ~~`postrinch-ofscp` core~~: done in re-ofscp as `ofscp-core`, pinned at `0b3a9ea` (*Shared with re-ofscp*); Postrinch's copy (#42) closed unmerged | — |
+| 3 | ~~`postrinch-ofscp` core~~: done in re-ofscp as `ofscp-core`, pinned at `1ede955` (*Shared with re-ofscp*); Postrinch's copy (#42) closed unmerged | — |
 | 4 | `postrinch-ofscp-fake`, on `ofscp-core` | 3 |
 | 5 | `postrinch-ofscp` transport on `ofscp-core`: signed HTTP, discovery, sign-in and device keys, media upload (*spec*, question 16), WebSocket | 3, 4 |
 | 6 | Store: the social types, a format bump | — |
