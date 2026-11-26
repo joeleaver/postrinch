@@ -13,7 +13,9 @@
 #
 # Writes <out-dir>/postrinch-<version>-linux-<arch>.tar.gz holding
 # postrinch, postrinch-mcp and postrinch-cli side by side (the window finds
-# the bridge beside itself), plus README.md and LICENSE when present.
+# the bridge beside itself), README.md, and the licenses that must travel
+# with every copy: Postrinch's own (LICENSE-MIT, LICENSE-APACHE) and that of
+# the IBM Plex fonts built into the window (LICENSE-IBM-Plex.txt).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,8 +35,12 @@ for program in postrinch postrinch-mcp postrinch-cli; do
   fi
   install -m 755 "$bin_dir/$program" "$stage/$program"
 done
-for doc in README.md LICENSE; do
-  if [ -f "$doc" ]; then cp "$doc" "$stage/"; fi
+for doc in README.md LICENSE-MIT LICENSE-APACHE crates/postrinch/assets/fonts/LICENSE-IBM-Plex.txt; do
+  if [ ! -f "$doc" ]; then
+    echo "package.sh: no $doc: every package carries it" >&2
+    exit 1
+  fi
+  cp "$doc" "$stage/"
 done
 
 archive="postrinch-${version}-linux-$(uname -m).tar.gz"
