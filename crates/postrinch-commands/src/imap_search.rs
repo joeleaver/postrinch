@@ -8,8 +8,10 @@
 //! query matches is missed: words go by their stems' text ([`key`]),
 //! dates go a few days wider (a server dates mail in its own zone), and
 //! terms the headers here can answer but IMAP cannot ask (a second label,
-//! `last:`, a word left out) are left to the check made on what is found
-//! ([`Commands::remote_rows`]). The one term neither can answer,
+//! `last:`, anything left out: `-word`, `-from:`, `-to:`) are left to the
+//! check made on what is found ([`Commands::server_found_holds`]). The
+//! alternative in Gmail's language leaves the same words and people
+//! unasked (`Query::gmail_superset`). The one term neither can answer,
 //! `has:attachment`, is named in [`ImapAlternative::inexact`], so a server
 //! without Gmail's own language refuses the search rather than answer it
 //! wrongly.
@@ -84,7 +86,7 @@ pub(crate) fn alternative(
         not_in,
         set_aside_too: query.set_aside_too,
         key,
-        gmail: query.gmail.clone(),
+        gmail: query.gmail_superset.clone(),
         inexact,
     })
 }
@@ -140,18 +142,15 @@ pub(crate) fn key(query: &Query, zone: &TimeZone) -> (SearchKey, Option<String>)
     }
     keys.extend(query.from.iter().map(|v| SearchKey::From(v.clone())));
     keys.extend(query.to.iter().map(|v| recipient(v)));
-    keys.extend(
-        query
-            .not_from
-            .iter()
-            .map(|v| SearchKey::negated(SearchKey::From(v.clone()))),
-    );
-    keys.extend(
-        query
-            .not_to
-            .iter()
-            .map(|v| SearchKey::negated(recipient(v))),
-    );
+    // People left out (`-from:`, `-to:`, `-cc:`, `-bcc:`) are not asked
+    // either, for the same reason as words: NOT FROM leaves out what the
+    // server matches, and a server matches its own way (Dovecot folds
+    // accents, so NOT FROM "jose" would leave out "José", whom search
+    // here keeps). The server is asked for a superset, never less: the
+    // check made on what is found leaves them out as search here does.
+    // `-label:` is no key but a folder not looked in (`not_in`): a message
+    // with a copy there has that label here, so the check leaves it out
+    // too, and its copies elsewhere are still found.
     keys.extend(query.subject.iter().map(|v| SearchKey::Subject(v.clone())));
     match query.unread {
         Some(true) => keys.push(SearchKey::Unseen),

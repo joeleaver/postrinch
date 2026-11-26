@@ -1,7 +1,7 @@
-//! Words in an IMAP account's search, here and on its server: a word left
-//! out leaves out what has it, and what the server is asked for finds at
-//! least what search here finds, so the two answers agree once what the
-//! server found is checked here.
+//! Words and people in an IMAP account's search, here and on its server:
+//! a word or person left out leaves out what has it, and what the server
+//! is asked for finds at least what search here finds, so the two answers
+//! agree once what the server found is checked here.
 
 use std::collections::HashSet;
 
@@ -47,9 +47,19 @@ struct Imap {
 }
 
 fn imap(mail: &[(&str, &str, Option<&str>)]) -> Imap {
+    let me = address("ada@example.org");
+    let messages = mail
+        .iter()
+        .enumerate()
+        .map(|(i, (id, subject, body))| message(&me, id, 100 * (i as i64 + 1), subject, *body))
+        .collect();
+    imap_of(me, messages)
+}
+
+/// An IMAP account `me` with these messages in its inbox.
+fn imap_of(me: EmailAddress, messages: Vec<Message>) -> Imap {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
-    let me = address("ada@example.org");
     store
         .put_account(&Account::new(me.clone(), Provider::Imap))
         .unwrap();
@@ -59,11 +69,8 @@ fn imap(mail: &[(&str, &str, Option<&str>)]) -> Imap {
             &Label::new("INBOX", "Inbox", LabelKind::System(SystemLabel::Inbox)),
         )
         .unwrap();
-    for (i, (id, subject, body)) in mail.iter().enumerate() {
-        let at = 100 * (i as i64 + 1);
-        store
-            .put_message(&message(&me, id, at, subject, *body), None)
-            .unwrap();
+    for message in &messages {
+        store.put_message(message, None).unwrap();
     }
     Imap {
         _dir: dir,
@@ -197,4 +204,103 @@ fn a_hyphenated_word_or_phrase_is_its_terms() {
             SearchKey::Text("report".into())
         ])
     );
+}
+
+#[test]
+fn people_left_out_are_checked_here_not_asked() {
+    let me = address("ada@example.org");
+    // A rota from (or copied to) each of these, downloaded or stored by its
+    // headers alone.
+    let people = [
+        ("jose", None, "jose@example.com", Some("the rota")),
+        ("accented", Some("José Pérez"), "jp@example.com", None),
+        ("mary", None, "mary@example.com", Some("the rota")),
+        ("joseph", None, "joseph@example.com", None),
+    ];
+    let mail = |to_too: bool| {
+        let messages: Vec<Message> = people
+            .iter()
+            .enumerate()
+            .map(|(i, (id, name, who, body))| {
+                let mut m = message(&me, id, 100 * (i as i64 + 1), "Rota", *body);
+                let who = Mailbox::new(name.map(str::to_owned), address(who));
+                if to_too {
+                    m.headers.cc = vec![who];
+                } else {
+                    m.headers.from = vec![who];
+                }
+                m
+            })
+            .collect();
+        imap_of(me.clone(), messages)
+    };
+    let found = ["jose", "accented", "mary", "joseph"];
+    for (op, to_too) in [("from", false), ("to", true), ("cc", true), ("bcc", true)] {
+        let f = mail(to_too);
+        let query = format!("rota -{op}:jose");
+        // The server is asked for the rota alone: a server that folds
+        // accents would leave out "José" for NOT FROM "jose", where search
+        // here may keep it.
+        assert_eq!(f.key(&query), SearchKey::Text("rota".into()), "{query}");
+        // The check here leaves out what search here leaves out, and the
+        // one it leaves out is gone, whatever the server found.
+        let here = f.here(&query);
+        assert!(!here.contains(&"jose".to_owned()), "{query}: {here:?}");
+        // "José" is not "jose" here: kept, as the server is not asked to
+        // leave it out (one folding accents would have).
+        assert_eq!(here, ["accented", "mary"], "{query}");
+        assert_eq!(f.checked(&query, &found), here, "{query}");
+        // Gmail's language leaves them out of what it asks too.
+        let search = f.commands.imap_search(&query, &f.me).unwrap();
+        assert_eq!(search.alternatives[0].gmail, "rota", "{query}");
+    }
+}
+
+#[test]
+fn a_query_only_leaving_out_asks_for_everything_and_checks_here() {
+    let me = address("ada@example.org");
+    let people = [
+        ("jose", None, "jose@example.com", Some("the rota")),
+        ("accented", Some("José Pérez"), "jp@example.com", None),
+        ("mary", None, "mary@example.com", Some("the notes")),
+    ];
+    let messages: Vec<Message> = people
+        .iter()
+        .enumerate()
+        .map(|(i, (id, name, who, body))| {
+            let subject = if *id == "mary" { "Notes" } else { "Rota" };
+            let mut m = message(&me, id, 100 * (i as i64 + 1), subject, *body);
+            m.headers.from = vec![Mailbox::new(name.map(str::to_owned), address(who))];
+            m
+        })
+        .collect();
+    let f = imap_of(me, messages);
+    let everything = ["jose", "accented", "mary"];
+    // Nothing to ask but what is left out: every message.
+    assert_eq!(f.key("-from:jose"), SearchKey::All(Vec::new()));
+    let search = f.commands.imap_search("-from:jose", &f.me).unwrap();
+    assert_eq!(search.alternatives[0].gmail, "");
+    assert_eq!(f.here("-from:jose"), ["accented", "mary"]);
+    assert_eq!(f.checked("-from:jose", &everything), ["accented", "mary"]);
+    // The check sync makes as it pages through what was found.
+    let ids: Vec<ProviderMessageId> = everything
+        .iter()
+        .map(|id| ProviderMessageId((*id).into()))
+        .collect();
+    let holds = f
+        .commands
+        .server_found_holds("-from:jose", &f.me, &ids)
+        .unwrap();
+    assert_eq!(holds, HashSet::from([ids[1].clone(), ids[2].clone()]));
+    // An alternative only leaving out, beside one asking: the first asks
+    // its words, the second everything, and the check holds either.
+    let either = "{notes -from:jose}";
+    let search = f.commands.imap_search(either, &f.me).unwrap();
+    let keys: Vec<SearchKey> = search.alternatives.iter().map(|a| a.key.clone()).collect();
+    assert_eq!(keys, [f.key("notes"), SearchKey::All(Vec::new())]);
+    assert_eq!(f.here(either), ["accented", "mary"]);
+    assert_eq!(f.checked(either, &everything), ["accented", "mary"]);
+    // Words left out the same way: `-rota` is asked as nothing.
+    assert_eq!(f.key("-rota"), SearchKey::All(Vec::new()));
+    assert_eq!(f.checked("-rota", &everything), f.here("-rota"));
 }

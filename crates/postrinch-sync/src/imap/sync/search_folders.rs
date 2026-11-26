@@ -43,7 +43,12 @@ pub(super) fn plan(folders: &[ImapFolder], search: &ImapSearch, gmail: bool) -> 
         if asking.is_empty() {
             continue;
         }
-        let command = if gmail {
+        // An alternative with nothing in Gmail's language to ask (only
+        // what is left out, or `last:`) asks for every message there.
+        let every = asking.iter().any(|a| a.gmail.trim().is_empty());
+        let command = if gmail && every {
+            uid_search(&SearchKey::All(Vec::new()))
+        } else if gmail {
             let texts: Vec<&str> = asking.iter().map(|a| a.gmail.as_str()).collect();
             gmail_raw(&match texts.as_slice() {
                 [one] => (*one).to_owned(),
@@ -221,6 +226,22 @@ mod tests {
                     r#"UID SEARCH X-GM-RAW "(x) OR (has:attachment z)""#.to_owned()
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn gmail_with_nothing_to_ask_asks_for_everything() {
+        // `-from:jose`: what is left out is left to the check.
+        let mut left_out = alternative("");
+        left_out.key = SearchKey::All(Vec::new());
+        let planned = plan(
+            &account(true),
+            &search(vec![alternative("x"), left_out]),
+            true,
+        );
+        assert_eq!(
+            searched(&planned),
+            [("fall".to_owned(), "UID SEARCH ALL".to_owned())]
         );
     }
 

@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use postrinch_mailtest::ImapFault;
 use postrinch_sync::SyncError;
+use postrinch_sync::imap::Holds;
 
 use super::idle_support::sign_ins;
 use super::keep_support::until_true;
@@ -95,7 +96,10 @@ async fn opening_a_message_does_not_wait_behind_a_slow_search() {
     let asked = f.server.command_count("UID SEARCH");
     let slow = f.server.hold_next("UID SEARCH", "");
     let (sync, me) = (f.sync.clone(), f.me.clone());
-    let search = tokio::spawn(async move { sync.search_server(&me, &one(text("rota")), 50).await });
+    let search = tokio::spawn(async move {
+        sync.search_server(&me, &one(text("rota")), &Holds::every(), 50)
+            .await
+    });
     until_true("the server is asked", || {
         f.server.command_count("UID SEARCH") > asked
     })
@@ -126,7 +130,10 @@ async fn a_newer_search_takes_an_older_ones_place() {
     let signed_in = sign_ins(&f.server);
     let slow = f.server.hold_next("UID SEARCH", "");
     let (sync, me) = (f.sync.clone(), f.me.clone());
-    let older = tokio::spawn(async move { sync.search_server(&me, &one(text("shift")), 50).await });
+    let older = tokio::spawn(async move {
+        sync.search_server(&me, &one(text("shift")), &Holds::every(), 50)
+            .await
+    });
     until_true("the server is asked", || {
         f.server.command_count("UID SEARCH") > asked
     })

@@ -39,8 +39,8 @@ pub use secret::{ImapSecret, ImapSecrets};
 pub use session::ImapSession;
 pub use smtp::SmtpConnection;
 pub use sync::{
-    AccountFolder, Added, ImapSync, NewImapAccount, NewSignIn, OnGrant, OpenBrowser, SentLookup,
-    ServerFound, SignInAgain, SignInCancel, SignInCanceller, sign_in_cancel,
+    AccountFolder, Added, Holds, ImapSync, NewImapAccount, NewSignIn, OnGrant, OpenBrowser,
+    SentLookup, ServerFound, SignInAgain, SignInCancel, SignInCanceller, sign_in_cancel,
 };
 pub(crate) use sync::{IdleEnd, Idler};
 pub use threading::{Own, thread_for};

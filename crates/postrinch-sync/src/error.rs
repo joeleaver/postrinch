@@ -114,6 +114,11 @@ pub enum SyncError {
     /// account's search connection next. Nothing is wrong.
     #[error("a newer search took this one's place")]
     SearchSuperseded,
+    /// What a server found could not be checked against the search as
+    /// search here reads it ([`crate::imap::Holds`]): why, in the checker's
+    /// words.
+    #[error("what the server found could not be checked: {0}")]
+    SearchCheck(String),
     #[error("store: {0}")]
     Store(#[from] StoreError),
     #[error("{0}")]

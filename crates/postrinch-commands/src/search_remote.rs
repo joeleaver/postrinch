@@ -2,10 +2,13 @@
 //! (search.rs). Gmail's search is Gmail's language, so what it finds
 //! holds. An IMAP server's `SEARCH` asks for at least what the query asks
 //! (imap_search.rs), so what it finds is checked here against the whole
-//! query as search here reads it: a message whose body is here wholly,
-//! and one stored by its headers by all but the words it must have,
-//! which only the server could match in its body. Words it must not have
-//! are checked in what is stored.
+//! query as search here reads it ([`Commands::server_found_holds`]): a
+//! message whose body is here wholly, and one stored by its headers by
+//! all but the words it must have, which only the server could match in
+//! its body. Words it must not have are checked in what is stored. Sync
+//! checks as it pages through what the server found, so a page is of
+//! messages that hold; the rows check again, as they may be asked of any
+//! ids.
 
 use std::collections::{HashMap, HashSet};
 
@@ -82,6 +85,22 @@ impl Commands {
             }
         }
         Ok(rows)
+    }
+
+    /// Of the messages an IMAP server found for `query` (in the search
+    /// language), those the whole query holds for, as search here reads
+    /// it: the check sync makes as it pages through what was found
+    /// (`postrinch_sync::imap::Holds`).
+    pub fn server_found_holds(
+        &self,
+        query: &str,
+        account: &EmailAddress,
+        found: &[ProviderMessageId],
+    ) -> CommandResult<HashSet<ProviderMessageId>> {
+        self.check(account)?;
+        let now = Timestamp::from_millis(jiff::Timestamp::now().as_millisecond());
+        let query = Either::parse(query, now)?;
+        self.query_holds(&query, account, found)
     }
 
     /// Of the messages a server found, those every term of an alternative

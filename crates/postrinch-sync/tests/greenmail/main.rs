@@ -31,7 +31,7 @@ use postrinch_model::{
     ProviderMessageId, Security, Server, SignInMethod,
 };
 use postrinch_store::{OutgoingKind, Store};
-use postrinch_sync::imap::{AccessTokens, TokenFuture};
+use postrinch_sync::imap::{AccessTokens, Holds, TokenFuture};
 use postrinch_sync::imap::{
     Added, Connector, ImapOAuth, ImapSecret, ImapSecrets, ImapSync, NewImapAccount, NewSignIn,
     OAuthClients, SentLookup, Timeouts, TlsConfig, message_id,
@@ -179,9 +179,19 @@ async fn the_server_finds_mail_not_here_yet(client: &Client, other: &mut Peer) {
     let results = commands.search("zanzibar", 10).unwrap();
     let remote = results.remote.expect("the server is asked");
     let search = remote.imap_search(&client.me).expect("in IMAP's terms");
+    // What the server found is checked against the query here, as the
+    // window checks it.
+    let holds = {
+        let me = client.me.clone();
+        Holds::new(move |store, ids| {
+            Commands::new(store.clone())
+                .server_found_holds("zanzibar", &me, ids)
+                .map_err(|e| e.to_string())
+        })
+    };
     let found = client
         .mail
-        .search_server(&client.me, &remote.query, Some(search), 50)
+        .search_server(&client.me, &remote.query, Some(search), &holds, 50)
         .await
         .unwrap();
     assert_eq!(found.incomplete, None);

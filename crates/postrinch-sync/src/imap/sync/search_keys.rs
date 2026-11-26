@@ -41,7 +41,6 @@ fn ascii(key: &SearchKey) -> bool {
         | SearchKey::Cc(s)
         | SearchKey::Bcc(s)
         | SearchKey::Subject(s) => s.is_ascii(),
-        SearchKey::Not(k) => ascii(k),
         SearchKey::Or(a, b) => ascii(a) && ascii(b),
         SearchKey::All(keys) => keys.iter().all(ascii),
         _ => true,
@@ -66,7 +65,6 @@ fn write(key: &SearchKey, command: Command) -> Command {
         // bound.
         SearchKey::Larger(n) => command.then(&format!("LARGER {}", number(*n))),
         SearchKey::Smaller(n) => command.then(&format!("SMALLER {}", number(*n))),
-        SearchKey::Not(k) => write(k, command.then("NOT ")),
         SearchKey::Or(a, b) => write(b, write(a, command.then("OR ")).then(" ")),
         SearchKey::All(keys) => match keys.as_slice() {
             [] => command.then("ALL"),
@@ -185,13 +183,13 @@ mod tests {
     }
 
     #[test]
-    fn or_not_and_groups_nest() {
+    fn or_and_groups_nest() {
         let key = SearchKey::All(vec![
             text("rota"),
-            SearchKey::negated(SearchKey::either(
+            SearchKey::either(
                 SearchKey::From("a".into()),
                 SearchKey::All(vec![SearchKey::Seen, SearchKey::Flagged]),
-            )),
+            ),
             SearchKey::either(
                 SearchKey::either(SearchKey::To("b".into()), SearchKey::Cc("b".into())),
                 SearchKey::Bcc("b".into()),
@@ -199,7 +197,7 @@ mod tests {
         ]);
         assert_eq!(
             first(&key),
-            r#"UID SEARCH (TEXT "rota" NOT OR FROM "a" (SEEN FLAGGED) OR OR TO "b" CC "b" BCC "b")"#
+            r#"UID SEARCH (TEXT "rota" OR FROM "a" (SEEN FLAGGED) OR OR TO "b" CC "b" BCC "b")"#
         );
         // A group of one is the key itself.
         assert_eq!(
