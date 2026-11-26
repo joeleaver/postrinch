@@ -59,6 +59,11 @@ impl ViewEdit {
         }
     }
 
+    /// Whether the panel is changing the saved view `key`.
+    pub fn is_of(&self, key: &str) -> bool {
+        self.kind == Editing::View && self.draft.key == key
+    }
+
     /// The view to list while the panel is open: the draft, when its
     /// search reads. A search lists through search instead.
     pub fn listed(&self) -> Option<SavedView> {
@@ -166,8 +171,13 @@ impl State {
         }
     }
 
-    /// Open the panel on a view, opening the view first.
+    /// Open the panel on a view, opening the view first. A panel open on
+    /// something else (a new view being named, say) is finished first, so
+    /// what it holds is kept, as opening another view keeps it.
     pub fn edit_view(self, key: &str) {
+        if self.view_edit.with(|e| e.is_some()) {
+            self.finish_edit();
+        }
         if self.open_view.get() != key || self.search.get().is_some() {
             self.open_view(key);
         }
@@ -344,5 +354,22 @@ impl State {
                 v.query = format!("{} {term}", v.query).trim().to_owned();
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_panel_is_of_a_view_only_while_changing_that_saved_view() {
+        let mut inbox = blank("in:inbox");
+        inbox.key = "inbox".into();
+        let edit = ViewEdit::new(inbox.clone(), Editing::View);
+        assert!(edit.is_of("inbox"));
+        assert!(!edit.is_of("sent"));
+        // A search or a view not made yet is no saved view's, whatever its key.
+        assert!(!ViewEdit::new(inbox.clone(), Editing::Search).is_of("inbox"));
+        assert!(!ViewEdit::new(inbox, Editing::New).is_of("inbox"));
     }
 }

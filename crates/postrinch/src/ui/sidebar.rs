@@ -10,6 +10,7 @@ use rinch::prelude::*;
 use crate::state::State;
 use crate::sync::thousands;
 use crate::ui::account_color;
+use crate::ui::icons::{Icon, icon};
 use crate::view_edit::Editing;
 
 #[component]
@@ -182,6 +183,31 @@ fn view_row(state: State, view: SavedView, tree: Tree) -> NodeHandle {
                     {move || thousands(count.get())}
                 }
             }
+            {row_edit(__scope, state, view.key.clone(), view.name.clone())}
+        }
+    }
+}
+
+/// ✎ on a view's row: the one way to change a view, opening the view
+/// panel on it. Shown only while the row is hovered or it has the focus,
+/// in place of the row's count.
+fn row_edit(__scope: &mut RenderScope, state: State, key: String, name: String) -> NodeHandle {
+    let editing = key.clone();
+    let pressed = Memo::new(move || {
+        state
+            .view_edit
+            .with(|e| e.as_ref().is_some_and(|e| e.is_of(&editing)))
+    });
+    let title = format!("Edit {name}");
+    let label = title.clone();
+    rsx! {
+        button {
+            class: {move || if pressed.get() { "row-edit pressed" } else { "row-edit" }},
+            title: {title.clone()},
+            aria-label: {label.clone()},
+            aria-pressed: {move || if pressed.get() { "true" } else { "false" }},
+            onclick: move || state.toggle_edit_of(&key),
+            {icon(__scope, Icon::Write)}
         }
     }
 }
@@ -204,7 +230,9 @@ fn chevron(__scope: &mut RenderScope, state: State, key: String, parent: bool) -
 }
 
 /// A row for what is shown but not in the sidebar yet: a search, or a
-/// view being made, with × to let it go. ✎ over the list changes it.
+/// view being made, with × to let it go. A search's row has ✎, as a
+/// view's has, to refine it in the panel; a view being made has the
+/// panel open already.
 #[component]
 fn unsaved_row(state: State, kind: Editing) -> NodeHandle {
     let (name, close_title) = match kind {
@@ -221,7 +249,29 @@ fn unsaved_row(state: State, kind: Editing) -> NodeHandle {
             div { class: "row-open",
                 span { class: "folder-name", span { class: "name-text", {name} } }
             }
+            if kind == Editing::Search {
+                {search_edit(__scope, state)}
+            }
             button { class: "row-close", title: close_title, aria-label: close_title, onclick: close, "×" }
+        }
+    }
+}
+
+/// ✎ on the search's row: refine the search in the view panel.
+fn search_edit(__scope: &mut RenderScope, state: State) -> NodeHandle {
+    let pressed = Memo::new(move || {
+        state
+            .view_edit
+            .with(|e| e.as_ref().is_some_and(|e| e.kind == Editing::Search))
+    });
+    rsx! {
+        button {
+            class: {move || if pressed.get() { "row-edit pressed" } else { "row-edit" }},
+            title: "Refine this search",
+            aria-label: "Refine this search",
+            aria-pressed: {move || if pressed.get() { "true" } else { "false" }},
+            onclick: move || state.toggle_edit_search(),
+            {icon(__scope, Icon::Write)}
         }
     }
 }

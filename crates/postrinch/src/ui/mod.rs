@@ -31,6 +31,7 @@ mod labels;
 pub(crate) mod list;
 mod list_bar;
 mod list_head;
+mod list_order;
 mod logo;
 mod notices_settings;
 mod outgoing;
@@ -160,7 +161,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {share_card::CSS} {compose_files::CSS} {label_new::CSS} }
-                style { {list_bar::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
+                style { {list_bar::CSS} {list_order::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
                 style { {calendar_side::CSS} {calendar_view::CSS} {calendar_month::CSS} {event_pane::CSS} {event_notes::CSS} {calendar_pane::CSS} {event_editor::CSS} {notices_settings::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}
@@ -199,9 +200,9 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     window
 }
 
-/// The title bar's own part: Write (a pencil, after the title bar mockup)
-/// and search together in the middle of the window, and on the right an
-/// update waiting and anything that went wrong.
+/// The title bar's own part: search in the middle of the window, and on
+/// the right an update waiting and anything that went wrong. Write is in
+/// the bar over the list (list_bar.rs).
 #[component]
 fn title_status(state: State) -> NodeHandle {
     rsx! {
@@ -213,13 +214,6 @@ fn title_status(state: State) -> NodeHandle {
             }
         }
         div { class: "title-center",
-            button {
-                class: "title-write",
-                title: "Write (C)",
-                aria-label: "Write",
-                onclick: move || state.write(postrinch_commands::Start::New),
-                {icons::icon(__scope, icons::Icon::Write)}
-            }
             div { class: "title-search",
                 TextInput {
                     spellcheck: false,

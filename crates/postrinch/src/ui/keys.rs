@@ -25,6 +25,11 @@ pub fn listen(root: NodeHandle, state: State) {
             state.filter_list(String::new());
             return true;
         }
+        // An open menu's keys are its own: rinch's menus listen for keys
+        // as this does, but were registered after it (rinch#3090).
+        if state.ordering.get() {
+            return false;
+        }
         if !key.is_down() || in_field || key.ctrl || key.alt || key.meta {
             return false;
         }

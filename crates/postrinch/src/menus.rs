@@ -47,6 +47,9 @@ pub fn menus(state: State) -> Vec<(&'static str, Menu)> {
                 .on_click(go("drafts")),
         )
         .separator()
+        // The same panel as ✎ on the view's row in the sidebar.
+        .item(MenuItem::new("Edit view…").on_click(move || state.edit_shown()))
+        .separator()
         .item(MenuItem::new("Open in browser").on_click(move || state.open_in_browser()))
         .separator()
         .item(MenuItem::new("Light").on_click(move || state.set_appearance(Appearance::Light)))

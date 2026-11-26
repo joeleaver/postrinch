@@ -38,7 +38,7 @@ Views are the person's saved searches, listed in Postrinch's sidebar in place of
 the inbox and its tabs, the person's own, then Everything else, All mail, Sent and Drafts. \
 list_views shows them; list_threads with `view` lists what one shows. save_view makes one \
 or changes one's search, accounts, count, order and place in the sidebar, as the person \
-does with ✎ over a view's list; delete_view deletes one of theirs. Make a view when the \
+does with ✎ on a view in the sidebar; delete_view deletes one of theirs. Make a view when the \
 person asks for one, not to do your own work: search does that.
 
 Attachments are numbered in read_thread's answer. read_attachment returns a file's text \

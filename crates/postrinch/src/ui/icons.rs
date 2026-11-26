@@ -31,6 +31,12 @@ pub enum Icon {
     File,
     /// Three dots: more actions.
     More,
+    /// An arrow down beside shortening lines: newest first.
+    NewestFirst,
+    /// An arrow up beside shortening lines: oldest first.
+    OldestFirst,
+    /// An envelope with a dot: unread first.
+    UnreadFirst,
 }
 
 #[component]
@@ -99,8 +105,19 @@ pub fn icon(which: Icon) -> NodeHandle {
         Icon::Warning => two(__scope, "M12 3l9 16H3z", "M12 10v4M12 17h.01", "none"),
         Icon::Close => one(__scope, "M6 6l12 12M18 6L6 18", "none"),
         Icon::File => two(__scope, "M6 3h9l4 4v14H6z", "M14 3v5h5", "none"),
+        Icon::NewestFirst => two(__scope, "M7 4v16M3 16l4 4 4-4", ORDER_LINES, "none"),
+        Icon::OldestFirst => two(__scope, "M7 20V4M3 8l4-4 4 4", ORDER_LINES, "none"),
+        Icon::UnreadFirst => two(
+            __scope,
+            "M3 8h13v11H3zM3 10l6.5 4 6.5-4",
+            "M19.5 3.5a2 2 0 1 0 0 4a2 2 0 1 0 0-4",
+            "none",
+        ),
     }
 }
+
+/// The shortening lines beside the order arrows.
+const ORDER_LINES: &str = "M13 6h8M13 12h6M13 18h4";
 
 const STAR: &str = "M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z";
 
