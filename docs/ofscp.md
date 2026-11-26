@@ -221,7 +221,8 @@ provider**, not by provider or group.
 | Crate | Holds | New? |
 |---|---|---|
 | `postrinch-sync-core` | What every sync engine shares, moved out of `postrinch-sync` unchanged: `SecretStore`, `Keychain`, `MemorySecrets`, the Linux default-keyring step, `Backoff`. | new (extracted) |
-| `postrinch-ofscp` | The protocol, with no store and no Postrinch types. `wire/`: serde types; `sign/`: the canonical string, Ed25519 signing, the WS-auth string, dmId; `http/`: a signed reqwest client per provider (discovery, sign-in and device keys, endpoints, media upload with progress, problem-details errors, 503 retry, clock offset); `ws/`: the socket (challenge auth, ping, close codes, subscribe/resume, correlation). | new |
+| `ofscp-core` (re-ofscp repo) | The protocol with no I/O, shared with the re-ofscp server: identifiers and dmId, the canonical string and Ed25519 signing (client side too), the WS-auth string, serde wire types, and the WebSocket frames. A pinned git dependency; see *Shared with re-ofscp*. | dependency |
+| `postrinch-ofscp` | The transport on top of `ofscp-core`, with no store and no Postrinch types. `http/`: a signed reqwest client per provider (discovery, sign-in and device keys, endpoints, media upload with progress, problem-details errors, 503 retry, clock offset); `ws/`: the socket (challenge auth, ping, close codes, subscribe/resume, correlation). | new |
 | `postrinch-ofscp-fake` | A fake provider on loopback for tests, like `postrinch-mailtest`: several providers at once, signatures checked as the spec says, switchable faults. | new, tests only |
 | `postrinch-social` | The sync engine: accounts and sign-in, a session per (account, provider), first sync, live events, resume and backfill, the outbox, media upload and fetch, private-message merging, mention scanning. | new |
 | `postrinch-store` | New types (below), a format bump, and the reads and writes. | changed |
@@ -235,11 +236,18 @@ provider**, not by provider or group.
   IMAP IDLE) and is already large, while OFSCP keeps sockets open to many providers. The two
   share only the keychain and backoff, hence `postrinch-sync-core`. The app starts
   `Social::keep_connected` on the same sync thread and tokio runtime as `keep_in_sync`.
-- **Shared with re-ofscp:** re-ofscp already has `re-ofscp-types` (wire types, no I/O, builds
-  for wasm). One Rust crate for the wire types, signing and dmId, used by the server and the
-  client, would keep them honest with each other. Proposed: build `postrinch-ofscp`'s I/O-free
-  core so that it can move into that shared crate, and agree it with re-ofscp's session
-  before PR 2.
+- **Shared with re-ofscp (agreed 2026-11-26):** one I/O-free, wasm-safe crate, `ofscp-core`,
+  lives in the re-ofscp repo (`crates/ofscp-core`) and serves both the server and Postrinch.
+  Postrinch keeps no copy of it. New protocol wire types go into it, through re-ofscp's own
+  sessions: Postrinch sessions never edit re-ofscp, but hand over a patch or file an issue.
+  - Postrinch pins it by rev:
+    `ofscp-core = { git = "https://github.com/joeleaver/re-ofscp", rev = "44f58aa01a4c64b345722dc547a5b920c4ebac4d" }`.
+    That commit has identifiers, dmId, signing, and the REST wire types up to spec main
+    187acb9 (spec #24 included).
+  - The WebSocket frames (`ofscp_core::ws`) are not in it yet: they were handed to re-ofscp as
+    a patch. PR 5 moves the pin to the commit that adds them.
+  - `ofscp-core` needs rustc 1.99 (`rust-version`); the local stable toolchain is 1.98.1, so
+    update it before PR 5.
 
 ### Storage (rhypedb)
 
@@ -323,9 +331,9 @@ CI. Rows marked *spec* depend on the spec changes above, all merged on 2026-11-2
 |---|---|---|
 | 1 | Modes rail for the whole window; the sidebar's Mail \| Calendar switch removed | — |
 | 2 | `postrinch-sync-core` extracted (no behaviour change) | — |
-| 3 | `postrinch-ofscp` core: wire types, signing, the WS-auth string, dmId; golden vectors (agree sharing with re-ofscp first) | — |
-| 4 | `postrinch-ofscp-fake` | 3 |
-| 5 | `postrinch-ofscp` transport: signed HTTP, discovery, sign-in and device keys, media upload (*spec*, question 16), WebSocket | 3, 4 |
+| 3 | ~~`postrinch-ofscp` core~~: done in re-ofscp as `ofscp-core`, pinned at `44f58aa` (*Shared with re-ofscp*); Postrinch's copy (#42) closed unmerged | — |
+| 4 | `postrinch-ofscp-fake`, on `ofscp-core` | 3 |
+| 5 | `postrinch-ofscp` transport on `ofscp-core`: signed HTTP, discovery, sign-in and device keys, media upload (*spec*, question 16), WebSocket (needs `ofscp_core::ws` merged in re-ofscp) | 3, 4 |
 | 6 | Store: the social types, a format bump | — |
 | 7 | Render: social content (plain, Markdown, HTML), mentions (*spec*, question 14) | — |
 | 8 | Engine I: add, sign in again, sign out; first sync; CLI | 2, 5, 6 |
