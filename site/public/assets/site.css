@@ -185,7 +185,7 @@ section.band + section.band { border-top: 1px solid var(--line); }
 }
 .note strong { display: block; margin-bottom: 2px; }
 
-/* Long-form pages (setup guide, privacy) */
+/* Long-form pages (privacy, terms) */
 .doc { padding: 48px 0 72px; }
 .doc h1 { font-size: clamp(30px, 4vw, 42px); line-height: 1.15; margin: 0 0 8px; }
 .doc .updated { color: var(--muted); margin: 0 0 32px; }

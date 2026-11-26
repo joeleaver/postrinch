@@ -1,14 +1,13 @@
 # postrinch.jkbase.app
 
-Postrinch's public site: what it does, how to get it, how to set up Gmail sign-in, and the
-privacy policy and terms. A plain static [jkbase](https://jkbase.app) site: the pages are `public/`, there
-is no build step, it sets no cookies and loads nothing from anyone else, except that the
-download box asks GitHub's API which release is the latest.
+Postrinch's public site: what it does, how to get it, and the privacy policy and terms. A plain
+static [jkbase](https://jkbase.app) site: the pages are `public/`, there is no build step, it
+sets no cookies and loads nothing from anyone else, except that the download box asks GitHub's
+API which release is the latest.
 
 | Page | What it is |
 |---|---|
 | `public/index.html` | Features, screenshots, download |
-| `public/gmail-setup.html` | Making a Google OAuth "Desktop app" client of your own (the early-preview sign-in) |
 | `public/privacy.html` | The privacy policy (LBME Publishing). Google's app verification links to it |
 | `public/terms.html` | The terms of service (LBME Publishing). Google's app verification links to it too |
 | `public/postrinch-update-key.pem` | The release key, for checking a download's signature by hand |
@@ -66,8 +65,8 @@ PEM, or `deploy.sh` refuses:
 
 ## Keep the pages true
 
-The features, the setup guide, the privacy policy and the terms describe the app. When a change makes
-them wrong (a new account type, something new Postrinch sends anywhere, a new scope, Google
-verification done so the setup guide is no longer needed), change the page in the same PR and
-deploy it. The privacy policy promises that anything new sent anywhere is said in the app
-first, and its date changes with it.
+The features, the privacy policy and the terms describe the app. When a change makes them wrong
+(a new account type, something new Postrinch sends anywhere, a new scope, Google verification
+done so the "unverified app" warning in `index.html`'s download section is gone), change the
+page in the same PR and deploy it. The privacy policy promises that anything new sent anywhere
+is said in the app first, and its date changes with it.
