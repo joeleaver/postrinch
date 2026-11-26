@@ -247,8 +247,7 @@ provider**, not by provider or group.
     - identifiers, dmId and signing;
     - the REST wire types up to spec main 187acb9, spec #24 included;
     - the WebSocket frames, `ofscp_core::ws`.
-  - Frame rules (re-ofscp decision 0016, from the oracle's answers on spec #27, which is still
-    open):
+  - Frame rules (spec #27, merged as spec main 24af593; re-ofscp decision 0016):
     - Sending: every frame is written with `id`, `type`, `ts` and `data`. A command needs a
       `ts`, which the caller supplies; `encode` refuses a frame without one.
     - Receiving: a client that gets a malformed known event treats it as a local error and
