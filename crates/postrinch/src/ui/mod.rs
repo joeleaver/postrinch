@@ -37,6 +37,7 @@ mod notices_settings;
 mod outgoing;
 mod palette;
 mod people_picker;
+mod rail;
 mod reader;
 mod reading_settings;
 mod rule_editor;
@@ -162,6 +163,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {share_card::CSS} {compose_files::CSS} {label_new::CSS} }
+                style { {rail::CSS} }
                 style { {list_bar::CSS} {list_order::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
                 style { {calendar_side::CSS} {calendar_view::CSS} {calendar_month::CSS} {event_pane::CSS} {event_notes::CSS} {calendar_pane::CSS} {event_editor::CSS} {notices_settings::CSS} }
                 {label_edit::label_dialog(__scope, state)}
@@ -169,29 +171,32 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 {add_account::add_account_dialog(__scope, state)}
                 {sign_in_again::sign_in_again_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}
-                if state.view.get() == View::Mail {
-                    div { class: "panes",
-                        {sidebar::sidebar(__scope, state)}
-                        {splitter::splitter(__scope, state, splitter::Pane::Sidebar)}
-                        {list::thread_list(__scope, state)}
-                        {splitter::splitter(__scope, state, splitter::Pane::List)}
-                        // The view panel stands where the reader does, so
-                        // the list beside it shows the view as changed.
-                        if state.view_edit.get().is_some() {
-                            {view_panel::view_panel(__scope, state)}
-                        } else {
-                            {reader::reader(__scope, state)}
+                div { class: "window-body",
+                    {rail::rail(__scope, state)}
+                    if state.view.get() == View::Mail {
+                        div { class: "panes",
+                            {sidebar::sidebar(__scope, state)}
+                            {splitter::splitter(__scope, state, splitter::Pane::Sidebar)}
+                            {list::thread_list(__scope, state)}
+                            {splitter::splitter(__scope, state, splitter::Pane::List)}
+                            // The view panel stands where the reader does, so
+                            // the list beside it shows the view as changed.
+                            if state.view_edit.get().is_some() {
+                                {view_panel::view_panel(__scope, state)}
+                            } else {
+                                {reader::reader(__scope, state)}
+                            }
                         }
+                    } else if state.view.get() == View::Calendar {
+                        div { class: "panes",
+                            {calendar_side::calendar_sidebar(__scope, state)}
+                            {splitter::splitter(__scope, state, splitter::Pane::Sidebar)}
+                            {calendar_view::calendar_view(__scope, state)}
+                            {event_pane::event_pane(__scope, state)}
+                        }
+                    } else {
+                        {settings::settings(__scope, state)}
                     }
-                } else if state.view.get() == View::Calendar {
-                    div { class: "panes",
-                        {calendar_side::calendar_sidebar(__scope, state)}
-                        {splitter::splitter(__scope, state, splitter::Pane::Sidebar)}
-                        {calendar_view::calendar_view(__scope, state)}
-                        {event_pane::event_pane(__scope, state)}
-                    }
-                } else {
-                    {settings::settings(__scope, state)}
                 }
             }
         }

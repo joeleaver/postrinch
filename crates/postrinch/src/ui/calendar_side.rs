@@ -1,5 +1,4 @@
-//! The sidebar's Mail | Calendar switch, and the calendar's sidebar after
-//! the calendar mockup: a small month (a click shows that day's stretch)
+//! The calendar's sidebar, after the calendar mockup: a small month (a click shows that day's stretch)
 //! and each account's calendars, each with a tick to show or hide it, its
 //! colour, and its name (a click opens it in the right pane).
 
@@ -8,26 +7,7 @@ use postrinch_model::{CalendarInfo, EmailAddress};
 use rinch::prelude::*;
 
 use crate::calendar_ui::{CalSpan, hide_key, stretch, today};
-use crate::state::{State, View};
-
-/// Mail or Calendar, at the top of either sidebar.
-#[component]
-pub fn mode_switch(state: State) -> NodeHandle {
-    rsx! {
-        div { class: "mode-switch",
-            button {
-                class: {move || if state.view.get() == View::Calendar { "mode" } else { "mode on" }},
-                onclick: move || state.show_calendar(false),
-                "Mail"
-            }
-            button {
-                class: {move || if state.view.get() == View::Calendar { "mode on" } else { "mode" }},
-                onclick: move || state.show_calendar(true),
-                "Calendar"
-            }
-        }
-    }
-}
+use crate::state::State;
 
 #[component]
 pub fn calendar_sidebar(state: State) -> NodeHandle {
@@ -35,7 +15,6 @@ pub fn calendar_sidebar(state: State) -> NodeHandle {
         nav {
             class: "sidebar",
             style: {move || format!("width: {}px", state.sidebar_width.get())},
-            {mode_switch(__scope, state)}
             {crate::ui::outgoing::outgoing_lines(__scope, state)}
             {mini_month(__scope, state)}
             div { class: "cal-list",
@@ -171,15 +150,6 @@ fn month_step(state: State, on: bool) {
 }
 
 pub const CSS: &str = r#"
-.mode-switch {
-    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px;
-    padding: 3px; border-radius: 8px; background: var(--surface);
-}
-.mode {
-    height: 28px; border: 0; border-radius: 6px;
-    background: transparent; color: var(--muted); font: inherit; cursor: pointer;
-}
-.mode.on { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
 .mini-month { display: flex; flex-direction: column; gap: 6px; padding: 0 4px; }
 .mini-head { display: flex; align-items: center; gap: 2px; }
 .mini-title { flex: 1; font-weight: 600; font-size: 13px; color: var(--ink); }

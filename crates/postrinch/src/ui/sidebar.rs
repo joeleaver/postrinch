@@ -19,7 +19,6 @@ pub fn sidebar(state: State) -> NodeHandle {
         nav {
             class: "sidebar",
             style: {move || format!("width: {}px", state.sidebar_width.get())},
-            {crate::ui::calendar_side::mode_switch(__scope, state)}
             {crate::ui::outgoing::outgoing_lines(__scope, state)}
             div { class: "folders",
                 div { class: "folder-group",

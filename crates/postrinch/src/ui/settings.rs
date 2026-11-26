@@ -33,7 +33,6 @@ pub fn settings(state: State) -> NodeHandle {
                 {section_link(__scope, state, SettingsSection::Agents, "Agents")}
                 {section_link(__scope, state, SettingsSection::Appearance, "Appearance")}
                 {section_link(__scope, state, SettingsSection::About, "About")}
-                div { class: "settings-back", onclick: move || state.view.set(View::Mail), "← Back to mail" }
             }
             match state.settings_section.get() {
                 SettingsSection::Accounts => {accounts(__scope, state)},

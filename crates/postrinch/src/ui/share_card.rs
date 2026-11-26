@@ -60,7 +60,7 @@ fn card(state: State, account: EmailAddress, id: String, shared: Shared) -> Node
                     span { class: "invite-going", {format!("In {}\u{2019}s calendars.", account.clone())} }
                     button { class: "link-button",
                         onclick: move || {
-                            state.show_calendar(true);
+                            state.view.set(crate::state::View::Calendar);
                             state.open_calendar_panel(&account, &calendar);
                         },
                         "Show in Calendar" }

@@ -14,6 +14,7 @@ pub const LIGHT: &str = r#"
     --line-soft: #eceef1;
     --field: #d4d8de;
     --hover: #eaecef;
+    --rail: #e9ebef;
     --row-hover: #f8f9fa;
     --accent: #2456b8;
     --accent-tint: #e6eefb;
@@ -53,6 +54,7 @@ pub const DARK: &str = r#"
     --line-soft: #262a31;
     --field: #3a3f49;
     --hover: #2a2e36;
+    --rail: #121418;
     --row-hover: #1f2329;
     --accent: #6f9cf0;
     --accent-tint: #1f2d48;

@@ -40,7 +40,8 @@ html, body { margin: 0; height: 100%; background: transparent; }
 mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2px; }
 .header-error { color: var(--danger); font-size: 13px; }
 
-.panes { flex: 1; display: flex; min-height: 0; }
+.window-body { flex: 1; display: flex; min-height: 0; }
+.panes { flex: 1; display: flex; min-width: 0; min-height: 0; }
 /* A wide grip over the panes' 1px border, without taking room. */
 .splitter {
     width: 7px;
@@ -392,7 +393,6 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     gap: 2px;
 }
 .settings-title { padding: 0 10px 12px; font-size: 16px; font-weight: 600; }
-.settings-back { margin-top: auto; padding: 8px 10px; color: var(--accent); cursor: pointer; font-size: 13px; }
 .settings-accounts {
     width: 320px;
     flex-shrink: 0;
