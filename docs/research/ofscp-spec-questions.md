@@ -218,7 +218,11 @@ spec PR.
   `metadata`; REST `POST .../messages`, idempotent on `clientMessageId`); 5 (full BaseMessage
   in events); 28 (`clientMessageId` echoed); who fills an attachment's `width`, `height` and
   `durationMs` (16); the avatar flow (`POST /api/media` at home, then `PATCH /api/me/profile`).
-- **Needs Joe and Seth**, with the oracle's recommendation:
+- **Decided by Joe (2026-11-26): every recommendation below accepted**, with one addition:
+  servers MAY store and serve attachments from any host (a CDN, object storage); deleting a
+  message SHOULD revoke its attachments, by removing them within a bounded time or by
+  short-lived URLs clients refresh from the message. These go into a second spec PR, stacked
+  on the one above. Postrinch builds against them now:
   - article title, summary and cover: optional fields, `cover` an attachment id;
   - content baseline (14): text/plain and CommonMark, raw HTML shown as text, text/html
     optional behind an allow-list, no auto-loaded remote content, optional `mentions`;
