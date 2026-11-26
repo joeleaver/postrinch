@@ -259,7 +259,7 @@ when an account is deleted.
 | `SocialMedia` | acct + provider + attachment id | URL, blob hash, fetched | mime, size, width, height, duration, poster |
 | `SocialDraft` | draft id | account, place, updated | kind, title, Markdown body, tags, cover, attachments (local files and uploaded ones) |
 | `SocialNotification` | acct + id | account, created, read | the notification |
-| `SocialOutbox` | acct + client id | account, place, seq | the change (post, reply, edit, delete, react, read marker, follow, DM pointer, profile), attempts, last error |
+| `SocialOutbox` | acct + client id | account, place, seq | the change (post, reply, edit, delete, react, read marker, follow, DM pointer, group pointer, profile), attempts, last error |
 
 - Messages stay small (mail's rule, and the same guard test). Media bytes live in the blob
   store.
@@ -347,7 +347,7 @@ CI. Rows marked *spec* depend on the spec changes above, all merged on 2026-11-2
 | 24 | Joining: invite links, join requests, All channels | 10, 15 |
 | 25 | Demo seed, visual tests, interop CI, DESIGN.md | 17, 19, 20 |
 
-- **In parallel from the start:** 1, 2, 3, 6 and 7, plus the spec work with the oracle.
+- **In parallel from the start:** 1, 2, 3, 6 and 7, plus any further spec questions with the oracle.
 - **After 15:** 22 and 24 (once 9 and 10 are in); 18 once 17 is in. 23 comes after the
   composer, editor and private messages (16, 19, 20).
 - **Packaging:** `rinch-video` needs libmpv in every release (Linux, Windows, macOS). This is

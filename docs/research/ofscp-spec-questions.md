@@ -214,8 +214,8 @@ spec PR.
 - **Answered by the spec:** upload size limits (16) are §5.8 L1042 plus discovery
   `capabilities.limits.maxUploadBytes`. Notifications for remote mentions (8) are deferred
   past v0.1 (§10.1 L2170, §13 L2425): not built.
-- **Merged in [ofscp#23](https://github.com/lost-conn/ofscp/pull/23):** 1 (`message.create` gains `type`, `attachments`, `reference`, `tags`,
-  `metadata`; REST `POST .../messages`, idempotent on `clientMessageId`); 5 (full BaseMessage
+- **Merged in [ofscp#23](https://github.com/lost-conn/ofscp/pull/23):** 1 (`message.create`
+  gains `type`, `attachments`, `reference`, `tags`, `metadata`; REST `POST .../messages`, idempotent on `clientMessageId`); 5 (full BaseMessage
   in events); 28 (`clientMessageId` echoed); who fills an attachment's `width`, `height` and
   `durationMs` (16); the avatar flow (`POST /api/media` at home, then `PATCH /api/me/profile`).
 - **Decided by Joe (2026-11-26): every recommendation below accepted**, with one addition:
