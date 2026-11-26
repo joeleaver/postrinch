@@ -136,7 +136,8 @@ fn an_imap_accounts_form_has_thunderbirds_servers_and_postrinchs_sign_in() {
 
     let outlook = imap_form(listing.rows().find(|r| r.who == "ada@outlook.com").unwrap());
     assert_eq!(outlook.way, Way::Browser(OAuthProvider::Microsoft));
-    assert!(!outlook.found.takes_passwords);
+    assert!(outlook.found.browser_only);
+    assert!(!fastmail.found.browser_only);
     assert_eq!(outlook.smtp.line(), "smtp.office365.com · 587 · STARTTLS");
 
     // A server Thunderbird reaches without encryption is tried with
@@ -418,6 +419,27 @@ fn google_and_microsoft_sign_in_their_own_way_whatever_thunderbird_says() {
     let listing = listing(&found, &[], |p| p == OAuthProvider::Microsoft).unwrap();
     let hows: Vec<&str> = listing.rows().map(|r| r.how.as_str()).collect();
     assert_eq!(hows, vec!["Sign in with Google", "Sign in with Microsoft"]);
+}
+
+#[test]
+fn google_mail_signing_in_with_a_password_comes_in_by_googles_sign_in() {
+    // Gmail and a Workspace domain, both on a password (an app password)
+    // in Thunderbird: never asked for one here, nor sent to an app
+    // password page.
+    let mut gmail = account("ada@gmail.com", tb::SignIn::Password);
+    gmail.incoming.as_mut().unwrap().host = "imap.gmail.com".into();
+    let mut workspace = account("sam@acme.co", tb::SignIn::Password);
+    workspace.incoming.as_mut().unwrap().host = "imap.googlemail.com".into();
+    let found = tb::Found {
+        profiles: vec![profile("one", vec![gmail, workspace])],
+        unreadable: vec![],
+    };
+    let listing = listing(&found, &[], |_| false).unwrap();
+    for row in listing.rows() {
+        assert_eq!(row.how, "Sign in with Google", "{}", row.who);
+        assert!(matches!(&row.route, Some(Route::Google(_))), "{}", row.who);
+    }
+    assert_eq!(listing.addable(), 2);
 }
 
 /// A profile of a native Thunderbird holding `accounts`.

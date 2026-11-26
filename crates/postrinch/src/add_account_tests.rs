@@ -87,7 +87,7 @@ fn microsoft_signs_in_in_the_browser_when_it_can() {
     assert_eq!(f.smtp.line(), "smtp.office365.com · 587 · STARTTLS");
     assert_eq!(f.way, Way::Browser(OAuthProvider::Microsoft));
     assert_eq!(f.found.provider.as_deref(), Some("Microsoft"));
-    assert!(!f.found.takes_passwords, "Microsoft takes no passwords");
+    assert!(f.found.browser_only, "Microsoft takes no passwords");
     assert!(f.no_way_in().is_none());
     let (new, secret) = f.to_add().unwrap();
     assert!(secret.is_none(), "no password for the browser");
@@ -107,21 +107,65 @@ fn a_browser_sign_in_not_set_up_leaves_no_way_in() {
     assert_eq!(f.way, Way::Password);
     let why = f.no_way_in().unwrap();
     assert!(why.contains("only in the browser"), "{why}");
+    assert!(!f.asks_password());
+    f.password = "secret".into();
+    assert_eq!(f.to_add().err(), Some(why), "no password is taken");
+}
+
+/// Google's mail, as discovery tells it: OAuth 2 only, no app password
+/// page.
+fn google() -> Discovery {
+    let mut found = Discovery::nothing();
+    found.source = Source::IspdbViaMx;
+    found.provider_name = Some("Google".into());
+    found.hosted_by = Some(HostedBy::Google);
+    found.oauth2_only = true;
+    found.imap = vec![candidate(
+        "imap.gmail.com",
+        993,
+        Sec::Tls,
+        Username::Address,
+    )];
+    found.smtp = vec![candidate(
+        "smtp.gmail.com",
+        465,
+        Sec::Tls,
+        Username::Address,
+    )];
+    found
 }
 
 #[test]
-fn google_mail_offers_google_first_then_imap() {
-    let mut found = fastmail();
-    found.hosted_by = Some(HostedBy::Google);
-    found.provider_name = Some("Google".into());
+fn google_mail_offers_google_first_then_imap_in_the_browser() {
     let mut f = form(Kind::Other, "ed@workspace.example");
-    f.take_discovery(&found, no_sign_in);
+    f.take_discovery(&google(), every_sign_in);
     assert_eq!(f.step_after_discovery(), Step::Workspace);
     f.use_imap_anyway();
-    assert_eq!(f.way, Way::Password, "an app password without the client");
-    f.take_discovery(&found, every_sign_in);
-    f.use_imap_anyway();
     assert_eq!(f.way, Way::Browser(OAuthProvider::Google));
+    assert!(f.found.browser_only, "no app password instead");
+    assert_eq!(f.found.app_password_url, None);
+    assert!(!f.asks_password());
+    let (new, secret) = f.to_add().unwrap();
+    assert!(secret.is_none());
+    assert_eq!(new.settings.sign_in, OAuthProvider::Google.sign_in_method());
+}
+
+#[test]
+fn google_mail_never_offers_a_password() {
+    // Without Google's sign-in over IMAP in this copy, there is no way in
+    // over IMAP at all: no app password, no password.
+    let mut f = form(Kind::Other, "ed@gmail.com");
+    f.take_discovery(&google(), no_sign_in);
+    assert_eq!(f.step_after_discovery(), Step::Workspace);
+    let why = f.no_way_in().expect("no way in over IMAP");
+    assert!(
+        why.starts_with("Google signs mail apps in only in the browser"),
+        "{why}"
+    );
+    f.use_imap_anyway();
+    assert!(!f.asks_password());
+    f.password = "an app password".into();
+    assert_eq!(f.to_add().err(), Some(why));
 }
 
 #[test]
@@ -243,9 +287,7 @@ fn discovery_steps_report_in_place() {
 
 #[test]
 fn a_changed_address_forgets_what_was_found_for_the_old_one() {
-    let mut google = fastmail();
-    google.hosted_by = Some(HostedBy::Google);
-    google.app_password_url = Some("https://example.com/app-passwords".into());
+    let mut google = google();
     google.confirm_servers = true;
     let mut f = form(Kind::Other, "a@gmail.com");
     f.name = "Ada".into();
@@ -256,7 +298,8 @@ fn a_changed_address_forgets_what_was_found_for_the_old_one() {
     // The same address, typed again with a space, keeps it all.
     f.set_address("a@gmail.com ".into());
     assert_eq!(f.way, Way::Browser(OAuthProvider::Google));
-    assert!(f.found.app_password_url.is_some());
+    assert!(f.found.google && f.found.confirm_servers);
+    assert_eq!(f.password, "secret");
 
     f.set_address("b@example.org".into());
     assert_eq!(f.address, "b@example.org");

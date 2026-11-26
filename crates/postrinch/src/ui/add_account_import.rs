@@ -11,9 +11,8 @@ use crate::add_account::{Step, Way};
 use crate::add_account_run::{AddUi, adding_address};
 use crate::import_thunderbird::{Ended, Group, Route, Row};
 use crate::state::State;
-use crate::ui::add_account::{
-    browser_hint, error_line, found_box, head, password_body, provider_name,
-};
+use crate::ui::add_account::{error_line, found_box, head};
+use crate::ui::add_account_sign_in::{browser_hint, password_body, provider_name};
 
 #[component]
 pub fn import_list(state: State) -> NodeHandle {

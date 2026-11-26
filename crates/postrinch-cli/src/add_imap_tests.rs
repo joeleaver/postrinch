@@ -219,3 +219,16 @@ fn discovered_servers_are_used_unless_nobody_vouches_for_them() {
     let nothing = settings_from_discovery(&args(&[USER]), &ada(), &Discovery::nothing());
     assert!(nothing.unwrap_err().to_string().contains("--imap-host"));
 }
+
+#[tokio::test]
+async fn googles_mail_is_never_added_with_a_password() {
+    let f = fixture().await;
+    for host in ["imap.gmail.com", "IMAP.googlemail.com."] {
+        let words = [USER, "--imap-host", host, "--smtp-host", "smtp.gmail.com"];
+        let refused = add_imap(&f.sync, &f.oauth, args(&words), &mut Given(vec![PASSWORD]))
+            .await
+            .unwrap_err();
+        assert!(refused.to_string().contains("--oauth google"), "{refused}");
+    }
+    assert!(f.store.account(&ada()).unwrap().is_none(), "nothing kept");
+}

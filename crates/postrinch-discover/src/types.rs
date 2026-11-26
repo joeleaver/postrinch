@@ -108,7 +108,8 @@ pub struct Discovery {
     pub enable_url: Option<String>,
     /// The provider signs mail apps in with OAuth2 only: its file lists no
     /// other way for IMAP, and it is not one Postrinch knows takes app
-    /// passwords (see `app_password_url`).
+    /// passwords (see `app_password_url`); or the mail is Google's, which
+    /// Postrinch signs in to only in the browser.
     pub oauth2_only: bool,
     /// The person must confirm the servers before any password is sent to
     /// them. Set when a server's host is outside the address's domain and

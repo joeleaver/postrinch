@@ -221,15 +221,15 @@ impl AddUi {
                 Ok(discovery) => {
                     ui.form
                         .update(|f| f.take_discovery(&discovery, |p| ready.contains(&p)));
-                    let form = ui.form.get();
-                    let next = form.step_after_discovery();
+                    // The found step says when there is no way in; Google's
+                    // step then offers only Google's own sign-in.
+                    let next = ui.form.get().step_after_discovery();
                     if next == Step::Servers {
                         // The panel's head says these are guesses; it is
                         // not an error.
                         ui.servers(Step::Address);
                     } else {
                         ui.go(next);
-                        ui.error.set(form.no_way_in());
                     }
                 }
                 Err(error) => {

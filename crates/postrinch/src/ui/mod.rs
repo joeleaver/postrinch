@@ -5,6 +5,7 @@ mod add_account;
 mod add_account_choose;
 mod add_account_import;
 mod add_account_servers;
+mod add_account_sign_in;
 mod agent_dialogs;
 mod agents_settings;
 mod attachment_cards;

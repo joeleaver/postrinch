@@ -8,7 +8,7 @@
 use postrinch_model::Security;
 use rinch::prelude::*;
 
-use crate::add_account::{AddForm, ServerForm, Way};
+use crate::add_account::{AddForm, ServerForm};
 use crate::add_account_run::{AddUi, adding_address};
 use crate::state::State;
 use crate::ui::add_account::{error_line, head, kind_title, password_field};
@@ -32,9 +32,10 @@ pub fn servers_panel(state: State) -> NodeHandle {
     } else {
         (kind_title(&form), address)
     };
-    // A password is asked for only when adding with one; the servers of
-    // an account here keep the sign-in it has.
-    let asks_password = !changing && form.way == Way::Password;
+    // A password is asked for only when adding with one, to a provider
+    // that takes them; the servers of an account here keep the sign-in it
+    // has.
+    let asks_password = !changing && form.asks_password();
     let separate = Memo::new(move || ui.form.get().separate_smtp);
     rsx! {
         div { class: "dialog",
