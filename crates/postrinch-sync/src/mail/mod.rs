@@ -44,7 +44,7 @@ impl MailSync {
     }
 
     /// Waits out busy servers from `first`, doubling up to `cap`, in place
-    /// of [`crate::Backoff::new`]'s (for tests; see
+    /// of [`postrinch_sync_core::Backoff::new`]'s (for tests; see
     /// [`ImapSync::with_busy_backoff`]).
     pub fn with_busy_backoff(
         mut self,

@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use postrinch_model::SignInReason;
 use postrinch_sync::imap::{ImapSecret, ImapSecrets};
-use postrinch_sync::{MemorySecrets, SecretStore, SyncError, SyncResult};
+use postrinch_sync::{SyncError, SyncResult};
+use postrinch_sync_core::{MemorySecrets, SecretStore};
 
 use crate::support::{PASSWORD, account, oauth_secret};
 

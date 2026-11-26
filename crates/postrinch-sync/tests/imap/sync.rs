@@ -233,7 +233,7 @@ async fn a_refused_password_marks_the_account() {
     let f = fixture().await;
     f.user.append("INBOX", mail(Some("a@x"), "A", "")).unwrap();
     let secrets = postrinch_sync::imap::ImapSecrets::new(std::sync::Arc::new(
-        postrinch_sync::MemorySecrets::default(),
+        postrinch_sync_core::MemorySecrets::default(),
     ));
     secrets
         .set(&f.me, &postrinch_sync::imap::ImapSecret::password("wrong"))

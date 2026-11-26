@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use postrinch_sync::MemorySecrets;
 use postrinch_sync::google::{ClientConfig, Endpoints, GoogleAuth};
 use postrinch_sync::imap::{ImapOAuth, ImapSecret, ImapSecrets, MicrosoftClient, OAuthClients};
+use postrinch_sync_core::MemorySecrets;
 use serde_json::{Value, json};
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};

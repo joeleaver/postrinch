@@ -14,11 +14,12 @@ use postrinch_model::{
     Account, EmailAddress, Provider, Security, Server, SignInMethod, SignInReason,
 };
 use postrinch_store::Store;
+use postrinch_sync::SyncError;
 use postrinch_sync::imap::{
     AccountCheck, CheckFailure, Connector, ImapOAuth, ImapSecrets, ImapSync, NewSignIn,
     OAuthClients, TlsConfig,
 };
-use postrinch_sync::{MemorySecrets, SyncError};
+use postrinch_sync_core::MemorySecrets;
 use tokio::runtime::Runtime;
 
 use super::*;

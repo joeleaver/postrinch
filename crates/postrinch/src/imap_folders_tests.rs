@@ -15,7 +15,8 @@ use postrinch_store::Store;
 use postrinch_sync::imap::{
     Connector, ImapOAuth, ImapSecret, ImapSecrets, ImapSync, OAuthClients, TlsConfig,
 };
-use postrinch_sync::{MailSync, MemorySecrets, Progress, SyncEvent, SyncReport};
+use postrinch_sync::{MailSync, Progress, SyncEvent, SyncReport};
+use postrinch_sync_core::MemorySecrets;
 use tokio::runtime::Runtime;
 use tokio::sync::Notify;
 

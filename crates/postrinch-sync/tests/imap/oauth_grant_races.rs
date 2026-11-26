@@ -6,8 +6,9 @@
 use std::sync::Arc;
 
 use postrinch_model::Provider;
+use postrinch_sync::SyncError;
 use postrinch_sync::imap::{ImapSecrets, OAuthProvider};
-use postrinch_sync::{MemorySecrets, SecretStore, SyncError};
+use postrinch_sync_core::{MemorySecrets, SecretStore};
 use wiremock::MockServer;
 
 use crate::add::MAIL_SCOPES;

@@ -13,12 +13,13 @@ use postrinch_model::{
     SignInReason,
 };
 use postrinch_store::Store;
+use postrinch_sync_core::MemorySecrets;
 
 use super::ImapSync;
 use crate::imap::{
     AccessTokens, Connector, ImapSecret, ImapSecrets, Timeouts, TlsConfig, TokenFuture,
 };
-use crate::{MemorySecrets, SyncError, SyncResult};
+use crate::{SyncError, SyncResult};
 
 const USER: &str = "ada@example.org";
 const PASSWORD: &str = "correct horse";

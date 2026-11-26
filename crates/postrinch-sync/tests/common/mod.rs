@@ -10,7 +10,7 @@ use postrinch_model::{Account, EmailAddress, Provider};
 use postrinch_store::Store;
 use postrinch_sync::google::{ClientConfig, Endpoints, GmailApi, GmailSync, GoogleAuth};
 use postrinch_sync::imap::ImapSecrets;
-use postrinch_sync::{MemorySecrets, SecretStore};
+use postrinch_sync_core::{MemorySecrets, SecretStore};
 use serde_json::json;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};

@@ -1,0 +1,19 @@
+[package]
+name = "postrinch-sync-core"
+description = "What Postrinch's sync engines share: secrets in the OS keychain, and backing off from a busy server."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+postrinch-model = { workspace = true }
+keyring = "4.2"
+keyring-core = "1"
+rand = "0.10"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# The Secret Service, to create a default keyring when there is none.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+secret-service = { version = "5.2", features = ["crypto-rust"] }

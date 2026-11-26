@@ -9,9 +9,9 @@ use postrinch_model::{
     SignInMethod,
 };
 use postrinch_store::Store;
-use postrinch_sync::MemorySecrets;
 use postrinch_sync::imap::{ImapSecret, ImapSecrets, ImapSync, message_id};
 use postrinch_sync::{ProgressFn, SyncReport};
+use postrinch_sync_core::MemorySecrets;
 
 use super::support::{PASSWORD, Tokens, USER, account, closed_port, connector, server, settings};
 

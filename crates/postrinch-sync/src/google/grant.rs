@@ -13,11 +13,11 @@ use std::future::Future;
 use std::sync::Arc;
 
 use postrinch_model::{EmailAddress, Provider};
+use postrinch_sync_core::{KeychainError, SecretStore};
 
 use super::ledger::{GrantLedger, UnderWay};
 use crate::imap::ImapSecrets;
 use crate::oauth::OAuthFlow;
-use crate::secrets::SecretStore;
 use crate::{SyncError, SyncResult};
 
 /// Where both kinds of account keep their Google refresh tokens.
@@ -141,7 +141,9 @@ impl GoogleGrants {
         let address = address.clone();
         let held = tokio::task::spawn_blocking(move || google.get(&address))
             .await
-            .map_err(|e| SyncError::Keychain(format!("keychain task failed: {e}")))??;
+            .map_err(|e| {
+                SyncError::Keychain(KeychainError::new(format!("keychain task failed: {e}")))
+            })??;
         Ok(held.is_some())
     }
 }

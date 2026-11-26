@@ -13,12 +13,12 @@
 use secret_service::EncryptionType;
 use secret_service::blocking::SecretService;
 
-use crate::{SyncError, SyncResult};
+use crate::{KeychainError, KeychainResult};
 
 /// The label the created keyring gets, matching GNOME's own name for it.
 const LABEL: &str = "Login";
 
-pub(crate) fn ensure_default_collection() -> SyncResult<()> {
+pub(crate) fn ensure_default_collection() -> KeychainResult<()> {
     let service = SecretService::connect(EncryptionType::Dh).map_err(describe)?;
     match service.get_default_collection() {
         Ok(_) => Ok(()),
@@ -34,8 +34,8 @@ pub(crate) fn ensure_default_collection() -> SyncResult<()> {
 }
 
 /// Say what went wrong in terms a person can act on.
-fn describe(e: secret_service::Error) -> SyncError {
-    SyncError::Keychain(match e {
+fn describe(e: secret_service::Error) -> KeychainError {
+    KeychainError::new(match e {
         secret_service::Error::Unavailable => {
             "no password store is running; Postrinch keeps sign-ins in the desktop's \
              Secret Service (GNOME Keyring or KDE Wallet)"

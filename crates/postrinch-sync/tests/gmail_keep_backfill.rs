@@ -12,7 +12,8 @@ mod common;
 
 use common::*;
 use postrinch_model::{Account, EmailAddress, Provider, ProviderMessageId};
-use postrinch_sync::{IdleOptions, KeepOptions, Phase, Progress, SecretStore, SyncEvent};
+use postrinch_sync::{IdleOptions, KeepOptions, Phase, Progress, SyncEvent};
+use postrinch_sync_core::SecretStore;
 use serde_json::json;
 use tokio::sync::Notify;
 use wiremock::matchers::{method, path, query_param};

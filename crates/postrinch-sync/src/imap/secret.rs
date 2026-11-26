@@ -13,10 +13,11 @@
 use std::sync::{Arc, LazyLock};
 
 use postrinch_model::{EmailAddress, SignInMethod, SignInReason};
+use postrinch_sync_core::{Keychain, KeychainError, KeychainResult, SecretStore};
 use serde::{Deserialize, Serialize};
 
 use crate::google::GrantLedger;
-use crate::{Keychain, SecretStore, SyncError, SyncResult};
+use crate::{SyncError, SyncResult};
 
 /// The OS keychain's [`GrantLedger`]: one for the process, as the
 /// keychain is.
@@ -200,9 +201,9 @@ impl ImapSecrets {
                 secret,
                 ImapSecret::OAuth2 { provider, .. } if provider == super::OAuthProvider::Google.id()
             )),
-            None => Err(SyncError::Keychain(format!(
+            None => Err(SyncError::Keychain(KeychainError::new(format!(
                 "the saved IMAP sign-in for {account} is not one Postrinch reads"
-            ))),
+            )))),
         }
     }
 
@@ -225,13 +226,14 @@ impl ImapSecrets {
     async fn run<T: Send + 'static>(
         &self,
         account: &EmailAddress,
-        call: impl FnOnce(&dyn SecretStore, &EmailAddress) -> SyncResult<T> + Send + 'static,
+        call: impl FnOnce(&dyn SecretStore, &EmailAddress) -> KeychainResult<T> + Send + 'static,
     ) -> SyncResult<T> {
         let store = Arc::clone(&self.store);
         let account = account.clone();
-        tokio::task::spawn_blocking(move || call(store.as_ref(), &account))
+        let result = tokio::task::spawn_blocking(move || call(store.as_ref(), &account))
             .await
-            .map_err(|e| SyncError::Keychain(format!("keychain task failed: {e}")))?
+            .map_err(|e| KeychainError::new(format!("keychain task failed: {e}")))?;
+        Ok(result?)
     }
 }
 

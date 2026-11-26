@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use postrinch_sync::imap::{AccessTokens, ImapOAuth, OAuthProvider};
-use postrinch_sync::{OAuthTimeouts, SecretStore, SyncError};
+use postrinch_sync::{OAuthTimeouts, SyncError};
+use postrinch_sync_core::SecretStore;
 use serde_json::json;
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};

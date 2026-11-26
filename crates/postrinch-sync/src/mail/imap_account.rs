@@ -3,7 +3,7 @@
 //!
 //! - A server that turns the account away for now
 //!   ([`SyncError::Busy`]) is waited out: the account's server's
-//!   [`Backoff`](crate::Backoff) gives the wait (`BusyGate`),
+//!   [`Backoff`](postrinch_sync_core::Backoff) gives the wait (`BusyGate`),
 //!   [`SyncEvent::Busy`] says so with the server's words, and nothing is
 //!   asked of that server until the wait is over, a wake included: a
 //!   wake only makes the loop look at the wait again. Its sign-in is

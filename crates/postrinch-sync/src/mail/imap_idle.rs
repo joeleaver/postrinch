@@ -44,12 +44,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use postrinch_model::EmailAddress;
+use postrinch_sync_core::Backoff;
 use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
 
 use super::imap_keep::ImapKeeper;
 use crate::imap::{IdleEnd, Idler};
-use crate::{Backoff, IdleOptions, KeepOptions, SyncError, SyncEvent};
+use crate::{IdleOptions, KeepOptions, SyncError, SyncEvent};
 
 const IMAP: &str = "IMAP";
 

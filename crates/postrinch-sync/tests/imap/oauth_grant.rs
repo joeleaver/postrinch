@@ -6,7 +6,8 @@ use postrinch_model::{Account, Provider};
 use postrinch_store::Store;
 use postrinch_sync::google::sign_in_google;
 use postrinch_sync::imap::{ImapSecret, OAuthProvider};
-use postrinch_sync::{SecretStore, SyncError, check_address_free};
+use postrinch_sync::{SyncError, check_address_free};
+use postrinch_sync_core::SecretStore;
 use wiremock::MockServer;
 
 use crate::oauth_mock::{

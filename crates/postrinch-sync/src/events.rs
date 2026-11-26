@@ -46,7 +46,7 @@ pub enum SyncEvent {
     /// ([`SyncError::Busy`](crate::SyncError::Busy)): too many
     /// connections, a bandwidth limit. Its sign-in is fine, so it is not
     /// marked as needing to sign in; it is tried again after `retry_in`,
-    /// which grows while the server stays busy ([`crate::Backoff`], one
+    /// which grows while the server stays busy ([`postrinch_sync_core::Backoff`], one
     /// per account and server). `message` is the server's own sentence.
     /// Only IMAP accounts' servers answer so: Gmail's API has no such
     /// state.
@@ -118,7 +118,7 @@ pub struct IdleOptions {
     pub give_way: Duration,
     /// The first wait before connecting again after the connection was
     /// lost or failed, doubling up to [`Self::reconnect_cap`]
-    /// ([`crate::Backoff`]).
+    /// ([`postrinch_sync_core::Backoff`]).
     pub reconnect: Duration,
     pub reconnect_cap: Duration,
 }
@@ -129,8 +129,8 @@ impl IdleOptions {
         settle: Duration::from_secs(1),
         interval: Duration::from_secs(5 * 60),
         give_way: Duration::from_secs(30 * 60),
-        reconnect: crate::Backoff::FIRST,
-        reconnect_cap: crate::Backoff::CAP,
+        reconnect: postrinch_sync_core::Backoff::FIRST,
+        reconnect_cap: postrinch_sync_core::Backoff::CAP,
     };
 }
 

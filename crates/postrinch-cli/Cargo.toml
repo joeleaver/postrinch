@@ -18,6 +18,7 @@ postrinch-log = { workspace = true }
 postrinch-model = { workspace = true }
 postrinch-store = { workspace = true }
 postrinch-sync = { workspace = true }
+postrinch-sync-core = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 jiff = "0.2"
 open = "5"

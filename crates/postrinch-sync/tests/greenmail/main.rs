@@ -36,7 +36,8 @@ use postrinch_sync::imap::{
     Added, Connector, ImapOAuth, ImapSecret, ImapSecrets, ImapSync, NewImapAccount, NewSignIn,
     OAuthClients, SentLookup, Timeouts, TlsConfig, message_id,
 };
-use postrinch_sync::{MailSync, MemorySecrets, ProgressFn, SyncResult};
+use postrinch_sync::{MailSync, ProgressFn, SyncResult};
+use postrinch_sync_core::MemorySecrets;
 
 use peer::Peer;
 use server::{GreenMail, User};

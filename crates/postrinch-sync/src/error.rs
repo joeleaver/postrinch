@@ -49,7 +49,7 @@ pub enum SyncError {
     #[error("{address} is an IMAP account, and calendars are Google accounts' only")]
     NoCalendars { address: EmailAddress },
     #[error("the keychain: {0}")]
-    Keychain(String),
+    Keychain(#[from] postrinch_sync_core::KeychainError),
     #[error("network: {}", crate::google::error_chain(.0))]
     Http(#[from] reqwest::Error),
     /// The provider answered with an error that retrying did not cure.
@@ -85,8 +85,8 @@ pub enum SyncError {
     /// connections, a bandwidth or command limit, a sign-in service that
     /// is down. Nothing is wrong with the credential, so the account is
     /// not asked to sign in and no fresh token is fetched; it is to be
-    /// tried again later, as [`Backoff`](crate::Backoff) says (the IMAP
-    /// keep-in-sync and sending loops do, and send
+    /// tried again later, as [`Backoff`](postrinch_sync_core::Backoff)
+    /// says (the IMAP keep-in-sync and sending loops do, and send
     /// [`SyncEvent::Busy`](crate::SyncEvent::Busy); the account check
     /// reports it as `CheckFailure::Busy`). The message is the server's
     /// own sentence.

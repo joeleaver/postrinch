@@ -8,8 +8,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use postrinch_model::{EmailAddress, SignInMethod, SignInReason};
+use postrinch_sync::SyncError;
 use postrinch_sync::imap::{AccessTokens, Added, ImapSecret, NewSignIn, SignInAgain};
-use postrinch_sync::{MemorySecrets, SecretStore, SyncError, SyncResult};
+use postrinch_sync_core::{KeychainError, KeychainResult, MemorySecrets, SecretStore};
 use serde_json::json;
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -202,20 +203,18 @@ struct Refusing {
 }
 
 impl SecretStore for Refusing {
-    fn get(&self, account: &EmailAddress) -> SyncResult<Option<String>> {
+    fn get(&self, account: &EmailAddress) -> KeychainResult<Option<String>> {
         self.inner.get(account)
     }
 
-    fn set(&self, account: &EmailAddress, secret: &str) -> SyncResult<()> {
+    fn set(&self, account: &EmailAddress, secret: &str) -> KeychainResult<()> {
         if self.refuse.load(Ordering::SeqCst) {
-            return Err(SyncError::Io(std::io::Error::other(
-                "the keychain is locked",
-            )));
+            return Err(KeychainError::new("the keychain is locked"));
         }
         self.inner.set(account, secret)
     }
 
-    fn delete(&self, account: &EmailAddress) -> SyncResult<()> {
+    fn delete(&self, account: &EmailAddress) -> KeychainResult<()> {
         self.inner.delete(account)
     }
 }
@@ -233,7 +232,7 @@ async fn a_grant_the_keychain_will_not_take_is_given_back() {
     keychain.refuse.store(true, Ordering::SeqCst);
 
     let result = a.try_add_with_google().await;
-    assert!(matches!(result, Err(SyncError::Io(_))), "{result:?}");
+    assert!(matches!(result, Err(SyncError::Keychain(_))), "{result:?}");
     assert_eq!(a.secrets.get(&account()).await.unwrap(), password);
     assert_eq!(a.stored(), Some(before));
 }

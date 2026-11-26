@@ -8,10 +8,10 @@ use postrinch_discover::{Candidate, Discovery, Username};
 use postrinch_mailtest::{ImapConfig, ImapServer, SmtpConfig, SmtpServer, SpecialUse};
 use postrinch_model::{EmailAddress, Provider, SignInMethod};
 use postrinch_store::Store;
-use postrinch_sync::MemorySecrets;
 use postrinch_sync::imap::{
     Connector, ImapOAuth, ImapSecret, ImapSecrets, ImapSync, OAuthClients, TlsConfig,
 };
+use postrinch_sync_core::MemorySecrets;
 
 use super::*;
 use crate::{Cli, Command};
