@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use postrinch_mailtest::Extension;
 use postrinch_sync::{KeepOptions, Phase, Progress, SyncEvent, SyncReport};
+use tokio::sync::Notify;
 
 use super::idle_support::{KEEP, keeping, mail_sync};
 use super::keep_support::{Events, kinds, until, until_done, until_true};
@@ -68,6 +69,19 @@ fn bodies(log: &Events) -> Vec<(usize, usize)> {
         .collect()
 }
 
+/// Wakes the loop, and returns once the wake has reached each account's
+/// own loop. It is passed on twice (`MailSync::keep_in_sync`'s relay,
+/// then the keeper's), each by a future polled in this test's own task
+/// beside the test (`keeping`), on a runtime of one thread: so each time
+/// this task is polled, both are, and a wake passed on wakes the task
+/// again. Three polls see it through, whatever order they come in.
+async fn wake_every_account(wake: &Notify) {
+    wake.notify_one();
+    for _ in 0..3 {
+        tokio::task::yield_now().await;
+    }
+}
+
 #[tokio::test]
 async fn a_wake_during_a_long_backfill_gets_a_pass_before_it_finishes() {
     let f = old_mail().await;
@@ -80,10 +94,7 @@ async fn a_wake_during_a_long_backfill_gets_a_pass_before_it_finishes() {
         f.user
             .append("INBOX", mail(Some("new@x"), "New", ""))
             .unwrap();
-        wake.notify_one();
-        // The wake reaches the account's loop (through the keeper) while
-        // the batch is still held.
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        wake_every_account(&wake).await;
         first_batch.let_go();
         until_done(events, 1).await;
         // The wake brought one pass, not two: the poll is an hour away.
@@ -133,4 +144,37 @@ async fn the_poll_interval_going_by_during_a_backfill_gets_a_pass() {
     assert_eq!(kinds[..4], ["started", "synced", "started", "synced"]);
     assert_eq!(synced(&log)[1].headers, 1, "the new mail, polled for");
     assert!(f.store.undownloaded(&f.me).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_sync_as_long_as_the_poll_interval_leaves_backfill_a_whole_one() {
+    let f = old_mail().await;
+    // The sync's headers come only once the interval has gone by, as on
+    // a slow server: the interval counts from when backfill begins, so
+    // backfill does not give way after its first batch.
+    let headers = f.server.hold_next("UID FETCH", "BODY.PEEK[HEADER]");
+    let options = KeepOptions {
+        interval: Duration::from_secs(2),
+        ..KEEP
+    };
+    let log = keeping(&mail_sync(&f), options, async |events, _| {
+        until_true("the headers are asked for", || {
+            f.server
+                .commands()
+                .iter()
+                .any(|c| c.starts_with("UID FETCH") && c.contains("BODY.PEEK[HEADER]"))
+        })
+        .await;
+        tokio::time::sleep(options.interval).await;
+        headers.let_go();
+        until_done(events, 1).await;
+    })
+    .await;
+    assert_eq!(kinds(&log)[..3], ["started", "synced", "done"]);
+    let counts = bodies(&log);
+    assert_eq!(
+        counts,
+        [(0, OLD), (20, OLD), (40, OLD), (OLD, OLD)],
+        "every batch in one pass"
+    );
 }

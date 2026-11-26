@@ -19,10 +19,18 @@ pub struct Fixture {
     pub store: Store,
     pub sync: GmailSync,
     pub me: EmailAddress,
+    /// The Google accounts' refresh tokens: `me`'s is there.
+    pub secrets: Arc<MemorySecrets>,
     pub _dir: tempfile::TempDir,
 }
 
 pub async fn fixture() -> Fixture {
+    fixture_with_quota(1.0).await
+}
+
+/// As [`fixture`], paced to a quota `scale` times Gmail's: for tests that
+/// download more than Gmail's burst.
+pub async fn fixture_with_quota(scale: f64) -> Fixture {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/token"))
@@ -48,8 +56,11 @@ pub async fn fixture() -> Fixture {
     let secrets = Arc::new(MemorySecrets::default());
     secrets.set(&me, "rt").unwrap();
     let imap = ImapSecrets::new(Arc::new(MemorySecrets::default()));
-    let auth = Arc::new(GoogleAuth::with_endpoints(config, endpoints, secrets, imap).unwrap());
-    let api = Arc::new(GmailApi::with_base(auth, format!("{}/gmail", server.uri())));
+    let auth =
+        Arc::new(GoogleAuth::with_endpoints(config, endpoints, secrets.clone(), imap).unwrap());
+    let api = Arc::new(
+        GmailApi::with_base(auth, format!("{}/gmail", server.uri())).with_quota_scale(scale),
+    );
 
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
@@ -63,6 +74,7 @@ pub async fn fixture() -> Fixture {
         store,
         sync,
         me,
+        secrets,
         _dir: dir,
     }
 }

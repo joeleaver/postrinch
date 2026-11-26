@@ -1,7 +1,5 @@
-//! Keeping accounts in sync: passes, retries, accounts left alone, and
-//! backfill giving way to a pass.
+//! Keeping accounts in sync: passes, retries, and accounts left alone.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -9,7 +7,7 @@ mod common;
 
 use common::*;
 use postrinch_model::{Account, AccountState, EmailAddress, Provider, SignInReason};
-use postrinch_sync::{IdleOptions, KeepOptions, Progress, SyncEvent};
+use postrinch_sync::{IdleOptions, KeepOptions, SyncEvent};
 use serde_json::json;
 use tokio::sync::Notify;
 use wiremock::matchers::{method, path};
@@ -142,99 +140,4 @@ async fn waking_starts_the_next_pass_at_once() {
         .count();
     // FAST waits an hour between passes; only the wake explains a second.
     assert_eq!(started, 2);
-}
-
-/// More messages than Gmail backfill fetches at once (10), and few
-/// enough that the quota's pacing keeps the test short.
-const MANY: usize = 12;
-
-/// An account of [`MANY`] messages, stored by their headers first.
-async fn mock_many_messages(f: &Fixture) {
-    get(
-        &f.server,
-        "profile",
-        json!({"emailAddress": "me@example.org", "historyId": "100"}),
-    )
-    .await;
-    mock_labels(&f.server).await;
-    let ids: Vec<String> = (0..MANY).map(|n| format!("m{n}")).collect();
-    let listed: Vec<_> = ids
-        .iter()
-        .map(|id| json!({"id": id, "threadId": format!("t-{id}")}))
-        .collect();
-    get(&f.server, "messages", json!({ "messages": listed })).await;
-    for id in &ids {
-        mock_meta(&f.server, id, &["INBOX"], "Old").await;
-        mock_raw(&f.server, id, &["INBOX"], "Old").await;
-    }
-    mock_history(&f.server, "100", json!({"historyId": "100"})).await;
-}
-
-#[tokio::test]
-async fn a_wake_during_backfill_gets_a_pass_before_it_finishes() {
-    let f = fixture().await;
-    mock_many_messages(&f).await;
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let log = Arc::clone(&events);
-    let wake = Arc::new(Notify::new());
-    let waker = Arc::clone(&wake);
-    let woken = AtomicBool::new(false);
-    // Woken as the first backfill begins, as Sync now would be.
-    let report = move |e: SyncEvent| {
-        if matches!(e, SyncEvent::Synced { .. }) && !woken.swap(true, Ordering::Relaxed) {
-            waker.notify_one();
-        }
-        log.lock().unwrap().push(e);
-    };
-    let done = async {
-        while !events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|e| matches!(e, SyncEvent::Done { .. }))
-        {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        // No pass more: the poll is an hour away.
-        tokio::time::sleep(Duration::from_millis(300)).await;
-    };
-    let ran = tokio::time::timeout(Duration::from_secs(30), async {
-        tokio::select! {
-            () = f.sync.keep_in_sync(FAST, Arc::new(report), wake) => {}
-            () = done => {}
-        }
-    })
-    .await;
-    assert!(ran.is_ok(), "gave up waiting for the pass to be done");
-    let events = events.lock().unwrap();
-    let kinds: Vec<&str> = events
-        .iter()
-        .filter_map(|e| match e {
-            SyncEvent::Started { .. } => Some("started"),
-            SyncEvent::Synced { .. } => Some("synced"),
-            SyncEvent::Done { .. } => Some("done"),
-            _ => None,
-        })
-        .collect();
-    // The pass came before backfill finished, and then backfill finished:
-    // one wake, one more pass.
-    assert_eq!(kinds, ["started", "synced", "started", "synced", "done"]);
-    let downloaded = events.iter().find_map(|e| match e {
-        SyncEvent::Done { downloaded, .. } => Some(*downloaded),
-        _ => None,
-    });
-    assert!(
-        downloaded.is_some_and(|d| d > 0 && d < MANY),
-        "the rest, after the pass: {downloaded:?}"
-    );
-    assert!(f.store.undownloaded(&f.me).unwrap().is_empty());
-    // The count went on across the pass, to every message.
-    let last = events.iter().rev().find_map(|e| match e {
-        SyncEvent::Progress {
-            progress: Progress::Working { done, total, .. },
-            ..
-        } => Some((*done, *total)),
-        _ => None,
-    });
-    assert_eq!(last, Some((MANY, MANY)));
 }

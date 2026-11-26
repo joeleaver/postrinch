@@ -10,6 +10,7 @@ use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 
 use super::{CONCURRENT_FETCHES, GmailSync};
+use crate::giving_way::Unfinished;
 use crate::google::api::{MetadataMessage, MinimalMessage, Priority, RawMessage};
 use crate::google::labels::split_label_ids;
 use crate::{Envelope, SyncError, SyncResult, parse_headers, parse_message};
@@ -228,11 +229,13 @@ impl GmailSync {
         self.for_each_until(ids, phase, progress, report, work, || false)
             .await
             .map(|_| ())
+            .map_err(|unfinished| unfinished.error)
     }
 
     /// As [`Self::for_each`], starting no more once `give_way` says so
     /// (it is asked after each id, while some are not started yet): those
-    /// under way are seen through, and the rest are left.
+    /// under way are seen through, and the rest are left. A failure says
+    /// how many ids were gone through before it.
     pub(super) async fn for_each_until<F, Fut>(
         &self,
         ids: Vec<String>,
@@ -241,7 +244,7 @@ impl GmailSync {
         report: &mut SyncReport,
         work: F,
         mut give_way: impl FnMut() -> bool + Send,
-    ) -> SyncResult<Ran>
+    ) -> Result<Ran, Unfinished>
     where
         F: Fn(GmailSync, String) -> Fut,
         Fut: Future<Output = SyncResult<Outcome>> + Send + 'static,
@@ -270,9 +273,19 @@ impl GmailSync {
                 Ok(Ok(Outcome::Fetched)) => report.fetched += 1,
                 Ok(Ok(Outcome::Relabelled)) => report.relabelled += 1,
                 Ok(Ok(Outcome::Removed)) => report.removed += 1,
-                Ok(Err(e)) => return Err(e),
+                Ok(Err(error)) => {
+                    return Err(Unfinished {
+                        through: ran.through,
+                        error,
+                    });
+                }
                 Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
-                Err(e) => return Err(SyncError::Io(std::io::Error::other(e))),
+                Err(e) => {
+                    return Err(Unfinished {
+                        through: ran.through,
+                        error: SyncError::Io(std::io::Error::other(e)),
+                    });
+                }
             }
             ran.through += 1;
             progress(Progress::Working {

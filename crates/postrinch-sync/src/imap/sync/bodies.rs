@@ -20,7 +20,7 @@ use super::folder_error::{FolderError, FolderResult};
 use super::places::live_copies;
 use super::wire::{Conn, Fetched, uid_set};
 use super::{ImapSync, Lane};
-use crate::giving_way::Backfilled;
+use crate::giving_way::{Backfilled, Unfinished};
 use crate::{Envelope, SyncResult, parse_message};
 use crate::{Phase, Progress, ProgressFn, SyncReport};
 
@@ -47,20 +47,22 @@ impl ImapSync {
     ) -> SyncResult<SyncReport> {
         Ok(self
             .backfill_until(account, progress, || false)
-            .await?
+            .await
+            .map_err(|unfinished| unfinished.error)?
             .report)
     }
 
     /// As [`Self::backfill`], giving way between batches when
     /// `give_way` says a pass is due: after at least one batch, so each
     /// call gets on however often passes come, and never after the last,
-    /// so one that finished says so.
+    /// so one that finished says so. A failure says how many messages
+    /// were gone through before it.
     pub(crate) async fn backfill_until(
         &self,
         account: &EmailAddress,
         progress: ProgressFn,
         mut give_way: impl FnMut() -> bool + Send,
-    ) -> SyncResult<Backfilled> {
+    ) -> Result<Backfilled, Unfinished> {
         let a = account.clone();
         let ids = self.with_store(move |s| s.undownloaded(&a)).await?;
         let mut out = Backfilled::default();
@@ -82,8 +84,12 @@ impl ImapSync {
                     self.download(conn, account, batch).await
                 })
                 .await;
-            self.note_sign_in(account, &result).await?;
-            out.report.fetched += result?;
+            let failed = |error| Unfinished {
+                through: out.through,
+                error,
+            };
+            self.note_sign_in(account, &result).await.map_err(failed)?;
+            out.report.fetched += result.map_err(failed)?;
             out.through += count;
             progress(working(out.through));
             if out.through < total && give_way() {

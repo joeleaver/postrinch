@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 
 use super::GmailSync;
 use crate::SyncResult;
-use crate::giving_way::Backfilled;
+use crate::giving_way::{Backfilled, Unfinished};
 use crate::google::api::Priority;
 use crate::{Phase, ProgressFn, SyncReport};
 
@@ -24,19 +24,21 @@ impl GmailSync {
     ) -> SyncResult<SyncReport> {
         Ok(self
             .backfill_until(account, progress, || false)
-            .await?
+            .await
+            .map_err(|unfinished| unfinished.error)?
             .report)
     }
 
     /// As [`Self::backfill`], starting no more downloads once `give_way`
     /// says a pass is due (it is asked after each message, while some are
-    /// not started yet); those under way are seen through.
+    /// not started yet); those under way are seen through. A failure
+    /// says how many messages were gone through before it.
     pub(crate) async fn backfill_until(
         &self,
         account: &EmailAddress,
         progress: ProgressFn,
         give_way: impl FnMut() -> bool + Send,
-    ) -> SyncResult<Backfilled> {
+    ) -> Result<Backfilled, Unfinished> {
         let mut out = Backfilled::default();
         let a = account.clone();
         let ids: Vec<String> = self
