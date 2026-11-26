@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use postrinch_sync::SyncEvent;
 
+use crate::common::HUNG;
+
 pub type Events = Arc<Mutex<Vec<SyncEvent>>>;
 
 pub fn recorder() -> (Events, postrinch_sync::SyncEventFn) {
@@ -53,12 +55,6 @@ pub fn busy_waits(events: &Events) -> Vec<(Duration, String)> {
         })
         .collect()
 }
-
-/// How long the waits below give up after: only a hang ends one, so it is
-/// long enough for the slowest machine the tests run on. Windows' CI
-/// runner takes the whole suite about seven times as long as Linux's, and
-/// a sync of fifty messages there, beside the other tests, took over 10 s.
-const HUNG: Duration = Duration::from_secs(60);
 
 /// Waits (up to [`HUNG`]) until `done` says the events are as wanted.
 pub async fn until(events: &Events, done: impl Fn(&[&'static str]) -> bool) {
