@@ -58,7 +58,9 @@ pub struct Query {
     /// and Gmail matches its own way (it folds accents, so `-from:jose`
     /// would leave out "José", whom search here keeps); the check made on
     /// what it finds leaves them out as search here does. Labels left out
-    /// stay: a label is matched by name, as here.
+    /// (`-label:`, `-in:`, `-category:`) stay: a copy stored by its
+    /// headers from All Mail does not know its labels, so the check could
+    /// not leave them out (docs/imap.md, "What IMAP cannot ask").
     pub gmail_superset: String,
 }
 
