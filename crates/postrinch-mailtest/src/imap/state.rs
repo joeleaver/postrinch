@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, MutexGuard};
 
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 use tokio_rustls::TlsAcceptor;
 
 use super::config::{Extension, ImapConfig};
@@ -18,6 +18,9 @@ pub enum ImapFault {
     No(String),
     /// Answer `BAD` with this text without running the command.
     Bad(String),
+    /// Answer `OK` with this text without running the command: an IDLE
+    /// the server ends as soon as it is asked, for example.
+    Ok(String),
     /// Close the connection as soon as the command arrives, without
     /// running it or answering.
     DisconnectBefore,
@@ -29,8 +32,28 @@ pub enum ImapFault {
 #[derive(Debug)]
 struct PendingFault {
     command: String,
+    /// Text the command's logged form must contain, if any.
+    matching: Option<String>,
     remaining: usize,
     fault: ImapFault,
+}
+
+/// Something a test runs when a command arrives, before it is answered.
+pub(crate) type Action = Box<dyn FnOnce() + Send>;
+
+struct Hook {
+    command: String,
+    matching: String,
+    action: Action,
+}
+
+/// A command to be left unanswered until the test lets it go
+/// ([`super::ImapServer::hold_next`]).
+struct Hold {
+    command: String,
+    matching: String,
+    /// Sent, or dropped, when the test lets the command go.
+    gate: oneshot::Receiver<()>,
 }
 
 /// One command as the server saw it.
@@ -45,9 +68,18 @@ pub(crate) struct State {
     pub(crate) accounts: HashMap<String, Account>,
     pub(crate) next_folder_id: u64,
     faults: Vec<PendingFault>,
+    hooks: Vec<Hook>,
+    holds: Vec<Hold>,
     pub(crate) log: Vec<LoggedCommand>,
     /// Raised to drop every open session.
     pub(crate) kill_epoch: u64,
+    /// How many sessions each user has signed in.
+    pub(crate) signed_in: HashMap<String, usize>,
+    /// How many sessions are IDLEing now.
+    pub(crate) idling: usize,
+    /// Raised, with the words, to end every IDLE begun before with a
+    /// `BYE` ([`super::ImapServer::bye_idling`]).
+    pub(crate) idle_bye: (u64, String),
 }
 
 impl State {
@@ -56,8 +88,13 @@ impl State {
             accounts: HashMap::new(),
             next_folder_id: 0,
             faults: Vec::new(),
+            hooks: Vec::new(),
+            holds: Vec::new(),
             log: Vec::new(),
             kill_epoch: 0,
+            signed_in: HashMap::new(),
+            idling: 0,
+            idle_bye: (0, String::new()),
             config: config.clone(),
         };
         for user in &config.users {
@@ -79,21 +116,29 @@ impl State {
     }
 
     /// Adds a programmed failure for the next `times` commands named
-    /// `command`.
-    pub(crate) fn add_fault(&mut self, command: &str, times: usize, fault: ImapFault) {
+    /// `command` whose logged text contains `matching` (any, if `None`).
+    pub(crate) fn add_fault(
+        &mut self,
+        command: &str,
+        matching: Option<&str>,
+        times: usize,
+        fault: ImapFault,
+    ) {
         self.faults.push(PendingFault {
             command: command.to_ascii_uppercase(),
+            matching: matching.map(str::to_owned),
             remaining: times,
             fault,
         });
     }
 
     /// Takes the failure, if any, programmed for this command.
-    pub(crate) fn take_fault(&mut self, command: &str) -> Option<ImapFault> {
-        let i = self
-            .faults
-            .iter()
-            .position(|f| f.command == command && f.remaining > 0)?;
+    pub(crate) fn take_fault(&mut self, command: &str, text: &str) -> Option<ImapFault> {
+        let i = self.faults.iter().position(|f| {
+            f.command == command
+                && f.remaining > 0
+                && f.matching.as_deref().is_none_or(|m| text.contains(m))
+        })?;
         let pending = &mut self.faults[i];
         pending.remaining -= 1;
         let fault = pending.fault.clone();
@@ -101,6 +146,44 @@ impl State {
             self.faults.remove(i);
         }
         Some(fault)
+    }
+
+    /// Adds an action to run once, when the next command named `command`
+    /// whose logged text contains `matching` arrives.
+    pub(crate) fn add_hook(&mut self, command: &str, matching: &str, action: Action) {
+        self.hooks.push(Hook {
+            command: command.to_ascii_uppercase(),
+            matching: matching.to_owned(),
+            action,
+        });
+    }
+
+    /// Takes the action, if any, waiting for this command.
+    pub(crate) fn take_hook(&mut self, command: &str, text: &str) -> Option<Action> {
+        let i = self
+            .hooks
+            .iter()
+            .position(|h| h.command == command && text.contains(&h.matching))?;
+        Some(self.hooks.remove(i).action)
+    }
+
+    /// Holds the next command named `command` whose logged text contains
+    /// `matching` until `gate` is sent or dropped.
+    pub(crate) fn add_hold(&mut self, command: &str, matching: &str, gate: oneshot::Receiver<()>) {
+        self.holds.push(Hold {
+            command: command.to_ascii_uppercase(),
+            matching: matching.to_owned(),
+            gate,
+        });
+    }
+
+    /// Takes the gate, if any, this command is to wait on.
+    pub(crate) fn take_hold(&mut self, command: &str, text: &str) -> Option<oneshot::Receiver<()>> {
+        let i = self
+            .holds
+            .iter()
+            .position(|h| h.command == command && text.contains(&h.matching))?;
+        Some(self.holds.remove(i).gate)
     }
 }
 

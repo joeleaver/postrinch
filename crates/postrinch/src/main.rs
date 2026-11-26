@@ -1,6 +1,12 @@
 //! Postrinch: an agent-first desktop mail client.
 
 mod actions;
+mod add_account;
+mod add_account_flow;
+mod add_account_import;
+mod add_account_run;
+mod add_account_run_end;
+mod add_account_runs;
 mod agents;
 mod appearance;
 mod attachments;
@@ -14,7 +20,9 @@ mod calendar_ui;
 mod changes;
 mod conversations;
 mod dates;
-mod gmail_labels;
+mod imap_folders;
+mod imap_settings_run;
+mod import_thunderbird;
 mod invitations;
 mod links;
 mod loader;
@@ -24,13 +32,17 @@ mod notify;
 mod pictures;
 mod reading;
 mod recent;
+mod remote_line;
+mod remote_mail;
 mod remote_search;
 mod rule_draft;
 mod rule_run_now;
 mod rules;
 mod rules_ui;
+mod spelling;
 mod state;
 mod sync;
+mod sync_start;
 mod ui;
 mod update;
 mod view_edit;
@@ -123,6 +135,7 @@ fn main() -> ExitCode {
         .window_props(window)
         .fonts(FONTS)
         .theme(theme)
+        .spellcheck(spelling::config())
         .menu(menus::menus(state))
         .run();
     ExitCode::SUCCESS

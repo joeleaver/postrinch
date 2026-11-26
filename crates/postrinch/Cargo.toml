@@ -9,12 +9,14 @@ repository.workspace = true
 [dependencies]
 postrinch-agents = { workspace = true }
 postrinch-commands = { workspace = true }
+postrinch-discover = { workspace = true }
 postrinch-log = { workspace = true }
 postrinch-model = { workspace = true }
 postrinch-render = { workspace = true }
 postrinch-rules = { workspace = true }
 postrinch-store = { workspace = true }
 postrinch-sync = { workspace = true }
+postrinch-thunderbird = { workspace = true }
 postrinch-update = { workspace = true }
 base64 = "0.22"
 dark-light = "3"
@@ -36,4 +38,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 debug = ["rinch/debug"]
 
 [dev-dependencies]
+postrinch-mailtest = { path = "../postrinch-mailtest" }
 tempfile = { workspace = true }

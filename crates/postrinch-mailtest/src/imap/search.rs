@@ -4,8 +4,13 @@
 //! KEYWORD, UNKEYWORD, NEW, OLD, RECENT), a sequence set, UID, HEADER,
 //! SUBJECT, FROM, TO, CC, BCC, BODY, TEXT, SINCE, BEFORE, ON, SENTSINCE,
 //! SENTBEFORE, SENTON, LARGER, SMALLER, MODSEQ, NOT, OR and parenthesized
-//! groups, after an optional `CHARSET UTF-8` / `US-ASCII`. String matches
+//! groups, after an optional `CHARSET UTF-8` / `US-ASCII` (`UTF-8` refused
+//! with `BADCHARSET` when the config says `ascii_search`). String matches
 //! are case-insensitive substrings of the raw (undecoded) text.
+//!
+//! A server that says it is Gmail also takes `X-GM-RAW <text>`, roughly:
+//! each plain word of the text must be in the message's text, and Gmail's
+//! operators (`word:value`), `OR`, `-` and parentheses are ignored.
 
 use chrono::{DateTime, NaiveDate};
 
@@ -38,6 +43,19 @@ enum Key {
     Not(Box<Key>),
     Or(Box<Key>, Box<Key>),
     And(Vec<Key>),
+    /// `X-GM-RAW`'s plain words.
+    GmailWords(Vec<Vec<u8>>),
+}
+
+/// The plain words of a Gmail search: what the fake's `X-GM-RAW` asks of
+/// the text.
+fn gmail_words(raw: &[u8]) -> Vec<Vec<u8>> {
+    String::from_utf8_lossy(raw)
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c| c == '(' || c == ')' || c == '"'))
+        .filter(|w| !w.is_empty() && *w != "OR" && !w.contains(':') && !w.starts_with('-'))
+        .map(|w| w.as_bytes().to_vec())
+        .collect()
 }
 
 fn string(args: &mut Args) -> ArgResult<Vec<u8>> {
@@ -53,10 +71,10 @@ fn date(args: &mut Args) -> ArgResult<NaiveDate> {
     parse_date(&text).ok_or_else(|| format!("Bad date {text}"))
 }
 
-fn parse_key(args: &mut Args) -> ArgResult<Key> {
+fn parse_key(args: &mut Args, gmail: bool) -> ArgResult<Key> {
     let value = args.next()?;
     let atom = match value {
-        Value::List(list) => return parse_all(Args::new(list)),
+        Value::List(list) => return parse_all(Args::new(list), gmail),
         Value::Str(_) => return Err("Expected a search key".into()),
         Value::Atom(a) => a,
     };
@@ -97,10 +115,11 @@ fn parse_key(args: &mut Args) -> ArgResult<Key> {
         "LARGER" => Key::Larger(args.number()?),
         "SMALLER" => Key::Smaller(args.number()?),
         "MODSEQ" => Key::ModSeq(args.number()?),
-        "NOT" => Key::Not(Box::new(parse_key(args)?)),
+        "X-GM-RAW" if gmail => Key::GmailWords(gmail_words(&string(args)?)),
+        "NOT" => Key::Not(Box::new(parse_key(args, gmail)?)),
         "OR" => {
-            let a = parse_key(args)?;
-            let b = parse_key(args)?;
+            let a = parse_key(args, gmail)?;
+            let b = parse_key(args, gmail)?;
             Key::Or(Box::new(a), Box::new(b))
         }
         _ => match SeqSet::parse(&atom) {
@@ -114,10 +133,10 @@ fn parse_key(args: &mut Args) -> ArgResult<Key> {
     })
 }
 
-fn parse_all(mut args: Args) -> ArgResult<Key> {
+fn parse_all(mut args: Args, gmail: bool) -> ArgResult<Key> {
     let mut keys = Vec::new();
     while !args.is_empty() {
-        keys.push(parse_key(&mut args)?);
+        keys.push(parse_key(&mut args, gmail)?);
     }
     if keys.is_empty() {
         return Err("Missing search key".into());
@@ -178,6 +197,7 @@ fn matches(key: &Key, message: &Message, place: &Place) -> bool {
         Key::Larger(n) => message.body.len() as u64 > *n,
         Key::Smaller(n) => (message.body.len() as u64) < *n,
         Key::ModSeq(n) => message.modseq >= *n,
+        Key::GmailWords(words) => words.iter().all(|w| contains_ignore_case(&message.body, w)),
         Key::Not(k) => !matches(k, message, place),
         Key::Or(a, b) => matches(a, message, place) || matches(b, message, place),
         Key::And(keys) => keys.iter().all(|k| matches(k, message, place)),
@@ -186,19 +206,27 @@ fn matches(key: &Key, message: &Message, place: &Place) -> bool {
 
 impl Session {
     pub(crate) fn search(&mut self, mut args: Args, uid_mode: bool) -> Reply {
+        let (gmail, ascii_only) = {
+            let state = self.shared.lock();
+            (state.config.gmail, state.config.ascii_search)
+        };
         if let Some(Value::Atom(a)) = args.peek()
             && a.eq_ignore_ascii_case("CHARSET")
         {
             let _ = args.next();
             match args.text() {
-                Ok(c) if c.eq_ignore_ascii_case("UTF-8") || c.eq_ignore_ascii_case("US-ASCII") => {}
+                Ok(c) if c.eq_ignore_ascii_case("US-ASCII") => {}
+                Ok(c) if c.eq_ignore_ascii_case("UTF-8") && !ascii_only => {}
+                Ok(_) if ascii_only => {
+                    return Reply::No("[BADCHARSET (US-ASCII)] Unsupported charset".into());
+                }
                 Ok(_) => {
                     return Reply::No("[BADCHARSET (UTF-8 US-ASCII)] Unsupported charset".into());
                 }
                 Err(e) => return Reply::Bad(e),
             }
         }
-        let key = match parse_all(args) {
+        let key = match parse_all(args, gmail) {
             Ok(k) => k,
             Err(e) => return Reply::Bad(e),
         };

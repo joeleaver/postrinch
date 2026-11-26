@@ -8,6 +8,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use postrinch_model::{Account, EmailAddress, Provider};
 use postrinch_store::Store;
 use postrinch_sync::google::{ClientConfig, Endpoints, GmailApi, GmailSync, GoogleAuth};
+use postrinch_sync::imap::ImapSecrets;
 use postrinch_sync::{MemorySecrets, SecretStore};
 use serde_json::json;
 use wiremock::matchers::{method, path, query_param};
@@ -18,10 +19,18 @@ pub struct Fixture {
     pub store: Store,
     pub sync: GmailSync,
     pub me: EmailAddress,
+    /// The Google accounts' refresh tokens: `me`'s is there.
+    pub secrets: Arc<MemorySecrets>,
     pub _dir: tempfile::TempDir,
 }
 
 pub async fn fixture() -> Fixture {
+    fixture_with_quota(1.0).await
+}
+
+/// As [`fixture`], paced to a quota `scale` times Gmail's: for tests that
+/// download more than Gmail's burst.
+pub async fn fixture_with_quota(scale: f64) -> Fixture {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/token"))
@@ -46,8 +55,12 @@ pub async fn fixture() -> Fixture {
     let me = EmailAddress::parse("me@example.org").unwrap();
     let secrets = Arc::new(MemorySecrets::default());
     secrets.set(&me, "rt").unwrap();
-    let auth = Arc::new(GoogleAuth::with_endpoints(config, endpoints, secrets));
-    let api = Arc::new(GmailApi::with_base(auth, format!("{}/gmail", server.uri())));
+    let imap = ImapSecrets::new(Arc::new(MemorySecrets::default()));
+    let auth =
+        Arc::new(GoogleAuth::with_endpoints(config, endpoints, secrets.clone(), imap).unwrap());
+    let api = Arc::new(
+        GmailApi::with_base(auth, format!("{}/gmail", server.uri())).with_quota_scale(scale),
+    );
 
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
@@ -61,6 +74,7 @@ pub async fn fixture() -> Fixture {
         store,
         sync,
         me,
+        secrets,
         _dir: dir,
     }
 }
@@ -132,6 +146,6 @@ pub async fn mock_history(server: &MockServer, start: &str, body: serde_json::Va
         .await;
 }
 
-pub fn quiet() -> postrinch_sync::google::ProgressFn {
+pub fn quiet() -> postrinch_sync::ProgressFn {
     Arc::new(|_| {})
 }

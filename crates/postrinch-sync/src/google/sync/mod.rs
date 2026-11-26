@@ -27,8 +27,6 @@ mod search;
 
 pub use calendar::Answered;
 pub use calendar_sync::CalendarReport;
-pub use keep::{KeepOptions, SyncEvent, SyncEventFn};
-pub use outbox::SendReport;
 pub use rules::{RulesReport, SETTINGS_LABEL};
 
 use std::collections::{HashMap, HashSet};
@@ -40,63 +38,11 @@ use postrinch_store::{Store, StoreResult};
 use self::cursor::Cursor;
 use super::GmailApi;
 use super::labels::to_label;
-use crate::{SyncError, SyncResult};
+use crate::{ProgressFn, SyncError, SyncReport, SyncResult};
 
 /// How many messages are fetched at once. Gmail allows 250 quota units a
 /// second per user and a message fetch costs 5.
 const CONCURRENT_FETCHES: usize = 10;
-
-/// What a sync did.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct SyncReport {
-    /// Whether it listed the whole account rather than reading history.
-    pub full: bool,
-    /// Messages stored from their headers alone, to be downloaded later
-    /// ([`GmailSync::backfill`]).
-    pub headers: usize,
-    /// Messages downloaded whole and stored.
-    pub fetched: usize,
-    /// Stored messages whose labels or flags were brought up to date.
-    pub relabelled: usize,
-    /// Messages removed because Gmail no longer has them.
-    pub removed: usize,
-}
-
-impl SyncReport {
-    fn add(&mut self, other: SyncReport) {
-        self.full |= other.full;
-        self.headers += other.headers;
-        self.fetched += other.fetched;
-        self.relabelled += other.relabelled;
-        self.removed += other.removed;
-    }
-}
-
-/// How a sync is getting on, for a progress display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Progress {
-    /// A full sync has listed this many message ids so far.
-    Listing { found: usize },
-    /// Working through messages: `done` of `total` in this phase.
-    Working {
-        phase: Phase,
-        done: usize,
-        total: usize,
-    },
-}
-
-/// What a sync is working through.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Phase {
-    /// Storing the headers of messages new to the store.
-    Headers,
-    /// Applying changes: new messages, labels, deletions.
-    Changes,
-    /// Downloading whole messages known only by their headers.
-    Bodies,
-}
-
-pub type ProgressFn = Arc<dyn Fn(Progress) + Send + Sync>;
 
 /// Gmail sync into the store. Cheap to clone.
 #[derive(Clone)]

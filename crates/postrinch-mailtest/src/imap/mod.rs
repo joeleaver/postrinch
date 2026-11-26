@@ -29,6 +29,7 @@ mod user;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 pub use config::{Extension, ImapConfig};
@@ -41,6 +42,19 @@ use crate::listener;
 use crate::tls::TestCertificate;
 use session::Session;
 use state::{Shared, State};
+
+/// A command left unanswered ([`ImapServer::hold_next`]) until this is
+/// let go or dropped.
+#[derive(Debug)]
+pub struct HeldCommand(oneshot::Sender<()>);
+
+impl HeldCommand {
+    /// Lets the command run and be answered.
+    pub fn let_go(self) {
+        // The session may be gone already; then there is nothing to do.
+        let _ = self.0.send(());
+    }
+}
 
 /// A running fake IMAP server. Dropping it stops the server and every
 /// session on it.
@@ -120,13 +134,75 @@ impl ImapServer {
     /// says. Names are as the client sends them, upper case, with `UID `
     /// before UID commands: `"SELECT"`, `"UID FETCH"`, `"UID MOVE"`.
     pub fn fail_next(&self, command: &str, times: usize, fault: ImapFault) {
-        self.shared.lock().add_fault(command, times, fault);
+        self.shared.lock().add_fault(command, None, times, fault);
+    }
+
+    /// As [`ImapServer::fail_next`], for commands whose text as
+    /// [`ImapServer::commands`] shows it contains `matching`: for
+    /// example `fail_next_matching("SELECT", "\"Work\"", 1, ...)` fails
+    /// the next SELECT of Work only.
+    pub fn fail_next_matching(
+        &self,
+        command: &str,
+        matching: &str,
+        times: usize,
+        fault: ImapFault,
+    ) {
+        self.shared
+            .lock()
+            .add_fault(command, Some(matching), times, fault);
+    }
+
+    /// Runs `action` once, when the next command named `command` (as for
+    /// [`ImapServer::fail_next`]) whose text contains `matching` arrives,
+    /// before the command runs: for changing the mail in the middle of a
+    /// client's work, as another client would. The action may use a
+    /// [`UserHandle`].
+    pub fn on_next(&self, command: &str, matching: &str, action: impl FnOnce() + Send + 'static) {
+        self.shared
+            .lock()
+            .add_hook(command, matching, Box::new(action));
+    }
+
+    /// Leaves the next command named `command` (as for
+    /// [`ImapServer::fail_next`]) whose text contains `matching`
+    /// unanswered, as a slow server would, until the returned
+    /// [`HeldCommand`] is let go or dropped: for acting while a client
+    /// waits on it. It is logged ([`ImapServer::commands`]) as it
+    /// arrives; then it runs as any other.
+    pub fn hold_next(&self, command: &str, matching: &str) -> HeldCommand {
+        let (gate, held) = oneshot::channel();
+        self.shared.lock().add_hold(command, matching, held);
+        HeldCommand(gate)
     }
 
     /// Closes every open connection at once, as a server restart would.
     pub fn disconnect_all(&self) {
         self.shared.lock().kill_epoch += 1;
         self.shared.notify();
+    }
+
+    /// Ends every IDLE under way now with `* BYE <text>` and closes its
+    /// connection, as a server going down, or one turning the account
+    /// away, would. Sessions not idling are left alone.
+    pub fn bye_idling(&self, text: &str) {
+        let mut state = self.shared.lock();
+        state.idle_bye = (state.idle_bye.0 + 1, text.to_string());
+        drop(state);
+        self.shared.notify();
+    }
+
+    /// From now on, lets each user have at most `max` sessions signed in,
+    /// as [`ImapConfig::max_connections`] does from the start. Sessions
+    /// already signed in stay; only the next sign-ins are counted against
+    /// it.
+    pub fn set_max_connections(&self, max: usize) {
+        self.shared.lock().config.max_connections = Some(max);
+    }
+
+    /// How many sessions are in an IDLE now.
+    pub fn idling(&self) -> usize {
+        self.shared.lock().idling
     }
 
     /// Every command received so far, in order, without tags, literals

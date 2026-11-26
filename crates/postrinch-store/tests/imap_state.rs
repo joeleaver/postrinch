@@ -5,8 +5,9 @@ mod common;
 
 use common::{address, message};
 use postrinch_model::{
-    Account, EmailAddress, FolderRole, FolderRoles, ImapFolder, ImapPlace, ImapSettings, Label,
-    LabelKind, Provider, ProviderMessageId, Security, Server, SignInMethod, SystemLabel,
+    Account, EmailAddress, FolderRole, FolderRoles, ImapCopyAttempt, ImapFolder, ImapPlace,
+    ImapSettings, Label, LabelKind, Provider, ProviderMessageId, Security, Server, SignInMethod,
+    SystemLabel,
 };
 use postrinch_store::{Store, StoreError};
 
@@ -29,6 +30,7 @@ fn settings() -> ImapSettings {
             ..FolderRoles::default()
         },
         server_files_sent: true,
+        server_files_sent_chosen: false,
     }
 }
 
@@ -44,6 +46,7 @@ fn setup() -> (tempfile::TempDir, Store, EmailAddress) {
     inbox.role = Some(FolderRole::System(SystemLabel::Inbox));
     inbox.uidvalidity = 7;
     inbox.uidnext = 12;
+    inbox.mailbox_id = Some("F2212ea87".into());
     store.put_imap_folder(&me, &inbox).unwrap();
     let mut receipts = ImapFolder::new("f0123456789ab", "Receipts");
     receipts.delimiter = Some('.');
@@ -60,6 +63,7 @@ fn place(folder: &str, uidvalidity: u32, uid: u32, message: &str) -> ImapPlace {
         message: ProviderMessageId(message.into()),
         flags: vec!["\\Seen".into()],
         modseq: 0,
+        arrived: None,
     }
 }
 
@@ -95,6 +99,8 @@ fn folders_are_kept_and_changed() {
     let labels: Vec<&str> = folders.iter().map(|f| f.label_id.as_str()).collect();
     assert_eq!(labels, ["INBOX", "f0123456789ab"]);
     assert_eq!(folders[0].delimiter, Some('/'));
+    assert_eq!(folders[0].mailbox_id.as_deref(), Some("F2212ea87"));
+    assert_eq!(folders[1].mailbox_id, None);
     assert_eq!(
         folders[0].role,
         Some(FolderRole::System(SystemLabel::Inbox))
@@ -148,6 +154,13 @@ fn places_are_found_by_message_and_by_folder() {
     let places = store.imap_folder_places(&me, "INBOX").unwrap();
     assert_eq!(places.len(), 2);
     assert_eq!(places[1], flagged);
+    // One copy by its folder, UIDVALIDITY and UID.
+    assert_eq!(
+        store.imap_place(&me, "INBOX", 7, 10).unwrap(),
+        Some(flagged)
+    );
+    assert_eq!(store.imap_place(&me, "INBOX", 8, 10).unwrap(), None);
+    assert_eq!(store.imap_place(&me, "nowhere", 7, 10).unwrap(), None);
 
     store.remove_imap_place(&me, "INBOX", 7, 10).unwrap();
     assert_eq!(uids(&store, &me, "INBOX"), [3]);
@@ -261,6 +274,37 @@ fn removing_a_folders_label_removes_the_folder_and_its_places() {
 }
 
 #[test]
+fn a_folders_label_can_go_while_the_folder_stays() {
+    // Gmail's All Mail: synced, but no label (docs/imap.md).
+    let (_dir, store, me) = setup();
+    store
+        .put_label(
+            &me,
+            &Label::new("f0123456789ab", "Receipts", LabelKind::User),
+        )
+        .unwrap();
+    let mut m1 = message(&me, "m1", "t1", 100, "Hello", "hi");
+    m1.labels = vec!["INBOX".into(), "f0123456789ab".into()];
+    store.put_message(&m1, None).unwrap();
+    store
+        .put_imap_place(&me, &place("f0123456789ab", 3, 1, "m1"))
+        .unwrap();
+    assert!(store.has_label(&me, "f0123456789ab").unwrap());
+
+    store
+        .remove_label_keeping_folder(&me, "f0123456789ab")
+        .unwrap();
+    store
+        .remove_label_keeping_folder(&me, "f0123456789ab")
+        .unwrap();
+    assert!(!store.has_label(&me, "f0123456789ab").unwrap());
+    assert!(store.imap_folder(&me, "f0123456789ab").unwrap().is_some());
+    assert_eq!(uids(&store, &me, "f0123456789ab"), [1]);
+    let kept = store.message(&me, &m1.id).unwrap().unwrap();
+    assert_eq!(kept.labels, ["INBOX"], "the message lost the label");
+}
+
+#[test]
 fn removing_the_account_removes_its_folders_and_places() {
     let (dir, store, me) = setup();
     store
@@ -280,5 +324,78 @@ fn removing_the_account_removes_its_folders_and_places() {
     );
     drop(store);
     // And the store opens again as it was.
+    Store::open(dir.path()).unwrap();
+}
+
+fn attempt(folder: &str, message: &str) -> ImapCopyAttempt {
+    ImapCopyAttempt {
+        folder: folder.into(),
+        message: ProviderMessageId(message.into()),
+        uidvalidity: 3,
+        uidnext: 20,
+    }
+}
+
+/// The folders of a message's attempts, sorted.
+fn attempted(store: &Store, me: &EmailAddress, message: &ProviderMessageId) -> Vec<String> {
+    let mut folders: Vec<String> = store
+        .imap_copy_attempts(me, message)
+        .unwrap()
+        .into_iter()
+        .map(|a| a.folder)
+        .collect();
+    folders.sort();
+    folders
+}
+
+#[test]
+fn copy_attempts_are_kept_per_folder_and_go_with_it() {
+    let (dir, store, me) = setup();
+    let m1 = ProviderMessageId("m1".into());
+    let receipts = attempt("f0123456789ab", "m1");
+    store.put_imap_copy_attempt(&me, &receipts).unwrap();
+    store
+        .put_imap_copy_attempt(&me, &attempt("INBOX", "m1"))
+        .unwrap();
+    // Written again, it replaces the one kept.
+    let later = ImapCopyAttempt {
+        uidnext: 25,
+        ..receipts.clone()
+    };
+    store.put_imap_copy_attempt(&me, &later).unwrap();
+    let kept = store.imap_copy_attempts(&me, &m1).unwrap();
+    assert!(kept.contains(&later) && kept.len() == 2, "{kept:?}");
+    store
+        .put_imap_copy_attempt(&me, &attempt("f0123456789ab", "m2"))
+        .unwrap();
+    let mut in_folder = store
+        .imap_folder_copy_attempts(&me, "f0123456789ab")
+        .unwrap();
+    in_folder.sort_by(|a, b| a.message.0.cmp(&b.message.0));
+    assert_eq!(in_folder, [later.clone(), attempt("f0123456789ab", "m2")]);
+    assert!(
+        store
+            .imap_folder_copy_attempts(&me, "f000000000000")
+            .unwrap()
+            .is_empty()
+    );
+    let m2 = ProviderMessageId("m2".into());
+    store
+        .remove_imap_copy_attempt(&me, "f0123456789ab", &m2)
+        .unwrap();
+    let missing = store.put_imap_copy_attempt(&me, &attempt("f000000000000", "m1"));
+    assert!(matches!(missing, Err(StoreError::UnknownImapFolder { .. })));
+    store.remove_imap_copy_attempt(&me, "INBOX", &m1).unwrap();
+    assert_eq!(attempted(&store, &me, &m1), ["f0123456789ab"]);
+    // Removing the folder's label removes them.
+    store
+        .put_label(
+            &me,
+            &Label::new("f0123456789ab", "Receipts", LabelKind::User),
+        )
+        .unwrap();
+    store.remove_label(&me, "f0123456789ab").unwrap();
+    assert!(attempted(&store, &me, &m1).is_empty());
+    drop(store);
     Store::open(dir.path()).unwrap();
 }

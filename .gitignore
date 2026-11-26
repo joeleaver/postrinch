@@ -7,3 +7,4 @@
 # for redrawing, never shipped.
 /design/logo-concepts/
 /dist
+__pycache__/

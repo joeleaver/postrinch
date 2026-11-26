@@ -251,13 +251,10 @@ impl State {
         let (happenings, opened) = (self.calendar.happenings, self.calendar.open);
         let here = crate::actions::commands().map(|c| (*c).clone());
         std::thread::spawn(move || {
-            let sync = handle.sync_engine();
-            let done = handle.runtime.block_on(sync.answer_event(
-                &open.account,
-                &open.event.calendar,
-                &open.event.id,
-                answer,
-            ));
+            let done = handle.on_calendar(&open.account, async |sync| {
+                sync.answer_event(&open.account, &open.event.calendar, &open.event.id, answer)
+                    .await
+            });
             let trouble = match done {
                 Ok(Answered::Done(_)) => {
                     if let Some(here) = &here {

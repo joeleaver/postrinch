@@ -11,7 +11,7 @@ use postrinch_model::{
 use serde_json::{Value, json};
 
 use crate::calendar::moment;
-use crate::gmail::Gmail;
+use crate::remote::Remote;
 use crate::views::say;
 use crate::wire::Call;
 
@@ -25,7 +25,7 @@ pub(crate) fn run(
     commands: &Commands,
     call: Call,
     agent: &str,
-    gmail: Option<&dyn Gmail>,
+    remote: Option<&dyn Remote>,
 ) -> Result<Value, String> {
     match call {
         Call::SaveEvent {
@@ -130,7 +130,7 @@ pub(crate) fn run(
                     .map_err(say)?;
                 return Ok(json!({ "proposed": p.id, "waits_for": WAITS }));
             }
-            let id = gmail
+            let id = remote
                 .ok_or(NO_GOOGLE)?
                 .save_event(&account, event.as_deref(), &draft)?;
             Ok(json!({ "saved": id, "calendar": draft.calendar }))
@@ -158,7 +158,7 @@ pub(crate) fn run(
                     .map_err(say)?;
                 return Ok(json!({ "proposed": p.id, "waits_for": WAITS }));
             }
-            gmail
+            remote
                 .ok_or(NO_GOOGLE)?
                 .delete_event(&account, &calendar, &event, false)?;
             Ok(json!({ "deleted": event }))

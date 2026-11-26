@@ -204,10 +204,9 @@ impl State {
         draft.time_zone = tz.iana_name().map(str::to_owned);
         let (error, revision) = (self.error, self.revision);
         std::thread::spawn(move || {
-            let sync = handle.sync_engine();
-            let done = handle
-                .runtime
-                .block_on(sync.change_event(&account, &id, &draft));
+            let done = handle.on_calendar(&account, async |sync| {
+                sync.change_event(&account, &id, &draft).await
+            });
             if let Err(e) = done {
                 error.send(Some(crate::invitations::say(&e)));
             }

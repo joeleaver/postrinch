@@ -20,6 +20,8 @@ struct Session {
     shared: Arc<SmtpShared>,
     conn: Conn,
     greeted: bool,
+    /// Greeted with a refusal other than 421: only QUIT is served.
+    refusing: bool,
     user: Option<String>,
     transaction: Transaction,
 }
@@ -36,12 +38,23 @@ pub(super) async fn run(shared: Arc<SmtpShared>, conn: Conn) {
         shared,
         conn,
         greeted: false,
+        refusing: false,
         user: None,
         transaction: Transaction::default(),
     };
     // An I/O error ends the session as a closed connection would.
     let _ = session.serve().await;
     session.conn.close().await;
+}
+
+/// What follows a programmed reply: RFC 5321 3.8, a 421 closes the
+/// connection; any other code leaves it open.
+fn after_reply(code: u16) -> Next {
+    if code == 421 {
+        Next::Close
+    } else {
+        Next::Continue
+    }
 }
 
 /// The address inside `FROM:<a@b> SIZE=10` or `TO:<a@b>`, and the rest.
@@ -71,7 +84,18 @@ impl Session {
     }
 
     async fn serve(&mut self) -> io::Result<()> {
-        self.reply(220, "localhost ESMTP fake ready").await?;
+        let fault = self.shared.lock().take_fault(SmtpStage::Greeting);
+        match fault {
+            None => self.reply(220, "localhost ESMTP fake ready").await?,
+            Some(SmtpFault::Disconnect | SmtpFault::StoreThenDisconnect) => return Ok(()),
+            Some(SmtpFault::Reply { code, text }) => {
+                self.reply(code, &text).await?;
+                if let Next::Close = after_reply(code) {
+                    return Ok(());
+                }
+                self.refusing = true;
+            }
+        }
         while let Some(line) = self.conn.read_line().await? {
             let line = String::from_utf8_lossy(&line).into_owned();
             let (verb, args) = match line.split_once(' ') {
@@ -92,8 +116,18 @@ impl Session {
     }
 
     async fn command(&mut self, verb: &str, args: &str) -> io::Result<Next> {
+        if self.refusing && verb != "QUIT" {
+            // RFC 5321 3.1: after a 554 greeting, only QUIT is served.
+            self.reply(503, "5.5.1 No SMTP service here").await?;
+            return Ok(Next::Continue);
+        }
         match verb {
-            "EHLO" => self.ehlo().await?,
+            "EHLO" => {
+                if let Some(next) = self.fault(SmtpStage::Ehlo).await? {
+                    return Ok(next);
+                }
+                self.ehlo().await?
+            }
             "HELO" => {
                 self.greeted = true;
                 self.transaction = Transaction::default();
@@ -104,6 +138,10 @@ impl Session {
                 self.reply(502, "5.5.1 Command not implemented").await?
             }
             "STARTTLS" => {
+                if let Some(next) = self.fault(SmtpStage::StartTls).await? {
+                    // Still in plain text, as before the command.
+                    return Ok(next);
+                }
                 self.reply(220, "2.0.0 Ready to start TLS").await?;
                 let acceptor = self.shared.acceptor.clone();
                 self.conn.start_tls(&acceptor).await?;
@@ -173,7 +211,7 @@ impl Session {
             Some(SmtpFault::Disconnect | SmtpFault::StoreThenDisconnect) => Ok(Some(Next::Close)),
             Some(SmtpFault::Reply { code, text }) => {
                 self.reply(code, &text).await?;
-                Ok(Some(Next::Continue))
+                Ok(Some(after_reply(code)))
             }
         }
     }
@@ -334,6 +372,23 @@ impl Session {
             self.reply(501, "5.5.4 Syntax: RCPT TO:<address>").await?;
             return Ok(Next::Continue);
         };
+        let (most, too_many, answer) = {
+            let state = self.shared.lock();
+            let answer = state.recipient_answer(&to);
+            (
+                state.config.max_recipients,
+                state.config.too_many.clone(),
+                answer,
+            )
+        };
+        if most.is_some_and(|most| self.transaction.to.len() >= most) {
+            self.reply(too_many.0, &too_many.1).await?;
+            return Ok(Next::Continue);
+        }
+        if let Some((code, text)) = answer {
+            self.reply(code, &text).await?;
+            return Ok(Next::Continue);
+        }
         self.transaction.to.push(to);
         self.reply(250, "2.1.5 OK").await?;
         Ok(Next::Continue)
@@ -376,15 +431,15 @@ impl Session {
             Some(SmtpFault::Disconnect) => return Ok(Next::Close),
             Some(SmtpFault::Reply { code, text }) => {
                 self.reply(code, &text).await?;
-                return Ok(Next::Continue);
+                return Ok(after_reply(code));
             }
             Some(SmtpFault::StoreThenDisconnect) => {
-                self.shared.lock().messages.push(message);
+                self.shared.accept(message);
                 return Ok(Next::Close);
             }
             None => {}
         }
-        self.shared.lock().messages.push(message);
+        self.shared.accept(message);
         self.reply(250, "2.0.0 OK queued").await?;
         Ok(Next::Continue)
     }

@@ -1,47 +1,105 @@
-//! Asking Gmail too: when a search's words could be in mail whose bodies
-//! are not downloaded yet, Gmail's own search runs once for that query, and
-//! what it finds that the local search did not is listed after the local
-//! results, marked as found by Gmail.
+//! Asking the servers too: when a search's words could be in mail whose
+//! bodies are not downloaded yet, each account's server searches once for
+//! that query (Gmail's own search, or an IMAP server's `SEARCH`; docs/
+//! imap.md, "Searching the server"), and what they find that the local
+//! search did not is listed after the local results, marked as found on
+//! the server. The line about it is [`remote_line`].
 
 use std::collections::HashSet;
 
 use postrinch_commands::{Commands, Remote, SearchResults, ThreadRow};
 use postrinch_model::EmailAddress;
 use postrinch_sync::SyncError;
+use postrinch_sync::imap::Holds;
 use rinch::{Effect, untracked};
 
 use crate::actions::sync;
 use crate::state::State;
 
-/// How many messages Gmail is asked for, per account.
+pub use crate::remote_line::remote_line;
+
+/// How many messages each account's server is asked for: messages that
+/// hold for the search, as search here reads it.
 const REMOTE_MAX: usize = 50;
 
-/// Gmail's part of the search being shown.
+/// The servers' part of the search being shown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteSearch {
     /// The search it belongs to, as typed.
     pub query: String,
+    /// Who is asked, as the line names them.
+    pub asked: Asked,
     pub status: RemoteStatus,
-    /// Threads Gmail found that the local search did not, newest first.
+    /// Threads the servers found that the local search did not, newest
+    /// first.
     pub rows: Vec<ThreadRow>,
+}
+
+/// Who a search asks: Gmail only, one IMAP server, or several servers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asked {
+    Gmail,
+    Server,
+    Servers,
+}
+
+impl Asked {
+    /// Who the remote part asks.
+    pub fn of(remote: &Remote) -> Self {
+        let imap = remote.imap.len();
+        match (remote.accounts.len(), imap) {
+            (_, 0) => Self::Gmail,
+            (1, 1) => Self::Server,
+            _ => Self::Servers,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteStatus {
-    /// Waiting for Gmail; `waiting` messages are not downloaded.
-    Asking {
-        waiting: usize,
-    },
-    Found(usize),
-    /// Gmail could not be reached.
-    Offline {
-        waiting: usize,
-    },
+    /// Waiting for the servers; `waiting` messages are not downloaded.
+    Asking { waiting: usize },
+    /// The servers that answered found `count` more. `notes` says, for
+    /// each account, what was not searched, or why its server was not
+    /// asked, when something was not.
+    Found { count: usize, notes: Vec<Note> },
+    /// The server could not be reached, or none of the servers could.
+    Offline { waiting: usize },
+    /// The one server asked is busy for the account, and asked again later.
+    Busy { waiting: usize },
+    /// The one server asked would not search as asked: the results are the
+    /// mail here. The reason is the server's, or what IMAP cannot ask.
+    Refused(String),
+    /// The one server asked could not be asked.
+    Failed(String),
+    /// None of the several servers asked could search, each for the
+    /// reason its note gives.
+    Unanswered { waiting: usize, notes: Vec<Note> },
+}
+
+/// What one account's server search left out, or why it did not search.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Note {
+    pub account: EmailAddress,
+    pub what: Trouble,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Trouble {
+    /// It searched, but not everywhere: what was not searched, and why.
+    Incomplete(String),
+    /// Its server could not be reached.
+    Offline,
+    /// Its server is busy for the account.
+    Busy,
+    /// Its server would not search as asked, and why.
+    Refused(String),
+    /// It could not be asked, and why.
     Failed(String),
 }
 
 impl State {
-    /// Ask Gmail whenever a new search's results say it should be.
+    /// Ask the servers whenever a new search's results say they should be.
     pub fn watch_remote(self) {
         Effect::new(move || {
             let Some(results) = self.results.get() else {
@@ -53,19 +111,21 @@ impl State {
                     .with(|r| r.as_ref().is_some_and(|r| r.query == results.query))
             });
             match results.remote.clone() {
-                Some(remote) if !asked => untracked(|| self.ask_gmail(&results, remote)),
+                Some(remote) if !asked => untracked(|| self.ask_servers(&results, remote)),
                 Some(_) => {}
                 None => untracked(|| self.remote.set(None)),
             }
         });
     }
 
-    fn ask_gmail(self, results: &SearchResults, remote: Remote) {
+    fn ask_servers(self, results: &SearchResults, remote: Remote) {
         let waiting = remote.accounts.iter().map(|(_, n)| n).sum();
         let query = results.query.clone();
+        let asked = Asked::of(&remote);
         let Some(sync) = sync() else {
             self.remote.set(Some(RemoteSearch {
                 query,
+                asked,
                 status: RemoteStatus::Offline { waiting },
                 rows: Vec::new(),
             }));
@@ -73,6 +133,7 @@ impl State {
         };
         self.remote.set(Some(RemoteSearch {
             query: query.clone(),
+            asked,
             status: RemoteStatus::Asking { waiting },
             rows: Vec::new(),
         }));
@@ -87,24 +148,39 @@ impl State {
             })
             .collect();
         let signal = self.remote;
+        let mail = sync.mail().clone();
         sync.runtime.clone().spawn(async move {
             let mut rows: Vec<ThreadRow> = Vec::new();
-            let mut trouble: Option<RemoteStatus> = None;
+            let mut notes: Vec<Note> = Vec::new();
+            let mut answered = 0;
             for (account, _) in &remote.accounts {
-                let ids = match sync
-                    .sync_engine()
-                    .search_remote(account, &remote.query, REMOTE_MAX)
-                    .await
-                {
-                    Ok(ids) => ids,
-                    Err(SyncError::Http(e)) => {
-                        tracing::info!("Gmail search for {account}: {e}");
-                        trouble = Some(RemoteStatus::Offline { waiting });
-                        continue;
-                    }
+                let holds = {
+                    let (q, a) = (query.clone(), account.clone());
+                    Holds::new(move |store, ids| {
+                        Commands::new(store.clone())
+                            .server_found_holds(&q, &a, ids)
+                            .map_err(|e| e.to_string())
+                    })
+                };
+                let found = mail
+                    .search_server(
+                        account,
+                        &remote.query,
+                        remote.imap_search(account),
+                        &holds,
+                        REMOTE_MAX,
+                    )
+                    .await;
+                let found = match found {
+                    Ok(found) => found,
+                    // A newer search took this one's place; it says what
+                    // the servers found.
+                    Err(SyncError::SearchSuperseded) => return,
                     Err(e) => {
-                        tracing::warn!("Gmail search for {account}: {e}");
-                        trouble = Some(RemoteStatus::Failed(e.to_string()));
+                        notes.push(Note {
+                            account: account.clone(),
+                            what: trouble_of(account, e),
+                        });
                         continue;
                     }
                 };
@@ -114,20 +190,49 @@ impl State {
                     .map(|(_, t)| t.clone())
                     .collect();
                 let (store, q, a) = (sync.store.clone(), query.clone(), account.clone());
-                let found = tokio::task::spawn_blocking(move || {
+                let ids = found.ids;
+                let checked = tokio::task::spawn_blocking(move || {
                     Commands::new(store).remote_rows(&q, &a, &ids, &here, grouping)
                 })
                 .await;
-                match found {
-                    Ok(Ok(found)) => rows.extend(found),
-                    Ok(Err(e)) => trouble = Some(RemoteStatus::Failed(e.to_string())),
-                    Err(e) => trouble = Some(RemoteStatus::Failed(e.to_string())),
+                let failed = match checked {
+                    Ok(Ok(found)) => {
+                        rows.extend(found);
+                        None
+                    }
+                    Ok(Err(e)) => Some(e.to_string()),
+                    Err(e) => Some(e.to_string()),
+                };
+                if let Some(why) = failed {
+                    tracing::warn!("server search for {account}: {why}");
+                    notes.push(Note {
+                        account: account.clone(),
+                        what: Trouble::Failed(why),
+                    });
+                    continue;
+                }
+                answered += 1;
+                if let Some(why) = found.incomplete {
+                    notes.push(Note {
+                        account: account.clone(),
+                        what: Trouble::Incomplete(why),
+                    });
+                }
+                if let Some(most) = found.looked_through {
+                    notes.push(Note {
+                        account: account.clone(),
+                        what: Trouble::Incomplete(looked_through(most)),
+                    });
                 }
             }
             rows.sort_by_key(|r| std::cmp::Reverse(r.summary.latest));
-            let status = match trouble {
-                Some(trouble) if rows.is_empty() => trouble,
-                _ => RemoteStatus::Found(rows.len()),
+            let status = if answered > 0 {
+                RemoteStatus::Found {
+                    count: rows.len(),
+                    notes,
+                }
+            } else {
+                unanswered(notes, waiting)
             };
             signal.update_send(move |r| {
                 if let Some(r) = r
@@ -141,32 +246,98 @@ impl State {
     }
 }
 
-/// The line under a search's heading about Gmail's part, if it has one.
-pub fn remote_line(remote: Option<&RemoteSearch>) -> String {
-    let Some(remote) = remote else {
-        return String::new();
-    };
-    let messages = |n: usize| {
-        if n == 1 {
-            "1 message".to_owned()
-        } else {
-            format!("{} messages", crate::sync::thousands(n))
+/// What a search that stopped at its bound says: the walk looked through
+/// the newest `most` messages the server found, across its folders, and
+/// stopped with older ones it found not looked at, any of which may match.
+fn looked_through(most: usize) -> String {
+    format!(
+        "only the newest {most} of the messages it found were looked through; older ones may match too"
+    )
+}
+
+/// The status when no server searched: one server's trouble as it is,
+/// several offline as offline, otherwise each one's.
+fn unanswered(mut notes: Vec<Note>, waiting: usize) -> RemoteStatus {
+    if notes.iter().all(|n| n.what == Trouble::Offline) {
+        return RemoteStatus::Offline { waiting };
+    }
+    if notes.len() > 1 {
+        return RemoteStatus::Unanswered { waiting, notes };
+    }
+    match notes.pop().map(|n| n.what) {
+        Some(Trouble::Busy) => RemoteStatus::Busy { waiting },
+        Some(Trouble::Refused(why)) => RemoteStatus::Refused(why),
+        Some(Trouble::Failed(why) | Trouble::Incomplete(why)) => RemoteStatus::Failed(why),
+        Some(Trouble::Offline) | None => RemoteStatus::Offline { waiting },
+    }
+}
+
+/// What a server search's failure means for the line.
+fn trouble_of(account: &EmailAddress, e: SyncError) -> Trouble {
+    match e {
+        SyncError::Http(_) | SyncError::Unreachable { .. } => {
+            tracing::info!("server search for {account}: {e}");
+            Trouble::Offline
         }
-    };
-    match &remote.status {
-        RemoteStatus::Asking { waiting } => format!(
-            "Asking Gmail too: {} here are not downloaded yet\u{2026}",
-            messages(*waiting)
-        ),
-        RemoteStatus::Found(0) => "Gmail found nothing more in mail not downloaded yet.".to_owned(),
-        RemoteStatus::Found(1) => "Gmail found 1 more in mail not downloaded yet.".to_owned(),
-        RemoteStatus::Found(n) => {
-            format!("Gmail found {n} more in mail not downloaded yet.")
+        SyncError::Busy { .. } => {
+            tracing::info!("server search for {account}: {e}");
+            Trouble::Busy
         }
-        RemoteStatus::Offline { waiting } => format!(
-            "Offline: mail not downloaded yet ({}) is searched by subject and sender only.",
-            messages(*waiting)
-        ),
-        RemoteStatus::Failed(why) => format!("Gmail could not be asked: {why}"),
+        SyncError::SearchRefused { message, .. } => {
+            tracing::info!("server search for {account} refused: {message}");
+            Trouble::Refused(message)
+        }
+        e => {
+            tracing::warn!("server search for {account}: {e}");
+            Trouble::Failed(e.to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn note(account: &str, what: Trouble) -> Note {
+        Note {
+            account: EmailAddress::parse(account).unwrap(),
+            what,
+        }
+    }
+
+    #[test]
+    fn a_search_stopped_at_its_bound_says_so() {
+        assert_eq!(
+            looked_through(500),
+            "only the newest 500 of the messages it found were looked through; older ones may match too"
+        );
+    }
+
+    #[test]
+    fn one_servers_trouble_is_the_status() {
+        let busy = vec![note("a@x.org", Trouble::Busy)];
+        assert_eq!(unanswered(busy, 3), RemoteStatus::Busy { waiting: 3 });
+        let refused = vec![note("a@x.org", Trouble::Refused("why".into()))];
+        assert_eq!(unanswered(refused, 3), RemoteStatus::Refused("why".into()));
+    }
+
+    #[test]
+    fn several_servers_troubles_are_each_kept() {
+        let offline = vec![
+            note("a@x.org", Trouble::Offline),
+            note("b@x.org", Trouble::Offline),
+        ];
+        assert_eq!(unanswered(offline, 2), RemoteStatus::Offline { waiting: 2 });
+        let mixed = vec![
+            note("a@x.org", Trouble::Busy),
+            note("b@x.org", Trouble::Offline),
+        ];
+        assert_eq!(
+            unanswered(mixed.clone(), 2),
+            RemoteStatus::Unanswered {
+                waiting: 2,
+                notes: mixed
+            }
+        );
     }
 }

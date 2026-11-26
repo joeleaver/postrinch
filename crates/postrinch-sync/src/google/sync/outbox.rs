@@ -14,19 +14,11 @@ use tokio::sync::RwLock;
 
 use super::GmailSync;
 use crate::google::labels::{STARRED, TRASH, UNREAD};
-use crate::{SyncError, SyncResult};
+use crate::outbox_runs::{merged, runs};
+use crate::{SendReport, SyncError, SyncResult};
 
 /// `messages.batchModify` takes at most this many messages a call.
 const BATCH: usize = 1000;
-
-/// What sending an account's outbox did.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct SendReport {
-    pub sent: usize,
-    /// Why Gmail refused the changes it would never take. Each was dropped
-    /// and its messages read again from Gmail.
-    pub refused: Vec<String>,
-}
 
 /// Now, as the store keeps times.
 pub(super) fn now() -> Timestamp {
@@ -34,40 +26,6 @@ pub(super) fn now() -> Timestamp {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
     Timestamp::from_millis(millis)
-}
-
-/// Waiting entries in order, in runs that make the same change, each run
-/// naming at most [`BATCH`] messages.
-fn groups(waiting: Vec<OutboxEntry>) -> Vec<Vec<OutboxEntry>> {
-    let mut all: Vec<Vec<OutboxEntry>> = Vec::new();
-    for entry in waiting {
-        match all.last_mut() {
-            Some(run)
-                if run[0].change == entry.change
-                    && run.iter().map(|e| e.messages.len()).sum::<usize>()
-                        + entry.messages.len()
-                        <= BATCH =>
-            {
-                run.push(entry);
-            }
-            _ => all.push(vec![entry]),
-        }
-    }
-    all
-}
-
-/// A run of entries as one: their messages, each once, and their change.
-fn merged(run: &[OutboxEntry]) -> OutboxEntry {
-    let mut one = run[0].clone();
-    one.messages.clear();
-    for entry in run {
-        for m in &entry.messages {
-            if !one.messages.contains(m) {
-                one.messages.push(m.clone());
-            }
-        }
-    }
-    one
 }
 
 /// Whether Gmail refused a change for good: a malformed request, or a
@@ -109,7 +67,7 @@ impl GmailSync {
         let owner = account.clone();
         let entries = self.with_store(move |s| s.outbox(&owner)).await?;
         let waiting: Vec<OutboxEntry> = entries.into_iter().filter(|e| e.sent.is_none()).collect();
-        for group in groups(waiting) {
+        for group in runs(waiting, BATCH) {
             if group.len() == 1 {
                 self.send_one(account, &group[0], &mut report).await?;
                 continue;

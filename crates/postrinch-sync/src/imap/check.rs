@@ -43,8 +43,39 @@ pub enum CheckFailure {
     Insecure,
     /// It refused the sign-in, in its own words.
     SignIn(SignInReason),
+    /// It turned the account away for now (too many connections, a
+    /// limit, its sign-in service down), in its own words: the settings
+    /// may well be right, and trying again later may pass.
+    Busy(String),
     /// It answered something else, in its own words where it gave them.
     Server(String),
+}
+
+impl std::fmt::Display for CheckFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unreachable(detail) => write!(f, "could not be reached: {detail}"),
+            Self::Tls(detail) => write!(f, "the secure connection failed: {detail}"),
+            Self::Insecure => f.write_str("it offers no encryption, so no password was sent"),
+            Self::SignIn(reason) => write!(f, "it refused the sign-in: {reason}"),
+            Self::Busy(message) => write!(f, "it is busy; try again later: {message}"),
+            Self::Server(message) => write!(f, "it answered: {message}"),
+        }
+    }
+}
+
+impl std::fmt::Display for AccountCheck {
+    /// Each server's outcome on a line of its own.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.imap {
+            Ok(folders) => writeln!(f, "IMAP: signed in, {} folders", folders.len())?,
+            Err(failure) => writeln!(f, "IMAP: {failure}")?,
+        }
+        match &self.smtp {
+            Ok(()) => write!(f, "SMTP: signed in"),
+            Err(failure) => write!(f, "SMTP: {failure}"),
+        }
+    }
 }
 
 impl From<SyncError> for CheckFailure {
@@ -54,6 +85,7 @@ impl From<SyncError> for CheckFailure {
             SyncError::Tls { detail, .. } => Self::Tls(detail),
             SyncError::Insecure { .. } => Self::Insecure,
             SyncError::NeedsSignIn(reason) => Self::SignIn(reason),
+            SyncError::Busy { message, .. } => Self::Busy(message),
             SyncError::Server { message, .. } => Self::Server(message),
             other => Self::Server(other.to_string()),
         }

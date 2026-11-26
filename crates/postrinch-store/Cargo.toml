@@ -16,7 +16,13 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+unicode-segmentation = { workspace = true }
 zstd = { workspace = true }
+
+[features]
+# Write failures a test can program (`Store::fail_updates`), for the tests
+# of the crates that use the store. Never enabled in the app.
+faults = []
 
 [dev-dependencies]
 tempfile = { workspace = true }

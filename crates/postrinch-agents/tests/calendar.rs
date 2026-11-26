@@ -162,7 +162,7 @@ fn an_agent_reads_calendars_and_proposes_answers() {
         agents_path,
         postrinch_agents::serve::Hooks {
             on_change: Arc::new(move |c: &Changed| seen.lock().unwrap().push(c.clone())),
-            gmail: None,
+            remote: None,
         },
     )
     .unwrap();

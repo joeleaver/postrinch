@@ -3,7 +3,8 @@
 
 use async_imap::types::{Name, NameAttribute};
 
-/// An RFC 6154 special use.
+/// An RFC 6154 special use, or Gmail's `\Important` (its virtual folder
+/// of the mail it deems important, listed beside RFC 6154's).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SpecialUse {
     All,
@@ -13,6 +14,7 @@ pub enum SpecialUse {
     Junk,
     Sent,
     Trash,
+    Important,
 }
 
 /// One folder from LIST.
@@ -50,6 +52,9 @@ impl ListedFolder {
                 // (and implies \Noselect, which some servers leave out).
                 NameAttribute::Extension(other) if other.eq_ignore_ascii_case("\\NonExistent") => {
                     selectable = false;
+                }
+                NameAttribute::Extension(other) if other.eq_ignore_ascii_case("\\Important") => {
+                    special_use = Some(SpecialUse::Important);
                 }
                 _ => {}
             }

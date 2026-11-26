@@ -88,6 +88,7 @@ fn editor_body(state: State) -> NodeHandle {
                     div { class: "rule-form-row",
                         span { class: "rule-form-label", "Name" }
                         TextInput {
+                            spellcheck: false,
                             value_fn: move || name.get(),
                             oninput: move |v: String| {
                                 name.set(v.clone());
@@ -224,7 +225,7 @@ fn looks_row(state: State, id: u32, field: &'static str, how: &'static str) -> N
         category_select(__scope, value, set)
     } else if needs_value(row.how) {
         let hint = placeholder(row.field, row.how);
-        rsx! { TextInput { placeholder: hint, value_fn: move || value.get(), oninput: set } }
+        rsx! { TextInput { spellcheck: false, placeholder: hint, value_fn: move || value.get(), oninput: set } }
     } else {
         rsx! { span { class: "rule-value-none" } }
     };
@@ -316,6 +317,7 @@ fn does_row(state: State, id: u32, what: &'static str) -> NodeHandle {
                     div { class: "rule-agent",
                         Select { data: agents, placeholder: "Pick an agent", value_fn: move || value.get(), onchange: move |v: String| set(v) }
                         TextInput {
+                            spellcheck: true,
                             placeholder: "What to do, such as \u{201c}draft a reply saying I\u{2019}ll be there\u{201d}",
                             value_fn: move || prompt.get(),
                             oninput: move |v: String| {

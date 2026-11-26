@@ -1,18 +1,15 @@
-//! Running sync in the background and reporting it to the window.
+//! Running sync in the background and reporting it to the window. Sync
+//! itself starts in `sync_start`.
 
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use postrinch_model::EmailAddress;
-use postrinch_store::Store;
-use postrinch_sync::Keychain;
-use postrinch_sync::google::{
-    ClientConfig, GmailApi, GmailSync, GoogleAuth, KeepOptions, Phase, Progress, SyncEvent,
-};
+use postrinch_sync::{Phase, Progress, SyncEvent};
 use rinch::prelude::*;
-use tokio::runtime::Handle;
 use tokio::sync::Notify;
+
+pub use crate::sync_start::{SyncHandle, start};
 
 /// One account's sync, as the sidebar shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,117 +22,41 @@ pub struct AccountSync {
     pub trouble: bool,
 }
 
-/// What the window needs to act on accounts while sync runs.
-#[derive(Clone)]
-pub struct SyncHandle {
-    pub auth: Arc<GoogleAuth>,
-    pub store: Store,
-    /// The runtime sync runs on, for sign-ins and removals.
-    pub runtime: Handle,
-    /// Starts sync's next pass at once.
-    pub wake: Arc<Notify>,
-    /// Sends the changes made here at once.
-    pub send: Arc<Notify>,
-    sync: GmailSync,
+/// The last of the accounts' passes to end, numbered so that the same
+/// account's next pass is news too. What a pass keeps of an account
+/// beyond its mail (an IMAP account's folders) is read again from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PassEnd {
+    pub account: EmailAddress,
+    pub number: u64,
 }
 
-impl SyncHandle {
-    /// The sync itself, for downloads the person asks for.
-    pub fn sync_engine(&self) -> &GmailSync {
-        &self.sync
-    }
-}
-
-/// Why sync is not running: a sentence for the sidebar, and the detail
-/// for the log.
-#[derive(Debug)]
-pub struct SyncOff {
-    pub said: &'static str,
-    pub detail: String,
-}
-
-impl SyncOff {
-    fn new(said: &'static str, detail: impl Into<String>) -> Self {
-        Self {
-            said,
-            detail: detail.into(),
-        }
-    }
-}
-
-/// Start keeping every account in sync, and sending the changes made here,
-/// on a thread of its own. `status` follows what each account's sync is
-/// doing; `revision` is bumped when the store changed. Fails, saying why,
-/// when sync cannot run at all.
-pub fn start(
-    store: Store,
-    status: Signal<Vec<AccountSync>>,
-    revision: Signal<u64>,
-) -> Result<SyncHandle, SyncOff> {
-    let Some(path) = ClientConfig::default_path() else {
-        return Err(SyncOff::new(
-            "Sync is off: this computer has no settings folder.",
-            "no configuration directory",
-        ));
-    };
-    let config = ClientConfig::load(&path).map_err(|e| {
-        let said = if path.exists() {
-            "Sync is off: the Google sign-in settings could not be read."
-        } else {
-            "Sync is off: Google sign-in is not set up on this computer."
-        };
-        SyncOff::new(said, format!("{}: {e}", path.display()))
-    })?;
-    let auth = Arc::new(GoogleAuth::new(config, Arc::new(Keychain::GOOGLE)));
-    let sync = GmailSync::new(Arc::new(GmailApi::new(auth.clone())), store.clone());
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| {
-            SyncOff::new(
-                "Sync is off: it could not start.",
-                format!("its runtime: {e}"),
-            )
-        })?;
-    let (wake, send) = (Arc::new(Notify::new()), Arc::new(Notify::new()));
-    let fetch = wake.clone();
-    let events = Arc::new(move |event: SyncEvent| report(event, status, revision, &fetch));
-    let handle = SyncHandle {
-        auth,
-        store,
-        runtime: runtime.handle().clone(),
-        wake: wake.clone(),
-        send: send.clone(),
-        sync: sync.clone(),
-    };
-    let options = KeepOptions::default();
-    thread::Builder::new()
-        .name("sync".into())
-        .spawn(move || {
-            runtime.block_on(async {
-                tokio::join!(
-                    sync.keep_in_sync(options, events.clone(), wake),
-                    sync.keep_sending(options, events, send),
-                )
-            })
-        })
-        .map_err(|e| {
-            SyncOff::new(
-                "Sync is off: it could not start.",
-                format!("its thread: {e}"),
-            )
-        })?;
-    Ok(handle)
+/// Notes in `ended` that a pass of `account` ended, from any thread.
+pub fn pass_ended(ended: Signal<Option<PassEnd>>, account: EmailAddress) {
+    ended.update_send(move |last| {
+        let number = last.as_ref().map_or(1, |l| l.number + 1);
+        *last = Some(PassEnd { account, number });
+    });
 }
 
 /// Turn a sync event into the sidebar's line for the account, from the
-/// sync thread.
-fn report(
+/// sync thread. `ended` is told of each pass that ended: once its sync
+/// part is done ([`SyncEvent::Synced`], before the hours a first
+/// download can take), or when it stopped short.
+pub(crate) fn report(
     event: SyncEvent,
     status: Signal<Vec<AccountSync>>,
     revision: Signal<u64>,
+    ended: Signal<Option<PassEnd>>,
     wake: &Notify,
 ) {
+    if let SyncEvent::Synced { account, .. }
+    | SyncEvent::Failed { account, .. }
+    | SyncEvent::NeedsSignIn { account }
+    | SyncEvent::Busy { account, .. } = &event
+    {
+        pass_ended(ended, account.clone());
+    }
     let (account, line, progress, trouble, changed) = match event {
         SyncEvent::Started { account } => (
             account,
@@ -188,7 +109,17 @@ fn report(
         SyncEvent::NeedsSignIn { account } => {
             (account, "Needs to sign in".to_owned(), None, true, true)
         }
-        // Mail that went: show what is left to send, and fetch Gmail's
+        // The server's limit, not the account's sign-in: say so in its
+        // words, and when it is tried again; the account is left signed in.
+        SyncEvent::Busy {
+            account,
+            message,
+            retry_in,
+        } => {
+            tracing::info!("{account}: server busy: {message}");
+            (account, busy_line(&message, retry_in), None, true, false)
+        }
+        // Mail that went: show what is left to send, and fetch the server's
         // copy into Sent now rather than at the next check.
         SyncEvent::Sent { report, mail, .. } if report.refused.is_empty() && mail > 0 => {
             revision.update_send(|n| *n += 1);
@@ -201,10 +132,13 @@ fn report(
         SyncEvent::Sent {
             account, report, ..
         } => {
-            tracing::warn!("{account}: Gmail refused changes: {:?}", report.refused);
+            tracing::warn!(
+                "{account}: the server refused changes: {:?}",
+                report.refused
+            );
             let line = match report.refused.len() {
-                1 => "Gmail refused a change; showing Gmail's mail".to_owned(),
-                n => format!("Gmail refused {n} changes; showing Gmail's mail"),
+                1 => "The server refused a change; showing its mail".to_owned(),
+                n => format!("The server refused {n} changes; showing its mail"),
             };
             (account, line, None, true, true)
         }
@@ -282,6 +216,29 @@ fn describe(progress: Progress) -> (String, Option<(usize, usize)>) {
     }
 }
 
+/// The sidebar's line for a busy server: when it is tried again, then
+/// the server's own sentence.
+fn busy_line(message: &str, retry_in: Duration) -> String {
+    let message = message.trim();
+    let when = wait_in_words(retry_in);
+    if message.is_empty() {
+        format!("Server busy; trying again in {when}")
+    } else {
+        format!("Server busy; trying again in {when}: {message}")
+    }
+}
+
+/// A wait as the sidebar says it: seconds under two minutes, else whole
+/// minutes, rounded up so it never promises sooner than it is.
+fn wait_in_words(wait: Duration) -> String {
+    let secs = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
+    if secs < 120 {
+        format!("{} s", secs.max(1))
+    } else {
+        format!("{} min", secs.div_ceil(60))
+    }
+}
+
 /// 3718 as "3,718".
 pub fn thousands(n: usize) -> String {
     let digits = n.to_string();
@@ -297,7 +254,34 @@ pub fn thousands(n: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::thousands;
+    use std::time::Duration;
+
+    use super::{busy_line, thousands, wait_in_words};
+
+    #[test]
+    fn busy_says_when_and_the_servers_words() {
+        assert_eq!(
+            busy_line(
+                "Too many simultaneous connections. (Failure)",
+                Duration::from_secs(25)
+            ),
+            "Server busy; trying again in 25 s: Too many simultaneous connections. (Failure)"
+        );
+        assert_eq!(
+            busy_line("  ", Duration::from_secs(600)),
+            "Server busy; trying again in 10 min"
+        );
+    }
+
+    #[test]
+    fn waits_in_words() {
+        assert_eq!(wait_in_words(Duration::ZERO), "1 s");
+        assert_eq!(wait_in_words(Duration::from_millis(14_200)), "15 s");
+        assert_eq!(wait_in_words(Duration::from_secs(119)), "119 s");
+        assert_eq!(wait_in_words(Duration::from_secs(120)), "2 min");
+        assert_eq!(wait_in_words(Duration::from_secs(121)), "3 min");
+        assert_eq!(wait_in_words(Duration::from_secs(900)), "15 min");
+    }
 
     #[test]
     fn groups_thousands() {

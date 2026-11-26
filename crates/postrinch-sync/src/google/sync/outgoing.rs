@@ -5,23 +5,12 @@ use postrinch_model::EmailAddress;
 use postrinch_store::{Outgoing, OutgoingKind};
 
 use super::GmailSync;
+use crate::compose::outgoing_message_id;
 use crate::{SyncError, SyncResult, build_message};
-
-/// The `Message-ID` (without brackets) a queued message goes out with:
-/// the same every attempt, so a send that may have gone through is found
-/// rather than sent again.
-pub(crate) fn outgoing_message_id(outgoing: &Outgoing) -> String {
-    format!(
-        "postrinch.{}.{}@{}",
-        outgoing.created.as_millis(),
-        outgoing.seq,
-        outgoing.draft.account.domain()
-    )
-}
 
 impl GmailSync {
     /// How much of the account's mail waits to be delivered.
-    pub(super) async fn outgoing_waiting(&self, account: &EmailAddress) -> SyncResult<usize> {
+    pub(crate) async fn outgoing_waiting(&self, account: &EmailAddress) -> SyncResult<usize> {
         let account = account.clone();
         self.with_store(move |s| {
             Ok(s.outgoing_for(&account)?

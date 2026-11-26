@@ -3,6 +3,7 @@
 use mail_builder::MessageBuilder;
 use mail_builder::headers::address::Address;
 use postrinch_model::{Draft, Mailbox};
+use postrinch_store::Outgoing;
 
 fn address(mailbox: &Mailbox) -> Address<'static> {
     match &mailbox.name {
@@ -19,6 +20,18 @@ fn list(mailboxes: &[Mailbox]) -> Address<'static> {
 /// queue. Gmail replaces `Message-ID` with its own, so this is how a send
 /// that may have gone through is found again.
 pub const MARKER_HEADER: &str = "X-Postrinch-Id";
+
+/// The `Message-ID` (without brackets) a queued message goes out with:
+/// the same every attempt, so a send that may have gone through is found
+/// rather than sent again.
+pub fn outgoing_message_id(outgoing: &Outgoing) -> String {
+    format!(
+        "postrinch.{}.{}@{}",
+        outgoing.created.as_millis(),
+        outgoing.seq,
+        outgoing.draft.account.domain()
+    )
+}
 
 /// The message a draft makes, from `from_name` at its account, with
 /// `message_id` (without brackets) as its `Message-ID` and its

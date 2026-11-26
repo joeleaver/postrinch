@@ -22,6 +22,37 @@ pub struct ImapSettings {
     /// servers, Outlook, iCloud), so Postrinch does not append its own copy.
     #[serde(default = "files_sent_by_default")]
     pub server_files_sent: bool,
+    /// The person set `server_files_sent` in the account's settings: what
+    /// sends show no longer changes it. Off, Postrinch learns it from
+    /// what sends find in Sent.
+    #[serde(default)]
+    pub server_files_sent_chosen: bool,
+}
+
+impl ImapSettings {
+    /// These settings' servers and sign-in in place of `stored`'s: what
+    /// adding an account that is already here changes (docs/imap.md,
+    /// "Adding an account"). What the person chose since (the folder
+    /// roles, and whether the provider files sent mail itself when they
+    /// set it) and what sending learned stay as `stored` has them.
+    pub fn servers_over(self, stored: ImapSettings) -> ImapSettings {
+        // Named field by field, so a field added later is placed here on
+        // purpose: either the add changes it, or it is kept.
+        let ImapSettings {
+            imap,
+            smtp,
+            sign_in,
+            roles: _,
+            server_files_sent: _,
+            server_files_sent_chosen: _,
+        } = self;
+        ImapSettings {
+            imap,
+            smtp,
+            sign_in,
+            ..stored
+        }
+    }
 }
 
 /// On until a send shows otherwise (docs/imap.md, "Writing and sending").
@@ -108,6 +139,7 @@ mod tests {
                 ..FolderRoles::default()
             },
             server_files_sent: false,
+            server_files_sent_chosen: true,
         }
     }
 
@@ -122,6 +154,28 @@ mod tests {
     }
 
     #[test]
+    fn servers_over_keeps_what_was_chosen_and_learned() {
+        let stored = settings();
+        let mut given = settings();
+        given.imap.host = "mail.example.org".into();
+        given.smtp.port = 465;
+        given.smtp.security = Security::Tls;
+        given.imap.username = "ada".into();
+        given.sign_in = SignInMethod::Password;
+        given.roles = FolderRoles::default();
+        given.server_files_sent = true;
+        given.server_files_sent_chosen = false;
+
+        let merged = given.clone().servers_over(stored.clone());
+        assert_eq!(merged.imap, given.imap);
+        assert_eq!(merged.smtp, given.smtp);
+        assert_eq!(merged.sign_in, SignInMethod::Password);
+        assert_eq!(merged.roles, stored.roles);
+        assert!(!merged.server_files_sent);
+        assert!(merged.server_files_sent_chosen, "the person's choice stays");
+    }
+
+    #[test]
     fn missing_fields_take_their_defaults() {
         let json = r#"{
             "imap": {"host": "imap.example.org", "port": 993, "username": "ada"},
@@ -132,5 +186,9 @@ mod tests {
         assert_eq!(settings.sign_in, SignInMethod::Password);
         assert_eq!(settings.roles, FolderRoles::default());
         assert!(settings.server_files_sent);
+        assert!(
+            !settings.server_files_sent_chosen,
+            "learned until the person sets it"
+        );
     }
 }

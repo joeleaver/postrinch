@@ -1,6 +1,10 @@
 //! The window: a header over the sidebar, the thread list and the reader.
 
 mod about;
+mod add_account;
+mod add_account_choose;
+mod add_account_import;
+mod add_account_servers;
 mod agent_dialogs;
 mod agents_settings;
 mod attachment_cards;
@@ -16,6 +20,7 @@ mod event_editor;
 mod event_notes;
 mod event_pane;
 mod icons;
+mod imap_account;
 mod invitation_card;
 mod keys;
 mod label_edit;
@@ -42,6 +47,7 @@ mod search;
 mod settings;
 mod share_card;
 mod sidebar;
+mod sign_in_again;
 mod splitter;
 mod style;
 pub(crate) mod thread_actions;
@@ -73,8 +79,15 @@ pub fn account_color(index: usize) -> &'static str {
 /// The whole window, over one store.
 pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle {
     let commands = Rc::new(Commands::new(store.clone()));
-    let sync = match sync::start(store, state.sync, state.revision) {
-        Ok(handle) => Some(handle),
+    let sync = match sync::start(store, state.sync, state.revision, state.pass_ended) {
+        Ok((handle, google_off)) => {
+            // IMAP accounts sync all the same.
+            if let Some(off) = google_off {
+                tracing::warn!("{} ({})", off.said, off.detail);
+                state.sync_off.set(Some(off.said.to_owned()));
+            }
+            Some(handle)
+        }
         Err(off) => {
             tracing::error!("{} ({})", off.said, off.detail);
             state.sync_off.set(Some(off.said.to_owned()));
@@ -89,6 +102,13 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     agents::start((*commands).clone(), state, sync.as_ref().cloned());
     if let Some(sync) = &sync {
         crate::rules_ui::set_sender(sync.send.clone());
+        // An IMAP account's Folders list, read while its page is shown.
+        state.imap.folders.follow(
+            crate::imap_folders::Reader::of(sync),
+            state.notice,
+            move || settings::imap_page(state),
+            state.pass_ended,
+        );
     }
     crate::rules::start(
         (*commands).clone(),
@@ -135,7 +155,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {compose::CSS} }
                 style { {search::CSS} }
                 style { {outgoing::CSS} }
-                style { {about::CSS} }
+                style { {about::CSS} {add_account::CSS} {add_account_import::CSS} {add_account_servers::CSS} {imap_account::CSS} }
                 style { {thread_actions::CSS} }
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {share_card::CSS} {compose_files::CSS} {label_new::CSS} }
@@ -143,6 +163,8 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {calendar_side::CSS} {calendar_view::CSS} {calendar_month::CSS} {event_pane::CSS} {event_notes::CSS} {calendar_pane::CSS} {event_editor::CSS} {notices_settings::CSS} }
                 {label_edit::label_dialog(__scope, state)}
                 {label_new::new_label_dialog(__scope, state)}
+                {add_account::add_account_dialog(__scope, state)}
+                {sign_in_again::sign_in_again_dialog(__scope, state)}
                 {compose::compose_dialog(__scope, state)}
                 if state.view.get() == View::Mail {
                     div { class: "panes",
@@ -199,6 +221,7 @@ fn title_status(state: State) -> NodeHandle {
             }
             div { class: "title-search",
                 TextInput {
+                    spellcheck: false,
                     size: "xs",
                     placeholder: "Search all mail",
                     value_fn: move || state.search_draft.get(),

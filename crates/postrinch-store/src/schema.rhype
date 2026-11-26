@@ -22,6 +22,9 @@ type Account {
     // The provider's sync position (Gmail's historyId), written only after
     // everything before it has been stored.
     sync_cursor: String
+    // What sends have shown about whether an IMAP account's provider files
+    // sent mail in Sent itself (sent_filing.rs); null until a send has.
+    sent_filing: Json
     labels: [Label] @inverse(Label.account)
     threads: [Thread] @inverse(Thread.account)
     imap_folders: [ImapFolder] @inverse(ImapFolder.account)
@@ -160,6 +163,16 @@ type Outgoing {
     error: String
     // Whether the provider refused it for good.
     refused: Bool
+    // SendStage: how far an IMAP account's send got; null for queued.
+    stage: Json
+    // The recipients (EmailAddress list) the server took it for in earlier
+    // transactions of a send split by the server's limit; null for none.
+    delivered_to: Json
+    // While `stage` is data_sent: the recipients that transaction was for.
+    sending_to: Json
+    // The recipients (PutOff list) the server put off on earlier attempts
+    // (outgoing_put_off.rs); null for none.
+    put_off: Json
 }
 
 // One account's mail rules (postrinch-rules): `settings` as the account's
@@ -232,7 +245,10 @@ type ImapFolder {
     // 0 for none (no CONDSTORE).
     highest_modseq: u64
     subscribed: Bool
+    // RFC 8474 MAILBOXID, or null where the server has none.
+    mailbox_id: String
     places: [ImapPlace] @inverse(ImapPlace.folder)
+    attempts: [ImapCopyAttempt] @inverse(ImapCopyAttempt.folder)
 }
 
 // One copy of a message on an IMAP server: a UID in a folder
@@ -254,4 +270,24 @@ type ImapPlace {
     flags: Json
     // 0 for none (no CONDSTORE).
     modseq: u64
+    // The copy's INTERNALDATE; absent when the server gave none.
+    arrived: DateTime
+}
+
+// A COPY or MOVE of a message into a folder whose copy the server has not
+// been seen to make (imap_attempts.rs): it stops the copy being made twice,
+// and is never counted as a copy. Its one to-one relation is its folder, so
+// removing the folder, or the account, removes it.
+type ImapCopyAttempt {
+    // "<folder key>\u001f<message provider id>".
+    key: String @unique
+    folder: ImapFolder @on_delete(cascade)
+    label_id: String
+    // "<account address key>\u001f<message provider id>", indexed to find
+    // a message's.
+    message: String @indexed
+    // The folder's UIDVALIDITY and UIDNEXT on the server just before the
+    // command.
+    uidvalidity: u32
+    uidnext: u32
 }

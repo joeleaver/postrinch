@@ -103,6 +103,8 @@ pub struct State {
     pub sync: Signal<Vec<AccountSync>>,
     /// Bumped whenever sync changed the store, so what is shown reloads.
     pub revision: Signal<u64>,
+    /// The last account whose pass ended.
+    pub pass_ended: Signal<Option<crate::sync::PassEnd>>,
     /// Sidebar rows opened or closed by the person (`row_open`).
     pub view_tree: Signal<std::collections::BTreeMap<String, bool>>,
     /// The label being renamed or coloured.
@@ -182,6 +184,10 @@ pub struct State {
     pub update_ready: Signal<Option<String>>,
     /// Settings › Rules and its editor.
     pub rules: crate::rules_ui::RulesUi,
+    /// The add-account dialog.
+    pub adding: crate::add_account_run::AddUi,
+    /// An IMAP account's settings: its folders, signing in again.
+    pub imap: crate::imap_settings_run::ImapUi,
     /// The invitations the reader shows.
     pub invitations: crate::invitations::Invitations,
     /// The calendar view.
@@ -221,6 +227,7 @@ impl State {
             thread: Signal::new(None),
             sync: Signal::new(Vec::new()),
             revision: Signal::new(0),
+            pass_ended: Signal::new(None),
             view_tree: Signal::new(settings.view_tree.clone()),
             editing: Signal::new(None),
             making: Signal::new(None),
@@ -261,6 +268,8 @@ impl State {
             update: Signal::new(crate::update::UpdateStatus::NotInstalled),
             update_ready: Signal::new(None),
             rules: crate::rules_ui::RulesUi::new(),
+            adding: crate::add_account_run::AddUi::new(),
+            imap: crate::imap_settings_run::ImapUi::new(),
             invitations: crate::invitations::Invitations::new(),
             calendar: crate::calendar_ui::CalendarUi::new(&settings),
             panel: crate::calendar_panel::Panel::new(),

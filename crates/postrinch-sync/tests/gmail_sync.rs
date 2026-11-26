@@ -8,7 +8,7 @@ mod common;
 use common::*;
 use postrinch_model::{AccountState, ProviderMessageId, SignInReason};
 use postrinch_sync::SyncError;
-use postrinch_sync::google::{Phase, Progress, SyncReport};
+use postrinch_sync::{Phase, Progress, SyncReport};
 use serde_json::json;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, ResponseTemplate};

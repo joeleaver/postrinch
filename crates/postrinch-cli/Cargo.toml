@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 postrinch-agents = { workspace = true }
 postrinch-commands = { workspace = true }
+postrinch-discover = { workspace = true }
 postrinch-log = { workspace = true }
 postrinch-model = { workspace = true }
 postrinch-store = { workspace = true }
@@ -21,5 +22,10 @@ clap = { version = "4", features = ["derive"] }
 dirs = "7"
 jiff = "0.2"
 open = "5"
+rpassword = "7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+postrinch-mailtest = { path = "../postrinch-mailtest" }
+tempfile = { workspace = true }

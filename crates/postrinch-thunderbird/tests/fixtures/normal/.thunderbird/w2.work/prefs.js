@@ -1,0 +1,27 @@
+// Mozilla User Preferences
+user_pref("mail.account.account1.identities", "id1");
+user_pref("mail.account.account1.server", "server1");
+user_pref("mail.account.account2.identities", "id2");
+user_pref("mail.account.account2.server", "server2");
+user_pref("mail.accountmanager.accounts", "account1,account2");
+user_pref("mail.identity.id1.fullName", "Ada Lovelace");
+user_pref("mail.identity.id1.htmlSigFormat", true);
+user_pref("mail.identity.id1.htmlSigText", "<b>Ada</b> &mdash; Work");
+user_pref("mail.identity.id1.smtpServer", "smtp1");
+user_pref("mail.identity.id1.useremail", "ada@outlook.com");
+user_pref("mail.identity.id2.useremail", "ada@outlook.com");
+user_pref("mail.server.server1.authMethod", 10);
+user_pref("mail.server.server1.hostname", "outlook.office365.com");
+user_pref("mail.server.server1.port", 993);
+user_pref("mail.server.server1.socketType", 3);
+user_pref("mail.server.server1.type", "imap");
+user_pref("mail.server.server1.userName", "ada@outlook.com");
+user_pref("mail.server.server2.hostname", "news.example.org");
+user_pref("mail.server.server2.name", "news.example.org");
+user_pref("mail.server.server2.type", "nntp");
+user_pref("mail.smtpserver.smtp1.authMethod", 10);
+user_pref("mail.smtpserver.smtp1.hostname", "smtp.office365.com");
+user_pref("mail.smtpserver.smtp1.port", 587);
+user_pref("mail.smtpserver.smtp1.try_ssl", 2);
+user_pref("mail.smtpserver.smtp1.username", "ada@outlook.com");
+user_pref("mail.smtpservers", "smtp1");

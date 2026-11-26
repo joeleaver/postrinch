@@ -1,4 +1,4 @@
-use postrinch_model::SignInReason;
+use postrinch_model::{EmailAddress, Provider, SignInReason};
 use postrinch_store::StoreError;
 
 pub type SyncResult<T> = Result<T, SyncError>;
@@ -14,6 +14,40 @@ pub enum SyncError {
     Config(String),
     #[error("sign-in failed: {0}")]
     SignIn(String),
+    /// The person stopped a browser sign-in while it waited for the
+    /// browser ([`crate::imap::SignInCanceller`]). Nothing was kept.
+    #[error("the sign-in was cancelled")]
+    SignInCancelled,
+    /// This copy of Postrinch has no OAuth client for the provider: its
+    /// client file is missing (`detail` is `None`) or does not read. The
+    /// provider's accounts cannot sign in; others are unaffected.
+    #[error(
+        "{provider} sign-in isn't set up in this copy of Postrinch{}",
+        .detail.as_deref().map(|d| format!(" ({d})")).unwrap_or_default()
+    )]
+    OAuthNotSetUp {
+        provider: String,
+        detail: Option<String>,
+    },
+    /// The browser sign-in was finished by another account than the one
+    /// asked for. Nothing was kept.
+    #[error("signed in as {signed_in}, not {asked}")]
+    OtherAccount {
+        asked: EmailAddress,
+        signed_in: EmailAddress,
+    },
+    /// The address is already here as the other kind of account (a
+    /// Google account, or an IMAP account): the two cannot both be kept,
+    /// so nothing was added (docs/imap.md, "Credentials").
+    #[error("{address} is already added as {}", kind_phrase(*.existing))]
+    AlreadyAdded {
+        address: EmailAddress,
+        existing: Provider,
+    },
+    /// A calendar call for an IMAP account: calendars are Google
+    /// accounts' only (docs/imap.md, "The goal").
+    #[error("{address} is an IMAP account, and calendars are Google accounts' only")]
+    NoCalendars { address: EmailAddress },
     #[error("the keychain: {0}")]
     Keychain(String),
     #[error("network: {}", crate::google::error_chain(.0))]
@@ -47,10 +81,56 @@ pub enum SyncError {
         server: String,
         message: String,
     },
+    /// A mail server turned the account away for now: too many
+    /// connections, a bandwidth or command limit, a sign-in service that
+    /// is down. Nothing is wrong with the credential, so the account is
+    /// not asked to sign in and no fresh token is fetched; it is to be
+    /// tried again later, as [`Backoff`](crate::Backoff) says (the IMAP
+    /// keep-in-sync and sending loops do, and send
+    /// [`SyncEvent::Busy`](crate::SyncEvent::Busy); the account check
+    /// reports it as `CheckFailure::Busy`). The message is the server's
+    /// own sentence.
+    #[error("{service} server {server} is busy: {message}")]
+    Busy {
+        service: &'static str,
+        server: String,
+        message: String,
+        /// Whether the IMAP server said the account has too many
+        /// connections open (`[LIMIT]` at sign-in, or a known
+        /// connection limit's words: `imap::refusal::names_connections`).
+        /// An IMAP account's IDLE connection then gives way to the
+        /// others rather than waiting the account out (docs/imap.md,
+        /// "Sync"). Always `false` for SMTP.
+        connections: bool,
+    },
+    /// A server would not search as asked (`NO [BADCHARSET]` to text that
+    /// is not ASCII, a term IMAP cannot ask, a `SEARCH` refused in every
+    /// folder): the search keeps to the mail here. The message says why,
+    /// in the server's words where it gave some.
+    #[error("{server} could not search: {message}")]
+    SearchRefused { server: String, message: String },
+    /// A server search stopped because a newer one of the same account
+    /// began: the person has moved on to another search, which takes the
+    /// account's search connection next. Nothing is wrong.
+    #[error("a newer search took this one's place")]
+    SearchSuperseded,
+    /// What a server found could not be checked against the search as
+    /// search here reads it ([`crate::imap::Holds`]): why, in the checker's
+    /// words.
+    #[error("what the server found could not be checked: {0}")]
+    SearchCheck(String),
     #[error("store: {0}")]
     Store(#[from] StoreError),
     #[error("{0}")]
     Io(#[from] std::io::Error),
+}
+
+/// "a Google account", "an IMAP account".
+fn kind_phrase(provider: Provider) -> &'static str {
+    match provider {
+        Provider::Google => "a Google account",
+        Provider::Imap => "an IMAP account",
+    }
 }
 
 impl SyncError {

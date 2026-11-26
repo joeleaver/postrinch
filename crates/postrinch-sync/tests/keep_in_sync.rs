@@ -7,7 +7,7 @@ mod common;
 
 use common::*;
 use postrinch_model::{Account, AccountState, EmailAddress, Provider, SignInReason};
-use postrinch_sync::google::{KeepOptions, SyncEvent};
+use postrinch_sync::{IdleOptions, KeepOptions, SyncEvent};
 use serde_json::json;
 use tokio::sync::Notify;
 use wiremock::matchers::{method, path};
@@ -16,6 +16,7 @@ use wiremock::{Mock, ResponseTemplate};
 const FAST: KeepOptions = KeepOptions {
     interval: Duration::from_secs(3600),
     retry: Duration::from_millis(50),
+    idle: IdleOptions::DEFAULT,
 };
 
 /// Run the loop for `time`, collecting what it reports.

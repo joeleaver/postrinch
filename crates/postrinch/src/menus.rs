@@ -21,7 +21,7 @@ pub fn menus(state: State) -> Vec<(&'static str, Menu)> {
                 .on_click(close_current_window),
         );
     let account = Menu::new()
-        .item(MenuItem::new("Add Google account…").on_click(move || state.sign_in(None)))
+        .item(MenuItem::new("Add account…").on_click(move || state.adding.open()))
         .item(
             MenuItem::new("Sync now")
                 .shortcut("F5")

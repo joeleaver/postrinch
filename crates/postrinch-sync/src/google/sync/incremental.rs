@@ -6,10 +6,11 @@ use std::sync::Arc;
 use postrinch_model::{EmailAddress, ProviderMessageId};
 use tokio::sync::RwLock;
 
+use super::GmailSync;
 use super::cursor::Cursor;
-use super::{GmailSync, Phase, ProgressFn, SyncReport};
 use crate::SyncResult;
 use crate::google::api::Priority;
+use crate::{Phase, ProgressFn, SyncReport};
 
 impl GmailSync {
     /// Read history from `since` to now and apply it: remove deleted

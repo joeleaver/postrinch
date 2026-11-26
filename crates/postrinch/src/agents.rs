@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use postrinch_agents::connect::{self, Changes, Outcome};
 use postrinch_agents::setup::{bridge_path, command_snippet, json_snippet, toml_snippet};
-use postrinch_agents::{Agent, Agents, App, Changed, Gmail, Reach, serve, wire};
+use postrinch_agents::{Agent, Agents, App, Changed, Reach, Remote, serve, wire};
 use postrinch_commands::Commands;
 use postrinch_model::EmailAddress;
 
@@ -44,7 +44,8 @@ pub struct Ready {
 /// and wakes sync's sender, as the window's own changes do; a change to
 /// rules also wakes sync, to give Gmail the rules, and the rules runner;
 /// a change to views only reloads the window.
-/// With `sync`, agents can also make, rename and delete labels in Gmail.
+/// With `sync`, agents can also make, rename and delete labels at the
+/// account's provider, and change Google accounts' calendars.
 pub fn start(commands: Commands, state: State, sync: Option<SyncHandle>) {
     let Some(path) = Agents::default_path() else {
         state.agents_off.set(Some(
@@ -52,9 +53,9 @@ pub fn start(commands: Commands, state: State, sync: Option<SyncHandle>) {
         ));
         return;
     };
-    let gmail = sync
+    let remote = sync
         .clone()
-        .map(|sync| Arc::new(crate::gmail_labels::GmailLabels(sync)) as Arc<dyn Gmail>);
+        .map(|sync| Arc::new(crate::remote_mail::RemoteMail::of(&sync)) as Arc<dyn Remote>);
     let wakes = sync.map(|s| (s.send, s.wake));
     let on_change: serve::OnChange = Arc::new(move |changed: &Changed| {
         // Views stay here: nothing for sync to send.
@@ -75,7 +76,7 @@ pub fn start(commands: Commands, state: State, sync: Option<SyncHandle>) {
         state.revision.update_send(|n| *n += 1);
     });
     let addr = wire::addr();
-    let hooks = serve::Hooks { on_change, gmail };
+    let hooks = serve::Hooks { on_change, remote };
     if let Err(e) = serve::start(&addr, commands, path, hooks) {
         // Another Postrinch is answering there, or something else holds it.
         tracing::warn!("agents cannot connect: listening at {addr} failed: {e}");

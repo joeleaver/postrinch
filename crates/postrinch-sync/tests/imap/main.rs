@@ -1,11 +1,59 @@
 //! Connecting and signing in to IMAP and SMTP servers, against the fake
-//! servers of `postrinch-mailtest` on loopback ports. No test touches a
-//! real mailbox.
+//! servers of `postrinch-mailtest` on loopback ports, and OAuth sign-in
+//! against mock providers. No test touches a real mailbox or provider.
 
+mod account_settings;
+mod add;
+mod add_secrets;
+mod changes;
+mod changes_attempts;
+mod changes_fallbacks;
+mod changes_keeping;
+mod changes_labels;
+mod changes_marks;
+mod changes_refusals;
+mod changes_safety;
+mod changes_stale;
+mod changes_support;
+mod changes_waiting;
 mod check;
+#[path = "../common/mod.rs"]
+mod common;
 mod connect;
+mod idle;
+mod idle_gaps;
+mod idle_support;
+mod keep_backfill;
+mod keep_support;
+mod limits;
+mod mail_keep;
+mod mail_routing;
 mod misbehaving;
 mod oauth;
+mod oauth_grant;
+mod oauth_grant_races;
+mod oauth_mock;
+mod oauth_robust;
+mod oauth_sign_in;
+mod oauth_tokens;
+mod search;
+mod search_checked;
+mod search_open;
 mod secrets;
+mod send;
+mod send_drafts;
+mod send_filing;
+mod send_parts;
+mod send_recipients;
+mod send_support;
 mod smtp;
+mod smtp_limits;
 mod support;
+mod sync;
+mod sync_busy;
+mod sync_folders;
+mod sync_passes;
+mod sync_quirks;
+mod sync_refusals;
+mod sync_stuck;
+mod sync_support;

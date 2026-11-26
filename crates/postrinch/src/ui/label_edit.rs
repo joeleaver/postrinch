@@ -150,6 +150,7 @@ fn rename(state: State, edit: LabelEdit) -> NodeHandle {
         div { class: "dialog",
             h2 { class: "dialog-title", "Rename label" }
             TextInput {
+                spellcheck: false,
                 value_fn: move || draft.get(),
                 oninput: move |v: String| draft.set(v),
                 onsubmit: save.clone(),

@@ -48,6 +48,7 @@ fn decode_folder(fields: &Fields) -> StoreResult<ImapFolder> {
         uidnext: fields.u32("uidnext")?,
         highest_modseq: fields.u64("highest_modseq")?,
         subscribed: fields.bool("subscribed")?,
+        mailbox_id: fields.opt_str("mailbox_id")?,
     })
 }
 
@@ -64,6 +65,9 @@ fn decode_place(account_prefix: &str, fields: &Fields) -> StoreResult<ImapPlace>
         message: ProviderMessageId(message),
         flags: fields.json("flags")?,
         modseq: fields.u64("modseq")?,
+        arrived: fields
+            .opt_datetime("arrived")?
+            .map(postrinch_model::Timestamp::from_millis),
     })
 }
 
@@ -81,6 +85,7 @@ impl Store {
                 .u32("uidnext", folder.uidnext)
                 .u64("highest_modseq", folder.highest_modseq)
                 .bool("subscribed", folder.subscribed)
+                .opt_str("mailbox_id", folder.mailbox_id.clone())
         };
         let create = fields()
             .str("key", key.clone())
@@ -137,6 +142,7 @@ impl Store {
                 .str("message", scoped(account, &place.message.0))
                 .json("flags", &place.flags)
                 .u64("modseq", place.modseq)
+                .opt_datetime("arrived", place.arrived.map(|t| t.as_millis()))
         };
         let create = fields()
             .str("key", key.clone())
@@ -162,6 +168,20 @@ impl Store {
             self.db_delete(PLACE, found.id())?;
         }
         Ok(())
+    }
+
+    /// The copy kept at a folder's UID, of that UIDVALIDITY, if any.
+    pub fn imap_place(
+        &self,
+        account: &EmailAddress,
+        folder: &str,
+        uidvalidity: u32,
+        uid: u32,
+    ) -> StoreResult<Option<ImapPlace>> {
+        let key = place_key(&scoped(account, folder), uidvalidity, uid);
+        self.find(PLACE, "key", &key)?
+            .map(|found| decode_place(&scoped(account, ""), &found))
+            .transpose()
     }
 
     /// Every kept copy of a message, in no particular order.

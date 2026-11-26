@@ -1,12 +1,12 @@
 //! Searching with the search language: words, Gmail's operators, and
-//! what is left for Gmail to search.
+//! what is left for the servers to search.
 
 use std::collections::HashSet;
 
 use postrinch_commands::Commands;
 use postrinch_model::{
     Account, EmailAddress, Flags, Label, LabelKind, Mailbox, Message, MessageHeaders, Provider,
-    ProviderMessageId, ProviderThreadId, SystemLabel, Timestamp,
+    ProviderMessageId, ProviderThreadId, SearchKey, SystemLabel, Timestamp,
 };
 use postrinch_store::Store;
 
@@ -215,6 +215,72 @@ fn gmail_is_asked_only_for_words_in_mail_not_downloaded() {
             &a,
             &ids,
             &listed,
+            postrinch_commands::Grouping::Conversations,
+        )
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].summary.id.0, "t2");
+    assert!(rows[0].remote);
+}
+
+#[test]
+fn an_imap_accounts_server_is_asked_in_its_own_terms() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let ada = address("ada@example.org");
+    store
+        .put_account(&Account::new(ada.clone(), Provider::Imap))
+        .unwrap();
+    store
+        .put_label(
+            &ada,
+            &Label::new("INBOX", "Inbox", LabelKind::System(SystemLabel::Inbox)),
+        )
+        .unwrap();
+    let read = Mail {
+        id: "i1",
+        thread: "t1",
+        at: 100,
+        from: "mary@rota.org",
+        subject: "Rota",
+        body: None,
+        labels: &["INBOX"],
+        unread: false,
+    };
+    let unread = Mail {
+        id: "i2",
+        thread: "t2",
+        at: 200,
+        unread: true,
+        ..read
+    };
+    for m in [&read, &unread] {
+        store.put_message(&message(&ada, m), None).unwrap();
+    }
+    let commands = Commands::new(store);
+    let results = commands.search("thursday is:unread", 10).unwrap();
+    assert!(results.threads.is_empty());
+    let remote = results.remote.expect("the server is asked");
+    assert_eq!(remote.accounts, [(ada.clone(), 2)]);
+    let search = remote.imap_search(&ada).expect("in IMAP's terms");
+    assert_eq!(search.alternatives.len(), 1);
+    assert_eq!(
+        search.alternatives[0].key,
+        SearchKey::All(vec![SearchKey::Text("thursday".into()), SearchKey::Unseen])
+    );
+
+    // What the server found is checked here against the whole query: the
+    // read one does not hold.
+    let ids = [
+        ProviderMessageId("i1".into()),
+        ProviderMessageId("i2".into()),
+    ];
+    let rows = commands
+        .remote_rows(
+            "thursday is:unread",
+            &ada,
+            &ids,
+            &HashSet::new(),
             postrinch_commands::Grouping::Conversations,
         )
         .unwrap();

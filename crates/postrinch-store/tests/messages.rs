@@ -161,6 +161,54 @@ fn search_matches_subject_people_and_body() {
 }
 
 #[test]
+fn words_left_out_leave_out_the_messages_they_match() {
+    let (_dir, store, me) = setup();
+    let rota = message(&me, "m1", "t1", 1_000, "Rota", "the weekly rota");
+    let draft = message(&me, "m2", "t2", 2_000, "Rota draft", "a rota, drafted");
+    let other = message(&me, "m3", "t3", 3_000, "Lunch", "noodles");
+    for m in [&rota, &draft, &other] {
+        store.put_message(m, None).unwrap();
+    }
+    let ids = |find: Find| -> Vec<String> {
+        let mut ids: Vec<String> = store
+            .find_messages(&find)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.id.0)
+            .collect();
+        ids.sort();
+        ids
+    };
+    // Among the words' matches: `rota -draft`, by the stem (`drafted`).
+    let without_draft = vec!["+draft".to_owned()];
+    assert_eq!(
+        ids(Find {
+            text: Some("+rota".into()),
+            text_without: without_draft.clone(),
+            ..Default::default()
+        }),
+        ["m1"]
+    );
+    // With no words to match, among every message: `-draft`.
+    assert_eq!(
+        ids(Find {
+            text_without: without_draft,
+            ..Default::default()
+        }),
+        ["m1", "m3"]
+    );
+    // A phrase left out leaves out only mail with the phrase.
+    assert_eq!(
+        ids(Find {
+            text: Some("+rota".into()),
+            text_without: vec!["+\"weekly rota\"".into()],
+            ..Default::default()
+        }),
+        ["m2"]
+    );
+}
+
+#[test]
 fn removing_an_account_removes_its_mail_and_garbage_collects_raw() {
     let (_dir, store, me) = setup();
     let m = message(&me, "m1", "t1", 1_000, "s", "b");
@@ -316,4 +364,45 @@ fn headers_never_overwrite_a_downloaded_body() {
     assert!(stored.downloaded);
     assert_eq!(stored.body_text, "the body");
     assert!(!stored.flags.unread);
+}
+
+#[test]
+fn search_narrows_by_size_and_to_named_messages() {
+    let (_dir, store, me) = setup();
+    let mut small = message(&me, "s1", "t1", 1_000, "small", "a");
+    small.size = 100;
+    let mut big = message(&me, "b1", "t2", 2_000, "big", "b");
+    big.size = 10_000;
+    store.put_message(&small, None).unwrap();
+    store.put_message(&big, None).unwrap();
+    let ids = |find: Find| -> Vec<String> {
+        let found = store.find_messages(&find).unwrap();
+        found.into_iter().map(|f| f.id.0).collect()
+    };
+    let larger = Find {
+        larger: Some(100),
+        ..Default::default()
+    };
+    assert_eq!(ids(larger), ["b1"], "larger is more than, not as much as");
+    let smaller = Find {
+        smaller: Some(10_000),
+        ..Default::default()
+    };
+    assert_eq!(ids(smaller), ["s1"]);
+    let within = Find {
+        within: Some(vec![
+            (me.clone(), small.id.clone()),
+            (
+                me.clone(),
+                postrinch_model::ProviderMessageId("gone".into()),
+            ),
+        ]),
+        ..Default::default()
+    };
+    assert_eq!(ids(within), ["s1"], "only the named messages that are here");
+    let none = Find {
+        within: Some(Vec::new()),
+        ..Default::default()
+    };
+    assert!(ids(none).is_empty());
 }

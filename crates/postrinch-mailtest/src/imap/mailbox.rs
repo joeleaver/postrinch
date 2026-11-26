@@ -13,7 +13,7 @@ use chrono::{DateTime, FixedOffset};
 /// The hierarchy delimiter of every folder name.
 pub const DELIMITER: char = '/';
 
-/// A folder's special use (RFC 6154).
+/// A folder's special use (RFC 6154), or Gmail's `\Important`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SpecialUse {
     Sent,
@@ -23,6 +23,8 @@ pub enum SpecialUse {
     Archive,
     All,
     Flagged,
+    /// Gmail's virtual folder of important mail; not RFC 6154's.
+    Important,
 }
 
 impl SpecialUse {
@@ -36,6 +38,7 @@ impl SpecialUse {
             SpecialUse::Archive => "\\Archive",
             SpecialUse::All => "\\All",
             SpecialUse::Flagged => "\\Flagged",
+            SpecialUse::Important => "\\Important",
         }
     }
 }
@@ -89,6 +92,9 @@ pub(crate) struct Folder {
     pub(crate) special_use: Option<SpecialUse>,
     pub(crate) selectable: bool,
     pub(crate) subscribed: bool,
+    /// Whether LIST shows it; a test hides one to play a server that
+    /// leaves a folder out of a listing for a while.
+    pub(crate) listed: bool,
     pub(crate) uid_validity: u32,
     pub(crate) uid_next: u32,
     pub(crate) highest_modseq: u64,
@@ -96,6 +102,9 @@ pub(crate) struct Folder {
     pub(crate) messages: Vec<Message>,
     /// Expunged UIDs with the MODSEQ of their expunge.
     pub(crate) vanished: Vec<(u32, u64)>,
+    /// UIDs whose header and body FETCH leaves out, as a server failing
+    /// to read a message does.
+    pub(crate) withheld: BTreeSet<u32>,
     /// Every keyword set in this folder, spelled as it was first seen.
     /// Keywords compare case-insensitively (RFC 9051 2.3.2), so a later
     /// `$label` is the same keyword as an earlier `$Label` and is stored
@@ -111,11 +120,13 @@ impl Folder {
             special_use: None,
             selectable: true,
             subscribed: true,
+            listed: true,
             uid_validity: 1000 + u32::try_from(id).unwrap_or(u32::MAX - 1000),
             uid_next: 1,
             highest_modseq: 1,
             messages: Vec::new(),
             vanished: Vec::new(),
+            withheld: BTreeSet::new(),
             keywords: Vec::new(),
         }
     }

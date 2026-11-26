@@ -121,12 +121,30 @@ impl Bucket {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct Quota {
     buckets: Mutex<HashMap<String, Arc<Mutex<Bucket>>>>,
+    /// How many times Gmail's quota requests are paced to: every cost
+    /// counts this many times less. One, but for tests.
+    scale: f64,
+}
+
+impl Default for Quota {
+    fn default() -> Self {
+        Self::scaled(1.0)
+    }
 }
 
 impl Quota {
+    /// A quota `scale` times Gmail's: for tests that download more than
+    /// a burst's worth without waiting out Gmail's pace.
+    pub(crate) fn scaled(scale: f64) -> Self {
+        assert!(scale > 0.0, "a quota scale is positive: {scale}");
+        Self {
+            buckets: Mutex::default(),
+            scale,
+        }
+    }
+
     async fn bucket(&self, account: &str) -> Arc<Mutex<Bucket>> {
         let mut buckets = self.buckets.lock().await;
         Arc::clone(buckets.entry(account.to_owned()).or_insert_with(|| {
@@ -150,7 +168,7 @@ impl Quota {
     /// cost with [`RESERVE`] to spare, and book nothing until it does: they
     /// only ever use what foreground work leaves.
     pub(crate) async fn acquire(&self, account: &str, cost: Cost, priority: Priority) {
-        let cost = cost.units();
+        let cost = cost.units() / self.scale;
         let bucket = self.bucket(account).await;
         if priority == Priority::Foreground {
             let wait = {
@@ -165,7 +183,7 @@ impl Quota {
             tokio::time::sleep(wait).await;
             return;
         }
-        let needed = cost + RESERVE;
+        let needed = cost + RESERVE / self.scale;
         loop {
             let wait = {
                 let mut b = bucket.lock().await;
@@ -211,6 +229,19 @@ mod tests {
         // The burst covers 5 whole messages; at 90 units/s the next 15 take
         // 900 units, 10 seconds.
         for _ in 0..20 {
+            quota.acquire("a", Cost::GetMessageRaw, FG).await;
+        }
+        let took = start.elapsed();
+        assert!(took >= Duration::from_secs(9), "{took:?}");
+        assert!(took <= Duration::from_secs(11), "{took:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_scaled_quota_paces_that_many_times_faster() {
+        let quota = Quota::scaled(10.0);
+        let start = Instant::now();
+        // Ten times the whole messages above in the same 10 seconds.
+        for _ in 0..200 {
             quota.acquire("a", Cost::GetMessageRaw, FG).await;
         }
         let took = start.elapsed();

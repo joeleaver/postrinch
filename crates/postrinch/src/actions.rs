@@ -1,14 +1,22 @@
 //! What the window does to mail and accounts: through the commands for the
-//! store, and on sync's runtime for anything that talks to Google.
+//! store, and on sync's runtime for anything that talks to an account's
+//! provider.
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use postrinch_commands::Commands;
-use postrinch_model::{EmailAddress, LabelPrefs, ProviderMessageId};
-use postrinch_sync::google::{remove_google_account, sign_in_google};
+use postrinch_model::{
+    AccountState, EmailAddress, ImapSettings, LabelPrefs, Provider, ProviderMessageId, SignInMethod,
+};
+use postrinch_sync::google::{GoogleAuth, remove_google_account, sign_in_google};
+use postrinch_sync::imap::{Added, SignInAgain};
+use postrinch_sync::{SyncError, SyncResult};
 
+use crate::add_account::Found;
+use crate::add_account_flow::check_text;
 use crate::state::State;
 use crate::sync::SyncHandle;
 
@@ -81,11 +89,22 @@ impl State {
         }
     }
 
-    /// Sign a Google account in through the browser: a new one, or `again`
-    /// for one that has to sign in again.
+    /// Sign an account in through the browser: a new Google account, or
+    /// `again` for one that has to sign in again, whatever its provider.
     pub fn sign_in(self, again: Option<EmailAddress>) {
         let Some(sync) = sync() else {
             return self.notice(sync_off());
+        };
+        let route = match sign_in_route(&sync, again.as_ref()) {
+            Ok(SignInRoute::Password {
+                account,
+                reason,
+                method,
+            }) => {
+                return self.imap.open_sign_in_again(account, reason, &method);
+            }
+            Ok(route) => route,
+            Err(refused) => return self.notice(refused),
         };
         self.notice(Notice {
             text: "Finish signing in in your browser.".into(),
@@ -93,14 +112,36 @@ impl State {
         });
         let (notice, revision) = (self.notice, self.revision);
         sync.runtime.clone().spawn(async move {
-            let opened = sign_in_google(&sync.auth, &sync.store, again.as_ref(), |url| {
-                open::that_detached(url)
-            })
-            .await;
+            let opened = match route {
+                SignInRoute::Google(auth) => {
+                    sign_in_google(&auth, &sync.store, again.as_ref(), |url| {
+                        open::that_detached(url)
+                    })
+                    .await
+                }
+                SignInRoute::Imap { account, settings } => {
+                    let browser = Box::new(|url: &str| open::that_detached(url));
+                    let imap = sync.mail().imap();
+                    let how = SignInAgain::Browser(browser);
+                    match imap.sign_in_again(&sync.imap_oauth, &account, how).await {
+                        Ok(Added::Account(account)) => Ok(*account),
+                        Ok(Added::CheckFailed(check)) => {
+                            let (text, _) = check_text(&check, &settings, &Found::default());
+                            Err(SyncError::SignIn(text))
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                // Answered on the window's thread above.
+                SignInRoute::Password { .. } => return,
+            };
             let text = match opened {
                 Ok(account) => {
-                    sync.sync_engine().recheck_rules(&account.address);
-                    sync.wake.notify_one();
+                    // Gmail's filters are read again, as a new account's are.
+                    if let Some(gmail) = sync.mail().gmail() {
+                        gmail.recheck_rules(&account.address);
+                    }
+                    sync.accounts_changed();
                     Notice {
                         text: format!("{} is signed in. Its mail is on the way.", account.address),
                         trouble: false,
@@ -123,11 +164,14 @@ impl State {
         };
         let (notice, revision) = (self.notice, self.revision);
         sync.runtime.clone().spawn(async move {
-            let text = match remove_google_account(&sync.auth, &sync.store, &account).await {
-                Ok(_) => Notice {
-                    text: format!("{account} is removed from this computer."),
-                    trouble: false,
-                },
+            let text = match remove(&sync, &account).await {
+                Ok(_) => {
+                    sync.accounts_changed();
+                    Notice {
+                        text: format!("{account} is removed from this computer."),
+                        trouble: false,
+                    }
+                }
                 Err(e) => Notice {
                     text: format!("{account} could not be removed: {e}"),
                     trouble: true,
@@ -157,7 +201,7 @@ impl State {
         sync.runtime.clone().spawn(async move {
             let keys: Vec<(String, String)> =
                 ids.iter().map(|id| (account.key(), id.0.clone())).collect();
-            if let Err(e) = sync.sync_engine().download_now(&account, ids).await {
+            if let Err(e) = sync.mail().download_now(&account, ids).await {
                 error.send(Some(format!("The message did not download: {e}")));
             }
             done.send(keys);
@@ -174,5 +218,93 @@ fn sync_off() -> Notice {
     Notice {
         text: "Sync is off, so accounts cannot sign in. The sidebar says why, and the log has the detail.".into(),
         trouble: true,
+    }
+}
+
+fn google_off() -> Notice {
+    Notice {
+        text: "Google sign-in is not set up in this copy of Postrinch, so Google accounts cannot sign in. The sidebar says why.".into(),
+        trouble: true,
+    }
+}
+
+/// Where an account signs in.
+enum SignInRoute {
+    /// Google's sign-in: a new account, or a Google account again.
+    Google(Arc<GoogleAuth>),
+    /// An IMAP account's provider, in the browser, again; its servers
+    /// name what refused.
+    Imap {
+        account: EmailAddress,
+        settings: Box<ImapSettings>,
+    },
+    /// An IMAP account that signs in with a password: the window's
+    /// password dialog, saying `reason`.
+    Password {
+        account: EmailAddress,
+        reason: String,
+        method: SignInMethod,
+    },
+}
+
+/// Where `again` (or a new account) signs in; a notice saying why it
+/// cannot when it cannot.
+fn sign_in_route(sync: &SyncHandle, again: Option<&EmailAddress>) -> Result<SignInRoute, Notice> {
+    let stored = match again.map(|address| sync.store.account(address)).transpose() {
+        Ok(stored) => stored.flatten(),
+        Err(e) => {
+            return Err(Notice {
+                text: format!("The account could not be read: {e}"),
+                trouble: true,
+            });
+        }
+    };
+    match stored {
+        Some(account) if account.provider == Provider::Imap => {
+            let Some(settings) = account.imap else {
+                return Err(Notice {
+                    text: format!("{} has no IMAP settings.", account.address),
+                    trouble: true,
+                });
+            };
+            if matches!(settings.sign_in, SignInMethod::OAuth2 { .. }) {
+                return Ok(SignInRoute::Imap {
+                    account: account.address,
+                    settings: Box::new(settings),
+                });
+            }
+            let reason = match &account.state {
+                AccountState::NeedsSignIn(reason) => reason.to_string(),
+                AccountState::Active => "give the password again".to_owned(),
+            };
+            Ok(SignInRoute::Password {
+                account: account.address,
+                reason,
+                method: settings.sign_in,
+            })
+        }
+        _ => sync
+            .auth
+            .clone()
+            .map(SignInRoute::Google)
+            .ok_or_else(google_off),
+    }
+}
+
+/// Removes the account through its provider: signed out there, its secret
+/// forgotten, and its mail gone from this computer.
+async fn remove(sync: &SyncHandle, account: &EmailAddress) -> SyncResult<usize> {
+    match sync.mail().account(account).await?.provider {
+        Provider::Imap => {
+            let imap = sync.mail().imap();
+            imap.remove_account(&sync.imap_oauth, account).await
+        }
+        Provider::Google => {
+            let auth = sync.auth.as_ref().ok_or_else(|| SyncError::OAuthNotSetUp {
+                provider: "Google".into(),
+                detail: None,
+            })?;
+            remove_google_account(auth, &sync.store, account).await
+        }
     }
 }

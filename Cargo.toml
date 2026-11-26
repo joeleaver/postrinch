@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.34"
+version = "0.1.35"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/joeleaver/postrinch"
@@ -11,12 +11,14 @@ repository = "https://github.com/joeleaver/postrinch"
 [workspace.dependencies]
 postrinch-agents = { path = "crates/postrinch-agents" }
 postrinch-commands = { path = "crates/postrinch-commands" }
+postrinch-discover = { path = "crates/postrinch-discover" }
 postrinch-log = { path = "crates/postrinch-log" }
 postrinch-model = { path = "crates/postrinch-model" }
 postrinch-render = { path = "crates/postrinch-render" }
 postrinch-rules = { path = "crates/postrinch-rules" }
 postrinch-store = { path = "crates/postrinch-store" }
 postrinch-sync = { path = "crates/postrinch-sync" }
+postrinch-thunderbird = { path = "crates/postrinch-thunderbird" }
 postrinch-update = { path = "crates/postrinch-update" }
 
 # rinch, from its repository's main branch: rinch-html (HtmlView, the
@@ -38,4 +40,5 @@ sha2 = "0.10"
 tempfile = "3"
 thiserror = "2"
 tracing = "0.1"
+unicode-segmentation = "1"
 zstd = "0.14"

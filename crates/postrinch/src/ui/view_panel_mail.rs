@@ -134,6 +134,7 @@ pub fn which_mail(state: State) -> NodeHandle {
         div { class: "panel-field panel-query",
             span { class: "panel-name", "Search text" }
             TextInput {
+                spellcheck: false,
                 size: "sm",
                 value_fn: move || read(state, |e| e.draft.query.clone()),
                 oninput: move |v: String| state.change_edit(|view| view.query = v),

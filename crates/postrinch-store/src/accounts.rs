@@ -1,4 +1,4 @@
-use postrinch_model::{Account, AccountState, EmailAddress, Provider};
+use postrinch_model::{Account, AccountState, EmailAddress, ImapSettings, Provider};
 
 use crate::codec::{Fields, FieldsBuilder};
 use crate::{Store, StoreError, StoreResult};
@@ -40,6 +40,47 @@ impl Store {
     /// Add an account, or replace what is stored about it. Its labels,
     /// messages and sync position are kept.
     pub fn put_account(&self, account: &Account) -> StoreResult<()> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
+        self.write_account(account)
+    }
+
+    /// Reads the account as it is now (none when it is not here), and
+    /// stores what `change` makes of it, with no other change to the
+    /// account in between: what sending learned about an IMAP account's
+    /// settings meanwhile ([`Store::server_files_sent`]) is read, never
+    /// overwritten. `change` must not write accounts. Returns what was
+    /// stored.
+    pub fn change_account(
+        &self,
+        address: &EmailAddress,
+        change: impl FnOnce(Option<Account>) -> Account,
+    ) -> StoreResult<Account> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let account = change(self.account(address)?);
+        self.write_account(&account)?;
+        Ok(account)
+    }
+
+    /// Changes the account only if it is here, with no other change to it
+    /// in between, as [`Store::change_account`]: none when it is not here,
+    /// and nothing is written. `change` must not write accounts. Returns
+    /// what was stored.
+    pub fn update_account(
+        &self,
+        address: &EmailAddress,
+        change: impl FnOnce(&mut Account),
+    ) -> StoreResult<Option<Account>> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(mut account) = self.account(address)? else {
+            return Ok(None);
+        };
+        change(&mut account);
+        self.write_account(&account)?;
+        Ok(Some(account))
+    }
+
+    /// [`Store::put_account`], the account lock held by the caller.
+    fn write_account(&self, account: &Account) -> StoreResult<()> {
         let key = account.address.key();
         let fields = || {
             FieldsBuilder::new()
@@ -81,6 +122,21 @@ impl Store {
         Ok(())
     }
 
+    /// Replace an IMAP account's settings, and nothing else about it.
+    /// Sending changes one of them by itself with
+    /// [`Store::sent_copy_filed`] and [`Store::server_files_sent`].
+    pub fn set_imap_settings(
+        &self,
+        address: &EmailAddress,
+        settings: &ImapSettings,
+    ) -> StoreResult<()> {
+        let _held = self.account_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let id = self.account_id(address)?;
+        let fields = FieldsBuilder::new().json("imap", settings).build();
+        self.db_update(TYPE, id, fields)?;
+        Ok(())
+    }
+
     /// Where the provider's incremental sync last got to, if it has run.
     pub fn sync_cursor(&self, address: &EmailAddress) -> StoreResult<Option<String>> {
         let id = self.account_id(address)?;
@@ -95,6 +151,23 @@ impl Store {
         let fields = FieldsBuilder::new().opt_str("sync_cursor", cursor).build();
         self.db_update(TYPE, id, fields)?;
         Ok(())
+    }
+
+    /// Reads the sync position, changes it with `change` and writes back
+    /// what it returns, with no other `update_sync_cursor` of any account
+    /// in between: callers that change different parts of one cursor from
+    /// different connections lose none of each other's changes. `change`
+    /// may use the store, but not this method. Nothing is written when it
+    /// fails.
+    pub fn update_sync_cursor<T, E: From<StoreError>>(
+        &self,
+        address: &EmailAddress,
+        change: impl FnOnce(Option<String>) -> Result<(Option<String>, T), E>,
+    ) -> Result<T, E> {
+        let _held = self.cursor_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let (cursor, out) = change(self.sync_cursor(address)?)?;
+        self.set_sync_cursor(address, cursor.as_deref())?;
+        Ok(out)
     }
 
     /// Remove an account with its labels, threads, messages and IMAP
@@ -150,6 +223,50 @@ mod tests {
     }
 
     #[test]
+    fn changing_an_account_reads_it_as_it_is_now() {
+        let (_dir, store) = store();
+        let address = EmailAddress::parse("ada@example.org").unwrap();
+        let added = store
+            .change_account(&address, |before| {
+                assert_eq!(before, None);
+                Account::new(address.clone(), Provider::Imap)
+            })
+            .unwrap();
+        assert_eq!(store.account(&address).unwrap(), Some(added.clone()));
+
+        let changed = store
+            .change_account(&address, |before| {
+                let mut account = before.unwrap();
+                account.display_name = Some("Ada".into());
+                account
+            })
+            .unwrap();
+        assert_eq!(changed.display_name.as_deref(), Some("Ada"));
+        assert_eq!(store.account(&address).unwrap(), Some(changed));
+    }
+
+    #[test]
+    fn updating_changes_only_an_account_that_is_here() {
+        let (_dir, store) = store();
+        let address = EmailAddress::parse("ada@example.org").unwrap();
+        let missing = store
+            .update_account(&address, |_| panic!("there is no account to change"))
+            .unwrap();
+        assert_eq!(missing, None);
+        assert_eq!(store.account(&address).unwrap(), None, "nothing written");
+
+        let mut account = Account::new(address.clone(), Provider::Imap);
+        account.needs_sign_in(SignInReason::NoCredential);
+        store.put_account(&account).unwrap();
+        let changed = store
+            .update_account(&address, Account::signed_in)
+            .unwrap()
+            .unwrap();
+        assert!(changed.is_active());
+        assert_eq!(store.account(&address).unwrap(), Some(changed));
+    }
+
+    #[test]
     fn put_get_and_update() {
         let (_dir, store) = store();
         let address = EmailAddress::parse("Ada@Example.org").unwrap();
@@ -178,6 +295,64 @@ mod tests {
             store.sync_cursor(&address).unwrap().as_deref(),
             Some("12345")
         );
+    }
+
+    #[test]
+    fn sync_cursor_updates_lose_nothing_to_each_other() {
+        let (_dir, store) = store();
+        let address = EmailAddress::parse("ada@example.org").unwrap();
+        store
+            .put_account(&Account::new(address.clone(), Provider::Imap))
+            .unwrap();
+        let count = |store: &Store, address: &EmailAddress| {
+            for _ in 0..200 {
+                store
+                    .update_sync_cursor(address, |raw| {
+                        let n: u32 = raw.map_or(0, |r| r.parse().unwrap());
+                        Ok::<_, StoreError>((Some((n + 1).to_string()), ()))
+                    })
+                    .unwrap();
+            }
+        };
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| count(&store, &address));
+            }
+        });
+        assert_eq!(store.sync_cursor(&address).unwrap().as_deref(), Some("800"));
+    }
+
+    #[test]
+    fn imap_settings_change_alone() {
+        use postrinch_model::{FolderRoles, Security, Server, SignInMethod};
+
+        let (_dir, store) = store();
+        let address = EmailAddress::parse("ada@example.org").unwrap();
+        let server = |host: &str, port| Server {
+            host: host.into(),
+            port,
+            security: Security::Tls,
+            username: "ada".into(),
+        };
+        let mut settings = ImapSettings {
+            imap: server("imap.example.org", 993),
+            smtp: server("smtp.example.org", 465),
+            sign_in: SignInMethod::Password,
+            roles: FolderRoles::default(),
+            server_files_sent: true,
+            server_files_sent_chosen: false,
+        };
+        let mut account = Account::new(address.clone(), Provider::Imap);
+        account.display_name = Some("Ada".into());
+        account.imap = Some(settings.clone());
+        store.put_account(&account).unwrap();
+        store.set_sync_cursor(&address, Some("7")).unwrap();
+
+        settings.server_files_sent = false;
+        store.set_imap_settings(&address, &settings).unwrap();
+        account.imap = Some(settings);
+        assert_eq!(store.account(&address).unwrap(), Some(account));
+        assert_eq!(store.sync_cursor(&address).unwrap().as_deref(), Some("7"));
     }
 
     #[test]

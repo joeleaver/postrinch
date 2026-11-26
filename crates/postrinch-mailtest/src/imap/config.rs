@@ -23,11 +23,14 @@ pub enum Extension {
     ListExtended,
     /// RFC 2177 IDLE.
     Idle,
+    /// RFC 8474 OBJECTID: each folder's `MAILBOXID`, kept across renames,
+    /// in SELECT's and EXAMINE's responses.
+    ObjectId,
 }
 
 impl Extension {
     /// Every extension the fake knows.
-    pub const ALL: [Extension; 7] = [
+    pub const ALL: [Extension; 8] = [
         Extension::Condstore,
         Extension::Qresync,
         Extension::Move,
@@ -35,6 +38,7 @@ impl Extension {
         Extension::SpecialUse,
         Extension::ListExtended,
         Extension::Idle,
+        Extension::ObjectId,
     ];
 
     /// The capability name advertised for it.
@@ -47,6 +51,7 @@ impl Extension {
             Extension::SpecialUse => "SPECIAL-USE",
             Extension::ListExtended => "LIST-EXTENDED",
             Extension::Idle => "IDLE",
+            Extension::ObjectId => "OBJECTID",
         }
     }
 }
@@ -71,7 +76,14 @@ pub struct ImapConfig {
     pub(crate) mechanisms: BTreeSet<Mechanism>,
     pub(crate) users: Vec<UserConfig>,
     pub(crate) greets: bool,
+    pub(crate) bye_greeting: Option<String>,
     pub(crate) injects_after_starttls: bool,
+    pub(crate) literal_plus: bool,
+    pub(crate) splits_fetches: bool,
+    pub(crate) unsolicited_fetches: bool,
+    pub(crate) gmail: bool,
+    pub(crate) max_connections: Option<usize>,
+    pub(crate) ascii_search: bool,
 }
 
 impl Default for ImapConfig {
@@ -84,7 +96,14 @@ impl Default for ImapConfig {
             mechanisms: Mechanism::DEFAULT.into_iter().collect(),
             users: Vec::new(),
             greets: true,
+            bye_greeting: None,
             injects_after_starttls: false,
+            literal_plus: true,
+            splits_fetches: false,
+            unsolicited_fetches: false,
+            gmail: false,
+            max_connections: None,
+            ascii_search: false,
         }
     }
 }
@@ -154,6 +173,25 @@ impl ImapConfig {
         self
     }
 
+    /// Greets every new connection with `* BYE <text>` and closes it, as
+    /// a server turning connections away does (RFC 9051 7.1.5): `text`
+    /// may start with a response code, as `[UNAVAILABLE] Try later`, and
+    /// Dovecot sends `Maximum number of connections from user+IP
+    /// exceeded` this way. Off by default.
+    pub fn greets_with_bye(mut self, text: &str) -> Self {
+        self.bye_greeting = Some(text.to_string());
+        self
+    }
+
+    /// Lets each user have at most `max` sessions signed in at once, as
+    /// Dovecot's `mail_max_userip_connections` does: one more sign-in is
+    /// answered `NO [LIMIT] Maximum number of connections from user+IP
+    /// exceeded`. No limit by default.
+    pub fn max_connections(mut self, max: usize) -> Self {
+        self.max_connections = Some(max);
+        self
+    }
+
     /// Whether the plain-text port misbehaves at STARTTLS by sending a
     /// response of its own straight after its OK, still in plain text
     /// (`* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] injected`), as an attacker
@@ -161,6 +199,51 @@ impl ImapConfig {
     /// For testing that clients refuse whatever came before TLS.
     pub fn injects_after_starttls(mut self, on: bool) -> Self {
         self.injects_after_starttls = on;
+        self
+    }
+
+    /// Whether LITERAL+ (RFC 7888) is offered. On by default. Off, a
+    /// client must wait for `+` before each literal it sends.
+    pub fn literal_plus(mut self, on: bool) -> Self {
+        self.literal_plus = on;
+        self
+    }
+
+    /// Whether each message's FETCH data is split across two responses,
+    /// as RFC 3501 7.4.2 allows: the first with the UID and the first half
+    /// of the items, the second, without the UID, with the rest. Off by
+    /// default.
+    pub fn splits_fetches(mut self, on: bool) -> Self {
+        self.splits_fetches = on;
+        self
+    }
+
+    /// Whether a FETCH that asks for a body section also brings
+    /// unsolicited flag updates, as CONDSTORE servers send when another
+    /// client changes flags: `* n FETCH (UID u FLAGS (...) MODSEQ (m))`
+    /// for every message of the folder it did not ask for, and one for the
+    /// first message it asked for, before that message's answer. Off by
+    /// default.
+    pub fn unsolicited_fetches(mut self, on: bool) -> Self {
+        self.unsolicited_fetches = on;
+        self
+    }
+
+    /// Whether the server says it is Gmail, by advertising Gmail's
+    /// `X-GM-EXT-1` capability. Off by default. Of Gmail's `X-GM-` items
+    /// the fake has only `SEARCH X-GM-RAW` (see `search.rs`), and its
+    /// `\All` folder is an ordinary one the test fills, as Gmail's All
+    /// Mail is filled with every message.
+    pub fn gmail(mut self, on: bool) -> Self {
+        self.gmail = on;
+        self
+    }
+
+    /// Whether SEARCH takes only US-ASCII: `CHARSET UTF-8` is refused
+    /// with `NO [BADCHARSET (US-ASCII)]`, as some servers do. Off by
+    /// default.
+    pub fn ascii_search(mut self, on: bool) -> Self {
+        self.ascii_search = on;
         self
     }
 

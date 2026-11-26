@@ -40,6 +40,7 @@ pub use discoverer::{Discoverer, Endpoints, SetupError, Timeouts};
 pub use dns::{DnsError, HickoryResolver, MxRecord, Resolve, SrvRecord};
 pub use fetch::{Fetch, FetchError, HttpsFetch, MAX_BODY, MAX_REDIRECTS};
 pub use probe::{NetProbe, Probe, ProbeError, Protocol};
+pub use providers::{KnownHost, known_host};
 pub use types::{
     Candidate, Discovery, HostedBy, Progress, Security, Source, Step, StepState, Username,
 };

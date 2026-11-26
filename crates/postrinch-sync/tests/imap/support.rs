@@ -48,6 +48,7 @@ pub fn settings(imap: Server, smtp: Server, sign_in: SignInMethod) -> ImapSettin
         sign_in,
         roles: FolderRoles::default(),
         server_files_sent: true,
+        server_files_sent_chosen: false,
     }
 }
 
@@ -131,5 +132,17 @@ pub fn rejected_detail<T: std::fmt::Debug>(result: SyncResult<T>) -> String {
     match result {
         Err(SyncError::NeedsSignIn(SignInReason::CredentialRejected { detail })) => detail,
         other => panic!("expected a refused sign-in, got {other:?}"),
+    }
+}
+
+/// The words of a busy server, or a panic saying what came.
+pub fn busy_message<T: std::fmt::Debug>(result: SyncResult<T>, service: &str) -> String {
+    match result {
+        Err(SyncError::Busy {
+            service: s,
+            message,
+            ..
+        }) if s == service => message,
+        other => panic!("expected a busy {service} server, got {other:?}"),
     }
 }

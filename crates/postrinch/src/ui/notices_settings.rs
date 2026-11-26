@@ -121,12 +121,14 @@ pub fn notices_page(state: State) -> NodeHandle {
             div { class: "quiet-row",
                 span { "From" }
                 TextInput {
+                    spellcheck: false,
                     class: "quiet-time",
                     value_fn: move || prefs(state).quiet_from,
                     oninput: move |v: String| state.set_notices(|p| p.quiet_from = v),
                 }
                 span { "to" }
                 TextInput {
+                    spellcheck: false,
                     class: "quiet-time",
                     value_fn: move || prefs(state).quiet_to,
                     oninput: move |v: String| state.set_notices(|p| p.quiet_to = v),

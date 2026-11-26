@@ -72,6 +72,14 @@ impl Fields {
         }
     }
 
+    pub(crate) fn opt_u64(&self, name: &str) -> StoreResult<Option<u64>> {
+        match self.value(name) {
+            Value::Null => Ok(None),
+            Value::U64(n) => Ok(Some(*n)),
+            _ => Err(self.wrong(name, "u64")),
+        }
+    }
+
     pub(crate) fn datetime(&self, name: &str) -> StoreResult<i64> {
         self.opt_datetime(name)?
             .ok_or_else(|| self.wrong(name, "DateTime"))
@@ -148,6 +156,14 @@ impl FieldsBuilder {
     pub(crate) fn datetime(mut self, name: &str, millis: i64) -> Self {
         self.0.insert(name.into(), Value::DateTime(millis));
         self
+    }
+
+    /// A DateTime field, or null for `None`.
+    pub(crate) fn opt_datetime(self, name: &str, millis: Option<i64>) -> Self {
+        match millis {
+            Some(millis) => self.datetime(name, millis),
+            None => self.null(name),
+        }
     }
 
     pub(crate) fn json(mut self, name: &str, value: &impl Serialize) -> Self {

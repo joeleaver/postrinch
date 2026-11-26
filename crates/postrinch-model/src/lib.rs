@@ -11,6 +11,7 @@ mod calendar_share;
 mod change;
 mod draft;
 mod imap;
+mod imap_search;
 mod imap_state;
 mod label;
 mod message;
@@ -31,7 +32,8 @@ pub use draft::{
     format_mailboxes, parse_mailboxes,
 };
 pub use imap::{FolderRoles, ImapSettings, Security, Server, SignInMethod};
-pub use imap_state::{FolderRole, ImapFolder, ImapPlace};
+pub use imap_search::{ImapAlternative, ImapSearch, SearchKey};
+pub use imap_state::{FolderRole, ImapCopyAttempt, ImapFolder, ImapPlace};
 pub use label::{Label, LabelColor, LabelKind, LabelPrefs, LabelVisibility, SystemLabel};
 pub use message::{AttachmentInfo, Flags, Message, MessageHeaders, ProviderMessageId};
 pub use thread::{ProviderThreadId, ThreadSummary, answered, is_draft};

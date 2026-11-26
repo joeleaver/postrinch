@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ProviderMessageId, SystemLabel};
+use crate::{ProviderMessageId, SystemLabel, Timestamp};
 
 /// The special role a folder plays, if any.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -39,6 +39,10 @@ pub struct ImapFolder {
     /// none.
     pub highest_modseq: u64,
     pub subscribed: bool,
+    /// The folder's RFC 8474 `MAILBOXID` (OBJECTID), which stays the same
+    /// when the folder is renamed; `None` where the server has none.
+    #[serde(default)]
+    pub mailbox_id: Option<String>,
 }
 
 impl ImapFolder {
@@ -53,6 +57,7 @@ impl ImapFolder {
             uidnext: 0,
             highest_modseq: 0,
             subscribed: true,
+            mailbox_id: None,
         }
     }
 }
@@ -73,4 +78,28 @@ pub struct ImapPlace {
     pub flags: Vec<String>,
     /// The copy's MODSEQ (CONDSTORE); 0 for none.
     pub modseq: u64,
+    /// The copy's INTERNALDATE, when the server gave one: of a message's
+    /// copies, the one that arrived first gives it its time, headers and
+    /// body (docs/imap.md, "A message's identity").
+    #[serde(default)]
+    pub arrived: Option<Timestamp>,
+}
+
+/// A `UID COPY` or `UID MOVE` of a message into a folder whose copy the
+/// server has not been seen to make: written before the command and
+/// removed once the copy is found or known not to have been made. It is
+/// never a copy: it never keeps a message nor lets another copy be
+/// deleted; it only stops the copy being made twice (docs/imap.md,
+/// "Keeping every message safe").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImapCopyAttempt {
+    /// The label id of the folder the copy was to be made in.
+    pub folder: String,
+    /// The message copied.
+    pub message: ProviderMessageId,
+    /// The folder's UIDVALIDITY on the server just before the command.
+    pub uidvalidity: u32,
+    /// The folder's UIDNEXT on the server just before the command: the
+    /// copy, if made, has this UID or a higher one.
+    pub uidnext: u32,
 }

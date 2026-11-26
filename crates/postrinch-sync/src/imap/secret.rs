@@ -10,12 +10,17 @@
 //! Nothing here prints a secret: [`ImapSecret`]'s `Debug` hides them, and
 //! a secret that does not parse is reported without its text.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use postrinch_model::{EmailAddress, SignInMethod, SignInReason};
 use serde::{Deserialize, Serialize};
 
+use crate::google::GrantLedger;
 use crate::{Keychain, SecretStore, SyncError, SyncResult};
+
+/// The OS keychain's [`GrantLedger`]: one for the process, as the
+/// keychain is.
+static KEYCHAIN_LEDGER: LazyLock<Arc<GrantLedger>> = LazyLock::new(Arc::default);
 
 /// What an IMAP account signs in with.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,32 +135,79 @@ impl ImapSecret {
 
 /// IMAP accounts' secrets in a [`SecretStore`] (the keychain's
 /// `postrinch.imap` service in the app). Calls run on a blocking thread.
+///
+/// It also carries the keychain's [`GrantLedger`], which Google accounts'
+/// sign-ins share with IMAP accounts' through it: the Google sign-ins
+/// under way for each address, and its turn to keep or revoke a Google
+/// token.
 #[derive(Clone)]
 pub struct ImapSecrets {
     store: Arc<dyn SecretStore>,
+    ledger: Arc<GrantLedger>,
 }
 
 impl ImapSecrets {
+    /// Secrets in `store`, with a ledger of their own: clones share it.
     pub fn new(store: Arc<dyn SecretStore>) -> Self {
-        Self { store }
+        Self {
+            store,
+            ledger: Arc::default(),
+        }
     }
 
-    /// The OS keychain, under [`Keychain::IMAP`].
+    /// The OS keychain, under [`Keychain::IMAP`]. Every one shares the
+    /// process's ledger, as they share the keychain.
     pub fn keychain() -> Self {
-        Self::new(Arc::new(Keychain::IMAP))
+        Self {
+            store: Arc::new(Keychain::IMAP),
+            ledger: Arc::clone(&KEYCHAIN_LEDGER),
+        }
+    }
+
+    /// The keychain's ledger of Google sign-ins.
+    pub(crate) fn ledger(&self) -> &Arc<GrantLedger> {
+        &self.ledger
     }
 
     /// The account's secret. Fails with [`SyncError::NeedsSignIn`] when
     /// there is none, or what is kept cannot be read.
     pub async fn get(&self, account: &EmailAddress) -> SyncResult<ImapSecret> {
         let json = self
-            .run(account, |store, account| store.get(account))
+            .stored(account)
             .await?
             .ok_or(SyncError::NeedsSignIn(SignInReason::NoCredential))?;
         ImapSecret::from_json(&json).ok_or_else(|| {
             tracing::warn!("the saved IMAP sign-in for {account} is not one Postrinch reads");
             SyncError::NeedsSignIn(SignInReason::NoCredential)
         })
+    }
+
+    /// Whether the account has a secret here at all, readable or not.
+    pub(crate) async fn is_kept(&self, account: &EmailAddress) -> SyncResult<bool> {
+        Ok(self.stored(account).await?.is_some())
+    }
+
+    /// Whether the account's secret is a Google grant: one that shares
+    /// its OAuth client, and so its grant, with a Google account at the
+    /// address. A secret that is kept but cannot be read may be one, so
+    /// it cannot say: that is an error, and nothing is revoked over it.
+    pub(crate) async fn holds_google_grant(&self, account: &EmailAddress) -> SyncResult<bool> {
+        let Some(json) = self.stored(account).await? else {
+            return Ok(false);
+        };
+        match ImapSecret::from_json(&json) {
+            Some(secret) => Ok(matches!(
+                secret,
+                ImapSecret::OAuth2 { provider, .. } if provider == super::OAuthProvider::Google.id()
+            )),
+            None => Err(SyncError::Keychain(format!(
+                "the saved IMAP sign-in for {account} is not one Postrinch reads"
+            ))),
+        }
+    }
+
+    async fn stored(&self, account: &EmailAddress) -> SyncResult<Option<String>> {
+        self.run(account, |store, account| store.get(account)).await
     }
 
     pub async fn set(&self, account: &EmailAddress, secret: &ImapSecret) -> SyncResult<()> {

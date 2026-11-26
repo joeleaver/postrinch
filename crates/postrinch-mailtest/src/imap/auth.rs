@@ -15,6 +15,14 @@ use crate::sasl::{self, Claim, Mechanism};
 const PRIVACY: &str = "[PRIVACYREQUIRED] Use STARTTLS first";
 const FAILED: &str = "[AUTHENTICATIONFAILED] Invalid credentials";
 
+/// How a claim to sign in went.
+enum SignIn {
+    Done,
+    Refused,
+    /// The user has too many sessions signed in: the server's words.
+    Crowded(String),
+}
+
 /// The capability advertising a mechanism.
 fn auth_capability(mechanism: Mechanism) -> &'static str {
     match mechanism {
@@ -35,7 +43,11 @@ impl Session {
     pub(crate) fn capabilities(&self) -> String {
         let offers_starttls = self.offers_starttls();
         let state = self.shared.lock();
-        let mut caps = vec!["IMAP4rev1", "LITERAL+", "SASL-IR", "UNSELECT"];
+        let mut caps = vec!["IMAP4rev1"];
+        if state.config.literal_plus {
+            caps.push("LITERAL+");
+        }
+        caps.extend(["SASL-IR", "UNSELECT"]);
         if offers_starttls {
             caps.extend(["STARTTLS", "LOGINDISABLED"]);
         } else {
@@ -50,6 +62,9 @@ impl Session {
                 .filter(|e| state.has(*e))
                 .map(Extension::capability),
         );
+        if state.config.gmail {
+            caps.push("X-GM-EXT-1");
+        }
         caps.join(" ")
     }
 
@@ -62,9 +77,11 @@ impl Session {
         Reply::Ok("CAPABILITY completed".into())
     }
 
-    /// Checks a claim against the configured users; signs in on success.
-    fn sign_in(&mut self, claim: &Claim) -> bool {
-        let state = self.shared.lock();
+    /// Checks a claim against the configured users; signs in on success,
+    /// unless the user has as many sessions signed in as
+    /// [`super::ImapConfig::max_connections`] allows.
+    fn sign_in(&mut self, claim: &Claim) -> SignIn {
+        let mut state = self.shared.lock();
         let (user, ok) = match claim {
             Claim::Password { user, password } => (
                 user,
@@ -81,11 +98,32 @@ impl Session {
                     .is_some_and(|a| a.oauth_token.as_deref() == Some(token.as_str())),
             ),
         };
-        drop(state);
-        if ok {
-            self.user = Some(user.clone());
+        if !ok {
+            return SignIn::Refused;
         }
-        ok
+        let max = state.config.max_connections;
+        let open = state.signed_in.entry(user.clone()).or_default();
+        if let Some(max) = max
+            && *open >= max
+        {
+            return SignIn::Crowded(format!(
+                "[LIMIT] Maximum number of connections from user+IP exceeded \
+                 (mail_max_userip_connections={max})"
+            ));
+        }
+        *open += 1;
+        drop(state);
+        self.user = Some(user.clone());
+        SignIn::Done
+    }
+
+    /// The session ends: its user has one session fewer signed in.
+    pub(crate) fn sign_out(&mut self) {
+        if let Some(user) = self.user.take()
+            && let Some(open) = self.shared.lock().signed_in.get_mut(&user)
+        {
+            *open = open.saturating_sub(1);
+        }
     }
 
     fn signed_in(&self) -> Reply {
@@ -106,10 +144,10 @@ impl Session {
         if self.offers_starttls() {
             return Reply::No(PRIVACY.into());
         }
-        if self.sign_in(&claim) {
-            self.signed_in()
-        } else {
-            Reply::No(FAILED.into())
+        match self.sign_in(&claim) {
+            SignIn::Done => self.signed_in(),
+            SignIn::Refused => Reply::No(FAILED.into()),
+            SignIn::Crowded(text) => Reply::No(text),
         }
     }
 
@@ -154,8 +192,12 @@ impl Session {
             return Ok(Reply::Bad("Response is not base64".into()));
         };
         let claim = mechanism.parse(&message);
-        if claim.as_ref().is_some_and(|c| self.sign_in(c)) {
-            return Ok(self.signed_in());
+        if let Some(claim) = &claim {
+            match self.sign_in(claim) {
+                SignIn::Done => return Ok(self.signed_in()),
+                SignIn::Crowded(text) => return Ok(Reply::No(text)),
+                SignIn::Refused => {}
+            }
         }
         if let Some(failure) = mechanism.failure_challenge() {
             // As Google does for XOAUTH2, and RFC 7628 3.2.2 for

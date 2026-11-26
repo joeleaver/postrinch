@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+postrinch-discover = { workspace = true }
 postrinch-model = { workspace = true }
 postrinch-rules = { workspace = true }
 postrinch-store = { workspace = true }
@@ -42,7 +43,10 @@ url = "2"
 secret-service = { version = "5.2", features = ["crypto-rust"] }
 
 [dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+postrinch-commands = { workspace = true }
 postrinch-mailtest = { path = "../postrinch-mailtest" }
+postrinch-store = { workspace = true, features = ["faults"] }
 tempfile = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
 wiremock = "0.6"

@@ -77,6 +77,13 @@ impl GmailApi {
         }
     }
 
+    /// Pace requests to a quota `scale` times Gmail's: for tests that
+    /// download many messages, so they need not wait out Gmail's pace.
+    pub fn with_quota_scale(mut self, scale: f64) -> Self {
+        self.quota = Quota::scaled(scale);
+        self
+    }
+
     pub(crate) async fn profile(&self, account: &EmailAddress) -> SyncResult<Profile> {
         self.get(account, (Cost::GetProfile, FG), "profile", &[])
             .await

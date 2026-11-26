@@ -8,7 +8,8 @@ use super::auth::{self, Signed};
 use super::capabilities::Capabilities;
 use super::connect::{Connector, describe};
 use super::folders::ListedFolder;
-use super::reply::ImapStream;
+use super::refusal::{is_busy, is_temporary_limit, names_connections};
+use super::reply::{ImapStream, Recorder, Status, Tagged};
 use super::secret::{ImapSecret, Service};
 use super::tokens::AccessTokens;
 use crate::{SyncError, SyncResult};
@@ -19,6 +20,9 @@ pub struct ImapSession {
     capabilities: Capabilities,
     server: Server,
     connector: Connector,
+    /// Records the answers to the first commands after sign-in, for
+    /// [`after_sign_in`].
+    recorder: Recorder,
 }
 
 impl std::fmt::Debug for ImapSession {
@@ -33,7 +37,11 @@ impl std::fmt::Debug for ImapSession {
 impl ImapSession {
     /// Connects to the account's IMAP server and signs in with `secret`,
     /// as the account's settings say. A refused sign-in is
-    /// [`SyncError::NeedsSignIn`] with the server's words; a server
+    /// [`SyncError::NeedsSignIn`] with the server's words; a server too
+    /// busy for the account now (a connection or bandwidth limit, its
+    /// sign-in service down, also when it says so with a `BYE` in place
+    /// of the greeting or a `BAD` to the CAPABILITY after signing in) is
+    /// [`SyncError::Busy`]; a server
     /// offering no encryption is [`SyncError::Insecure`], and gets no
     /// credentials.
     pub async fn open(
@@ -46,22 +54,24 @@ impl ImapSession {
         let credential = secret.credential(&settings.sign_in, Service::Imap)?;
         let server = &settings.imap;
         let greeted = connector.imap(server).await?;
+        let recorder = greeted.recorder.clone();
         let mut session =
             auth::sign_in(connector, greeted, server, account, credential, tokens).await?;
         // Asked again: what a server offers changes once signed in.
-        let capabilities = connector
+        recorder.start();
+        let answered = connector
             .exchange(server, "asking its capabilities", async {
-                session
-                    .capabilities()
-                    .await
-                    .map_err(|e| imap_error(server, e))
+                Ok(session.capabilities().await)
             })
-            .await?;
+            .await;
+        let recorded = recorder.stop();
+        let capabilities = after_sign_in(server, &recorded, answered?)?;
         Ok(Self {
             capabilities: Capabilities::from_async_imap(&capabilities),
             session,
             server: server.clone(),
             connector: connector.clone(),
+            recorder,
         })
     }
 
@@ -75,13 +85,19 @@ impl ImapSession {
         &self.server
     }
 
+    /// How this session reaches its server: the TLS trust and timeouts.
+    pub(crate) fn connector(&self) -> &Connector {
+        &self.connector
+    }
+
     /// The async-imap session, for the commands sync sends.
     pub fn inner(&mut self) -> &mut async_imap::Session<ImapStream> {
         &mut self.session
     }
 
     /// Every folder (`LIST "" *`), with SPECIAL-USE attributes where the
-    /// server offers them.
+    /// server offers them. As one of the first commands after signing in,
+    /// a `BAD` naming a known limit is [`SyncError::Busy`].
     pub async fn list_folders(&mut self) -> SyncResult<Vec<ListedFolder>> {
         // RFC 6154 5.1: RETURN (SPECIAL-USE) asks for the attributes; it
         // is LIST-EXTENDED syntax. Without it a SPECIAL-USE server may
@@ -93,19 +109,20 @@ impl ImapSession {
         };
         let server = &self.server;
         let session = &mut self.session;
-        self.connector
+        self.recorder.start();
+        let answered = self
+            .connector
             .exchange(server, "listing folders", async {
-                let names = session
-                    .list(Some(""), Some(pattern))
-                    .await
-                    .map_err(|e| imap_error(server, e))?;
-                let names: Vec<_> = names
-                    .try_collect()
-                    .await
-                    .map_err(|e| imap_error(server, e))?;
-                Ok(names.iter().map(ListedFolder::from_name).collect())
+                let names = match session.list(Some(""), Some(pattern)).await {
+                    Ok(names) => names,
+                    Err(e) => return Ok(Err(e)),
+                };
+                Ok(names.try_collect::<Vec<_>>().await)
             })
-            .await
+            .await;
+        let recorded = self.recorder.stop();
+        let names = after_sign_in(server, &recorded, answered?)?;
+        Ok(names.iter().map(ListedFolder::from_name).collect())
     }
 
     /// Signs out and closes the connection.
@@ -119,6 +136,68 @@ impl ImapSession {
                     .map_err(|e| imap_error(&server, e))
             })
             .await
+    }
+}
+
+/// How one of the first commands after signing in (CAPABILITY, LIST)
+/// ended, from async-imap's `result` and what the server sent meanwhile
+/// (`recorded`).
+///
+/// async-imap 0.12 reads CAPABILITY and LIST to their tagged answer
+/// without looking at its status (`parse_capabilities`, `parse_names`),
+/// so a `NO` or `BAD` would pass as an empty answer: the recorded tagged
+/// answer is checked here, and anything but OK fails the command.
+fn after_sign_in<T>(
+    server: &Server,
+    recorded: &[u8],
+    result: Result<T, async_imap::error::Error>,
+) -> SyncResult<T> {
+    use async_imap::error::Error;
+    let refused = Tagged::last_in(recorded).filter(|answer| answer.status != Status::Ok);
+    match (result, refused) {
+        (Ok(_) | Err(Error::No(_) | Error::Bad(_)), Some(answer)) => {
+            Err(refused_after_sign_in(server, answer))
+        }
+        (Ok(value), None) => Ok(value),
+        (Err(e), _) => Err(imap_error(server, e)),
+    }
+}
+
+/// A `NO` or `BAD` to one of the first commands after signing in
+/// (CAPABILITY, LIST), which touch no folder. It is the server busy
+/// ([`SyncError::Busy`]) when:
+///
+/// - a `BAD` names a known temporary limit: Microsoft 365 accepts the
+///   sign-in and then answers the next command `BAD User is
+///   authenticated but not connected.` while it sheds sessions opened
+///   too fast ([`super::refusal::TEMPORARY_LIMITS`]);
+/// - a `NO` says "not now" as it would at sign-in ([`is_busy`]):
+///   `[UNAVAILABLE]`, `[INUSE]` or `[LIMIT]`, or a known limit's words
+///   under `[ALERT]` or no code. These commands name no folder for
+///   `[INUSE]` or `[UNAVAILABLE]` to be about, and ask nothing a fixed
+///   implementation `[LIMIT]` could cap, so each is the connection being
+///   turned away, the account's (as `busy_after_sign_in` has it for a
+///   known limit).
+///
+/// Anything else is the server's, in its words.
+fn refused_after_sign_in(server: &Server, answer: Tagged) -> SyncError {
+    let busy = match answer.status {
+        Status::Bad => is_temporary_limit(&answer.text),
+        Status::No => is_busy(answer.code.as_deref(), &answer.text),
+        Status::Ok => false,
+    };
+    if busy {
+        return SyncError::Busy {
+            service: "IMAP",
+            server: describe(server),
+            connections: names_connections(answer.code.as_deref(), &answer.text),
+            message: answer.text,
+        };
+    }
+    SyncError::Server {
+        service: "IMAP",
+        server: describe(server),
+        message: answer.text,
     }
 }
 
