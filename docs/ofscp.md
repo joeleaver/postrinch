@@ -247,11 +247,12 @@ provider**, not by provider or group.
     - identifiers, dmId and signing;
     - the REST wire types up to spec main 187acb9, spec #24 included;
     - the WebSocket frames, `ofscp_core::ws`.
-  - Encoding rules (spec #27, re-ofscp decision 0016):
-    - Every frame is written with `id`, `type`, `ts` and `data`. A command needs a `ts`, which
-      the caller supplies; `encode` refuses a frame without one.
-    - A client that receives a malformed known event treats it as a local error and never
-      replies.
+  - Frame rules (re-ofscp decision 0016, from the oracle's answers on spec #27, which is still
+    open):
+    - Sending: every frame is written with `id`, `type`, `ts` and `data`. A command needs a
+      `ts`, which the caller supplies; `encode` refuses a frame without one.
+    - Receiving: a client that gets a malformed known event treats it as a local error and
+      never replies.
   - `ofscp-core` needs rustc 1.99 (`rust-version`); the local stable toolchain is 1.98.1, so
     update it before PR 5.
 
@@ -371,9 +372,10 @@ CI. Rows marked *spec* depend on the spec changes above, all merged on 2026-11-2
 
 ## Tests
 
-- **Protocol:** the spec's signing vectors, Forumall's golden vectors, and the spec's dmId
-  example, as fixtures that name their source. Every wire type round-trips the spec's example
-  JSON.
+- **Protocol:** tested in `ofscp-core`, not here. Its tests check the spec's signing vectors and
+  dmId example, and that every REST and WebSocket sample round-trips. Postrinch adds tests
+  for its own transport and for the fake provider, below. A protocol case Postrinch finds
+  missing goes to re-ofscp as a patch or an issue.
 - **Against the fake provider:**
   - sign-in and key registration, with signatures checked by the fake;
   - reconnect and resume; `truncated` followed by a backfill; duplicate events;
