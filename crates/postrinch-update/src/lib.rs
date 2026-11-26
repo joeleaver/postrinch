@@ -11,6 +11,7 @@
 //! outside a marked folder, so a development build never updates itself.
 
 mod apply;
+mod busy;
 mod check;
 mod desktop;
 mod install;

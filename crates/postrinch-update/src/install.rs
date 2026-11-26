@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::busy;
 use crate::desktop::{self, Icons};
 use crate::{CURRENT, MARKER, PROGRAMS, exe};
 
@@ -89,14 +90,22 @@ fn copy_over(from: &Path, to: &Path) -> Result<(), String> {
 /// Move `new` over `dest`. On Linux and macOS a rename: a running `dest`
 /// keeps its open file. Windows will not replace a running program, but it
 /// will rename one, so the old file steps aside to `*.old` first (removed
-/// at the next start).
+/// at the next start). A file another process holds for a moment (Defender
+/// scanning it) is waited for (`busy`).
 pub(crate) fn replace_file(new: &Path, dest: &Path) -> Result<(), String> {
     if cfg!(windows) && dest.exists() {
         let old = dest.with_extension("old");
-        let _ = std::fs::remove_file(&old);
-        std::fs::rename(dest, &old).map_err(|e| format!("moving {} aside: {e}", dest.display()))?;
+        match busy::retry(|| std::fs::remove_file(&old)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(format!("removing {}: {e}", old.display()));
+            }
+            _ => {}
+        }
+        busy::retry(|| std::fs::rename(dest, &old))
+            .map_err(|e| format!("moving {} aside: {e}", dest.display()))?;
     }
-    std::fs::rename(new, dest).map_err(|e| format!("putting {} in place: {e}", dest.display()))?;
+    busy::retry(|| std::fs::rename(new, dest))
+        .map_err(|e| format!("putting {} in place: {e}", dest.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -145,5 +154,20 @@ mod tests {
         replaced.unwrap();
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new");
         assert_eq!(dest.with_extension("old").exists(), cfg!(windows));
+    }
+
+    /// The update's rename while a scanner holds the program: it waits
+    /// for the scanner to let go rather than failing the update.
+    #[cfg(windows)]
+    #[test]
+    fn a_program_held_for_a_moment_is_still_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let (new, dest) = (dir.path().join("new"), dir.path().join(exe("program")));
+        std::fs::write(&dest, "old").unwrap();
+        std::fs::write(&new, "new").unwrap();
+        let held = crate::busy::tests::hold(&dest, std::time::Duration::from_millis(300));
+        replace_file(&new, &dest).unwrap();
+        held.join().unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new");
     }
 }

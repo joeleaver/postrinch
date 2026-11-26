@@ -83,7 +83,8 @@ pub(crate) fn integrate(places: &Places, dir: &Path, version: &str) -> Result<Ve
 pub(crate) fn deintegrate(places: &Places, dir: &Path) -> Result<(), String> {
     let lnk = places.programs.join(SHORTCUT);
     if lnk.exists() {
-        std::fs::remove_file(&lnk).map_err(|e| format!("removing {}: {e}", lnk.display()))?;
+        crate::busy::retry(|| std::fs::remove_file(&lnk))
+            .map_err(|e| format!("removing {}: {e}", lnk.display()))?;
     }
     path::remove(&places.user, dir)?;
     registration::deregister(&places.user)?;

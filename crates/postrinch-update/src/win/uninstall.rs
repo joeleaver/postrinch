@@ -84,7 +84,7 @@ pub(crate) fn remove_programs(dir: &Path) -> Result<(), String> {
     for name in &PROGRAMS[1..] {
         let path = dir.join(exe(name));
         if path.exists() {
-            std::fs::remove_file(&path).map_err(|e| {
+            crate::busy::retry(|| std::fs::remove_file(&path)).map_err(|e| {
                 format!(
                     "{} cannot be removed ({e}): close any agent's app that uses it, then try again",
                     path.display()
@@ -100,7 +100,7 @@ pub(crate) fn remove_programs(dir: &Path) -> Result<(), String> {
 pub(crate) fn remove_files(dir: &Path) -> Result<(), String> {
     let stage = dir.join(STAGE);
     if stage.exists() {
-        std::fs::remove_dir_all(&stage)
+        crate::busy::retry(|| std::fs::remove_dir_all(&stage))
             .map_err(|e| format!("removing {}: {e}", stage.display()))?;
     }
     let entries = std::fs::read_dir(dir).map_err(|e| format!("reading {}: {e}", dir.display()))?;
@@ -110,7 +110,8 @@ pub(crate) fn remove_files(dir: &Path) -> Result<(), String> {
             .extension()
             .is_some_and(|ext| ext == "old" || ext == "incoming");
         if left_over || entry.file_name() == MARKER {
-            std::fs::remove_file(&path).map_err(|e| format!("removing {}: {e}", path.display()))?;
+            crate::busy::retry(|| std::fs::remove_file(&path))
+                .map_err(|e| format!("removing {}: {e}", path.display()))?;
         }
     }
     Ok(())
@@ -122,7 +123,7 @@ fn set_aside(exe: &Path) -> Result<(), String> {
     use windows::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
     let aside = std::env::temp_dir().join(format!("{SET_ASIDE}{}.exe", std::process::id()));
     let _ = std::fs::remove_file(&aside);
-    std::fs::rename(exe, &aside).map_err(|e| e.to_string())?;
+    crate::busy::retry(|| std::fs::rename(exe, &aside)).map_err(|e| e.to_string())?;
     let aside_w = wide(&aside);
     // SAFETY: a NUL-terminated path that outlives the call. Asking Windows
     // to delete it at the next restart needs an administrator's rights, so
