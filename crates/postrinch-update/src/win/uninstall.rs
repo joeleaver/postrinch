@@ -116,18 +116,18 @@ pub(crate) fn remove_files(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Move the running `exe` out of the install, to be deleted at the next
-/// restart if Windows lets this user ask for that, or else at Postrinch's
-/// next start.
+/// Move the running `exe` out of the install, to the temporary folder
+/// ([`SET_ASIDE`] says when it goes from there).
 fn set_aside(exe: &Path) -> Result<(), String> {
     use windows::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
     let aside = std::env::temp_dir().join(format!("{SET_ASIDE}{}.exe", std::process::id()));
     let _ = std::fs::remove_file(&aside);
     std::fs::rename(exe, &aside).map_err(|e| e.to_string())?;
     let aside_w = wide(&aside);
-    // SAFETY: a NUL-terminated path that outlives the call. Asking needs an
-    // administrator's rights; without them it fails and `clear_leftovers`
-    // is what removes the file.
+    // SAFETY: a NUL-terminated path that outlives the call. Asking Windows
+    // to delete it at the next restart needs an administrator's rights, so
+    // for a per-user install this normally fails and the file waits for
+    // the temporary folder's clean-up.
     let _ = unsafe {
         MoveFileExW(
             PCWSTR(aside_w.as_ptr()),

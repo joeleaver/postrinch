@@ -161,7 +161,7 @@ jobs:
             do {
               $left = @()
               if (Test-Path "$app\postrinch.exe") { $left += "postrinch.exe" }
-              if (Test-Path "$app\unins000.exe") { $left += "the Setup's uninstaller" }
+              if ((Test-Path "$app\unins000.exe") -or (Uninstaller-Running)) { $left += "the Setup's uninstaller" }
               if (Test-Path $lnk) { $left += "the Start-menu entry" }
               if ((Path-Entries) -ne 0) { $left += "$app on the PATH ('$(User-Path)')" }
               if ((Test-Path $setupKey) -or (Test-Path $zipKey)) { $left += "Postrinch in Apps & features" }
@@ -171,10 +171,13 @@ jobs:
             } while ((Get-Date) -lt $deadline)
             throw "$how left $($left -join ', ')"
           }
+          # The Setup's uninstaller works from a copy of itself in %TEMP%
+          # (`_iu*.tmp`); it is done when that copy has exited.
+          function Uninstaller-Running { @(Get-Process | Where-Object { $_.ProcessName -like '_iu*' }).Count -gt 0 }
           function Wait-SetupUninstalled {
             $deadline = (Get-Date).AddSeconds(60)
-            while (((Test-Path "$app\unins000.exe") -or (Test-Path $setupKey)) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
-            if ((Test-Path "$app\unins000.exe") -or (Test-Path $setupKey)) { throw "the Setup's uninstaller did not finish" }
+            while (((Uninstaller-Running) -or (Test-Path "$app\unins000.exe") -or (Test-Path $setupKey)) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+            if ((Uninstaller-Running) -or (Test-Path "$app\unins000.exe") -or (Test-Path $setupKey)) { throw "the Setup's uninstaller did not finish" }
           }
 
           $setup = "dist/postrinch-$env:version-windows-x86_64-setup.exe"
