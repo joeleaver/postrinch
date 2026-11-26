@@ -41,32 +41,36 @@ impl OAuthClients {
     }
 
     /// The clients in Postrinch's config directory
-    /// (`<config dir>/postrinch`).
+    /// (`<config dir>/postrinch`), Google's falling back to the one this
+    /// build carries.
     pub fn load() -> Self {
-        match dirs::config_dir() {
-            Some(dir) => Self::load_from(&dir.join("postrinch")),
-            None => Self::none(),
-        }
+        let dir = dirs::config_dir().map(|d| d.join("postrinch"));
+        Self::load_from_dir(dir.as_deref())
     }
 
-    /// The clients in `dir`: `google-oauth-client.json` and
+    /// The clients in `dir`: `google-oauth-client.json` (or else the
+    /// Google client this build carries, as [`ClientConfig::find`]) and
     /// `microsoft-oauth-client.json`. A file that is there but does not
     /// read leaves its provider not set up, with the reason, and is
     /// logged.
     pub fn load_from(dir: &Path) -> Self {
-        let google_path = dir.join("google-oauth-client.json");
-        let google = if google_path.exists() {
-            match ClientConfig::load(&google_path) {
-                Ok(config) => ready(google_spec(&config, Endpoints::google(&config))),
-                Err(e) => missing_because(e),
-            }
-        } else {
-            Client::Missing(None)
-        };
-        let microsoft = match MicrosoftClient::load(&dir.join(MicrosoftClient::FILE_NAME)) {
-            Ok(Some(client)) => ready(client.spec()),
+        Self::load_from_dir(Some(dir))
+    }
+
+    fn load_from_dir(dir: Option<&Path>) -> Self {
+        let google_path = dir.map(|d| d.join("google-oauth-client.json"));
+        let google = match ClientConfig::find(google_path.as_deref()) {
+            Ok(Some(config)) => ready(google_spec(&config, Endpoints::google(&config))),
             Ok(None) => Client::Missing(None),
             Err(e) => missing_because(e),
+        };
+        let microsoft = match dir {
+            Some(dir) => match MicrosoftClient::load(&dir.join(MicrosoftClient::FILE_NAME)) {
+                Ok(Some(client)) => ready(client.spec()),
+                Ok(None) => Client::Missing(None),
+                Err(e) => missing_because(e),
+            },
+            None => Client::Missing(None),
         };
         Self { google, microsoft }
     }
@@ -136,9 +140,10 @@ mod tests {
     fn without_files_nothing_is_set_up() {
         let dir = tempfile::tempdir().unwrap();
         let clients = OAuthClients::load_from(dir.path());
-        for p in OAuthProvider::ALL {
-            assert!(!clients.is_set_up(*p));
-        }
+        assert!(!clients.is_set_up(OAuthProvider::Microsoft));
+        // Google's comes built in when this build was given one.
+        let built_in = option_env!("POSTRINCH_GOOGLE_CLIENT").is_some_and(|t| !t.trim().is_empty());
+        assert_eq!(clients.is_set_up(OAuthProvider::Google), built_in);
         let err = clients.spec(OAuthProvider::Microsoft).err().unwrap();
         assert_eq!(
             err.to_string(),

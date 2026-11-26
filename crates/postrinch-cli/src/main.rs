@@ -25,7 +25,8 @@ struct Cli {
     #[arg(long, global = true)]
     data_dir: Option<PathBuf>,
     /// The Google OAuth client file. Defaults to
-    /// `<config dir>/postrinch/google-oauth-client.json`.
+    /// `<config dir>/postrinch/google-oauth-client.json` when there is one,
+    /// and otherwise the client this build carries.
     #[arg(long, global = true)]
     client: Option<PathBuf>,
     #[command(subcommand)]
