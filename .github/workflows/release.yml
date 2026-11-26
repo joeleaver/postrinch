@@ -83,8 +83,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # The same Google client as Linux's build, and the same guard.
       - name: Build (release)
-        run: cargo build --release --locked -p postrinch -p postrinch-mcp -p postrinch-cli
+        shell: bash
+        env:
+          POSTRINCH_GOOGLE_CLIENT: ${{ secrets.POSTRINCH_GOOGLE_CLIENT }}
+        run: |
+          if [ -z "$POSTRINCH_GOOGLE_CLIENT" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "POSTRINCH_GOOGLE_CLIENT is not set: gh secret set POSTRINCH_GOOGLE_CLIENT < the client's JSON" >&2
+            exit 1
+          fi
+          cargo build --release --locked -p postrinch -p postrinch-mcp -p postrinch-cli
 
       - name: Check the tag names the version
         if: startsWith(github.ref, 'refs/tags/v')
