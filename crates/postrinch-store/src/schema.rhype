@@ -114,6 +114,9 @@ type MessageContent {
 type StoreInfo {
     key: String @unique
     version: u32
+    // The last sequence number a social change took (social/outbox.rs);
+    // null before the first.
+    social_seq: u64
 }
 
 // A view the person made or changed (views.rs): `name` holds its key,

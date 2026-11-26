@@ -6,20 +6,23 @@ use serde_json::Value;
 
 use super::{KEY, RECORD, SocialOutboxEntry, scoped, social_account_key};
 use crate::codec::{Fields, FieldsBuilder};
-use crate::{Store, StoreResult};
+use crate::format::{INFO, INFO_KEY};
+use crate::{Store, StoreError, StoreResult};
 
 const OUTBOX: &str = "SocialOutbox";
 
 impl Store {
     /// Queue a change, as made at `created`, to go out after every change
-    /// queued before it. Queuing a client id that is queued already returns
-    /// that entry as it is: a repeat of the call queues nothing twice.
+    /// queued before it, with the blobs of the files it uploads first.
+    /// Queuing a client id that is queued already returns that entry as it
+    /// is: a repeat of the call queues nothing twice.
     pub fn queue_social_change(
         &self,
         account: &str,
         client_id: &str,
         place: Option<&str>,
         change: &Value,
+        blobs: &[String],
         created: i64,
     ) -> StoreResult<SocialOutboxEntry> {
         let key = scoped(account, client_id);
@@ -33,6 +36,7 @@ impl Store {
                 place: place.map(str::to_owned),
                 seq: self.next_social_seq()?,
                 change: change.clone(),
+                blobs: blobs.to_vec(),
                 created,
                 attempts: 0,
                 error: None,
@@ -42,12 +46,17 @@ impl Store {
         })
     }
 
+    /// The next sequence number, never one taken before: the last one is
+    /// kept in the store's info, so numbers go on rising once the outbox
+    /// is empty. Called with the social lock held.
     fn next_social_seq(&self) -> StoreResult<u64> {
-        let mut last = 0;
-        for object in self.db.scan_type_projected(OUTBOX, &["seq"])? {
-            last = last.max(Fields::new(OUTBOX, object).u64("seq")?);
-        }
-        Ok(last + 1)
+        let info = self
+            .find(INFO, "key", INFO_KEY)?
+            .ok_or_else(|| StoreError::corrupt(INFO, 0, "the store's info is missing"))?;
+        let next = info.opt_u64("social_seq")?.unwrap_or(0) + 1;
+        let fields = FieldsBuilder::new().u64("social_seq", next).build();
+        self.db_update(INFO, info.id(), fields)?;
+        Ok(next)
     }
 
     fn write_social_change(&self, key: &str, entry: &SocialOutboxEntry) -> StoreResult<()> {
@@ -102,6 +111,16 @@ impl Store {
     /// Returns whether it was queued.
     pub fn remove_social_change(&self, account: &str, client_id: &str) -> StoreResult<bool> {
         self.social_locked(|| self.social_remove(OUTBOX, KEY, &scoped(account, client_id)))
+    }
+
+    /// Every blob a queued change uploads.
+    pub(crate) fn social_outbox_blobs(&self) -> StoreResult<Vec<String>> {
+        let mut blobs = Vec::new();
+        for object in self.db.scan_type_projected(OUTBOX, &[RECORD])? {
+            let entry: SocialOutboxEntry = Fields::new(OUTBOX, object).json(RECORD)?;
+            blobs.extend(entry.blobs);
+        }
+        Ok(blobs)
     }
 
     /// Forget every queued change of `account`.

@@ -76,7 +76,7 @@ fn removing_an_account_removes_everything_it_holds() {
         .put_social_message(&message(ADA, GENERAL, "m1", 1), "hello")
         .unwrap();
     store
-        .queue_social_change(ADA, "c1", Some(GENERAL), &json!({}), 1)
+        .queue_social_change(ADA, "c1", Some(GENERAL), &json!({}), &[], 1)
         .unwrap();
     store
         .put_social_notification(&notification(ADA, "n1", 1))
@@ -135,6 +135,7 @@ fn removing_an_account_removes_everything_it_holds() {
     assert!(store.social_message(BOB, GENERAL, "m1").unwrap().is_some());
     assert!(store.social_draft("d2").unwrap().is_some());
     // Again, and of an account never here: nothing to do.
+    assert_eq!(store.db.count_type("SocialMessage").unwrap(), 1);
     store.remove_social_account(ADA).unwrap();
     store.remove_social_account("nobody@x.example").unwrap();
 }
@@ -183,4 +184,26 @@ pub(super) fn draft(account: &str, id: &str, place: Option<&str>) -> SocialDraft
             mime: Some("image/png".into()),
         }],
     }
+}
+
+#[test]
+fn removing_an_account_removes_messages_of_places_never_kept() {
+    let (_dir, store) = store();
+    store.put_social_account(&account(ADA)).unwrap();
+    // A private message that came before its conversation.
+    store
+        .put_social_message(&message(ADA, "dm_early", "m1", 1), "early")
+        .unwrap();
+    store
+        .put_social_message(&message(BOB, "dm_early", "m1", 1), "early")
+        .unwrap();
+    store.remove_social_account(ADA).unwrap();
+    assert_eq!(store.social_message(ADA, "dm_early", "m1").unwrap(), None);
+    assert!(
+        store
+            .social_message(BOB, "dm_early", "m1")
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(store.db.count_type("SocialMessageContent").unwrap(), 1);
 }

@@ -92,10 +92,10 @@ fn removing_a_place_keeps_its_drafts_without_it() {
         .put_social_message(&message(ADA, GENERAL, "m1", 1), "hi")
         .unwrap();
     store
-        .queue_social_change(ADA, "c1", Some(GENERAL), &serde_json::json!({}), 1)
+        .queue_social_change(ADA, "c1", Some(GENERAL), &serde_json::json!({}), &[], 1)
         .unwrap();
     store
-        .queue_social_change(ADA, "c2", None, &serde_json::json!({}), 2)
+        .queue_social_change(ADA, "c2", None, &serde_json::json!({}), &[], 2)
         .unwrap();
     store
         .put_social_draft(&accounts::draft(ADA, "d1", Some(GENERAL)))

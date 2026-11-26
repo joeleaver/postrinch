@@ -7,15 +7,31 @@ use crate::{Store, StoreResult};
 const NOTIFICATION: &str = "SocialNotification";
 
 impl Store {
-    /// Keep a notification, replacing the one with its id.
+    /// Keep a notification, replacing the one with its id. One read here
+    /// stays read, whatever the provider last said.
     pub fn put_social_notification(&self, notification: &SocialNotification) -> StoreResult<()> {
+        let key = scoped(&notification.account, &notification.id);
+        self.social_locked(|| {
+            let kept: Option<SocialNotification> = self.social_record(NOTIFICATION, KEY, &key)?;
+            let notification = &SocialNotification {
+                read: notification.read || kept.is_some_and(|kept| kept.read),
+                ..notification.clone()
+            };
+            self.write_social_notification(&key, notification)
+        })
+    }
+
+    fn write_social_notification(
+        &self,
+        key: &str,
+        notification: &SocialNotification,
+    ) -> StoreResult<()> {
         let fields = FieldsBuilder::new()
             .str("account", social_account_key(&notification.account))
             .datetime("created", notification.created)
             .bool("read", notification.read)
             .json(RECORD, notification);
-        let key = scoped(&notification.account, &notification.id);
-        self.social_put(NOTIFICATION, KEY, &key, fields)?;
+        self.social_put(NOTIFICATION, KEY, key, fields)?;
         Ok(())
     }
 
@@ -46,6 +62,7 @@ impl Store {
     /// Mark an account's notifications `ids` read. Returns how many were
     /// here and unread.
     pub fn set_social_notifications_read(&self, account: &str, ids: &[&str]) -> StoreResult<usize> {
+        let _held = self.social_lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut marked = 0;
         for id in ids {
             let Some(found) = self.find(NOTIFICATION, KEY, &scoped(account, id))? else {

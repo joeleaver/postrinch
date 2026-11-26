@@ -49,7 +49,8 @@ impl Store {
     }
 
     /// Change the social account of `actor` as it is now, with no other
-    /// change to a social object in between. Returns it as changed, or
+    /// change to a social object in between. `change` must not call the
+    /// store: the social lock is held while it runs. Returns it as changed, or
     /// `None` when it is not here.
     pub fn change_social_account(
         &self,
@@ -72,6 +73,8 @@ impl Store {
     /// them. Fetched media bytes stay in the blob store until
     /// [`Store::collect_garbage`]. Removing an account that is not here
     /// does nothing, and an interrupted removal is finished by a repeat.
+    /// Stop the account's sync first: what it writes meanwhile is left
+    /// until a repeat.
     pub fn remove_social_account(&self, actor: &str) -> StoreResult<()> {
         let account = social_account_key(actor);
         // Its changes first, so nothing is sent for an account half gone.
@@ -85,6 +88,8 @@ impl Store {
         for group in self.social_groups(&account)? {
             self.remove_social_group(&account, &group.uri)?;
         }
+        // Messages of places that were never kept, too.
+        self.remove_social_messages_of(&account)?;
         self.forget_social_account_in_views(&account)?;
         self.social_remove(ACCOUNT, KEY, &account)?;
         Ok(())

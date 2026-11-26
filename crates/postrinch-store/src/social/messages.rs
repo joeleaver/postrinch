@@ -31,18 +31,34 @@ impl Store {
     /// finds it by (its plain text and its author's name). Returns whether
     /// that changed anything: a replayed event is not written again. A
     /// repeat of the same call finishes what an interrupted one left.
+    ///
+    /// [`SocialMessage::unread`] is taken only for a message not here yet:
+    /// whether a kept one is read is the read marker's and the person's
+    /// ([`Store::set_social_messages_read`],
+    /// [`Store::set_social_message_unread`]), so an edit or a reaction
+    /// arriving never makes a read message unread again.
     pub fn put_social_message(
         &self,
         message: &SocialMessage,
         search_text: &str,
     ) -> StoreResult<bool> {
+        self.social_locked(|| self.write_social_message(message, search_text))
+    }
+
+    fn write_social_message(
+        &self,
+        message: &SocialMessage,
+        search_text: &str,
+    ) -> StoreResult<bool> {
         let key = message_key(&message.account, &message.place, &message.id);
-        // As it reads back: by its account's key.
+        let kept = self.social_message_at(&key)?;
+        // As it reads back: by its account's key, read as it is here.
         let message = &SocialMessage {
             account: social_account_key(&message.account),
+            unread: kept.as_ref().map_or(message.unread, |kept| kept.unread),
             ..message.clone()
         };
-        if self.social_message_at(&key)?.as_ref() == Some(message)
+        if kept.as_ref() == Some(message)
             && self.social_search_text(&key)?.as_deref() == Some(search_text)
         {
             return Ok(false);
@@ -196,6 +212,7 @@ impl Store {
         place: &str,
         up_to: i64,
     ) -> StoreResult<usize> {
+        let _held = self.social_lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut marked = 0;
         for scalars in self.social_where(MESSAGE, "place", &scoped(account, place))? {
             if scalars.bool("unread")? && scalars.datetime("created")? <= up_to {
@@ -215,6 +232,7 @@ impl Store {
         id: &str,
         unread: bool,
     ) -> StoreResult<bool> {
+        let _held = self.social_lock.lock().unwrap_or_else(|e| e.into_inner());
         match self.find(MESSAGE, KEY, &message_key(account, place, id))? {
             Some(scalars) => {
                 let fields = FieldsBuilder::new().bool("unread", unread).build();
@@ -251,6 +269,24 @@ impl Store {
     pub fn remove_social_message(&self, account: &str, place: &str, id: &str) -> StoreResult<()> {
         self.social_remove(MESSAGE, KEY, &message_key(account, place, id))?;
         Ok(())
+    }
+
+    /// Forget every message of `account`, whether or not its place is
+    /// here (a message may come before its place, or be written while the
+    /// account is being removed). Returns how many went.
+    pub(super) fn remove_social_messages_of(&self, account: &str) -> StoreResult<usize> {
+        let prefix = format!("{}{SEP}", social_account_key(account));
+        let mut ids = Vec::new();
+        for object in self.db.scan_type_projected(MESSAGE, &[KEY])? {
+            let scalars = Fields::new(MESSAGE, object);
+            if scalars.str(KEY)?.starts_with(&prefix) {
+                ids.push(scalars.id());
+            }
+        }
+        for &id in &ids {
+            self.db_delete(MESSAGE, id)?;
+        }
+        Ok(ids.len())
     }
 
     /// Forget every message of the place whose key is `place`.

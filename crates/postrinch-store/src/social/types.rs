@@ -353,6 +353,9 @@ pub struct SocialOutboxEntry {
     pub seq: u64,
     /// The change, as the engine will send it.
     pub change: Value,
+    /// The blobs of the files it uploads first (a pasted picture), kept
+    /// while it is queued.
+    pub blobs: Vec<String>,
     pub created: i64,
     pub attempts: u32,
     /// Why the last attempt failed; `None` while none has.

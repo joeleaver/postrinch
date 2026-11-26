@@ -42,8 +42,8 @@ const UPGRADES: &[Upgrade] = &[(
     |_| Ok(()),
 )];
 
-const INFO: &str = "StoreInfo";
-const INFO_KEY: &str = "store";
+pub(crate) const INFO: &str = "StoreInfo";
+pub(crate) const INFO_KEY: &str = "store";
 
 /// Open the store under `root`, creating it if it does not exist.
 pub(crate) fn open(root: &Path) -> StoreResult<Store> {

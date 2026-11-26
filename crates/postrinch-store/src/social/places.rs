@@ -33,7 +33,8 @@ impl Store {
 
     /// Change the place as it is now, with no other change to a social
     /// object in between: sync moving its cursors and the window moving
-    /// its read marker lose nothing to each other. Returns it as changed,
+    /// its read marker lose nothing to each other. `change` must not call
+    /// the store: the social lock is held while it runs. Returns it as changed,
     /// or `None` when it is not here.
     pub fn change_social_place(
         &self,

@@ -218,3 +218,23 @@ fn an_interrupted_put_is_not_read_and_its_repeat_finishes_it() {
         Some(kept)
     );
 }
+
+#[test]
+fn an_edit_arriving_never_makes_a_read_message_unread() {
+    let (_dir, store) = ada_with_general();
+    let mut kept = message(ADA, GENERAL, "m1", 1);
+    store.put_social_message(&kept, "m1").unwrap();
+    store.set_social_messages_read(ADA, GENERAL, 1).unwrap();
+    // Sync writes an edit, with the message as the provider has it.
+    kept.reactions = vec![ReactionSum {
+        key: "🎉".into(),
+        count: 1,
+        mine: false,
+    }];
+    assert!(store.put_social_message(&kept, "m1").unwrap());
+    let read = store.social_message(ADA, GENERAL, "m1").unwrap().unwrap();
+    assert!(!read.unread);
+    assert_eq!(read.reactions, kept.reactions);
+    // Unchanged but for `unread`: nothing to write.
+    assert!(!store.put_social_message(&kept, "m1").unwrap());
+}

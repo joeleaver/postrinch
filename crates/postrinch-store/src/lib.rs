@@ -150,7 +150,8 @@ impl Store {
 
     /// Delete raw messages no stored message refers to any more (after a
     /// message or an account is removed), attachments no queued mail
-    /// refers to, and social media bytes no attachment or draft refers to.
+    /// refers to, and social media bytes no attachment, draft or queued
+    /// social change refers to.
     /// Blobs written in the last `grace` are kept, for writers still
     /// between storing a blob and what refers to it. Returns how many were
     /// deleted.
@@ -168,6 +169,7 @@ impl Store {
         }
         referenced.extend(self.social_media_blobs()?);
         referenced.extend(self.social_draft_blobs()?);
+        referenced.extend(self.social_outbox_blobs()?);
         Ok(self.blobs.retain(|hash| referenced.contains(hash), grace)?)
     }
 }
