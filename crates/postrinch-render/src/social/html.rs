@@ -6,18 +6,19 @@
 //! marked.
 //!
 //! §5.3 drops every `src`: a body shows the message's own attachments by
-//! `<img data-attachment="<id>">`, and no picture from anywhere else. The
-//! allow-list cannot keep `data-attachment` (rinch keeps no `data-*`
-//! attribute from a document; its DOM reads many), so the user sheet carries
-//! it: one rule per attachment the message has, `img[data-attachment="…"]`,
-//! matched against the body as written, marks each picture with its rule's
-//! index, and the index names the attachment.
+//! `<img data-attachment="<id>">`, and no picture from anywhere else. A
+//! picture by address is therefore its caption only, never a link to the
+//! address as Markdown's is: the sanitizer MUST drop `src`, which outweighs
+//! the SHOULD to offer it as a link. The allow-list cannot keep
+//! `data-attachment` as itself (rinch keeps no `data-*` attribute from a
+//! document; its DOM reads many), so rinch carries it through renamed
+//! ([`CARRIED`]).
 
 use std::sync::Arc;
 
-use rinch_html::{AllowList, Policy, USER_MARK, clean};
+use rinch_html::{AllowList, CARRIED, Policy, clean};
 
-use super::{Attachment, finish};
+use super::finish;
 
 /// §5.3's elements.
 pub(super) const TAGS: &[&str] = &[
@@ -91,7 +92,7 @@ pub(super) enum Source {
 }
 
 /// The policy a body is cleaned under.
-pub(super) fn policy(source: Source, attachments: &[Attachment]) -> Policy {
+pub(super) fn policy(source: Source) -> Policy {
     let mut attributes: Vec<(String, String)> = ATTRIBUTES
         .iter()
         .map(|(t, a)| ((*t).to_owned(), (*a).to_owned()))
@@ -108,73 +109,26 @@ pub(super) fn policy(source: Source, attachments: &[Attachment]) -> Policy {
         // attachments are placed afterwards, under the picture rule.
         picture: Arc::new(|_| None),
         link_schemes: LINK_SCHEMES.iter().map(|s| (*s).to_owned()).collect(),
-        user_css: attachment_sheet(attachments),
+        user_css: String::new(),
         allow: Some(AllowList {
             tags: TAGS.iter().map(|s| (*s).to_owned()).collect(),
             attributes,
             removed_with_content: REMOVED.iter().map(|s| (*s).to_owned()).collect(),
+            carried: vec![("img".to_owned(), ATTACHMENT_ATTRIBUTE.to_owned())],
         }),
     }
 }
 
-/// One rule per attachment, in order: rule `i` marks the pictures that
-/// place `attachments[i]`.
-fn attachment_sheet(attachments: &[Attachment]) -> String {
-    let mut sheet = String::new();
-    for attachment in attachments {
-        sheet.push_str("img[data-attachment=\"");
-        css_string_into(&mut sheet, attachment.id);
-        sheet.push_str("\"] {}\n");
-    }
-    sheet
-}
-
-/// `value` escaped for a double-quoted CSS string.
-fn css_string_into(out: &mut String, value: &str) {
-    for c in value.chars() {
-        match c {
-            '"' | '\\' => {
-                out.push('\\');
-                out.push(c);
-            }
-            c if c.is_control() => out.push_str(&format!("\\{:x} ", u32::from(c))),
-            c => out.push(c),
-        }
-    }
-}
+/// The attribute a body places an attachment with (§5.3).
+const ATTACHMENT_ATTRIBUTE: &str = "data-attachment";
 
 /// `html` from `source`, cleaned and finished.
-pub(super) fn render(
-    html: &str,
-    source: Source,
-    attachments: &[Attachment],
-    finishing: &mut super::Finishing,
-) -> String {
-    let cleaned = clean(html, &policy(source, attachments));
+pub(super) fn render(html: &str, source: Source, finishing: &mut super::Finishing) -> String {
+    let cleaned = clean(html, &policy(source));
     finish(
         &cleaned.html,
-        USER_MARK,
+        &format!("{CARRIED}{ATTACHMENT_ATTRIBUTE}"),
         source == Source::Markdown,
         finishing,
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{attachment_sheet, css_string_into};
-    use crate::social::Attachment;
-
-    #[test]
-    fn an_id_cannot_end_its_selector() {
-        let mut out = String::new();
-        css_string_into(&mut out, "a\"] * { x } img[\\\n");
-        assert_eq!(out, "a\\\"] * { x } img[\\\\\\a ");
-        let sheet = attachment_sheet(&[Attachment {
-            id: "att_1",
-            mime: "image/png",
-            name: None,
-            picture: None,
-        }]);
-        assert_eq!(sheet, "img[data-attachment=\"att_1\"] {}\n");
-    }
 }

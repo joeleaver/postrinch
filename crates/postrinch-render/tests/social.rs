@@ -388,3 +388,59 @@ fn many_attachments_and_pictures() {
     assert_eq!(out.placed.len(), 1000);
     assert_eq!(out.html.matches("<img").count(), 1000);
 }
+
+#[test]
+fn an_attachment_is_found_by_its_id_as_written() {
+    let attachments = [
+        picture("a b", Some(DATA_PNG)),
+        Attachment {
+            id: "ü1",
+            mime: "application/pdf",
+            name: Some("doc.pdf"),
+            picture: None,
+        },
+    ];
+    let out = render(
+        &body(
+            "text/markdown",
+            "[space](<attachment:a b>) [doc](attachment:ü1) ![](<attachment:a b>)",
+            &attachments,
+        ),
+        Options::default(),
+    );
+    assert_eq!(out.placed, ["a b", "ü1"], "{}", out.html);
+    assert!(
+        out.html.contains(r#"href="attachment:a b">space</a>"#),
+        "{}",
+        out.html
+    );
+}
+
+#[test]
+fn a_held_picture_counts_once_and_many_mentions_stay_linear() {
+    let attachments = [picture("att_1", None)];
+    let text = "![a](attachment:att_1) ![b](attachment:att_1)";
+    let out = render(
+        &body("text/markdown", text, &attachments),
+        Options::default(),
+    );
+    assert_eq!(out.pictures_held, 1);
+
+    let many: String = (0..80_000).map(|i| format!("@u{i:07} ")).collect();
+    let out = shown("text/plain", &many);
+    assert_eq!(out.mentions.len(), 80_000);
+}
+
+#[test]
+fn many_attachments_named_many_times() {
+    let ids: Vec<String> = (0..2_000).map(|i| format!("att_{i}")).collect();
+    let attachments: Vec<Attachment> = ids.iter().map(|id| picture(id, Some(DATA_PNG))).collect();
+    let text: String = (0..40_000)
+        .map(|i| format!("[x](attachment:att_{}) ", i % 2_000))
+        .collect();
+    let out = render(
+        &body("text/markdown", &text, &attachments),
+        Options::default(),
+    );
+    assert_eq!(out.placed.len(), 2_000);
+}

@@ -19,8 +19,8 @@ use super::html::TAGS;
 use super::text::escape_into;
 use super::{ATTACHMENT_CLASS, Finishing};
 
-/// `cleaned` finished: `mark` is the attribute rinch marks a picture's
-/// attachment with (its rule index, see [`html`](super::html)).
+/// `cleaned` finished: `mark` is the attribute rinch carried a picture's
+/// `data-attachment` through as (see [`html`](super::html)).
 pub(in crate::social) fn finish(
     cleaned: &str,
     mark: &str,
@@ -206,12 +206,8 @@ impl State<'_, '_, '_> {
     /// it; with none, its caption (§5.3: nothing is fetched).
     fn picture(&mut self, tag: &Tag) {
         let caption = attribute(tag, "alt").unwrap_or_default().to_owned();
-        let index = attribute(tag, self.mark)
-            .and_then(|marks| marks.split_ascii_whitespace().next())
-            .and_then(|i| i.parse::<usize>().ok());
-        let Some(attachment) = index
-            .and_then(|i| self.finishing.attachments.get(i))
-            .copied()
+        let Some(attachment) =
+            attribute(tag, self.mark).and_then(|id| self.finishing.attachment(id))
         else {
             escape_into(&mut self.out, &caption);
             return;

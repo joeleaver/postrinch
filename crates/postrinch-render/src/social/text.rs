@@ -18,6 +18,8 @@ pub(super) struct Marker<'a> {
     domain: &'a str,
     /// Everyone marked, in the order first marked.
     pub marked: Vec<String>,
+    /// The same, to look up: a body may mention as many people as it likes.
+    marked_set: HashSet<String>,
 }
 
 impl<'a> Marker<'a> {
@@ -26,6 +28,7 @@ impl<'a> Marker<'a> {
             listed: listed.map(|l| l.iter().map(|a| a.to_ascii_lowercase()).collect()),
             domain,
             marked: Vec::new(),
+            marked_set: HashSet::new(),
         }
     }
 
@@ -71,7 +74,7 @@ impl<'a> Marker<'a> {
             escape_into(out, &text[reference.range.clone()]);
             out.push_str("</span>");
             from = reference.range.end;
-            if !self.marked.contains(&reference.actor) {
+            if self.marked_set.insert(reference.actor.clone()) {
                 self.marked.push(reference.actor);
             }
         }

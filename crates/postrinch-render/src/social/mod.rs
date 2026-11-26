@@ -27,6 +27,8 @@ mod mentions;
 mod text;
 mod title;
 
+use std::collections::{HashMap, HashSet};
+
 use finish::finish;
 use text::Marker;
 
@@ -94,8 +96,9 @@ pub struct Rendered {
     /// id, in order. The rest are shown after the body (§5.3), the cover of
     /// an article apart.
     pub placed: Vec<String>,
-    /// Pictures the body places that are not shown: not loaded yet, or not
-    /// to be loaded until the person asks ([`Options::pictures`]).
+    /// How many of the attachments the body places are pictures not shown:
+    /// not loaded yet, or not to be loaded until the person asks
+    /// ([`Options::pictures`]). Each counts once, however often placed.
     pub pictures_held: usize,
 }
 
@@ -123,28 +126,47 @@ impl Format {
 }
 
 /// What the finishing pass carries from one piece of a body to the next.
+/// Lookups are by hash: a body names as many attachments, as often, as its
+/// sender likes.
 struct Finishing<'a> {
     marker: Marker<'a>,
-    attachments: &'a [Attachment<'a>],
+    /// The message's attachments by id; the first of any that share one.
+    attachments: HashMap<&'a str, Attachment<'a>>,
     options: Options,
     placed: Vec<String>,
-    pictures_held: usize,
+    placed_ids: HashSet<String>,
+    held: HashSet<String>,
 }
 
 impl<'a> Finishing<'a> {
-    fn attachment(&self, id: &str) -> Option<&Attachment<'a>> {
-        self.attachments.iter().find(|a| a.id == id)
+    fn new(body: &Body<'a>, options: Options) -> Self {
+        let mut attachments = HashMap::new();
+        for attachment in body.attachments {
+            attachments.entry(attachment.id).or_insert(*attachment);
+        }
+        Self {
+            marker: Marker::new(body.mentions, body.domain),
+            attachments,
+            options,
+            placed: Vec::new(),
+            placed_ids: HashSet::new(),
+            held: HashSet::new(),
+        }
+    }
+
+    fn attachment(&self, id: &str) -> Option<Attachment<'a>> {
+        self.attachments.get(id).copied()
     }
 
     fn place(&mut self, id: &str) {
-        if !self.placed.iter().any(|p| p == id) {
+        if self.placed_ids.insert(id.to_owned()) {
             self.placed.push(id.to_owned());
         }
     }
 
     /// The source to show an attachment's picture from, under mail's
     /// picture rule; `None` for one that is not a picture, and for a
-    /// picture held back (counted).
+    /// picture held back (counted once).
     fn picture(&mut self, attachment: &Attachment) -> Option<String> {
         if !attachment
             .mime
@@ -156,7 +178,7 @@ impl<'a> Finishing<'a> {
         let rule = crate::policy(self.options.pictures).picture;
         let shown = attachment.picture.and_then(|source| rule(source));
         if shown.is_none() {
-            self.pictures_held += 1;
+            self.held.insert(attachment.id.to_owned());
         }
         shown
     }
@@ -164,33 +186,21 @@ impl<'a> Finishing<'a> {
 
 /// Render a message's body.
 pub fn render(body: &Body, options: Options) -> Rendered {
-    let mut finishing = Finishing {
-        marker: Marker::new(body.mentions, body.domain),
-        attachments: body.attachments,
-        options,
-        placed: Vec::new(),
-        pictures_held: 0,
-    };
+    let mut finishing = Finishing::new(body, options);
     let html = match Format::of(body.mime) {
         Format::Plain => plain(body.text, &mut finishing),
         Format::Markdown => html::render(
             &markdown::to_html(body.text),
             html::Source::Markdown,
-            body.attachments,
             &mut finishing,
         ),
-        Format::Html => html::render(
-            body.text,
-            html::Source::Html,
-            body.attachments,
-            &mut finishing,
-        ),
+        Format::Html => html::render(body.text, html::Source::Html, &mut finishing),
     };
     Rendered {
         html,
         mentions: finishing.marker.marked,
         placed: finishing.placed,
-        pictures_held: finishing.pictures_held,
+        pictures_held: finishing.held.len(),
     }
 }
 

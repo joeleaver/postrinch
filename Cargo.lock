@@ -5588,7 +5588,7 @@ dependencies = [
 [[package]]
 name = "rinch"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "base64 0.22.1",
  "block2 0.6.2",
@@ -5647,7 +5647,7 @@ dependencies = [
 [[package]]
 name = "rinch-android"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "android-activity",
  "base64 0.22.1",
@@ -5660,7 +5660,7 @@ dependencies = [
 [[package]]
 name = "rinch-clipboard"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "arboard",
  "js-sys",
@@ -5673,7 +5673,7 @@ dependencies = [
 [[package]]
 name = "rinch-components"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "rinch-core",
  "rinch-macros",
@@ -5685,7 +5685,7 @@ dependencies = [
 [[package]]
 name = "rinch-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -5695,7 +5695,7 @@ dependencies = [
 [[package]]
 name = "rinch-debug"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -5707,7 +5707,7 @@ dependencies = [
 [[package]]
 name = "rinch-dom"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "app_units",
  "atomic_refcell",
@@ -5752,7 +5752,7 @@ dependencies = [
 [[package]]
 name = "rinch-editable"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "rinch-words",
 ]
@@ -5760,7 +5760,7 @@ dependencies = [
 [[package]]
 name = "rinch-editor-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "regex",
  "rinch-core",
@@ -5771,7 +5771,7 @@ dependencies = [
 [[package]]
 name = "rinch-editor-view"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "rinch-core",
  "rinch-editor-core",
@@ -5781,7 +5781,7 @@ dependencies = [
 [[package]]
 name = "rinch-html"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "ammonia",
  "css-inline",
@@ -5798,7 +5798,7 @@ dependencies = [
 [[package]]
 name = "rinch-http"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "js-sys",
  "rinch-core",
@@ -5811,7 +5811,7 @@ dependencies = [
 [[package]]
 name = "rinch-macros"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5821,7 +5821,7 @@ dependencies = [
 [[package]]
 name = "rinch-platform"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "peniko",
  "vello",
@@ -5831,7 +5831,7 @@ dependencies = [
 [[package]]
 name = "rinch-renderer"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "rinch-core",
  "thiserror 1.0.69",
@@ -5843,7 +5843,7 @@ dependencies = [
 [[package]]
 name = "rinch-spell"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "dispatch2",
  "icu_normalizer",
@@ -5859,7 +5859,7 @@ dependencies = [
 [[package]]
 name = "rinch-tabler-icons"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "heck 0.5.0",
  "rinch-core",
@@ -5871,12 +5871,12 @@ dependencies = [
 [[package]]
 name = "rinch-theme"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 
 [[package]]
 name = "rinch-visual-test"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -5893,7 +5893,7 @@ dependencies = [
 [[package]]
 name = "rinch-words"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#f287b6cea01d97a6d959be15e3e3516b86237b33"
 dependencies = [
  "icu_segmenter",
  "regex",

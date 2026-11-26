@@ -37,10 +37,23 @@ pub(super) fn to_html(text: &str) -> String {
 
 struct Events<'a> {
     inner: Parser<'a>,
-    /// For each link open, whether it was kept.
-    links: Vec<bool>,
+    /// For each link open, what it was written as.
+    links: Vec<Link>,
     /// Inside an HTML block, written as a paragraph of its lines.
     in_html_block: bool,
+}
+
+/// What a Markdown link was written as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Link {
+    /// Left out: its text only.
+    Left,
+    /// A web or mail link, written by `pulldown-cmark`.
+    Kept,
+    /// A link to an attachment, written here: `pulldown-cmark` would
+    /// percent-encode the id (`a b` as `a%20b`), and an id is matched as it
+    /// is.
+    Attachment,
 }
 
 impl<'a> Events<'a> {
@@ -65,24 +78,29 @@ impl<'a> Events<'a> {
                     title,
                     id,
                 }) => {
-                    let kept = is_active(link_type, &dest_url);
-                    self.links.push(kept);
-                    if !kept {
-                        continue;
+                    let link = kind(link_type, &dest_url);
+                    self.links.push(link);
+                    match link {
+                        Link::Left => continue,
+                        Link::Kept => Event::Start(Tag::Link {
+                            link_type,
+                            dest_url,
+                            title,
+                            id,
+                        }),
+                        Link::Attachment => {
+                            let mut html = String::from("<a href=\"");
+                            escape_into(&mut html, dest_url.trim());
+                            html.push_str("\">");
+                            Event::InlineHtml(html.into())
+                        }
                     }
-                    Event::Start(Tag::Link {
-                        link_type,
-                        dest_url,
-                        title,
-                        id,
-                    })
                 }
-                Event::End(TagEnd::Link) => {
-                    if self.links.pop() != Some(true) {
-                        continue;
-                    }
-                    Event::End(TagEnd::Link)
-                }
+                Event::End(TagEnd::Link) => match self.links.pop() {
+                    Some(Link::Kept) => Event::End(TagEnd::Link),
+                    Some(Link::Attachment) => Event::InlineHtml("</a>".into()),
+                    _ => continue,
+                },
                 Event::Start(Tag::Image { dest_url, .. }) => self.picture(&dest_url),
                 event => event,
             };
@@ -116,7 +134,7 @@ impl<'a> Events<'a> {
             escape_into(&mut html, &alt);
             html.push_str("\">");
         } else if (lower.starts_with("http://") || lower.starts_with("https://"))
-            && self.links.last() != Some(&true)
+            && !self.links.last().is_some_and(|l| *l != Link::Left)
         {
             // Inside a link it cannot be one: its alt text, below.
             html.push_str("<a href=\"");
@@ -153,17 +171,25 @@ impl<'a> Events<'a> {
     }
 }
 
-/// Whether a link is one to keep (§5.3): `http`, `https`, `mailto`, or an
-/// `attachment:` reference (checked against the attachments later). An
-/// email autolink (`<bob@e.example>`) is `mailto`.
-fn is_active(link_type: LinkType, dest: &str) -> bool {
+/// What a link is written as (§5.3): kept for `http`, `https` and
+/// `mailto`, an attachment link for an `attachment:` reference (checked
+/// against the attachments later), and otherwise left out. An email
+/// autolink (`<bob@e.example>`) is `mailto`.
+fn kind(link_type: LinkType, dest: &str) -> Link {
     if link_type == LinkType::Email {
-        return true;
+        return Link::Kept;
     }
     let lower = dest.trim().to_ascii_lowercase();
-    ["http://", "https://", "mailto:", "attachment:"]
+    if lower.starts_with(ATTACHMENT) {
+        Link::Attachment
+    } else if ["http://", "https://", "mailto:"]
         .iter()
         .any(|scheme| lower.starts_with(scheme))
+    {
+        Link::Kept
+    } else {
+        Link::Left
+    }
 }
 
 #[cfg(test)]

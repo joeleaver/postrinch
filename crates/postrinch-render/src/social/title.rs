@@ -51,7 +51,7 @@ fn markdown_title(text: &str) -> Option<String> {
 /// The text of the `<h1>` the body starts with, read from the body as
 /// cleaned to be shown (so as a browser parses it, its nesting cut).
 fn html_title(text: &str) -> Option<String> {
-    let cleaned = rinch_html::clean(text, &super::html::policy(super::html::Source::Html, &[]));
+    let cleaned = rinch_html::clean(text, &super::html::policy(super::html::Source::Html));
     let sink = Sink(RefCell::new(Seen::Nothing));
     let tokenizer = Tokenizer::new(sink, TokenizerOpts::default());
     let input = BufferQueue::default();
