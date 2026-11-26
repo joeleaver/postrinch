@@ -327,14 +327,72 @@ impl GmailSync {
     }
 }
 
-/// Keeps the first failure of [`GmailSync::for_each_until`]'s work, the
-/// one that stopped it; any after it, from work already under way, is
-/// logged.
+/// Keeps the failure [`GmailSync::for_each_until`]'s work ends with:
+/// the first, the one that stopped it, unless work already under way
+/// then found the account needs signing in again. That one is kept
+/// whatever came before it, as the keep-in-sync loop asks the person to
+/// sign in for it rather than retrying later. Any other is logged.
 fn note_failure(failed: &mut Option<SyncError>, error: SyncError) {
+    let replaces = |first: &SyncError| {
+        matches!(error, SyncError::NeedsSignIn(_)) && !matches!(first, SyncError::NeedsSignIn(_))
+    };
     match failed {
-        None => *failed = Some(error),
-        Some(first) => {
+        Some(first) if !replaces(first) => {
             tracing::warn!("Gmail: also failed, after {first}: {error}");
         }
+        Some(first) => {
+            tracing::warn!("Gmail: failed, before the account needed signing in: {first}");
+            *failed = Some(error);
+        }
+        None => *failed = Some(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use postrinch_model::SignInReason;
+
+    use super::*;
+
+    fn sign_in(detail: &str) -> SyncError {
+        SyncError::NeedsSignIn(SignInReason::CredentialRejected {
+            detail: detail.into(),
+        })
+    }
+
+    fn other(message: &str) -> SyncError {
+        SyncError::Io(std::io::Error::other(message.to_owned()))
+    }
+
+    fn kept(errors: Vec<SyncError>) -> String {
+        let mut failed = None;
+        for error in errors {
+            note_failure(&mut failed, error);
+        }
+        failed.expect("a failure was noted").to_string()
+    }
+
+    #[test]
+    fn the_first_failure_is_kept() {
+        assert_eq!(
+            kept(vec![other("first"), other("second")]),
+            other("first").to_string()
+        );
+        assert_eq!(
+            kept(vec![sign_in("first"), sign_in("second")]),
+            sign_in("first").to_string()
+        );
+        assert_eq!(
+            kept(vec![sign_in("first"), other("second")]),
+            sign_in("first").to_string()
+        );
+    }
+
+    #[test]
+    fn needing_to_sign_in_is_kept_over_any_other_failure() {
+        assert_eq!(
+            kept(vec![other("first"), sign_in("second"), other("third")]),
+            sign_in("second").to_string()
+        );
     }
 }

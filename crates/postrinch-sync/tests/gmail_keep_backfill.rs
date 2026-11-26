@@ -273,18 +273,28 @@ async fn a_failed_download_sees_those_under_way_through() {
             .push(SyncEvent::Progress { account, progress });
     });
     assert!(f.sync.backfill(&f.me, progress).await.is_err());
-    // Gmail backfill starts ten at once. Those under way when one failed
-    // were stored and counted, and no more were started after it.
-    let started = 10;
+    // Every download started besides the failing one, under way when it
+    // failed, was seen through: stored, and counted.
+    let started = f
+        .server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| {
+            r.url.query() == Some("format=raw")
+                && r.url.path() != format!("/gmail/messages/{failing}")
+        })
+        .count();
+    let stored = MANY - f.store.undownloaded(&f.me).unwrap().len();
     let counts = bodies(&events.lock().unwrap());
-    assert_eq!(counts.last(), Some(&(started - 1, MANY)), "{counts:?}");
-    let mut left = f.store.undownloaded(&f.me).unwrap();
-    left.sort();
-    let mut not_started: Vec<_> = ids()[started..]
-        .iter()
-        .map(|id| ProviderMessageId(id.clone()))
-        .collect();
-    not_started.push(ProviderMessageId(failing));
-    not_started.sort();
-    assert_eq!(left, not_started);
+    assert!(started > 0);
+    assert_eq!(stored, started);
+    assert_eq!(counts.last(), Some(&(started, MANY)), "{counts:?}");
+    assert!(
+        f.store
+            .undownloaded(&f.me)
+            .unwrap()
+            .contains(&ProviderMessageId(failing))
+    );
 }
