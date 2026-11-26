@@ -205,6 +205,13 @@ fn ask_agent(ask: &AgentAsk, notice: Signal<Option<Notice>>) {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("rule {}: Claude Code did not start: {e}", ask.rule);
+            notice.send(Some(Notice {
+                text: format!(
+                    "A rule asked an agent, but Claude Code ({}) did not start: {e}",
+                    claude.program.display()
+                ),
+                trouble: true,
+            }));
             return;
         }
     };
