@@ -3383,6 +3383,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4a5ff6bcca6c4867b1c4fd4ef63e4db7436ef363e0ad7531d1558856bae64f4"
 
 [[package]]
+name = "linkify"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19ddb16a872aaef460efdefe77da5f20e12226d220580952710c4a9d60e1aa7c"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4770,9 +4779,12 @@ name = "postrinch-render"
 version = "0.1.38"
 dependencies = [
  "base64 0.22.1",
+ "html5ever",
  "jiff",
+ "linkify",
  "mail-parser",
  "postrinch-model",
+ "pulldown-cmark",
  "rinch-html",
 ]
 
@@ -5024,6 +5036,24 @@ name = "psl-types"
 version = "2.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac"
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3db2be46835f013dd3f4fa7f5f7402c537787b54ebb6fe2b94bbdd7e2669bb7b"
+dependencies = [
+ "bitflags 2.13.2",
+ "memchr",
+ "pulldown-cmark-escape",
+ "unicase",
+]
+
+[[package]]
+name = "pulldown-cmark-escape"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
 
 [[package]]
 name = "pxfm"
@@ -5558,7 +5588,7 @@ dependencies = [
 [[package]]
 name = "rinch"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "base64 0.22.1",
  "block2 0.6.2",
@@ -5617,7 +5647,7 @@ dependencies = [
 [[package]]
 name = "rinch-android"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "android-activity",
  "base64 0.22.1",
@@ -5630,7 +5660,7 @@ dependencies = [
 [[package]]
 name = "rinch-clipboard"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "arboard",
  "js-sys",
@@ -5643,7 +5673,7 @@ dependencies = [
 [[package]]
 name = "rinch-components"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "rinch-core",
  "rinch-macros",
@@ -5655,7 +5685,7 @@ dependencies = [
 [[package]]
 name = "rinch-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "thiserror 1.0.69",
  "tracing",
@@ -5665,7 +5695,7 @@ dependencies = [
 [[package]]
 name = "rinch-debug"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -5677,7 +5707,7 @@ dependencies = [
 [[package]]
 name = "rinch-dom"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "app_units",
  "atomic_refcell",
@@ -5722,7 +5752,7 @@ dependencies = [
 [[package]]
 name = "rinch-editable"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "rinch-words",
 ]
@@ -5730,7 +5760,7 @@ dependencies = [
 [[package]]
 name = "rinch-editor-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "regex",
  "rinch-core",
@@ -5741,7 +5771,7 @@ dependencies = [
 [[package]]
 name = "rinch-editor-view"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "rinch-core",
  "rinch-editor-core",
@@ -5751,7 +5781,7 @@ dependencies = [
 [[package]]
 name = "rinch-html"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "ammonia",
  "css-inline",
@@ -5768,7 +5798,7 @@ dependencies = [
 [[package]]
 name = "rinch-http"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "js-sys",
  "rinch-core",
@@ -5781,7 +5811,7 @@ dependencies = [
 [[package]]
 name = "rinch-macros"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5791,7 +5821,7 @@ dependencies = [
 [[package]]
 name = "rinch-platform"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "peniko",
  "vello",
@@ -5801,7 +5831,7 @@ dependencies = [
 [[package]]
 name = "rinch-renderer"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "rinch-core",
  "thiserror 1.0.69",
@@ -5813,7 +5843,7 @@ dependencies = [
 [[package]]
 name = "rinch-spell"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "dispatch2",
  "icu_normalizer",
@@ -5829,7 +5859,7 @@ dependencies = [
 [[package]]
 name = "rinch-tabler-icons"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "heck 0.5.0",
  "rinch-core",
@@ -5841,12 +5871,12 @@ dependencies = [
 [[package]]
 name = "rinch-theme"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 
 [[package]]
 name = "rinch-visual-test"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -5863,7 +5893,7 @@ dependencies = [
 [[package]]
 name = "rinch-words"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/rinch.git#f9d15abf77d275a784ed402ba595c7e25d71309f"
+source = "git+https://github.com/joeleaver/rinch.git?branch=postrinch%2Fhtml-allow-list#cb809bb6856bb032e8883b30e3b0b8201218eed3"
 dependencies = [
  "icu_segmenter",
  "regex",
@@ -7517,6 +7547,12 @@ checksum = "7c8a2469e56e6e5095c82ccd3afb98dad95f7af7929aab6d8ba8d6e0f73657da"
 dependencies = [
  "arrayvec",
 ]
+
+[[package]]
+name = "unicase"
+version = "2.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357cc3acc6a036009fd6c973ed009037c732d60d0b4f6c673e9041497482a28f"
 
 [[package]]
 name = "unicode-bidi"
