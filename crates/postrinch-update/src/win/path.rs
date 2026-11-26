@@ -42,10 +42,18 @@ pub(crate) fn add(user: &Key, dir: &Path) -> Result<Added, String> {
             Added::ByThePerson
         });
     }
-    write(&env, &path_list::with(&path, &dir), ty)?;
-    user.create(STATE_KEY)
-        .and_then(|state| state.set_string(PATH_ADDED, &dir))
+    // The record first: an entry on the PATH without it would pass for the
+    // person's own, which no uninstall removes.
+    let state = user
+        .create(STATE_KEY)
+        .map_err(|e| format!("opening HKCU\\{STATE_KEY}: {e}"))?;
+    state
+        .set_string(PATH_ADDED, &dir)
         .map_err(|e| format!("recording the PATH entry in HKCU\\{STATE_KEY}: {e}"))?;
+    if let Err(e) = write(&env, &path_list::with(&path, &dir), ty) {
+        let _ = state.remove_value(PATH_ADDED);
+        return Err(e);
+    }
     Ok(Added::Now)
 }
 

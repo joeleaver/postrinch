@@ -195,7 +195,9 @@ pub(crate) mod tests {
         let found = running_from(dir.path());
         child.kill().unwrap();
         child.wait().unwrap();
-        assert_eq!(found, [child.id()]);
+        let pid = child.id();
+        drop(child);
+        assert_eq!(found, [pid]);
         assert!(running_from(dir.path()).is_empty());
     }
 

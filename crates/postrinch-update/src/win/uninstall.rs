@@ -15,8 +15,11 @@ use super::{Places, deintegrate, registration, wide};
 use crate::{MARKER, PROGRAMS, STAGE, exe, install_dir, managed_dir};
 
 /// The running `postrinch.exe` cannot be deleted, but it can be moved: it
-/// goes to the temporary folder under this name, removed the next time
-/// Postrinch starts ([`clear_leftovers`]) or by Windows' own clean-up.
+/// goes to the temporary folder under this name. A per-user uninstall
+/// cannot ask Windows to delete it at the next restart (that takes an
+/// administrator), so it stays until Windows' own clean-up of the
+/// temporary folder (Storage Sense, Disk Cleanup) or Postrinch's next
+/// start, if it is installed again ([`clear_leftovers`]).
 const SET_ASIDE: &str = "postrinch-removed-";
 
 /// Remove the install this program is running from. Answers what to tell
@@ -46,8 +49,12 @@ pub fn uninstall() -> Result<String, String> {
                 .into(),
         );
     }
-    remove_files(&dir)?;
+    // The other programs first: one still in use stops the uninstall with
+    // nothing else changed. The marker goes last, after the registry and
+    // the shortcut, so an uninstall that fails part way can be run again.
+    remove_programs(&dir)?;
     deintegrate(&places, &dir)?;
+    remove_files(&dir)?;
     let mut said = "Postrinch was removed. Your mail and settings are kept, so installing it \
                     again picks up where you left off."
         .to_owned();
@@ -57,19 +64,23 @@ pub fn uninstall() -> Result<String, String> {
             " {} is still there ({e}): delete it by hand.",
             own.display()
         ));
-    } else if std::fs::remove_dir(&dir).is_err() {
-        said.push_str(&format!(
-            " {} holds files Postrinch did not put there, so it was left.",
-            dir.display()
-        ));
+    } else if let Err(e) = std::fs::remove_dir(&dir) {
+        let empty = std::fs::read_dir(&dir).is_ok_and(|mut d| d.next().is_none());
+        said.push_str(&if empty {
+            format!(" The empty folder {} is still there ({e}).", dir.display())
+        } else {
+            format!(
+                " {} holds files Postrinch did not put there, so it was left.",
+                dir.display()
+            )
+        });
     }
     Ok(said)
 }
 
-/// Everything in `dir` that the install and the updater put there, but the
-/// running window. Another program in it that cannot be removed stops the
-/// uninstall before anything else is.
-pub(crate) fn remove_files(dir: &Path) -> Result<(), String> {
+/// The programs beside the running window. One that cannot be removed (an
+/// agent's app has the bridge open) stops the uninstall.
+pub(crate) fn remove_programs(dir: &Path) -> Result<(), String> {
     for name in &PROGRAMS[1..] {
         let path = dir.join(exe(name));
         if path.exists() {
@@ -81,6 +92,12 @@ pub(crate) fn remove_files(dir: &Path) -> Result<(), String> {
             })?;
         }
     }
+    Ok(())
+}
+
+/// The rest of what the install and the updater put in `dir`, the marker
+/// among it, but the running window.
+pub(crate) fn remove_files(dir: &Path) -> Result<(), String> {
     let stage = dir.join(STAGE);
     if stage.exists() {
         std::fs::remove_dir_all(&stage)

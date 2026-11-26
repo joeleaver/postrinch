@@ -153,20 +153,35 @@ jobs:
             $shown = (Get-ItemProperty $entryKey -ErrorAction SilentlyContinue).DisplayVersion
             if ($shown -ne $env:version) { throw "Apps & features shows '$shown' for $how" }
           }
+          # An uninstaller's last steps (the Setup's [Code], its own files)
+          # come after postrinch.exe is gone: every condition is waited for,
+          # up to a minute, before one is called a failure.
           function Check-Gone($how) {
             $deadline = (Get-Date).AddSeconds(60)
-            while ((Test-Path "$app\postrinch.exe") -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
-            if (Test-Path "$app\postrinch.exe") { throw "$how left postrinch.exe" }
-            if (Test-Path $lnk) { throw "$how left the Start-menu entry" }
-            if ((Path-Entries) -ne 0) { throw "$how left $app on the PATH: '$(User-Path)'" }
-            if ((Test-Path $setupKey) -or (Test-Path $zipKey)) { throw "$how left Postrinch in Apps & features" }
+            do {
+              $left = @()
+              if (Test-Path "$app\postrinch.exe") { $left += "postrinch.exe" }
+              if (Test-Path "$app\unins000.exe") { $left += "the Setup's uninstaller" }
+              if (Test-Path $lnk) { $left += "the Start-menu entry" }
+              if ((Path-Entries) -ne 0) { $left += "$app on the PATH ('$(User-Path)')" }
+              if ((Test-Path $setupKey) -or (Test-Path $zipKey)) { $left += "Postrinch in Apps & features" }
+              if (Test-Path HKCU:\Software\Postrinch) { $left += "HKCU\Software\Postrinch" }
+              if ($left.Count -eq 0) { return }
+              Start-Sleep -Milliseconds 500
+            } while ((Get-Date) -lt $deadline)
+            throw "$how left $($left -join ', ')"
+          }
+          function Wait-SetupUninstalled {
+            $deadline = (Get-Date).AddSeconds(60)
+            while (((Test-Path "$app\unins000.exe") -or (Test-Path $setupKey)) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+            if ((Test-Path "$app\unins000.exe") -or (Test-Path $setupKey)) { throw "the Setup's uninstaller did not finish" }
           }
 
           $setup = "dist/postrinch-$env:version-windows-x86_64-setup.exe"
           Start-Process -Wait -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
           Check-Install "the Setup" $setupKey
           # The uninstaller hands over to a copy of itself and returns at
-          # once; Check-Gone waits (up to a minute) for it to have done its work.
+          # once; Check-Gone waits for it to have done its work.
           Start-Process -Wait -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
           Check-Gone "the Setup's uninstaller"
 
@@ -198,8 +213,7 @@ jobs:
           Start-Process -Wait -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
           if ((User-Path) -ne $theirs) { throw "the Setup changed the person's PATH to '$(User-Path)'" }
           Start-Process -Wait -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
-          $deadline = (Get-Date).AddSeconds(60)
-          while ((Test-Path "$app\postrinch.exe") -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+          Wait-SetupUninstalled
           if ((User-Path) -ne $theirs) { throw "an uninstall changed the person's PATH to '$(User-Path)'" }
           Write-Host "Setup and zip: marker $env:version, Start-menu entry, one PATH entry, Apps & features; both uninstalled cleanly; the person's own PATH entry kept"
 

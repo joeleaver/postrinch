@@ -7,7 +7,7 @@ use windows_registry::Type;
 use super::path::PATH_ADDED;
 use super::registration::{OWN, SETUP};
 use super::scratch::Scratch;
-use super::uninstall::remove_files;
+use super::uninstall::{remove_files, remove_programs};
 use super::*;
 
 const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -152,6 +152,8 @@ fn the_uninstall_removes_only_what_postrinch_put_in_the_folder() {
     std::fs::create_dir(path(crate::STAGE)).unwrap();
     std::fs::write(path(crate::STAGE).join("ready.json"), "{}").unwrap();
 
+    remove_programs(dir.path()).unwrap();
+    assert!(path(crate::MARKER).exists(), "the marker goes last");
     remove_files(dir.path()).unwrap();
     let mut left: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
