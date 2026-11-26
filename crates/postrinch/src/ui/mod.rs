@@ -79,7 +79,7 @@ pub fn account_color(index: usize) -> &'static str {
 /// The whole window, over one store.
 pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle {
     let commands = Rc::new(Commands::new(store.clone()));
-    let sync = match sync::start(store, state.sync, state.revision) {
+    let sync = match sync::start(store, state.sync, state.revision, state.pass_ended) {
         Ok((handle, google_off)) => {
             // IMAP accounts sync all the same.
             if let Some(off) = google_off {
@@ -113,6 +113,10 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     state.mark_read_when_opened();
     state.look_up_invitations();
     state.save_edits_as_they_come();
+    let folders = state.imap.folders;
+    folders.follow_passes(state.pass_ended, move |account| {
+        folders.load(state, account)
+    });
     state.open_by_setting();
     crate::pictures::fetch_web_pictures();
     appearance::watch_system(state.system_dark);

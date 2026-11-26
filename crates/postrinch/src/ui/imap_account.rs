@@ -45,14 +45,9 @@ pub fn imap_account_detail(state: State, info: AccountInfo, settings: ImapSettin
     } else {
         "Removing an account deletes its mail from this computer and forgets its password. Nothing is deleted from the server."
     };
-    if state
-        .imap
-        .folders
-        .get()
-        .is_none_or(|(account, _)| account != address)
-    {
-        state.imap.load_folders(state, address.clone());
-    }
+    // Read on each opening, as the store has them now; a pass that ends
+    // while the section is open reads them again (`follow_passes`).
+    state.imap.folders.load(state, address.clone());
     rsx! {
         div { class: "account-detail",
             h2 { {address.to_string()} }
@@ -103,7 +98,7 @@ fn signs_in_with(method: &SignInMethod) -> String {
 
 #[component]
 fn folders_section(state: State, account: EmailAddress, settings: ImapSettings) -> NodeHandle {
-    let loaded = state.imap.folders;
+    let loaded = state.imap.folders.shown;
     let mine = account.clone();
     let files = settings.server_files_sent;
     let chosen = settings.server_files_sent_chosen;
