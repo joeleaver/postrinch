@@ -344,7 +344,7 @@ pub fn summary(h: &Happening) -> String {
 }
 
 pub const CSS: &str = r#"
-.cal-button, .seg, .cal-new, .mode, .mini-day, .mini-step, .month-num, .invite-answer {
+.cal-button, .seg, .cal-new, .mini-day, .mini-step, .month-num, .invite-answer {
     display: flex; align-items: center; justify-content: center;
 }
 .cal-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); }

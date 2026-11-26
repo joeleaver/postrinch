@@ -177,10 +177,6 @@ impl State {
         });
     }
 
-    pub fn show_calendar(self, on: bool) {
-        self.view.set(if on { View::Calendar } else { View::Mail });
-    }
-
     /// Move the stretch shown by one step of its span, back or on.
     pub fn calendar_step(self, on: bool) {
         let span = self.calendar.span.get();
