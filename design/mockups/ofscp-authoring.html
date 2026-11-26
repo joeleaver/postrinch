@@ -247,7 +247,7 @@ const tray = `<div class="tray">
 const fmtbar = `<div class="fmt"><span title="Attach (or drop, or paste)">＋</span><span><b>B</b></span><span><i>I</i></span><span>⟨⟩</span><span>🔗</span><span>❝</span><span>☰</span><span style="margin-left:auto">☺</span><span>@</span></div>`;
 const bigComposer = (withTray) => `<div class="composer">
   <div class="cbox">${withTray ? tray : ''}<div class="text">Here's the rack tour, and the config Mira asked for. <span class="caret"></span></div>${fmtbar}</div>
-  <div class="foot"><span>Enter sends · Shift+Enter for a new line · uploads go to forumall.app</span><span style="margin-left:auto">${withTray ? 'Uploading 1 of 3… <b>Send</b> waits for it' : ''}</span><button class="send">Send</button></div></div>`;
+  <div class="foot"><span>Enter sends · Shift+Enter for a new line</span><span style="margin-left:auto">${withTray ? 'Uploading 1 of 3… <b>Send</b> waits for it' : ''}</span><button class="send">Send</button></div></div>`;
 
 const stream = `<div class="head"><div class="head-row"><h2>Rust Audio<span class="sub">forumall.app</span></h2></div>
   <div class="tabs"><span>All</span><span class="on"># general</span><span>▤ announcements</span><span>◖ standup</span></div></div>
@@ -279,7 +279,7 @@ const editor = (kind) => `${rail()}${sidebar('drafts')}<div class="main"><div cl
     <p>Library again, 18:00. Bring a laptop with your setup; there are two spare interfaces. <span class="caret"></span></p>
     <div class="media two" style="max-width:420px"><div class="pic b"></div><div class="pic c"></div></div>`}
   </div></div>
-  <div class="ed-foot">${kind === 'article' ? 'Written as Markdown (text/markdown); pictures and videos upload to forumall.app as you add them. 1,240 words · 6 min read' : 'A memo is a short post: plain text with pictures. Publishing needs the spec change for posting memos (spec question 1).'}</div></div></div>`;
+  <div class="ed-foot">${kind === 'article' ? 'Written as Markdown (text/markdown); pictures and videos upload as you add them. 1,240 words · 6 min read' : 'A memo is a short post: plain text with pictures. Publishing needs the spec change for posting memos (spec question 1).'}</div></div></div>`;
 
 const preview = `${rail()}${sidebar('drafts')}<div class="main"><div class="pane">
   <div class="ed-bar"><b>Preview</b><span style="color:var(--muted);margin-left:8px">as readers will see it in Synth Makers › ▤ blog</span><span style="margin-left:auto"></span><button class="btn">Back to editing</button><button class="btn filled">Publish</button></div>
@@ -294,7 +294,7 @@ const profile = `${rail()}${sidebar('home')}<div class="main"><div class="pane" 
     <div style="flex:1"><div class="field"><label>Name</label><input value="Joe Leaver"></div>
     <div class="field"><label>About</label><input value="Writes Postrinch. Likes filters."></div></div></div>
   <div style="display:flex;gap:8px;align-items:center;margin-top:4px"><input type="range" style="width:150px"><span class="hint" style="margin:0">Zoom · drag to place</span><span style="margin-left:auto"></span><button class="btn">Choose picture…</button></div>
-  <p class="hint">Drop a picture here or paste one. It is cropped to a square and uploaded to forumall.app.</p>
+  <p class="hint">Drop a picture here or paste one. It is cropped to a square and uploaded.</p>
   <div class="actions"><button class="btn">Cancel</button><button class="btn filled">Save</button></div></div></div>`;
 
 const states = {

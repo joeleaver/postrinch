@@ -140,10 +140,11 @@ provider**, not by provider or group.
   - how it reads (a stream, or a list with a reader);
   - its count.
 
-  Notices are not a view setting: they belong to the place or group (everything, mentions and
-  replies, or nothing), as the spec keeps them (§10.2, synced with the home provider), so a
-  place shown in two views can't disagree with itself. The view panel shows and changes its
-  places' notices.
+  Notices are not a view setting: they belong to the channel or group (everything, mentions
+  and replies, or nothing), as the spec keeps them (§10.2, synced with the home provider), so
+  a place shown in two views can't disagree with itself. The view panel shows and changes its
+  places' notices. Private conversations are outside §10.2: they always notify, unless muted
+  locally.
 
   A group in a view means all of that group's channels, including ones made later.
 - **Built-in views:** Home (posts from followed channels), Mentions, Messages (private
@@ -188,7 +189,7 @@ provider**, not by provider or group.
     (`ondropfiles`) or picked with ＋ all go to a tray above the text, each with ✕. A pasted
     bitmap arrives as raw RGBA and is encoded to PNG before upload. Pasting copied *files*
     (a video copied in a file manager) needs `rinch-clipboard` to offer file lists, which it
-    doesn't yet: a rinch issue, filed before PR 16.
+    doesn't yet ([rinch#3092](https://github.com/joeleaver/rinch/issues/3092)).
   - Uploads start at once and show their progress; Send waits for them. Which provider they
     go to waits on spec question 16.
   - Enter sends; Shift+Enter starts a new line.
@@ -197,7 +198,7 @@ provider**, not by provider or group.
   - Article: a cover, a title, tags, and the body in rinch's rich-text editor
     (`rinch-editor-core` already reads and writes Markdown), with pictures and videos placed
     at the caret. The editor has an image node but no video node, and Markdown has no video
-    syntax: a rinch issue for the node, and how inline media is referenced in a body goes into
+    syntax: the node is [rinch#3091](https://github.com/joeleaver/rinch/issues/3091), and how inline media is referenced in a body goes into
     spec question 14.
   - Memo: a title, plain text and pictures.
   - Drafts save as you type and are listed in Drafts. Preview shows the post exactly as a
@@ -240,9 +241,9 @@ when an account is deleted.
 |---|---|---|---|
 | `SocialAccount` | handle | state | profile, settings, `key_id` |
 | `SocialProvider` | domain | — | discovery document, capabilities, clock offset |
-| `SocialGroup` | acct + group URI | account, provider | group, my role, how it was found |
-| `SocialPlace` | acct + channel URI or dmId | account, group (optional), kind, followed, last activity | channel or conversation, resume cursors, read marker |
-| `SocialView` | view id | order | name, places and groups, filters, read as, notices, count |
+| `SocialGroup` | acct + group URI | account, provider | group, my role, how it was found, notices |
+| `SocialPlace` | acct + channel URI or dmId | account, group (optional), kind, followed, last activity | channel or conversation, resume cursors, read marker, notices (channels) |
+| `SocialView` | view id | order | name, places and groups, filters, read as, count |
 | `SocialMessage` | acct + place + message id | place, author, type, created, parent, deleted, `mentions_me`, unread | the message whole, reactions summed |
 | `SocialMessageContent` | as message | `search_text @fulltext` | — |
 | `SocialMedia` | URL | blob hash, fetched | mime, size, width, height, duration, poster |
