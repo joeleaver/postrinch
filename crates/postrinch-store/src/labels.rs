@@ -104,10 +104,29 @@ impl Store {
         // The folder goes first: if this is interrupted, the label is left
         // without sync state, which the next sync keeps again.
         self.remove_imap_folder(account, provider_id)?;
+        self.remove_label_keeping_folder(account, provider_id)
+    }
+
+    /// Remove a label but not the IMAP folder that was shown as it: the
+    /// folder's sync state and copies stay. For a folder sync keeps that
+    /// is no label (Gmail's All Mail, which holds every message; docs/
+    /// imap.md, "One model, two providers"). Messages that carried it lose
+    /// it, and so do the person's prefs for it. Removing a label that is
+    /// not there does nothing.
+    pub fn remove_label_keeping_folder(
+        &self,
+        account: &EmailAddress,
+        provider_id: &str,
+    ) -> StoreResult<()> {
         if let Some(label) = self.find_label(account, provider_id)? {
             self.db_delete(TYPE, label.id())?;
         }
         Ok(())
+    }
+
+    /// Whether the account has the label `provider_id`.
+    pub fn has_label(&self, account: &EmailAddress, provider_id: &str) -> StoreResult<bool> {
+        Ok(self.find_label(account, provider_id)?.is_some())
     }
 
     /// The store ids of an account's labels, by provider id, in order.

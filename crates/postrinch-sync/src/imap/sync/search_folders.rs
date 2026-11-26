@@ -4,12 +4,17 @@
 //! that names none looks where a search covers: every folder but Trash
 //! and Junk (they too with `in:trash`, `in:spam` or `in:anywhere`), or on
 //! Gmail's servers its All Mail, which holds every message but those two
-//! (docs/imap.md, "Searching the server"). Folders it leaves out
-//! (`-in:`, `-label:`) are not looked in; a message with copies in other
-//! folders too is checked by its labels after (`postrinch-commands`).
+//! (docs/imap.md, "Searching the server"). All Mail is known by LIST's
+//! `\All` ([`super::folders::holds_everything`]), never by the archive
+//! role: the person may make another folder the archive. Folders it
+//! leaves out (`-in:`, `-label:`) are not looked in; a message with copies
+//! in other folders too is checked by its labels after
+//! (`postrinch-commands`).
 //!
 //! The alternatives looking in one folder are asked at once, joined by
 //! `OR`, so a folder is opened and searched once.
+
+use std::collections::HashSet;
 
 use postrinch_model::{
     FolderRole, ImapAlternative, ImapFolder, ImapSearch, SearchKey, SystemLabel,
@@ -28,9 +33,16 @@ pub(super) struct FolderSearch {
 
 /// Each folder to look in, the inbox first and Trash and Junk last, with
 /// the command that asks there what every alternative looking in it asks.
-/// `gmail`: the server is Gmail's, so its All Mail is where a search
-/// covers and Gmail's language (`X-GM-RAW`) is how it is asked.
-pub(super) fn plan(folders: &[ImapFolder], search: &ImapSearch, gmail: bool) -> Vec<FolderSearch> {
+/// `gmail`: the server is Gmail's, so Gmail's language (`X-GM-RAW`) is
+/// how it is asked. `everything`: the label ids of the folders that hold
+/// every message (Gmail's All Mail), where a search covers when there is
+/// one.
+pub(super) fn plan(
+    folders: &[ImapFolder],
+    search: &ImapSearch,
+    gmail: bool,
+    everything: &HashSet<String>,
+) -> Vec<FolderSearch> {
     let mut ordered: Vec<&ImapFolder> = folders.iter().collect();
     ordered.sort_by_key(|f| rank(f.role));
     let mut out = Vec::new();
@@ -38,7 +50,7 @@ pub(super) fn plan(folders: &[ImapFolder], search: &ImapSearch, gmail: bool) -> 
         let asking: Vec<&ImapAlternative> = search
             .alternatives
             .iter()
-            .filter(|a| looks_in(a, folder, folders, gmail))
+            .filter(|a| looks_in(a, folder, folders, everything))
             .collect();
         if asking.is_empty() {
             continue;
@@ -72,12 +84,12 @@ pub(super) fn plan(folders: &[ImapFolder], search: &ImapSearch, gmail: bool) -> 
 }
 
 /// Whether an alternative looks in `folder`, one of the account's
-/// `folders`.
+/// `folders`, of which those in `everything` hold every message.
 fn looks_in(
     alternative: &ImapAlternative,
     folder: &ImapFolder,
     folders: &[ImapFolder],
-    gmail: bool,
+    everything: &HashSet<String>,
 ) -> bool {
     if alternative.not_in.contains(&folder.label_id) {
         return false;
@@ -92,10 +104,10 @@ fn looks_in(
     if set_aside {
         return alternative.set_aside_too;
     }
-    // Gmail's All Mail (its `\All`, kept as the archive) holds every other
-    // folder's mail.
-    let all_mail = gmail && folders.iter().any(|f| f.role == Some(FolderRole::Archive));
-    !all_mail || folder.role == Some(FolderRole::Archive)
+    // Gmail's All Mail holds every other folder's mail, whichever folder
+    // is the archive.
+    let all_mail = folders.iter().any(|f| everything.contains(&f.label_id));
+    !all_mail || everything.contains(&folder.label_id)
 }
 
 /// Whether some alternative asks what only Gmail's language can, and
@@ -156,9 +168,20 @@ mod tests {
         ImapSearch { alternatives }
     }
 
+    /// The plan, with `fall` as Gmail's All Mail where the account has it
+    /// and the server is Gmail's.
+    fn plan_for(folders: &[ImapFolder], search: &ImapSearch, gmail: bool) -> Vec<FolderSearch> {
+        let everything = folders
+            .iter()
+            .filter(|f| gmail && f.label_id == "fall")
+            .map(|f| f.label_id.clone())
+            .collect();
+        plan(folders, search, gmail, &everything)
+    }
+
     #[test]
     fn a_search_covers_every_folder_but_trash_and_junk() {
-        let planned = plan(&account(false), &search(vec![alternative("x")]), false);
+        let planned = plan_for(&account(false), &search(vec![alternative("x")]), false);
         let folders: Vec<String> = searched(&planned).into_iter().map(|(f, _)| f).collect();
         assert_eq!(folders, ["INBOX", "SENT", "fwork"]);
         assert!(
@@ -172,7 +195,7 @@ mod tests {
     fn set_aside_folders_when_asked() {
         let mut anywhere = alternative("x");
         anywhere.set_aside_too = true;
-        let planned = plan(&account(false), &search(vec![anywhere]), false);
+        let planned = plan_for(&account(false), &search(vec![anywhere]), false);
         let folders: Vec<String> = searched(&planned).into_iter().map(|(f, _)| f).collect();
         assert_eq!(folders, ["INBOX", "SENT", "fwork", "TRASH", "SPAM"]);
     }
@@ -183,7 +206,7 @@ mod tests {
         work.folders = vec!["fwork".into()];
         let mut not_sent = alternative("y");
         not_sent.not_in = vec!["SENT".into()];
-        let planned = plan(&account(false), &search(vec![work, not_sent]), false);
+        let planned = plan_for(&account(false), &search(vec![work, not_sent]), false);
         assert_eq!(
             searched(&planned),
             [
@@ -197,7 +220,7 @@ mod tests {
         let mut trash = alternative("z");
         trash.folders = vec!["TRASH".into()];
         trash.set_aside_too = true;
-        let planned = plan(&account(false), &search(vec![trash]), false);
+        let planned = plan_for(&account(false), &search(vec![trash]), false);
         assert_eq!(searched(&planned)[0].0, "TRASH");
     }
 
@@ -205,7 +228,7 @@ mod tests {
     fn gmail_looks_in_all_mail_in_its_own_language() {
         let mut work = alternative("label:work y");
         work.folders = vec!["fwork".into()];
-        let planned = plan(
+        let planned = plan_for(
             &account(true),
             &search(vec![
                 alternative("x"),
@@ -230,11 +253,30 @@ mod tests {
     }
 
     #[test]
+    fn gmail_looks_in_all_mail_whichever_folder_archives() {
+        // The person made `fwork` the archive: All Mail stays where a
+        // search covers, and the archive is no reason to look there.
+        let mut folders = account(true);
+        for f in &mut folders {
+            f.role = match f.label_id.as_str() {
+                "fall" => None,
+                "fwork" => Some(FolderRole::Archive),
+                _ => f.role,
+            };
+        }
+        let planned = plan_for(&folders, &search(vec![alternative("x")]), true);
+        assert_eq!(
+            searched(&planned),
+            [("fall".to_owned(), r#"UID SEARCH X-GM-RAW "x""#.to_owned())]
+        );
+    }
+
+    #[test]
     fn gmail_with_nothing_to_ask_asks_for_everything() {
         // `-from:jose`: what is left out is left to the check.
         let mut left_out = alternative("");
         left_out.key = SearchKey::All(Vec::new());
-        let planned = plan(
+        let planned = plan_for(
             &account(true),
             &search(vec![alternative("x"), left_out]),
             true,
@@ -247,13 +289,13 @@ mod tests {
 
     #[test]
     fn gmail_without_all_mail_looks_everywhere() {
-        let planned = plan(&account(false), &search(vec![alternative("x")]), true);
+        let planned = plan_for(&account(false), &search(vec![alternative("x")]), true);
         assert_eq!(planned.len(), 3);
     }
 
     #[test]
     fn nothing_to_ask_looks_nowhere() {
-        assert!(plan(&account(false), &search(Vec::new()), false).is_empty());
+        assert!(plan_for(&account(false), &search(Vec::new()), false).is_empty());
         let mut inexact = alternative("x");
         assert_eq!(super::inexact(&search(vec![inexact.clone()])), None);
         inexact.inexact = Some("has:attachment".into());

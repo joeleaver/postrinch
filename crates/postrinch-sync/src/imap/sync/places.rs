@@ -1,7 +1,9 @@
 //! Keeping messages in step with their copies on the server (docs/imap.md,
 //! "A message's identity"): a message's labels are the folders holding a
-//! copy of it, it is unread if any copy lacks `\Seen` and starred if any
-//! has `\Flagged`, and a copy marked `\Deleted` counts as gone. A message
+//! copy of it that are labels (all but Gmail's All Mail,
+//! [`super::folders::holds_everything`]), it is unread if any copy lacks
+//! `\Seen` and starred if any has `\Flagged`, and a copy marked `\Deleted`
+//! counts as gone. A message
 //! left without a live copy waits until every folder is read again
 //! ([`super::pending`]).
 
@@ -39,8 +41,9 @@ fn has(place: &ImapPlace, flag: &str) -> bool {
     place.flags.iter().any(|f| f.eq_ignore_ascii_case(flag))
 }
 
-/// A message's labels and flags from its copies; `None` when no copy is
-/// left that is not marked `\Deleted`.
+/// A message's folders and flags from its copies; `None` when no copy is
+/// left that is not marked `\Deleted`. Its labels are those of the
+/// folders that are labels ([`labelled`]).
 pub(super) fn summary(places: &[ImapPlace]) -> Option<(Vec<String>, Flags)> {
     let live: Vec<&ImapPlace> = places.iter().filter(|p| !has(p, DELETED)).collect();
     if live.is_empty() {
@@ -52,6 +55,23 @@ pub(super) fn summary(places: &[ImapPlace]) -> Option<(Vec<String>, Flags)> {
         starred: live.iter().any(|p| has(p, FLAGGED)),
     };
     Some((labels.into_iter().collect(), flags))
+}
+
+/// Of a message's folders (label ids), those that are labels: a folder
+/// the pass keeps no label for (Gmail's All Mail, which holds every
+/// message) puts none on its messages.
+fn labelled(
+    store: &Store,
+    account: &EmailAddress,
+    folders: Vec<String>,
+) -> SyncResult<Vec<String>> {
+    let mut labels = Vec::with_capacity(folders.len());
+    for folder in folders {
+        if store.has_label(account, &folder)? {
+            labels.push(folder);
+        }
+    }
+    Ok(labels)
 }
 
 /// Brings a stored message's labels and flags in step with its copies.
@@ -66,7 +86,8 @@ pub(super) fn refresh(
         return Ok(false);
     }
     let places = store.imap_message_places(account, id)?;
-    let (labels, flags) = summary(&places).unwrap_or_default();
+    let (folders, flags) = summary(&places).unwrap_or_default();
+    let labels = labelled(store, account, folders)?;
     store.set_message_labels(account, id, &labels, flags)?;
     Ok(true)
 }
@@ -157,9 +178,10 @@ pub(super) fn store_copy(
         },
     )?;
     let places = store.imap_message_places(account, &message.id)?;
-    let Some((labels, flags)) = summary(&places) else {
+    let Some((folders, flags)) = summary(&places) else {
         return Ok(Stored::Skipped);
     };
+    let labels = labelled(store, account, folders)?;
     if let Some(kept) = store.message(account, &message.id)? {
         let first = first_copy(&places).is_some_and(|p| {
             p.folder == folder.label && p.uidvalidity == folder.uidvalidity && p.uid == fetched.uid

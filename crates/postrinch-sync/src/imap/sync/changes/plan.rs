@@ -31,10 +31,10 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use postrinch_model::{FolderRole, ImapFolder, ImapPlace, MessageChange, SystemLabel};
 
-use super::super::folders::view_of_all;
+use super::super::folders::{holds_everything, kept_where, view_of_all};
 use super::super::places::{DELETED, FLAGGED, SEEN, first_copy};
 use super::commands::shown;
-use crate::imap::folders::{ListedFolder, SpecialUse};
+use crate::imap::folders::ListedFolder;
 
 /// The account's folders as the outbox needs them.
 #[derive(Debug, Clone, Default)]
@@ -51,24 +51,8 @@ impl Folders {
     /// The folders kept, with which of them LIST marks `\All`, on Gmail
     /// (`gmail`) or elsewhere.
     pub(super) fn new(stored: Vec<ImapFolder>, listed: &[ListedFolder], gmail: bool) -> Self {
-        let (mut all, mut views) = (HashSet::new(), HashSet::new());
-        for f in listed
-            .iter()
-            .filter(|f| f.special_use == Some(SpecialUse::All))
-        {
-            match view_of_all(f, gmail) {
-                true => views.insert(f.name.as_str()),
-                false => all.insert(f.name.as_str()),
-            };
-        }
-        let labels = |names: &HashSet<&str>| -> HashSet<String> {
-            stored
-                .iter()
-                .filter(|f| names.contains(f.name.as_str()))
-                .map(|f| f.label_id.clone())
-                .collect()
-        };
-        let (everything, views) = (labels(&all), labels(&views));
+        let everything = kept_where(&stored, listed, |f| holds_everything(f, gmail));
+        let views = kept_where(&stored, listed, |f| view_of_all(f, gmail));
         let by_label = stored
             .into_iter()
             .map(|f| (f.label_id.clone(), f))

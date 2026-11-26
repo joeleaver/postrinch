@@ -1,3 +1,4 @@
+use crate::imap::folders::SpecialUse;
 use postrinch_model::ProviderMessageId;
 
 use super::*;

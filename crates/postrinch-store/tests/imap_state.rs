@@ -274,6 +274,37 @@ fn removing_a_folders_label_removes_the_folder_and_its_places() {
 }
 
 #[test]
+fn a_folders_label_can_go_while_the_folder_stays() {
+    // Gmail's All Mail: synced, but no label (docs/imap.md).
+    let (_dir, store, me) = setup();
+    store
+        .put_label(
+            &me,
+            &Label::new("f0123456789ab", "Receipts", LabelKind::User),
+        )
+        .unwrap();
+    let mut m1 = message(&me, "m1", "t1", 100, "Hello", "hi");
+    m1.labels = vec!["INBOX".into(), "f0123456789ab".into()];
+    store.put_message(&m1, None).unwrap();
+    store
+        .put_imap_place(&me, &place("f0123456789ab", 3, 1, "m1"))
+        .unwrap();
+    assert!(store.has_label(&me, "f0123456789ab").unwrap());
+
+    store
+        .remove_label_keeping_folder(&me, "f0123456789ab")
+        .unwrap();
+    store
+        .remove_label_keeping_folder(&me, "f0123456789ab")
+        .unwrap();
+    assert!(!store.has_label(&me, "f0123456789ab").unwrap());
+    assert!(store.imap_folder(&me, "f0123456789ab").unwrap().is_some());
+    assert_eq!(uids(&store, &me, "f0123456789ab"), [1]);
+    let kept = store.message(&me, &m1.id).unwrap().unwrap();
+    assert_eq!(kept.labels, ["INBOX"], "the message lost the label");
+}
+
+#[test]
 fn removing_the_account_removes_its_folders_and_places() {
     let (dir, store, me) = setup();
     store
