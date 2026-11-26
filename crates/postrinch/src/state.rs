@@ -103,6 +103,8 @@ pub struct State {
     pub sync: Signal<Vec<AccountSync>>,
     /// Bumped whenever sync changed the store, so what is shown reloads.
     pub revision: Signal<u64>,
+    /// The last account whose pass ended.
+    pub pass_ended: Signal<Option<crate::sync::PassEnd>>,
     /// Sidebar rows opened or closed by the person (`row_open`).
     pub view_tree: Signal<std::collections::BTreeMap<String, bool>>,
     /// The label being renamed or coloured.
@@ -225,6 +227,7 @@ impl State {
             thread: Signal::new(None),
             sync: Signal::new(Vec::new()),
             revision: Signal::new(0),
+            pass_ended: Signal::new(None),
             view_tree: Signal::new(settings.view_tree.clone()),
             editing: Signal::new(None),
             making: Signal::new(None),

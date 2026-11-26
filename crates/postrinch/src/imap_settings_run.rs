@@ -3,9 +3,8 @@
 //! the provider files sent mail, and the password dialog for signing in
 //! again. The slow work runs on sync's runtime and reports back by
 //! `send`; the servers panel is the add-account dialog's
-//! (`AddUi::change_servers_of`).
-
-use std::sync::Arc;
+//! (`AddUi::change_servers_of`), and the folders themselves are read in
+//! `imap_folders`.
 
 use postrinch_model::{EmailAddress, FolderRole, FolderRoles, SignInMethod, SystemLabel};
 use postrinch_sync::imap::{AccountFolder, ImapSecret, SignInAgain};
@@ -14,6 +13,7 @@ use rinch::prelude::*;
 use crate::actions::{Notice, sync};
 use crate::add_account::Found;
 use crate::add_account_flow::{Outcome, outcome};
+use crate::imap_folders::AccountFolders;
 use crate::state::State;
 
 /// A role the person can give one of an account's folders.
@@ -131,8 +131,8 @@ pub fn role_choices(
 /// The account settings' state that is not the account itself.
 #[derive(Clone, Copy)]
 pub struct ImapUi {
-    /// The account the folders are for, and its folders (no inbox).
-    pub folders: Signal<Option<(EmailAddress, Vec<AccountFolder>)>>,
+    /// The account's folders, for the Folders section's choices.
+    pub folders: AccountFolders,
     /// The password dialog: the account signing in again, and why.
     pub again: Signal<Option<(EmailAddress, String)>>,
     /// The account takes a second password for its outgoing server.
@@ -149,7 +149,7 @@ pub struct ImapUi {
 impl ImapUi {
     pub fn new() -> Self {
         Self {
-            folders: Signal::new(None),
+            folders: AccountFolders::new(),
             again: Signal::new(None),
             again_separate: Signal::new(false),
             password: Signal::new(String::new()),
@@ -160,23 +160,6 @@ impl ImapUi {
         }
     }
 
-    /// Reads `account`'s folders, for the Folders section's choices.
-    pub fn load_folders(self, state: State, account: EmailAddress) {
-        let Some(sync) = sync() else {
-            return;
-        };
-        let folders = self.folders;
-        sync.runtime.clone().spawn(async move {
-            match sync.mail().imap().account_folders(&account).await {
-                Ok(found) => folders.send(Some((account, found))),
-                Err(e) => state.notice.send(Some(Notice {
-                    text: format!("{account}'s folders could not be read: {e}"),
-                    trouble: true,
-                })),
-            }
-        });
-    }
-
     /// Gives `role` to `folder` (none: back to the server's choice),
     /// changing only that role as the account is stored now, so a quick
     /// second choice does not undo the first. The folders take their
@@ -185,7 +168,6 @@ impl ImapUi {
         let Some(sync) = sync() else {
             return state.notice.set(Some(sync_off()));
         };
-        let ui = self;
         sync.runtime.clone().spawn(async move {
             let set = sync
                 .mail()
@@ -197,34 +179,12 @@ impl ImapUi {
                     state.revision.update_send(|n| *n += 1);
                     // The roles move at the next pass; run it now, and
                     // the choices follow it.
-                    rinch::run_on_main_thread(move || ui.reload_after_pass(state, account));
+                    rinch::run_on_main_thread(move || {
+                        AccountFolders::reload_after_pass(state, account);
+                    });
                 }
                 Err(e) => state.notice.send(Some(Notice {
                     text: format!("The folder could not be set: {e}"),
-                    trouble: true,
-                })),
-            }
-        });
-    }
-
-    /// Reads the folders again once the pass the role change started has
-    /// moved them.
-    fn reload_after_pass(self, state: State, account: EmailAddress) {
-        let Some(sync) = sync() else {
-            return;
-        };
-        let folders = self.folders;
-        sync.runtime.clone().spawn(async move {
-            // The pass waits its turn behind sync's own on the account.
-            let pass = sync.mail().sync(&account, Arc::new(|_| {})).await;
-            if let Err(e) = pass {
-                tracing::info!("IMAP: the pass after a role change did not finish: {e}");
-            }
-            state.revision.update_send(|n| *n += 1);
-            match sync.mail().imap().account_folders(&account).await {
-                Ok(found) => folders.send(Some((account, found))),
-                Err(e) => state.notice.send(Some(Notice {
-                    text: format!("{account}'s folders could not be read: {e}"),
                     trouble: true,
                 })),
             }

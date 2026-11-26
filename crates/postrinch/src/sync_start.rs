@@ -15,7 +15,7 @@ use rinch::prelude::*;
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
 
-use crate::sync::{AccountSync, report};
+use crate::sync::{AccountSync, PassEnd, report};
 
 /// What the window needs to act on accounts while sync runs.
 #[derive(Clone)]
@@ -88,7 +88,8 @@ impl SyncOff {
 
 /// Start keeping every account in sync, and sending the changes made here,
 /// on a thread of its own. `status` follows what each account's sync is
-/// doing; `revision` is bumped when the store changed. Fails, saying why,
+/// doing; `revision` is bumped when the store changed; `ended` names each
+/// account whose pass ended (`report`). Fails, saying why,
 /// when sync cannot run at all; with it running, says why Google accounts
 /// are off when this copy has no Google sign-in and the store has Google
 /// accounts to miss it.
@@ -96,6 +97,7 @@ pub fn start(
     store: Store,
     status: Signal<Vec<AccountSync>>,
     revision: Signal<u64>,
+    ended: Signal<Option<PassEnd>>,
 ) -> Result<(SyncHandle, Option<SyncOff>), SyncOff> {
     let (auth, google_off) = match google() {
         Ok(auth) => (Some(auth), None),
@@ -131,7 +133,7 @@ pub fn start(
         .map_err(|e| SyncOff::not_started(format!("its runtime: {e}")))?;
     let (wake, send) = (Arc::new(Notify::new()), Arc::new(Notify::new()));
     let fetch = wake.clone();
-    let events = Arc::new(move |event: SyncEvent| report(event, status, revision, &fetch));
+    let events = Arc::new(move |event: SyncEvent| report(event, status, revision, ended, &fetch));
     let handle = SyncHandle {
         auth,
         imap_oauth,

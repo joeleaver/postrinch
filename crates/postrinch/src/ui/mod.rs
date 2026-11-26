@@ -79,7 +79,7 @@ pub fn account_color(index: usize) -> &'static str {
 /// The whole window, over one store.
 pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle {
     let commands = Rc::new(Commands::new(store.clone()));
-    let sync = match sync::start(store, state.sync, state.revision) {
+    let sync = match sync::start(store, state.sync, state.revision, state.pass_ended) {
         Ok((handle, google_off)) => {
             // IMAP accounts sync all the same.
             if let Some(off) = google_off {
@@ -102,6 +102,13 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     agents::start((*commands).clone(), state, sync.as_ref().cloned());
     if let Some(sync) = &sync {
         crate::rules_ui::set_sender(sync.send.clone());
+        // An IMAP account's Folders list, read while its page is shown.
+        state.imap.folders.follow(
+            crate::imap_folders::Reader::of(sync),
+            state.notice,
+            move || settings::imap_page(state),
+            state.pass_ended,
+        );
     }
     crate::rules::start(
         (*commands).clone(),

@@ -22,14 +22,41 @@ pub struct AccountSync {
     pub trouble: bool,
 }
 
+/// The last of the accounts' passes to end, numbered so that the same
+/// account's next pass is news too. What a pass keeps of an account
+/// beyond its mail (an IMAP account's folders) is read again from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PassEnd {
+    pub account: EmailAddress,
+    pub number: u64,
+}
+
+/// Notes in `ended` that a pass of `account` ended, from any thread.
+pub fn pass_ended(ended: Signal<Option<PassEnd>>, account: EmailAddress) {
+    ended.update_send(move |last| {
+        let number = last.as_ref().map_or(1, |l| l.number + 1);
+        *last = Some(PassEnd { account, number });
+    });
+}
+
 /// Turn a sync event into the sidebar's line for the account, from the
-/// sync thread.
+/// sync thread. `ended` is told of each pass that ended: once its sync
+/// part is done ([`SyncEvent::Synced`], before the hours a first
+/// download can take), or when it stopped short.
 pub(crate) fn report(
     event: SyncEvent,
     status: Signal<Vec<AccountSync>>,
     revision: Signal<u64>,
+    ended: Signal<Option<PassEnd>>,
     wake: &Notify,
 ) {
+    if let SyncEvent::Synced { account, .. }
+    | SyncEvent::Failed { account, .. }
+    | SyncEvent::NeedsSignIn { account }
+    | SyncEvent::Busy { account, .. } = &event
+    {
+        pass_ended(ended, account.clone());
+    }
     let (account, line, progress, trouble, changed) = match event {
         SyncEvent::Started { account } => (
             account,

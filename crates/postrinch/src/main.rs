@@ -20,6 +20,7 @@ mod calendar_ui;
 mod changes;
 mod conversations;
 mod dates;
+mod imap_folders;
 mod imap_settings_run;
 mod import_thunderbird;
 mod invitations;
