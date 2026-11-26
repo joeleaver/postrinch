@@ -298,7 +298,7 @@ const profile = `${rail()}${sidebar('home')}<div class="main"><div class="pane" 
   <div class="actions"><button class="btn">Cancel</button><button class="btn filled">Save</button></div></div></div>`;
 
 const states = {
-  composing: { label: 'Composer: pasted, dropped, uploading', html: () => composing, note: 'Pictures pasted (Ctrl+V) and files dropped or picked with ＋ join the tray above the text, each with ✕. Uploads start at once (to the provider the message goes to) and show their progress; Send waits for them. Formatting is Markdown, with buttons for the common marks.' },
+  composing: { label: 'Composer: pasted, dropped, uploading', html: () => composing, note: 'Pictures pasted (Ctrl+V) and files dropped or picked with ＋ join the tray above the text, each with ✕. Uploads start at once and show their progress (which provider they go to waits on spec question 16); Send waits for them. Formatting is Markdown, with buttons for the common marks.' },
   dropping: { label: 'Dragging files over', html: () => dropping, note: 'Dragging files over the window shows where they will go. Dropped, they land in the composer\'s tray (rinch\'s ondropfiles); nothing is sent until Send.' },
   article: { label: 'Writing an article', html: () => editor('article'), note: 'New post (✎ in a view\'s header, or Write) opens the editor in the main pane: Article or Memo, where it goes (▾ lists the places you may post articles), a cover, title, tags, and the body in rinch\'s rich-text editor, saved as Markdown. Pictures and videos go in where the caret is. Drafts save as you type and are listed in Drafts. Publish is rightmost.' },
   memo: { label: 'Writing a memo', html: () => editor('memo'), note: 'A memo is the short form: a title, plain text and pictures.' },

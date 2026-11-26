@@ -299,7 +299,7 @@ const panel = `${chat(false)}<div class="panel"><h3>Edit view</h3>
   <div class="field"><label>Show</label><div class="checks"><label><input type="checkbox" checked> Chat</label><label><input type="checkbox" checked> Memos</label><label><input type="checkbox" checked> Articles</label></div></div>
   <div class="field"><label>Only</label><input placeholder="From, words, tags: from:mira tag:meetup"></div>
   <div class="field"><label>Read as</label><div class="seg"><span class="on">Stream</span><span>List and reader</span></div></div>
-  <div class="field"><label>Notify me of</label><select><option>Mentions and replies</option><option>Everything</option><option>Nothing</option></select></div>
+  <div class="field"><label>Notices</label><div class="hint" style="margin:0">Set on each place or group, not on the view: # general and ▤ announcements, mentions and replies; ◖ standup, nothing. Click a place chip to change it.</div></div>
   <div class="field"><label>Count</label><select><option>Unread</option><option>None</option></select></div>
   <div class="actions"><button class="btn red">Delete view</button><button class="btn">Cancel</button><button class="btn filled">Save</button></div></div>`;
 
@@ -313,7 +313,7 @@ const states = {
   posts: { label: 'Articles, list and reader', html: () => posts, note: 'A view read as list and reader, like mail: "Long reads" shows only articles, from five places. Articles have a cover, pictures and videos inline, and replies below.' },
   home: { label: 'Home', html: () => home, note: 'Home is a built-in view: posts from every channel you follow. It can be edited like any view.' },
   dms: { label: 'Messages', html: () => dms, note: 'Private messages, newest first, with presence on each face and the encryption banner the spec asks for.' },
-  panel: { label: 'Edit a view', html: () => panel, note: '✎ on a view\'s row (shown on hover, as in Mail) opens its one panel: name, places from any account and provider, which kinds, a filter, how it reads, notices and its count.' },
+  panel: { label: 'Edit a view', html: () => panel, note: '✎ on a view\'s row (shown on hover, as in Mail) opens its one panel: name, places from any account and provider, which kinds, a filter, how it reads, and its count; notices show per place, since they belong to the place or group.' },
   lightbox: { label: 'Picture, full size', html: () => lightbox, note: 'A picture opens over the window; arrows move through the message\'s pictures.' },
 };
 const strip = document.getElementById('states');

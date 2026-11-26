@@ -4,7 +4,7 @@ Gaps, ambiguities and contradictions found while designing Postrinch's OFSCP cli
 ([docs/ofscp.md](../ofscp.md)), for the spec's authors. Line numbers are
 `~/dev/ofscp/docs/ofscp_spec.md` as of 2026-11-26; schema paths are under
 `schemas/v0.1`. Postrinch works around none of these: where one blocks a feature, the
-feature waits (docs/ofscp.md, "What waits on the spec").
+feature waits (docs/ofscp.md, "Working with the spec").
 
 The schemas' own README says they were generated and not yet reviewed, and the conformance
 tests only validate example JSON against them; the two signing vectors are published but

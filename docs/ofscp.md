@@ -49,8 +49,9 @@ Spec questions: [docs/research/ofscp-spec-questions.md](research/ofscp-spec-ques
     then the client backfills over REST.
   - Delivery is at-least-once, so the client deduplicates by id.
   - Private messages, notifications and read markers arrive on the home socket without a
-    subscription, and are never replayed. After a reconnect the client reads them again over
-    REST.
+    subscription. Private messages can still be subscribed by `dmId` with a `since` cursor
+    (§7.4) and resume like channels; notifications and read markers have no cursor, so after
+    a reconnect the client reads them again over REST.
 - **Things in the protocol:**
   - Groups, each with a join policy, a tier, roles and a map of which roles may do which
     actions.
@@ -87,7 +88,8 @@ Rust provider, on rhypedb, still being built. In both cases the spec decides beh
   - media upload and access (16);
   - finding remote groups on a new device (3);
   - live reactions and edits on your own private messages (6);
-  - mentions on other providers (8);
+  - notifications for mentions on other providers, so they reach the person when Postrinch
+    isn't connected (8);
   - the echo of `clientMessageId` (28).
 - **Interop:** Forumall to start. re-ofscp, Joe's own provider, as it grows. And the spec
   itself, through shared vectors.
@@ -136,8 +138,12 @@ provider**, not by provider or group.
   - kinds (chat, memo, article);
   - words, `from:` and `tag:`;
   - how it reads (a stream, or a list with a reader);
-  - its notices (everything, mentions and replies, or nothing);
   - its count.
+
+  Notices are not a view setting: they belong to the place or group (everything, mentions and
+  replies, or nothing), as the spec keeps them (§10.2, synced with the home provider), so a
+  place shown in two views can't disagree with itself. The view panel shows and changes its
+  places' notices.
 
   A group in a view means all of that group's channels, including ones made later.
 - **Built-in views:** Home (posts from followed channels), Mentions, Messages (private
@@ -179,15 +185,20 @@ provider**, not by provider or group.
 - **The composer:**
   - Markdown, with buttons for the common marks.
   - Pictures pasted with Ctrl+V (`rinch-clipboard`), files dropped onto the window
-    (`ondropfiles`) or picked with ＋ all go to a tray above the text, each with ✕.
-  - Uploads start at once, to the provider the message is going to, and show their progress.
-    Send waits for them.
+    (`ondropfiles`) or picked with ＋ all go to a tray above the text, each with ✕. A pasted
+    bitmap arrives as raw RGBA and is encoded to PNG before upload. Pasting copied *files*
+    (a video copied in a file manager) needs `rinch-clipboard` to offer file lists, which it
+    doesn't yet: a rinch issue, filed before PR 16.
+  - Uploads start at once and show their progress; Send waits for them. Which provider they
+    go to waits on spec question 16.
   - Enter sends; Shift+Enter starts a new line.
 - **The article and memo editor** opens in the main pane:
   - Article or Memo, and where it goes (▾ lists the places that allow that kind).
   - Article: a cover, a title, tags, and the body in rinch's rich-text editor
     (`rinch-editor-core` already reads and writes Markdown), with pictures and videos placed
-    at the caret.
+    at the caret. The editor has an image node but no video node, and Markdown has no video
+    syntax: a rinch issue for the node, and how inline media is referenced in a body goes into
+    spec question 14.
   - Memo: a title, plain text and pictures.
   - Drafts save as you type and are listed in Drafts. Preview shows the post exactly as a
     reader will see it.
@@ -265,8 +276,11 @@ when an account is deleted.
   - Media is uploaded before the message that carries it.
 - **Private messages:** sending goes to the recipient's provider, then the pointer is written
   at home. Reading merges both providers by `createdAt`, deduplicated by id.
-- **Mentions:** the home provider's notifications cover home channels. For channels elsewhere,
-  Postrinch scans for the handle itself, until the spec covers them.
+- **Mentions:** the home provider's notifications cover home channels. For every place,
+  Postrinch also marks `mentions_me` from the messages it syncs, using the spec's mention
+  syntax (§10.1). That is the design, not a stopgap: it is local and needs nothing from the
+  provider. What the spec lacks (question 8) is a notification for a remote mention that
+  reaches the person's other clients.
 - **Unread:** the provider's read markers at home; local markers elsewhere.
 - **Groups on other providers** are remembered locally. On a new computer they come back
   through follows and invites, until the spec adds membership pointers (questions 3 and 29,
@@ -298,32 +312,35 @@ CI. Some PRs (marked *spec*) wait for the spec to define something first.
 | 2 | `postrinch-sync-core` extracted (no behaviour change) | — |
 | 3 | `postrinch-ofscp` core: wire types, signing, the WS-auth string, dmId; golden vectors (agree sharing with re-ofscp first) | — |
 | 4 | `postrinch-ofscp-fake` | 3 |
-| 5 | `postrinch-ofscp` transport: signed HTTP, discovery, sign-in and device keys, media upload, WebSocket | 3, 4 |
+| 5 | `postrinch-ofscp` transport: signed HTTP, discovery, sign-in and device keys, media upload (*spec*, question 16), WebSocket | 3, 4 |
 | 6 | Store: the social types, a format bump | — |
-| 7 | Render: social content (plain, Markdown, HTML), mentions | — |
+| 7 | Render: social content (plain, Markdown, HTML), mentions (*spec*, question 14) | — |
 | 8 | Engine I: add, sign in again, sign out; first sync; CLI | 2, 5, 6 |
 | 9 | Engine II: live sessions, resume and backfill, read markers, notifications, mentions, presence | 8 |
-| 10 | Engine III: the outbox (chat messages, edits, deletes, reactions, read, follow) | 9 |
-| 11 | Engine IV: media, both ways (upload with progress, fetch and cache, avatars) | 10 |
-| 12 | Engine V: private messages | 10 |
+| 10 | Engine III: the outbox (chat messages, edits, deletes, reactions, read, follow) (*spec*, question 28) | 9 |
+| 11 | Engine IV: media, both ways (upload with progress, fetch and cache, avatars) (*spec*, question 16) | 10 |
+| 12 | Engine V: private messages (live reactions and edits on sent ones: *spec*, question 6) | 10 |
 | 13 | Commands: `social/` (views, places, pages, threads, search, drafts, changes, profile) | 6, 7 |
-| 14 | Window: add account, settings page, profile and avatar | 8, 13 |
+| 14 | Window: add account, settings page, profile and avatar | 8, 11, 13 |
 | 15 | Window: Social mode, views in the sidebar, the view panel, tabs | 1, 13 |
-| 16 | Window: streams, threads, the composer (paste, drop, tray, uploads) | 10, 11, 15 |
+| 16 | Window: streams, threads, the composer (paste, drop, tray, uploads) (uploads: *spec*, question 16) | 10, 11, 15 |
 | 17 | Window: pictures and video (inline, full size, rinch-video), file cards | 11, 16 |
-| 18 | Window: lists and the reader, Home | 15 |
+| 18 | Window: lists and the reader, Home | 15, 17 |
 | 19 | Window: private messages | 12, 16 |
 | 20 | Editor: articles and memos, drafts, preview, publishing (*spec*, question 1) | 13, 17 |
 | 21 | Replies and attachments on posts sent (*spec*, question 1) | 16 |
 | 22 | Notices and unread counts, on the rail too | 9, 15 |
-| 23 | Agents: the social tools | 13 |
+| 23 | Agents: the social tools (proposals open in the composer, editor and private messages) | 13, 16, 19, 20 |
 | 24 | Joining: invite links, join requests, All channels | 10, 15 |
-| 25 | Demo seed, visual tests, interop CI, DESIGN.md | 19 |
+| 25 | Demo seed, visual tests, interop CI, DESIGN.md | 17, 19, 20 |
 
 - **In parallel from the start:** 1, 2, 3, 6 and 7, plus the spec work with the oracle.
-- **After 13:** 23. **After 15:** 18, 22 and 24.
+- **After 15:** 22 and 24 (once 9 and 10 are in); 18 once 17 is in. 23 comes after the
+  composer, editor and private messages (16, 19, 20).
 - **Packaging:** `rinch-video` needs libmpv in every release (Linux, Windows, macOS). This is
   checked with the release work before PR 17.
+- **Rinch issues** (rinch is a git dependency, never edited here): a video node in
+  `rinch-editor-core`, and file lists in `rinch-clipboard`.
 
 ## Tests
 
