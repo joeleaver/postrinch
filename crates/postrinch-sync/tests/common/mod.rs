@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -109,13 +110,28 @@ pub async fn mock_labels(server: &MockServer) {
 }
 
 pub async fn mock_raw(server: &MockServer, id: &str, labels: &[&str], subject: &str) {
+    mock_raw_after(server, id, labels, subject, Duration::ZERO).await;
+}
+
+/// As [`mock_raw`], the body coming `delay` after it is asked for.
+pub async fn mock_raw_after(
+    server: &MockServer,
+    id: &str,
+    labels: &[&str],
+    subject: &str,
+    delay: Duration,
+) {
     Mock::given(method("GET"))
         .and(path(format!("/gmail/messages/{id}")))
         .and(query_param("format", "raw"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "id": id, "threadId": format!("t-{id}"), "labelIds": labels, "snippet": format!("snippet {id}"),
-            "internalDate": "1700000000000", "raw": raw(subject, &format!("body of {id}")),
-        })))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({
+                    "id": id, "threadId": format!("t-{id}"), "labelIds": labels, "snippet": format!("snippet {id}"),
+                    "internalDate": "1700000000000", "raw": raw(subject, &format!("body of {id}")),
+                }))
+                .set_delay(delay),
+        )
         .mount(server)
         .await;
 }
