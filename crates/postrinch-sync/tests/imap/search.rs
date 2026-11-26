@@ -341,6 +341,34 @@ async fn gmail_is_searched_in_all_mail_in_its_own_language() {
 }
 
 #[tokio::test]
+async fn gmail_is_searched_in_all_mail_whichever_folder_archives() {
+    // The person made "Filed" the archive, so All Mail has no role; it
+    // still holds every message, and is where the search looks.
+    let roles = FolderRoles {
+        archive: Some("Filed".into()),
+        ..FolderRoles::default()
+    };
+    let f = fixture_with(ImapConfig::new().gmail(true), roles).await;
+    f.user.create_noselect_folder("[Gmail]").unwrap();
+    f.user
+        .create_special_folder("[Gmail]/All Mail", SpecialUse::All)
+        .unwrap();
+    f.user.create_folder("Filed").unwrap();
+    f.sync().await;
+    let all = f.folder_id("[Gmail]/All Mail");
+    let kept = f.store.imap_folder(&f.me, &all).unwrap().unwrap();
+    assert_eq!(kept.role, None);
+    // Mail only in All Mail: archived in Gmail, under no other label.
+    f.user
+        .append("[Gmail]/All Mail", mail(Some("g@x"), "Rota", ""))
+        .unwrap();
+    let mark = f.mark();
+    let found = f.search(&one(text("rota")), 50).await.unwrap();
+    assert_eq!(found.ids, [f.id("g@x")]);
+    assert_eq!(f.examined(mark), ["[Gmail]/All Mail"]);
+}
+
+#[tokio::test]
 async fn nothing_to_ask_asks_nothing() {
     let f = fixture().await;
     f.sync().await;

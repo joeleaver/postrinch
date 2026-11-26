@@ -43,7 +43,7 @@ use postrinch_model::{EmailAddress, ImapFolder, ImapSearch, ProviderMessageId};
 use postrinch_store::Store;
 
 use super::folder_error::{FolderError, FolderResult};
-use super::folders::GMAIL;
+use super::folders::{GMAIL, holds_everything, kept_where};
 use super::search_folders::{FolderSearch, inexact, plan};
 use super::wire::{Conn, Refusal};
 use super::{ImapSync, Lane};
@@ -194,13 +194,19 @@ impl ImapSync {
                 message: format!("IMAP has no way to ask for {term}"),
             });
         }
+        // Only LIST says which folder is Gmail's All Mail (`\All`).
+        let listed = match gmail {
+            true => conn.session_mut().list_folders().await?,
+            false => Vec::new(),
+        };
         let a = account.clone();
         let folders = self.with_store(move |s| s.imap_folders(&a)).await?;
+        let everything = kept_where(&folders, &listed, |f| holds_everything(f, gmail));
         let mut hits = Vec::new();
         // Why folders were not searched: refused, and busy.
         let mut refused: Vec<String> = Vec::new();
         let mut busy: Vec<String> = Vec::new();
-        for FolderSearch { folder, command } in plan(&folders, search, gmail) {
+        for FolderSearch { folder, command } in plan(&folders, search, gmail, &everything) {
             turn.go_on()?;
             let name = folder.name.clone();
             match self.search_folder(conn, folder, &command).await {

@@ -7,6 +7,8 @@
 //! Gmail ([`view_of_all`]). Gmail's All Mail is synced but is no label
 //! ([`holds_everything`]).
 
+use std::collections::HashSet;
+
 use postrinch_model::{
     FolderRole, FolderRoles, ImapFolder, Label, LabelKind, LabelVisibility, SystemLabel,
 };
@@ -208,6 +210,26 @@ pub(super) fn view_of_all(folder: &ListedFolder, gmail: bool) -> bool {
 /// on a message ([`super::places`]); the All mail view shows what it holds.
 pub(super) fn holds_everything(folder: &ListedFolder, gmail: bool) -> bool {
     gmail && folder.special_use == Some(SpecialUse::All)
+}
+
+/// The label ids of the kept folders (`stored`) that LIST gives (in
+/// `listed`, by name) as a folder `pick` picks: which hold every message,
+/// say, since only LIST says which folder is `\All`.
+pub(super) fn kept_where(
+    stored: &[ImapFolder],
+    listed: &[ListedFolder],
+    pick: impl Fn(&ListedFolder) -> bool,
+) -> HashSet<String> {
+    let names: HashSet<&str> = listed
+        .iter()
+        .filter(|f| pick(f))
+        .map(|f| f.name.as_str())
+        .collect();
+    stored
+        .iter()
+        .filter(|f| names.contains(f.name.as_str()))
+        .map(|f| f.label_id.clone())
+        .collect()
 }
 
 /// Whether a listed folder is synced: it can be selected, and is not one
