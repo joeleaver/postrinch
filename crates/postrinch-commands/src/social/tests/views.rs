@@ -186,6 +186,10 @@ fn a_tally_counts_unread_messages_as_the_view_filters_them() {
     read.unread = false;
     world.put(&read);
     world.bob(DM, "d1", 4, "psst");
+    // What the person wrote is never unread, however sync stored it.
+    let mut own = message(ADA, DM, "d2", 5, ADA, "mine");
+    own.mentions_me = true;
+    world.put(&own);
 
     let home = world.commands.social_view_tally(HOME).unwrap();
     assert_eq!((home.unread, home.mentions), (1, 1));

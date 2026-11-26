@@ -80,15 +80,21 @@ impl Filter {
 
     /// Whether `message` is shown.
     pub fn keeps(&self, message: &SocialMessage) -> bool {
+        self.keeps_besides_words(message)
+            && (self.words.is_empty() || {
+                let text = haystack(message);
+                self.words.iter().all(|w| text.contains(w.as_str()))
+            })
+    }
+
+    /// Whether `message` is of the kinds, authors and tags wanted, its
+    /// words aside (as the full-text index matched them).
+    pub fn keeps_besides_words(&self, message: &SocialMessage) -> bool {
         let kind_wanted = self.kinds.is_empty()
             || kind_of(&message.kind).is_some_and(|kind| self.kinds.contains(&kind));
         kind_wanted
             && self.from.iter().all(|from| by(&message.author, from))
             && self.tags.iter().all(|tag| tagged(&message.message, tag))
-            && (self.words.is_empty() || {
-                let text = haystack(message);
-                self.words.iter().all(|w| text.contains(w.as_str()))
-            })
     }
 }
 

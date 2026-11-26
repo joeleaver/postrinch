@@ -356,6 +356,10 @@ pub struct SocialOutboxEntry {
     /// The change, as the engine will send it.
     pub change: SocialChange,
     pub created: i64,
+    /// Whether the engine has begun sending it: from then on it may reach
+    /// its provider, so it can no longer be taken back.
+    pub tried: bool,
+    /// How many attempts failed.
     pub attempts: u32,
     /// Why the last attempt failed; `None` while none has.
     pub error: Option<String>,

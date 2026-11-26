@@ -2,6 +2,7 @@
 
 mod accounts;
 mod messages;
+mod outbox;
 mod places;
 mod writing;
 

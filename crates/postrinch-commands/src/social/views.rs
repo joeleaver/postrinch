@@ -134,14 +134,21 @@ impl Commands {
     }
 
     /// Put the person's views in the order of `ids`; those not named keep
-    /// their order, after them.
+    /// their order, after them. An agent orders only the views it sees,
+    /// among the places they had: the others stay where they are.
     pub fn order_social_views(&self, ids: &[String]) -> CommandResult<()> {
-        let mine: Vec<SocialView> = self
+        let mut mine: Vec<SocialView> = self
             .store
             .social_views()?
             .into_iter()
-            .filter(|v| BuiltInView::of(&v.id).is_none())
+            .filter(|v| BuiltInView::of(&v.id).is_none() && self.sees_social_view(v))
             .collect();
+        mine.sort_by_key(|v| v.order);
+        let slots: Vec<u64> = if self.sees_all() {
+            (0..mine.len() as u64).collect()
+        } else {
+            mine.iter().map(|v| v.order).collect()
+        };
         let mut ordered = Vec::with_capacity(mine.len());
         for id in ids {
             let view = mine
@@ -157,9 +164,9 @@ impl Commands {
         }
         let named: HashSet<&String> = ids.iter().collect();
         ordered.extend(mine.iter().filter(|v| !named.contains(&v.id)).cloned());
-        for (order, mut view) in ordered.into_iter().enumerate() {
-            if view.order != order as u64 {
-                view.order = order as u64;
+        for (order, mut view) in slots.into_iter().zip(ordered) {
+            if view.order != order {
+                view.order = order;
                 self.store.put_social_view(&view)?;
             }
         }

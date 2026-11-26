@@ -38,7 +38,7 @@ impl Commands {
                 .store
                 .social_replies(&account, &place.id, &root.message.id)?;
             let sent = client_ids(&kept);
-            replies.extend(kept.into_iter().map(|m| outbox.lay_over(m, &account)));
+            replies.extend(kept.into_iter().map(|m| outbox.lay_over(m)));
             replies.extend(outbox.queued(&account, &place.id, Some(&root.message.id), &sent));
         }
         replies.sort_by(|a, b| {
@@ -64,7 +64,7 @@ impl Commands {
         let parent = match self.store.social_message(&account, &place.id, id)? {
             Some(message) => match message.parent.clone() {
                 Some(parent) => parent,
-                None => return Ok(Some(outbox.lay_over(message, &account))),
+                None => return Ok(Some(outbox.lay_over(message))),
             },
             None => match outbox.queued_post(id) {
                 Some((_, post)) => match &post.reply_to {
@@ -83,6 +83,6 @@ impl Commands {
         Ok(self
             .store
             .social_message(&account, &place.id, &parent)?
-            .map(|m| outbox.lay_over(m, &account)))
+            .map(|m| outbox.lay_over(m)))
     }
 }

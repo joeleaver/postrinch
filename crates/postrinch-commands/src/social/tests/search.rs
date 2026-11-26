@@ -79,3 +79,61 @@ fn a_search_shows_messages_as_changed() {
     let found = world.commands.search_social("from:ada", 10).unwrap();
     assert_eq!(found[0].message.message["content"]["text"], "final wording");
 }
+
+#[test]
+fn what_the_index_matched_is_kept() {
+    let world = world();
+    // The index holds the plain text and the author's name, which the
+    // message itself does not.
+    let message = message(ADA, GENERAL, "m1", 1, BOB, "**bold** move");
+    world
+        .store
+        .put_social_message(&message, "bold move Bob Builder")
+        .unwrap();
+    assert_eq!(
+        ids(&world.commands.search_social("builder", 10).unwrap()),
+        ["m1"]
+    );
+    assert_eq!(
+        ids(&world.commands.search_social("\"bold move\"", 10).unwrap()),
+        ["m1"]
+    );
+    assert_eq!(
+        ids(&world
+            .commands
+            .search_social("builder from:bob", 10)
+            .unwrap()),
+        ["m1"]
+    );
+    assert!(
+        world
+            .commands
+            .search_social("builder from:ada", 10)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_deleted_message_is_not_found() {
+    let world = world();
+    world.put(&message(ADA, GENERAL, "m1", 1, ADA, "regrettable"));
+    world
+        .commands
+        .delete_social_message(ADA, GENERAL, "m1")
+        .unwrap();
+    assert!(
+        world
+            .commands
+            .search_social("regrettable", 10)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        world
+            .commands
+            .search_social("from:ada", 10)
+            .unwrap()
+            .is_empty()
+    );
+}

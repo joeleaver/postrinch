@@ -12,7 +12,7 @@ use postrinch_store::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::{same_actor, str_at, type_name};
+use super::{str_at, type_name};
 
 /// A change of the person's still on its way to its provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -72,7 +72,7 @@ impl PlaceOutbox {
     }
 
     /// `message` with its pending edits, delete and reactions made.
-    pub fn lay_over(&self, mut message: SocialMessage, me: &str) -> SocialItem {
+    pub fn lay_over(&self, mut message: SocialMessage) -> SocialItem {
         let mut pending = None;
         for entry in &self.entries {
             match &entry.change {
@@ -97,10 +97,6 @@ impl PlaceOutbox {
                 }
                 _ => {}
             }
-        }
-        // What the person wrote is never unread to them.
-        if same_actor(&message.author, me) {
-            message.unread = false;
         }
         SocialItem {
             message,

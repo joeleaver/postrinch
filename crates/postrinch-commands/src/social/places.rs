@@ -101,6 +101,7 @@ impl Commands {
         on: bool,
     ) -> CommandResult<SocialPlaceInfo> {
         let place = self.check_place(account, id)?;
+        self.check_speaks("follow a channel")?;
         if place.kind == PlaceKind::Conversation {
             return Err(CommandError::Invalid(
                 "Only channels are followed; a conversation always comes to Messages.".into(),
@@ -188,9 +189,21 @@ impl Commands {
         place: Option<&str>,
         change: &SocialChange,
     ) -> CommandResult<postrinch_store::SocialOutboxEntry> {
+        self.queue_change_as(account, &new_id(), place, change)
+    }
+
+    /// Queue a change under `client_id`: queuing it again queues nothing
+    /// twice.
+    pub(crate) fn queue_change_as(
+        &self,
+        account: &str,
+        client_id: &str,
+        place: Option<&str>,
+        change: &SocialChange,
+    ) -> CommandResult<postrinch_store::SocialOutboxEntry> {
         Ok(self
             .store
-            .queue_social_change(account, &new_id(), place, change, now())?)
+            .queue_social_change(account, client_id, place, change, now())?)
     }
 
     /// A place as shown.

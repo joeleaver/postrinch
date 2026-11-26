@@ -119,6 +119,10 @@ fn sending_queues_a_post_and_drops_the_draft() {
     assert_eq!(item.message.message["tags"], json!(["news", "rust"]));
     assert_eq!(item.message.message["content"]["text"], "  The body");
 
+    // The draft's id is its client id: sending it again queues nothing.
+    assert_eq!(item.message.id, draft.id);
+    let again = world.commands.send_social(&draft).unwrap();
+    assert_eq!(again.message.id, draft.id);
     let outbox = world.commands.social_outbox(ADA).unwrap();
     assert_eq!(outbox.len(), 1);
     let SocialChange::Post(post) = &outbox[0].change else {
@@ -344,7 +348,7 @@ fn deleting_takes_back_a_post_not_yet_tried() {
         .unwrap();
     world
         .store
-        .social_change_failed(ADA, &tried.message.id, "timed out")
+        .social_change_tried(ADA, &tried.message.id)
         .unwrap();
     assert!(
         refused(

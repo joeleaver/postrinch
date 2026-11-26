@@ -80,8 +80,14 @@ impl Commands {
             };
             let marker = now.read_marker.clone();
             if let Some(at) = &marker {
-                let marked = self.store.social_message(&account, &place.id, at)?;
-                if marked.is_some_and(|m| (m.created, m.id.as_str()) >= (created, id)) {
+                // A marker at a message not kept here was set by sync, read
+                // elsewhere up to one not fetched yet: it can't be told to
+                // be behind, so it is not moved (markers move forward only).
+                let further = match self.store.social_message(&account, &place.id, at)? {
+                    Some(m) => (m.created, m.id.as_str()) >= (created, id),
+                    None => true,
+                };
+                if further {
                     return Ok(false);
                 }
             }

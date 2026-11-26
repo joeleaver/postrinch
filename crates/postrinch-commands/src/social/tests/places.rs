@@ -268,3 +268,21 @@ fn a_message_renders_with_its_fetched_pictures() {
         rendered.html
     );
 }
+
+#[test]
+fn a_marker_at_a_message_not_kept_here_is_not_moved() {
+    let world = world();
+    world.bob(GENERAL, "a", 1, "a");
+    // Read elsewhere, up to a message sync has not fetched yet.
+    world
+        .store
+        .change_social_place(ADA, GENERAL, |p| p.read_marker = Some("unfetched".into()))
+        .unwrap();
+    assert_eq!(
+        world.commands.mark_social_read(ADA, GENERAL, None).unwrap(),
+        1
+    );
+    let place = world.store.social_place(ADA, GENERAL).unwrap().unwrap();
+    assert_eq!(place.read_marker.as_deref(), Some("unfetched"));
+    assert!(reads(&world).is_empty());
+}

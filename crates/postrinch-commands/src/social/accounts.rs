@@ -79,6 +79,7 @@ impl Commands {
         change: &ProfileChange,
     ) -> CommandResult<SocialAccountInfo> {
         let account = self.check_social(actor)?;
+        self.check_speaks("change the profile")?;
         if change.display_name.is_none() && change.bio.is_none() && change.avatar.is_none() {
             return Err(CommandError::Invalid(
                 "Nothing to change: give a name, an about line or a picture.".into(),

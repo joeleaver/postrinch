@@ -98,3 +98,94 @@ fn an_agent_changes_only_views_of_its_accounts_alone() {
     assert!(refused(agent.save_social_view(&home)).contains("only views of your own"));
     agent.remove_social_view(&carls.id).unwrap();
 }
+
+#[test]
+fn an_agent_orders_its_views_among_their_places_only() {
+    let world = world();
+    let view = |account: &str, id: &str, name: &str| SocialView {
+        id: String::new(),
+        order: 0,
+        name: name.into(),
+        places: vec![PlaceRef {
+            account: account.into(),
+            id: id.into(),
+        }],
+        groups: vec![],
+        filters: SocialFilters::default(),
+        read_as: ReadAs::Stream,
+        count: SocialCount::Unread,
+    };
+    let c1 = world
+        .commands
+        .save_social_view(&view(CARL, CARL_CHANNEL, "C1"))
+        .unwrap();
+    let a = world
+        .commands
+        .save_social_view(&view(ADA, GENERAL, "A"))
+        .unwrap();
+    let c2 = world
+        .commands
+        .save_social_view(&view(CARL, CARL_CHANNEL, "C2"))
+        .unwrap();
+    let agent = world.commands.limited(&[], &[CARL]);
+    agent
+        .order_social_views(std::slice::from_ref(&c2.id))
+        .unwrap();
+    let order: Vec<String> = world
+        .commands
+        .social_views()
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.built_in.is_none())
+        .map(|e| e.view.name)
+        .collect();
+    assert_eq!(order, ["C2", "A", "C1"]);
+    assert_eq!(
+        world.commands.social_view(&a.id).unwrap().view.order,
+        a.order
+    );
+    assert_ne!(c1.order, a.order);
+}
+
+#[test]
+fn an_agent_proposes_what_speaks_for_the_person_and_changes_the_rest() {
+    let world = world();
+    let agent = world.commands.limited(&[], &[ADA]);
+    world.bob(GENERAL, "m1", 1, "hello");
+    world.put(&message(ADA, GENERAL, "mine", 2, ADA, "mine"));
+
+    // Drafts are local: an agent writes them.
+    let mut draft = agent
+        .start_social_draft(ADA, Some(GENERAL), None, ContentKind::Chat)
+        .unwrap();
+    draft.body = "hi".into();
+    let draft = agent.save_social_draft(&draft).unwrap();
+    assert!(says(agent.send_social(&draft)));
+    assert!(says(agent.edit_social_message(
+        ADA,
+        GENERAL,
+        "mine",
+        &postrinch_store::SocialContent {
+            body: "x".into(),
+            ..Default::default()
+        }
+    )));
+    assert!(says(agent.delete_social_message(ADA, GENERAL, "mine")));
+    assert!(says(agent.react_social(ADA, GENERAL, "m1", "👍", true)));
+    assert!(says(agent.follow_social_place(ADA, NEWS, true)));
+    let name = postrinch_store::ProfileChange {
+        display_name: Some("Agent".into()),
+        ..Default::default()
+    };
+    assert!(says(agent.change_social_profile(ADA, &name)));
+    assert!(world.commands.social_outbox(ADA).unwrap().is_empty());
+
+    // Read state is the person's, and local: an agent marks it.
+    assert_eq!(agent.mark_social_read(ADA, GENERAL, None).unwrap(), 1);
+}
+
+/// Whether `result` is the refusal an agent gets for what it may only
+/// propose.
+fn says<T: std::fmt::Debug>(result: crate::CommandResult<T>) -> bool {
+    refused(result).contains("propose it")
+}

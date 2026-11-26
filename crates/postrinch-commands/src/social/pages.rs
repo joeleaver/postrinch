@@ -137,7 +137,7 @@ impl Commands {
             kept.extend(client_ids(&chunk));
             for message in chunk {
                 if before.is_none_or(|c| older(&message, c)) {
-                    let item = outbox.lay_over(message, &account);
+                    let item = outbox.lay_over(message);
                     if filter.keeps(&item.message) {
                         items.push(item);
                     }
@@ -189,8 +189,7 @@ impl Commands {
                     v.insert(outbox)
                 }
             };
-            let account = social_account_key(&message.account);
-            let mut item = outbox.lay_over(message, &account);
+            let mut item = outbox.lay_over(message);
             if filter.keeps(&item.message) {
                 item.replies = self.replies_of(outbox, &item)?;
                 items.push(item);

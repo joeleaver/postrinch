@@ -7,7 +7,7 @@
 
 use postrinch_store::{
     ContentKind, SocialChange, SocialContent, SocialDraft, SocialMessage, SocialOutboxEntry,
-    SocialPlace, SocialPost, social_account_key,
+    SocialPlace, SocialPost, TakeBack, social_account_key,
 };
 
 use super::overlay::SocialItem;
@@ -22,6 +22,7 @@ impl Commands {
             self.check_social(&kept.account)?;
         }
         let draft = self.checked_draft(draft)?;
+        self.check_speaks("send a message")?;
         let Some(place) = &draft.place else {
             return Err(CommandError::Invalid("Choose where it goes first.".into()));
         };
@@ -44,8 +45,11 @@ impl Commands {
             reply_to: parent.map(|p| p.id),
             content: self.checked_content(&draft.account, draft.kind, content)?,
         };
-        let entry =
-            self.queue_change(&draft.account, Some(&place.id), &SocialChange::Post(post))?;
+        // The draft's id is the post's client id: sending it twice (a
+        // double click, a retried call) queues it once, and its provider
+        // knows a retry of it (§5.3 `clientMessageId`).
+        let change = SocialChange::Post(post);
+        let entry = self.queue_change_as(&draft.account, &draft.id, Some(&place.id), &change)?;
         self.store.remove_social_draft(&draft.id)?;
         self.message_item(&place, &entry.client_id)
     }
@@ -60,6 +64,7 @@ impl Commands {
         content: &SocialContent,
     ) -> CommandResult<SocialItem> {
         let place = self.check_place(account, place)?;
+        self.check_speaks("edit a message")?;
         let kept = self.posted(&place, message)?;
         if !same_actor(&kept.author, &place.account) {
             return Err(CommandError::Invalid(
@@ -104,16 +109,23 @@ impl Commands {
     ) -> CommandResult<Option<SocialItem>> {
         let place = self.check_place(account, place)?;
         let account = social_account_key(&place.account);
-        if let Some((entry, _)) = self.place_outbox(&account, &place.id)?.queued_post(message) {
-            if entry.attempts > 0 {
-                return Err(CommandError::Invalid(
+        if self
+            .place_outbox(&account, &place.id)?
+            .queued_post(message)
+            .is_some()
+        {
+            return match self.store.take_back_social_change(&account, message)? {
+                TakeBack::Taken => Ok(None),
+                TakeBack::Tried => Err(CommandError::Invalid(
                     "It may have reached its provider already: delete it once it shows as sent, or give it up.".into(),
-                ));
-            }
-            self.store
-                .remove_social_change(&account, &entry.client_id)?;
-            return Ok(None);
+                )),
+                // Sent meanwhile: delete what its provider kept.
+                TakeBack::NotQueued => Err(CommandError::Invalid(
+                    "It has just been sent: delete it once it shows.".into(),
+                )),
+            };
         }
+        self.check_speaks("delete a message")?;
         let kept = self.posted(&place, message)?;
         if !same_actor(&kept.author, &account) && !self.standing(&place)?.may_moderate() {
             return Err(CommandError::Invalid(
@@ -138,6 +150,7 @@ impl Commands {
         on: bool,
     ) -> CommandResult<SocialItem> {
         let place = self.check_place(account, place)?;
+        self.check_speaks("react")?;
         let key = key.trim();
         if key.is_empty() {
             return Err(CommandError::Invalid("A reaction needs an emoji.".into()));
@@ -178,13 +191,26 @@ impl Commands {
         Ok(self.store.remove_social_change(&account.actor, client_id)?)
     }
 
+    /// An error unless this caller is the window. What speaks for the
+    /// person to others (a post, an edit, a delete, a reaction, a follow,
+    /// the profile) an agent only proposes, for the person to send
+    /// (docs/ofscp.md "Agents"); it never goes out from here.
+    pub(crate) fn check_speaks(&self, what: &str) -> CommandResult<()> {
+        if self.sees_all() {
+            return Ok(());
+        }
+        Err(CommandError::Invalid(format!(
+            "An agent can't {what} for the person: propose it, and they send it."
+        )))
+    }
+
     /// The message `id` of a place as shown, or the post being sent with
     /// that client id.
     pub(crate) fn message_item(&self, place: &SocialPlace, id: &str) -> CommandResult<SocialItem> {
         let account = social_account_key(&place.account);
         let outbox = self.place_outbox(&account, &place.id)?;
         let mut item = match self.store.social_message(&account, &place.id, id)? {
-            Some(message) => outbox.lay_over(message, &account),
+            Some(message) => outbox.lay_over(message),
             None => {
                 let parent = outbox
                     .queued_post(id)

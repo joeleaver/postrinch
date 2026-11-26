@@ -32,7 +32,11 @@ impl Store {
     /// that changed anything: a replayed event is not written again. A
     /// repeat of the same call finishes what an interrupted one left.
     ///
-    /// [`SocialMessage::unread`] is taken only for a message not here yet:
+    /// A message that carries the client id of a post queued to its place
+    /// (`clientMessageId`) takes that post off the outbox.
+    ///
+    /// [`SocialMessage::unread`] is taken only for a message not here yet,
+    /// and never for the person's own:
     /// whether a kept one is read is the read marker's and the person's
     /// ([`Store::set_social_messages_read`],
     /// [`Store::set_social_message_unread`]), so an edit or a reaction
@@ -52,10 +56,24 @@ impl Store {
     ) -> StoreResult<bool> {
         let key = message_key(&message.account, &message.place, &message.id);
         let kept = self.social_message_at(&key)?;
-        // As it reads back: by its account's key, read as it is here.
+        let account = social_account_key(&message.account);
+        // A post of the person's being sent is done with once its provider
+        // has it, so it never shows twice.
+        if let Some(client_id) = message
+            .message
+            .get("clientMessageId")
+            .and_then(Value::as_str)
+        {
+            self.settle_social_post(&account, &message.place, client_id)?;
+        }
+        // As it reads back: by its account's key, read as it is here. What
+        // the person wrote is never unread to them.
+        let own = social_account_key(&message.author) == account;
         let message = &SocialMessage {
-            account: social_account_key(&message.account),
-            unread: kept.as_ref().map_or(message.unread, |kept| kept.unread),
+            unread: kept
+                .as_ref()
+                .map_or(message.unread && !own, |kept| kept.unread),
+            account,
             ..message.clone()
         };
         if kept.as_ref() == Some(message)

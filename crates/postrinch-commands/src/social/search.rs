@@ -48,7 +48,7 @@ impl Commands {
             let exhausted = found.len() < asked;
             let mut out = Vec::new();
             for message in found {
-                if let Some(item) = shown.item(message, filter)? {
+                if let Some(item) = shown.item(message, filter, Found::ByIndex)? {
                     out.push(item);
                     if out.len() == limit {
                         return Ok(out);
@@ -79,7 +79,7 @@ impl Commands {
                     .store
                     .social_place_messages(&account.actor, &place.id)?
                 {
-                    out.extend(shown.item(message, filter)?);
+                    out.extend(shown.item(message, filter, Found::ByScan)?);
                 }
             }
         }
@@ -106,11 +106,12 @@ impl<'a> Shown<'a> {
     }
 
     /// `message` as shown, when this caller sees its account and `filter`
-    /// keeps it as changed.
+    /// keeps it as changed. A deleted message is not found.
     fn item(
         &mut self,
         message: SocialMessage,
         filter: &Filter,
+        found: Found,
     ) -> CommandResult<Option<SocialItem>> {
         if !self.commands.sees_social(&message.account) {
             return Ok(None);
@@ -124,11 +125,28 @@ impl<'a> Shown<'a> {
                 v.insert(outbox)
             }
         };
-        let mut item = outbox.lay_over(message, &account);
-        if !filter.keeps(&item.message) {
+        let mut item = outbox.lay_over(message);
+        // The index matched the words in the text it holds (the plain
+        // text and the author's name), which the filter can't see; only an
+        // edit being sent changes them.
+        let edited = item.pending.as_ref().is_some_and(|p| p.content.is_some());
+        let kept = match found {
+            Found::ByIndex if !edited => filter.keeps_besides_words(&item.message),
+            _ => filter.keeps(&item.message),
+        };
+        if item.message.deleted || !kept {
             return Ok(None);
         }
         item.replies = self.commands.replies_of(outbox, &item)?;
         Ok(Some(item))
     }
+}
+
+/// How a message was found.
+#[derive(Clone, Copy)]
+enum Found {
+    /// By the full-text index, for the filter's words.
+    ByIndex,
+    /// By going through every message.
+    ByScan,
 }
