@@ -29,22 +29,26 @@ struct Summary {
 /// Where each account stands: what sync last said of it, but an account
 /// the store says must sign in again does, whatever sync said. Sync
 /// passes such an account by without a word, so after a restart its
-/// sign-in is known only from the store.
-fn standing(accounts: &[Account], reports: &[AccountSync]) -> Vec<AccountSync> {
-    let signing = |address: &EmailAddress| {
-        accounts
-            .iter()
-            .any(|a| &a.address == address && matches!(a.state, AccountState::NeedsSignIn(_)))
+/// sign-in is known only from the store. `accounts` is the store's list
+/// once the sidebar has it; an account not in it (removed, though a pass
+/// already under way reported on it after) is left out. Before then
+/// sync's word stands alone.
+fn standing(accounts: Option<&[Account]>, reports: &[AccountSync]) -> Vec<AccountSync> {
+    let Some(accounts) = accounts else {
+        return reports.to_vec();
     };
+    let listed = |address: &EmailAddress| accounts.iter().find(|a| &a.address == address);
+    let signing = |a: &Account| matches!(a.state, AccountState::NeedsSignIn(_));
     let mut all: Vec<AccountSync> = reports
         .iter()
-        .map(|r| match signing(&r.account) {
-            true => needs_sign_in(r.account.clone()),
-            false => r.clone(),
+        .filter_map(|r| match listed(&r.account) {
+            Some(a) if signing(a) => Some(needs_sign_in(r.account.clone())),
+            Some(_) => Some(r.clone()),
+            None => None,
         })
         .collect();
-    for account in accounts {
-        if signing(&account.address) && !all.iter().any(|s| s.account == account.address) {
+    for account in accounts.iter().filter(|a| signing(a)) {
+        if !all.iter().any(|s| s.account == account.address) {
             all.push(needs_sign_in(account.address.clone()));
         }
     }
@@ -63,12 +67,13 @@ fn needs_sign_in(account: EmailAddress) -> AccountSync {
 /// Every account's standing, from the sync reports and the store's
 /// accounts (once the sidebar has them).
 fn standing_now(state: State) -> Vec<AccountSync> {
-    let accounts: Vec<Account> = state.sidebar.with(|s| {
+    let accounts: Option<Vec<Account>> = state.sidebar.with(|s| {
         s.as_ref()
             .map(|s| s.accounts.iter().map(|a| a.account.clone()).collect())
-            .unwrap_or_default()
     });
-    state.sync.with(|reports| standing(&accounts, reports))
+    state
+        .sync
+        .with(|reports| standing(accounts.as_deref(), reports))
 }
 
 /// "1 account" or "3 accounts".

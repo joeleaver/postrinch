@@ -121,7 +121,7 @@ fn an_account_the_store_says_must_sign_in_shows_so_though_sync_said_nothing() {
         account("a@example.org", false),
         account("b@example.org", true),
     ];
-    let all = standing(&accounts, &[idle("a@example.org")]);
+    let all = standing(Some(&accounts), &[idle("a@example.org")]);
     assert_eq!(all.len(), 2);
     assert_eq!(all[1].how, SyncHow::NeedsSignIn);
     assert_eq!(all[1].line, NEEDS_SIGN_IN);
@@ -132,7 +132,7 @@ fn an_account_the_store_says_must_sign_in_shows_so_though_sync_said_nothing() {
 fn the_stores_sign_in_outweighs_an_older_word_from_sync() {
     let accounts = [account("a@example.org", true)];
     let all = standing(
-        &accounts,
+        Some(&accounts),
         &[sync("a@example.org", SyncHow::Working, Some((1, 9)))],
     );
     assert_eq!(all.len(), 1);
@@ -143,7 +143,19 @@ fn the_stores_sign_in_outweighs_an_older_word_from_sync() {
 fn an_account_signed_in_again_shows_what_sync_says() {
     let accounts = [account("a@example.org", false)];
     let reports = [sync("a@example.org", SyncHow::Working, None)];
-    assert_eq!(standing(&accounts, &reports), reports);
+    assert_eq!(standing(Some(&accounts), &reports), reports);
     // Before the sidebar knows the accounts, sync's word stands alone.
-    assert_eq!(standing(&[], &reports), reports);
+    assert_eq!(standing(None, &reports), reports);
+}
+
+#[test]
+fn a_removed_account_is_left_out_though_a_late_pass_reported_on_it() {
+    let accounts = [account("a@example.org", false)];
+    let reports = [
+        idle("a@example.org"),
+        sync("gone@example.org", SyncHow::Trouble, None),
+    ];
+    let all = standing(Some(&accounts), &reports);
+    assert_eq!(all, [idle("a@example.org")]);
+    assert_eq!(summary(&all, None).text, "Up to date");
 }
