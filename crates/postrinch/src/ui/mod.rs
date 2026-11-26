@@ -116,6 +116,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
         (*commands).clone(),
         sync.as_ref().map(|s| s.send.clone()),
         state.revision,
+        state.notice,
     );
     actions::init(commands.clone(), sync);
     update::start(state);

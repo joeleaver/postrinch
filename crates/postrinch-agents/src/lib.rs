@@ -13,6 +13,7 @@ mod calendar;
 mod calendar_share;
 mod calendar_write;
 mod change;
+pub mod claude_code;
 pub mod client;
 pub mod connect;
 mod invitations;

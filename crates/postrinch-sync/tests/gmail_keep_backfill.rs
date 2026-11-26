@@ -81,7 +81,7 @@ async fn mock_failing_body(f: &Fixture, id: &str, delay: Duration) {
         .await;
 }
 
-/// Runs the loop until `done` holds of what it reported (up to 10 s).
+/// Runs the loop until `done` holds of what it reported (up to [`HUNG`]).
 async fn keeping(
     f: &Fixture,
     report: impl Fn(&SyncEvent) + Send + Sync + 'static,
@@ -99,7 +99,7 @@ async fn keeping(
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     };
-    let ran = tokio::time::timeout(Duration::from_secs(10), async {
+    let ran = tokio::time::timeout(HUNG, async {
         tokio::select! {
             () = f.sync.keep_in_sync(SLOW, Arc::new(on_event), wake) => {}
             () = until => {}
@@ -107,7 +107,14 @@ async fn keeping(
     })
     .await;
     let events = events.lock().unwrap().clone();
-    assert!(ran.is_ok(), "gave up waiting: {:?}", kinds(&events));
+    // Each account's last count too: a backfill still moving was slow, one
+    // stuck where it began hung.
+    assert!(
+        ran.is_ok(),
+        "gave up waiting: {:?}, bodies by account {:?}",
+        kinds(&events),
+        bodies_by_account(&events)
+    );
     events
 }
 
@@ -146,6 +153,30 @@ fn bodies(events: &[SyncEvent]) -> Vec<(usize, usize)> {
             _ => None,
         })
         .collect()
+}
+
+/// Each account's last bodies' count, `done` of `total`.
+fn bodies_by_account(events: &[SyncEvent]) -> Vec<(String, (usize, usize))> {
+    let mut last: Vec<(String, (usize, usize))> = Vec::new();
+    for e in events {
+        if let SyncEvent::Progress {
+            account,
+            progress:
+                Progress::Working {
+                    phase: Phase::Bodies,
+                    done,
+                    total,
+                },
+        } = e
+        {
+            let account = account.to_string();
+            match last.iter_mut().find(|(a, _)| *a == account) {
+                Some((_, count)) => *count = (*done, *total),
+                None => last.push((account, (*done, *total))),
+            }
+        }
+    }
+    last
 }
 
 /// Wakes `wake` once, when the first sync is reported: as Sync now
