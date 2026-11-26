@@ -232,3 +232,26 @@ async fn googles_mail_is_never_added_with_a_password() {
     }
     assert!(f.store.account(&ada()).unwrap().is_none(), "nothing kept");
 }
+
+#[tokio::test]
+async fn googles_servers_from_discovery_take_no_password() {
+    let f = fixture().await;
+    let mut found = Discovery::nothing();
+    found.imap = vec![candidate("imap.gmail.com", 993)];
+    found.smtp = vec![candidate("smtp.gmail.com", 465)];
+    // No --imap-host and no --oauth: the servers are discovery's.
+    let args = args(&[USER]);
+    let settings = settings_from_discovery(&args, &ada(), &found).unwrap();
+    let refused = add_with_settings(
+        &f.sync,
+        &f.oauth,
+        args,
+        ada(),
+        settings,
+        &mut Given(vec![PASSWORD]),
+    )
+    .await
+    .unwrap_err();
+    assert!(refused.to_string().contains("--oauth google"), "{refused}");
+    assert!(f.store.account(&ada()).unwrap().is_none(), "nothing kept");
+}

@@ -122,10 +122,23 @@ pub async fn add_imap(
     passwords: &mut dyn Passwords,
 ) -> Result<()> {
     let address = EmailAddress::parse(&args.address)?;
-    let mut settings = match &args.imap_host {
+    let settings = match &args.imap_host {
         Some(_) => given_settings(&args, &address),
         None => discovered_settings(&args, &address).await?,
     };
+    add_with_settings(sync, oauth, args, address, settings, passwords).await
+}
+
+/// Adds the account to the servers chosen (from the options or
+/// discovery): the sign-in, then the check.
+async fn add_with_settings(
+    sync: &ImapSync,
+    oauth: &ImapOAuth,
+    args: AddImapArgs,
+    address: EmailAddress,
+    mut settings: ImapSettings,
+    passwords: &mut dyn Passwords,
+) -> Result<()> {
     if args.oauth.is_none() {
         takes_a_password(&address, &settings.imap)?;
     }

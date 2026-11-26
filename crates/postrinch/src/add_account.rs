@@ -5,7 +5,7 @@
 //! leaves the person. The slow work is in `add_account_flow`, and the
 //! window's part in `add_account_run` and `ui::add_account`.
 
-use postrinch_discover::{Candidate, Discovery, HostedBy, Source};
+use postrinch_discover::{Candidate, Discovery, HostedBy, Source, known_host};
 use postrinch_model::{EmailAddress, FolderRoles, ImapSettings, Security, Server, SignInMethod};
 use postrinch_sync::imap::{ImapSecret, NewImapAccount, OAuthProvider};
 
@@ -269,10 +269,10 @@ impl AddForm {
     /// provider that takes only its browser sign-in, which this copy of
     /// Postrinch does not have set up.
     pub fn no_way_in(&self) -> Option<String> {
-        if self.found.oauth.is_some() || !self.found.browser_only {
+        if self.found.oauth.is_some() || !self.browser_only() {
             return None;
         }
-        let who = self.found.provider.as_deref().unwrap_or("This provider");
+        let who = self.provider_name();
         Some(format!(
             "{who} signs mail apps in only in the browser, and that sign-in is not set up in this copy of Postrinch."
         ))
@@ -291,8 +291,8 @@ impl AddForm {
         }
         let (sign_in, secret) = match self.way {
             Way::Browser(provider) => (provider.sign_in_method(), None),
-            Way::Password if self.found.browser_only => {
-                let who = self.found.provider.as_deref().unwrap_or("This provider");
+            Way::Password if self.browser_only() => {
+                let who = self.provider_name();
                 return Err(self.no_way_in().unwrap_or_else(|| {
                     format!("{who} signs mail apps in only in the browser, not with a password.")
                 }));
@@ -321,7 +321,54 @@ impl AddForm {
     /// The form asks for a password: signing in with one, to a provider
     /// that takes them.
     pub fn asks_password(&self) -> bool {
-        self.way == Way::Password && !self.found.browser_only
+        self.way == Way::Password && !self.browser_only()
+    }
+
+    /// The provider signs mail apps in only in the browser: discovery said
+    /// so, or the incoming server typed in is Google's (by hand, after a
+    /// lookup that found nothing, or changed after it).
+    pub fn browser_only(&self) -> bool {
+        self.found.browser_only || self.google_servers()
+    }
+
+    /// The incoming server is Google's, whatever discovery found.
+    pub fn google_servers(&self) -> bool {
+        known_host(&self.imap.host).hosted_by == Some(HostedBy::Google)
+    }
+
+    /// The provider as the dialog names it: Google for Google's servers,
+    /// whatever discovery named.
+    fn provider_name(&self) -> &str {
+        if self.google_servers() {
+            return "Google";
+        }
+        self.found.provider.as_deref().unwrap_or("This provider")
+    }
+
+    /// "Check and add" on servers typed by hand that are Google's, though
+    /// discovery did not say the mail is: the form takes it as Google's
+    /// mail, as discovery would have (no password, Google's browser sign-in
+    /// over IMAP when this copy has it), and says whether the dialog
+    /// should now offer Google's own sign-in first (`Step::Workspace`).
+    /// `oauth_ready` says which browser sign-ins this copy has set up.
+    pub fn take_google_servers(&mut self, oauth_ready: impl Fn(OAuthProvider) -> bool) -> bool {
+        if self.found.google || !self.google_servers() || self.kind != Kind::Other {
+            return false;
+        }
+        let oauth = Some(OAuthProvider::Google).filter(|p| oauth_ready(*p));
+        self.found = Found {
+            provider: Some("Google".to_owned()),
+            app_password_url: None,
+            oauth,
+            browser_only: true,
+            google: true,
+            ..std::mem::take(&mut self.found)
+        };
+        self.way = match oauth {
+            Some(provider) => Way::Browser(provider),
+            None => Way::Password,
+        };
+        true
     }
 
     /// The password (and SMTP's own) as a secret, or why there is none.

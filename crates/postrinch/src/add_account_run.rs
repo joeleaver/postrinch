@@ -248,13 +248,19 @@ impl AddUi {
             return;
         }
         let from = self.step.get().unwrap_or(Step::Found);
-        let form = self.form.get();
+        let Some(sync) = sync() else {
+            return self.error.set(Some(sync_off()));
+        };
+        let mut form = self.form.get();
+        // Google's servers typed by hand take no password: Google's own
+        // sign-in is offered first, as when discovery finds them.
+        if form.take_google_servers(|p| sync.imap_oauth.is_set_up(p)) {
+            self.form.set(form);
+            return self.go(Step::Workspace);
+        }
         let (new, secret) = match form.to_add() {
             Ok(add) => add,
             Err(error) => return self.error.set(Some(error)),
-        };
-        let Some(sync) = sync() else {
-            return self.error.set(Some(sync_off()));
         };
         let how = match (form.way, secret) {
             (Way::Browser(provider), _) => How::Browser(provider),
