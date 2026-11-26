@@ -1,0 +1,318 @@
+//! The messages of places. A message's scalars are a `SocialMessage`
+//! object, small because rhypedb copies it into each of its indexes; what
+//! it says (the protocol message, its reactions, its search text) is its
+//! `SocialMessageContent` (see `schema.rhype`).
+
+use rhypedb_engine::CompareOp;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use super::{KEY, RECORD, ReactionSum, SocialMessage, scoped, social_account_key};
+use crate::codec::{Fields, FieldsBuilder};
+use crate::keys::SEP;
+use crate::{Store, StoreError, StoreResult};
+
+pub(crate) const MESSAGE: &str = "SocialMessage";
+pub(crate) const CONTENT: &str = "SocialMessageContent";
+
+/// What a message's content keeps in `record`.
+#[derive(Serialize, Deserialize, PartialEq)]
+struct Body {
+    message: Value,
+    reactions: Vec<ReactionSum>,
+}
+
+fn message_key(account: &str, place: &str, id: &str) -> String {
+    format!("{}{SEP}{id}", scoped(account, place))
+}
+
+impl Store {
+    /// Keep a message as its place has it, with the text full-text search
+    /// finds it by (its plain text and its author's name). Returns whether
+    /// that changed anything: a replayed event is not written again. A
+    /// repeat of the same call finishes what an interrupted one left.
+    pub fn put_social_message(
+        &self,
+        message: &SocialMessage,
+        search_text: &str,
+    ) -> StoreResult<bool> {
+        let key = message_key(&message.account, &message.place, &message.id);
+        // As it reads back: by its account's key.
+        let message = &SocialMessage {
+            account: social_account_key(&message.account),
+            ..message.clone()
+        };
+        if self.social_message_at(&key)?.as_ref() == Some(message)
+            && self.social_search_text(&key)?.as_deref() == Some(search_text)
+        {
+            return Ok(false);
+        }
+        let parent = message
+            .parent
+            .as_ref()
+            .map(|parent| message_key(&message.account, &message.place, parent));
+        let scalars = FieldsBuilder::new()
+            .str("place", scoped(&message.account, &message.place))
+            .str("author", message.author.clone())
+            .str("kind", message.kind.clone())
+            .datetime("created", message.created)
+            .opt_str("parent", parent)
+            .bool("deleted", message.deleted)
+            .bool("mentions_me", message.mentions_me)
+            .bool("unread", message.unread);
+        let id = self.social_put(MESSAGE, KEY, &key, scalars)?;
+        let body = Body {
+            message: message.message.clone(),
+            reactions: message.reactions.clone(),
+        };
+        let content = FieldsBuilder::new()
+            .str("search_text", search_text)
+            .json(RECORD, &body);
+        let create = content
+            .clone()
+            .str(KEY, key.clone())
+            .relation("message", id);
+        self.upsert(CONTENT, KEY, &key, create.build(), content.build())?;
+        Ok(true)
+    }
+
+    /// The message `id` of a place.
+    pub fn social_message(
+        &self,
+        account: &str,
+        place: &str,
+        id: &str,
+    ) -> StoreResult<Option<SocialMessage>> {
+        self.social_message_at(&message_key(account, place, id))
+    }
+
+    fn social_message_at(&self, key: &str) -> StoreResult<Option<SocialMessage>> {
+        match self.find(MESSAGE, KEY, key)? {
+            Some(scalars) => self.decode_social_message(&scalars),
+            None => Ok(None),
+        }
+    }
+
+    fn social_search_text(&self, key: &str) -> StoreResult<Option<String>> {
+        match self.find(CONTENT, KEY, key)? {
+            Some(content) => content.opt_str("search_text"),
+            None => Ok(None),
+        }
+    }
+
+    /// Up to `limit` of a place's messages that answer none, newest first,
+    /// from just before `before` (the `created` and id of the oldest one
+    /// shown) or from the newest.
+    pub fn social_messages(
+        &self,
+        account: &str,
+        place: &str,
+        before: Option<(i64, &str)>,
+        limit: usize,
+    ) -> StoreResult<Vec<SocialMessage>> {
+        let before = before.map(|(created, id)| (created, message_key(account, place, id)));
+        let mut found = Vec::new();
+        for scalars in self.social_where(MESSAGE, "place", &scoped(account, place))? {
+            if scalars.opt_str("parent")?.is_some() {
+                continue;
+            }
+            let at = (scalars.datetime("created")?, scalars.str(KEY)?);
+            if before.as_ref().is_none_or(|before| &at < before) {
+                found.push((at, scalars));
+            }
+        }
+        found.sort_by(|a, b| b.0.cmp(&a.0));
+        self.decode_social_messages(found.into_iter().map(|(_, s)| s), limit)
+    }
+
+    /// The messages that answer `parent` in a place, oldest first.
+    pub fn social_replies(
+        &self,
+        account: &str,
+        place: &str,
+        parent: &str,
+    ) -> StoreResult<Vec<SocialMessage>> {
+        let mut found = self.social_replies_scalars(account, place, parent)?;
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        self.decode_social_messages(found.into_iter().map(|(_, s)| s), usize::MAX)
+    }
+
+    /// How many messages answer `parent` in a place.
+    pub fn social_reply_count(
+        &self,
+        account: &str,
+        place: &str,
+        parent: &str,
+    ) -> StoreResult<usize> {
+        Ok(self.social_replies_scalars(account, place, parent)?.len())
+    }
+
+    fn social_replies_scalars(
+        &self,
+        account: &str,
+        place: &str,
+        parent: &str,
+    ) -> StoreResult<Vec<((i64, String), Fields)>> {
+        let parent = message_key(account, place, parent);
+        self.social_where(MESSAGE, "parent", &parent)?
+            .into_iter()
+            .map(|s| Ok(((s.datetime("created")?, s.str(KEY)?), s)))
+            .collect()
+    }
+
+    /// How many of a place's messages are unread.
+    pub fn social_unread_count(&self, account: &str, place: &str) -> StoreResult<usize> {
+        let mut unread = 0;
+        for scalars in self.social_where(MESSAGE, "place", &scoped(account, place))? {
+            if scalars.bool("unread")? {
+                unread += 1;
+            }
+        }
+        Ok(unread)
+    }
+
+    /// Up to `limit` messages of every account that mention the person,
+    /// newest first.
+    pub fn social_mentions(&self, limit: usize) -> StoreResult<Vec<SocialMessage>> {
+        let found = self
+            .db
+            .filter_scan_bool(MESSAGE, "mentions_me", CompareOp::Eq, true, None)?;
+        let mut found = found
+            .into_iter()
+            .map(|o| {
+                let s = Fields::new(MESSAGE, o);
+                Ok(((s.datetime("created")?, s.str(KEY)?), s))
+            })
+            .collect::<StoreResult<Vec<_>>>()?;
+        found.sort_by(|a, b| b.0.cmp(&a.0));
+        self.decode_social_messages(found.into_iter().map(|(_, s)| s), limit)
+    }
+
+    /// Mark read every message of a place made at or before `up_to`, as a
+    /// read marker moving there does. Returns how many were unread.
+    pub fn set_social_messages_read(
+        &self,
+        account: &str,
+        place: &str,
+        up_to: i64,
+    ) -> StoreResult<usize> {
+        let mut marked = 0;
+        for scalars in self.social_where(MESSAGE, "place", &scoped(account, place))? {
+            if scalars.bool("unread")? && scalars.datetime("created")? <= up_to {
+                let read = FieldsBuilder::new().bool("unread", false).build();
+                self.db_update(MESSAGE, scalars.id(), read)?;
+                marked += 1;
+            }
+        }
+        Ok(marked)
+    }
+
+    /// Mark one message read or unread. Returns whether it is here.
+    pub fn set_social_message_unread(
+        &self,
+        account: &str,
+        place: &str,
+        id: &str,
+        unread: bool,
+    ) -> StoreResult<bool> {
+        match self.find(MESSAGE, KEY, &message_key(account, place, id))? {
+            Some(scalars) => {
+                let fields = FieldsBuilder::new().bool("unread", unread).build();
+                self.db_update(MESSAGE, scalars.id(), fields)?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// The best `limit` full-text matches for `text` among every account's
+    /// messages, best first. `text` is in rhypedb's `.matches` language.
+    pub fn search_social_messages(
+        &self,
+        text: &str,
+        limit: usize,
+    ) -> StoreResult<Vec<SocialMessage>> {
+        let result = self
+            .db
+            .fulltext_search(CONTENT, "search_text", text, limit, None, None)?;
+        let mut found = Vec::with_capacity(result.hits.len());
+        for hit in &result.hits {
+            if let Some(id) = self.link(CONTENT, hit.object_id, "message")?
+                && let Some(message) = self.decode_social_message(&self.get(MESSAGE, id)?)?
+            {
+                found.push(message);
+            }
+        }
+        Ok(found)
+    }
+
+    /// Forget a message for good (its content goes with it). A message its
+    /// provider deleted is kept, marked [`SocialMessage::deleted`].
+    pub fn remove_social_message(&self, account: &str, place: &str, id: &str) -> StoreResult<()> {
+        self.social_remove(MESSAGE, KEY, &message_key(account, place, id))?;
+        Ok(())
+    }
+
+    /// Forget every message of the place whose key is `place`.
+    pub(super) fn remove_social_messages_of_place(&self, place: &str) -> StoreResult<usize> {
+        self.social_remove_where(MESSAGE, "place", place)
+    }
+
+    /// The first `limit` of `scalars` that have their content, decoded.
+    fn decode_social_messages(
+        &self,
+        scalars: impl Iterator<Item = Fields>,
+        limit: usize,
+    ) -> StoreResult<Vec<SocialMessage>> {
+        let mut found = Vec::new();
+        for scalars in scalars {
+            if found.len() == limit {
+                break;
+            }
+            if let Some(message) = self.decode_social_message(&scalars)? {
+                found.push(message);
+            }
+        }
+        Ok(found)
+    }
+
+    /// A message from its scalars and content. `None` when its content is
+    /// not here yet: a put was interrupted, and its repeat finishes it.
+    fn decode_social_message(&self, scalars: &Fields) -> StoreResult<Option<SocialMessage>> {
+        let key = scalars.str(KEY)?;
+        let Some(content) = self.find(CONTENT, KEY, &key)? else {
+            return Ok(None);
+        };
+        let body: Body = content.json(RECORD)?;
+        let malformed = || StoreError::corrupt(MESSAGE, scalars.id(), format!("key {key:?}"));
+        let mut parts = key.splitn(3, SEP);
+        let (Some(account), Some(place), Some(id)) = (parts.next(), parts.next(), parts.next())
+        else {
+            return Err(malformed());
+        };
+        let prefix = format!("{account}{SEP}{place}{SEP}");
+        let parent = match scalars.opt_str("parent")? {
+            Some(parent) => Some(
+                parent
+                    .strip_prefix(&prefix)
+                    .ok_or_else(malformed)?
+                    .to_owned(),
+            ),
+            None => None,
+        };
+        Ok(Some(SocialMessage {
+            account: social_account_key(account),
+            place: place.to_owned(),
+            id: id.to_owned(),
+            author: scalars.str("author")?,
+            kind: scalars.str("kind")?,
+            created: scalars.datetime("created")?,
+            parent,
+            deleted: scalars.bool("deleted")?,
+            mentions_me: scalars.bool("mentions_me")?,
+            unread: scalars.bool("unread")?,
+            message: body.message,
+            reactions: body.reactions,
+        }))
+    }
+}

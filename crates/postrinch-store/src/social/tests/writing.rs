@@ -1,0 +1,171 @@
+//! Drafts, notifications, media and the outbox.
+
+use std::time::Duration;
+
+use serde_json::json;
+
+use super::accounts::{draft, media, notification};
+use super::*;
+
+#[test]
+fn drafts_survive_a_restart_newest_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let older = draft(ADA, "d1", Some(GENERAL));
+    let mut newer = draft(BOB, "d2", None);
+    newer.updated = 20;
+    newer.kind = ContentKind::Memo;
+    newer.cover = Some(DraftMedia::Uploaded {
+        attachment: json!({ "id": "a1", "url": "https://cdn.example/a1" }),
+    });
+    store.put_social_draft(&older).unwrap();
+    store.put_social_draft(&newer).unwrap();
+    drop(store);
+
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!(store.social_drafts().unwrap(), [newer, older.clone()]);
+    assert_eq!(store.social_drafts_for(ADA, GENERAL).unwrap(), [older]);
+    assert!(store.remove_social_draft("d1").unwrap());
+    assert!(!store.remove_social_draft("d1").unwrap());
+    assert_eq!(store.social_draft("d1").unwrap(), None);
+}
+
+#[test]
+fn notifications_list_newest_first_and_are_read() {
+    let (_dir, store) = store();
+    for (id, created) in [("n1", 1), ("n2", 3), ("n3", 2)] {
+        store
+            .put_social_notification(&notification(ADA, id, created))
+            .unwrap();
+    }
+    store
+        .put_social_notification(&notification(BOB, "n9", 9))
+        .unwrap();
+    let ids = |found: Vec<SocialNotification>| -> Vec<String> {
+        found.into_iter().map(|n| n.id).collect()
+    };
+    assert_eq!(
+        ids(store.social_notifications(ADA, 10).unwrap()),
+        ["n2", "n3", "n1"]
+    );
+    assert_eq!(ids(store.social_notifications(ADA, 1).unwrap()), ["n2"]);
+    assert_eq!(store.social_unread_notifications(ADA).unwrap(), 3);
+    assert_eq!(
+        store
+            .set_social_notifications_read(ADA, &["n1", "n2", "n0"])
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        store.set_social_notifications_read(ADA, &["n1"]).unwrap(),
+        0
+    );
+    assert_eq!(store.social_unread_notifications(ADA).unwrap(), 1);
+    let read = store.social_notifications(ADA, 10).unwrap();
+    assert!(read.iter().find(|n| n.id == "n1").unwrap().read);
+    assert_eq!(store.social_unread_notifications(BOB).unwrap(), 1);
+}
+
+#[test]
+fn media_is_found_by_attachment_and_url() {
+    let (_dir, store) = store();
+    let mut picture = media(ADA, "a1");
+    store.put_social_media(&picture).unwrap();
+    store.put_social_media(&media(BOB, "a1")).unwrap();
+    assert_eq!(
+        store.social_media(ADA, "Groups.Example", "a1").unwrap(),
+        Some(picture.clone())
+    );
+    assert_eq!(store.social_media_at(&picture.url).unwrap().len(), 2);
+
+    let blob = store.put_social_media_bytes(b"png bytes").unwrap();
+    picture.blob = Some(blob.clone());
+    picture.fetched = Some(5);
+    store.put_social_media(&picture).unwrap();
+    let read = store.social_media(ADA, "groups.example", "a1").unwrap();
+    assert_eq!(read.unwrap().blob, Some(blob.clone()));
+    assert_eq!(
+        store.social_media_bytes(&blob).unwrap().as_deref(),
+        Some(&b"png bytes"[..])
+    );
+    store
+        .remove_social_media(ADA, "groups.example", "a1")
+        .unwrap();
+    assert_eq!(
+        store.social_media(ADA, "groups.example", "a1").unwrap(),
+        None
+    );
+}
+
+#[test]
+fn garbage_collection_keeps_what_media_and_drafts_refer_to() {
+    let (_dir, store) = store();
+    let fetched = store.put_social_media_bytes(b"fetched").unwrap();
+    let pasted = store.put_social_media_bytes(b"pasted").unwrap();
+    let dropped = store.put_social_media_bytes(b"no one's").unwrap();
+    let mut picture = media(ADA, "a1");
+    picture.blob = Some(fetched.clone());
+    store.put_social_media(&picture).unwrap();
+    let mut writing = draft(ADA, "d1", None);
+    writing.attachments.push(DraftMedia::Kept {
+        blob: pasted.clone(),
+        name: "paste.png".into(),
+        mime: Some("image/png".into()),
+    });
+    store.put_social_draft(&writing).unwrap();
+
+    assert_eq!(store.collect_garbage(Duration::ZERO).unwrap(), 1);
+    assert!(store.social_media_bytes(&fetched).unwrap().is_some());
+    assert!(store.social_media_bytes(&pasted).unwrap().is_some());
+    assert!(store.social_media_bytes(&dropped).unwrap().is_none());
+}
+
+#[test]
+fn the_outbox_keeps_the_order_changes_were_made_in() {
+    let (_dir, store) = store();
+    let change = |n: u32| json!({ "post": { "text": format!("change {n}") } });
+    let first = store
+        .queue_social_change(ADA, "c1", Some(GENERAL), &change(1), 1)
+        .unwrap();
+    let second = store
+        .queue_social_change(BOB, "c2", None, &change(2), 2)
+        .unwrap();
+    let third = store
+        .queue_social_change("ADA@groups.example", "c3", Some(GENERAL), &change(3), 3)
+        .unwrap();
+    assert!(first.seq < second.seq && second.seq < third.seq);
+    // A repeat queues nothing twice.
+    let again = store
+        .queue_social_change(ADA, "c1", Some(GENERAL), &change(9), 9)
+        .unwrap();
+    assert_eq!(again, first);
+
+    let client_ids = |entries: Vec<SocialOutboxEntry>| -> Vec<String> {
+        entries.into_iter().map(|e| e.client_id).collect()
+    };
+    assert_eq!(client_ids(store.social_outbox(ADA).unwrap()), ["c1", "c3"]);
+    assert_eq!(
+        client_ids(store.social_outbox_for(ADA, GENERAL).unwrap()),
+        ["c1", "c3"]
+    );
+    assert_eq!(client_ids(store.social_outbox(BOB).unwrap()), ["c2"]);
+
+    let failed = store
+        .social_change_failed(ADA, "c1", "503 service unavailable")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (failed.attempts, failed.error.as_deref()),
+        (1, Some("503 service unavailable"))
+    );
+    assert_eq!(store.social_outbox(ADA).unwrap()[0], failed);
+    assert_eq!(store.social_change_failed(ADA, "c0", "x").unwrap(), None);
+
+    assert!(store.remove_social_change(ADA, "c1").unwrap());
+    assert!(!store.remove_social_change(ADA, "c1").unwrap());
+    // The next change still comes after every one made.
+    let fourth = store
+        .queue_social_change(BOB, "c4", None, &change(4), 4)
+        .unwrap();
+    assert!(fourth.seq > third.seq);
+}

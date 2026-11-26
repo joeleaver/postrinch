@@ -1,13 +1,17 @@
 //! The store's format version, and opening the database.
 //!
-//! Postrinch is in development: when the store's format changes, an older
-//! store is not upgraded. Opening one fails with [`StoreError::OldFormat`],
-//! and the person deletes the database (raw messages stay) and adds their
-//! accounts again. Upgrades in place come with the first release.
+//! A store records the format it was written in. Opening one of an older
+//! format that [`UPGRADES`] reaches brings it up to [`CURRENT`] in place,
+//! one format at a time; each step is safe to run again, as the new version
+//! is written only once the step is done. A store older than those, or one
+//! from before format versions, is refused with [`StoreError::OldFormat`]
+//! (the person deletes the database and adds their accounts again; raw
+//! messages stay). A store written by a newer Postrinch is refused with
+//! [`StoreError::NewerFormat`], and left as it is.
 //!
-//! A store is of another format when its recorded version differs from
-//! [`CURRENT`], or when it predates versions, or when the schema no longer
-//! has types or fields it holds (rhypedb refuses to drop them silently).
+//! The schema must be able to hold everything a store of an upgradable
+//! format holds: rhypedb refuses to drop types or fields silently, and a
+//! store whose types or fields the schema no longer has is refused too.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -20,10 +24,23 @@ use crate::codec::{Fields, FieldsBuilder};
 use crate::{SCHEMA, Store, StoreError, StoreResult, blobs};
 
 /// The format this code writes. Raise it with any change to `schema.rhype`
-/// or to how the store fills it that an older store would not match. Added
-/// types and fields are not such a change: an older store opens with them
-/// empty (`a_store_from_before_the_outbox_and_imap_opens`).
-pub(crate) const CURRENT: u32 = 3;
+/// or to how the store fills it, adding the step to [`UPGRADES`] and keeping
+/// the schema the last release wrote in `format_fixtures/` for the test
+/// that opens such a store.
+pub(crate) const CURRENT: u32 = 4;
+
+/// A step from one format to the next: what changes, and the change.
+type Upgrade = (u32, &'static str, fn(&Store) -> StoreResult<()>);
+
+/// The steps that bring an older store up to [`CURRENT`], oldest first, each
+/// from the format it names to the next. A store older than the first is
+/// refused.
+const UPGRADES: &[Upgrade] = &[(
+    3,
+    "social (OFSCP) accounts and what they hold, kept from now on",
+    // The social types are new to the schema and start empty.
+    |_| Ok(()),
+)];
 
 const INFO: &str = "StoreInfo";
 const INFO_KEY: &str = "store";
@@ -63,6 +80,7 @@ pub(crate) fn open(root: &Path) -> StoreResult<Store> {
         rules_lock: Arc::default(),
         account_lock: Arc::default(),
         cursor_lock: Arc::default(),
+        social_lock: Arc::default(),
         writes: Arc::default(),
         stats: Arc::default(),
         undownloaded: Arc::default(),
@@ -73,23 +91,28 @@ pub(crate) fn open(root: &Path) -> StoreResult<Store> {
     match store.db.find_by_unique(INFO, "key", &key)? {
         Some(info) => {
             let version = Fields::new(INFO, info).u32("version")?;
-            if version != CURRENT {
-                return Err(old(format!(
-                    "it is format {version}, this Postrinch writes {CURRENT}"
-                )));
+            if version > CURRENT {
+                return Err(StoreError::NewerFormat {
+                    dir: dir.clone(),
+                    found: version,
+                    current: CURRENT,
+                });
+            }
+            if version < CURRENT {
+                upgrade(&store, version).map_err(|e| match e {
+                    StoreError::OldFormat { .. } => e,
+                    e => StoreError::Upgrade {
+                        dir: dir.clone(),
+                        from: version,
+                        cause: Box::new(e),
+                    },
+                })?;
             }
         }
         None if store.db.count_type("Account")? > 0 => {
             return Err(old("it predates format versions".into()));
         }
-        None => {
-            let fields = || {
-                FieldsBuilder::new()
-                    .str("key", INFO_KEY)
-                    .u32("version", CURRENT)
-            };
-            store.upsert(INFO, "key", INFO_KEY, fields().build(), fields().build())?;
-        }
+        None => record_format(&store, CURRENT)?,
     }
     // Copies made before rhypedb#27 is fixed: labels and views are found
     // despite it, people are merged here.
@@ -104,6 +127,38 @@ pub(crate) fn open(root: &Path) -> StoreResult<Store> {
     }
     Ok(store)
 }
+
+/// Bring the store from format `from` up to [`CURRENT`], recording each
+/// format as its step is done.
+fn upgrade(store: &Store, from: u32) -> StoreResult<()> {
+    let Some(first) = UPGRADES.iter().position(|(version, ..)| *version == from) else {
+        return Err(StoreError::OldFormat {
+            dir: store.root.join("db"),
+            found: format!("it is format {from}, older than this Postrinch upgrades"),
+        });
+    };
+    for (version, what, step) in &UPGRADES[first..] {
+        tracing::info!("upgrading the store from format {version}: {what}");
+        step(store)?;
+        record_format(store, version + 1)?;
+    }
+    Ok(())
+}
+
+/// Record that the store is of format `version`.
+fn record_format(store: &Store, version: u32) -> StoreResult<()> {
+    let fields = || {
+        FieldsBuilder::new()
+            .str("key", INFO_KEY)
+            .u32("version", version)
+    };
+    store.upsert(INFO, "key", INFO_KEY, fields().build(), fields().build())?;
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "format_tests.rs"]
+mod upgrade_tests;
 
 #[cfg(test)]
 mod tests {
@@ -180,17 +235,36 @@ mod tests {
     }
 
     #[test]
-    fn another_format_is_refused() {
+    fn a_newer_format_is_refused_and_left_alone() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path()).unwrap();
-        let fields = FieldsBuilder::new().u32("version", CURRENT + 1).build();
-        let info = store.find(INFO, "key", INFO_KEY).unwrap().unwrap();
-        store.db_update(INFO, info.id(), fields).unwrap();
-        drop((info, store));
-        assert!(matches!(
-            Store::open(dir.path()),
-            Err(StoreError::OldFormat { .. })
-        ));
+        record_format(&store, CURRENT + 1).unwrap();
+        drop(store);
+        let err = Store::open(dir.path()).err().expect("refused");
+        assert!(
+            matches!(err, StoreError::NewerFormat { found, .. } if found == CURRENT + 1),
+            "{err}"
+        );
+        // Still the newer format: nothing was written down to this one.
+        let err = Store::open(dir.path()).err().expect("refused again");
+        assert!(matches!(err, StoreError::NewerFormat { .. }), "{err}");
+    }
+
+    #[test]
+    fn a_format_older_than_the_upgrades_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        record_format(&store, UPGRADES[0].0 - 1).unwrap();
+        drop(store);
+        let err = Store::open(dir.path()).err().expect("refused");
+        assert!(matches!(err, StoreError::OldFormat { .. }), "{err}");
+    }
+
+    #[test]
+    fn the_upgrades_reach_the_current_format_one_at_a_time() {
+        let versions: Vec<u32> = UPGRADES.iter().map(|(version, ..)| *version).collect();
+        let first = versions[0];
+        assert_eq!(versions, (first..CURRENT).collect::<Vec<_>>());
     }
 
     #[test]

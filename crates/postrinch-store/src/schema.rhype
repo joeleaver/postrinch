@@ -291,3 +291,150 @@ type ImapCopyAttempt {
     uidvalidity: u32
     uidnext: u32
 }
+
+// ---- Social: OFSCP groups, channels, posts and private messages ---------
+//
+// See docs/ofscp.md §"Storage (rhypedb)" and src/social/. A social account
+// is keyed by its actor ("handle@domain") lower-cased; everything of one
+// account carries that key in `account` and a `key` that starts with it,
+// "<account>\u001f<id>". Each object keeps its record (the protocol object
+// whole, as JSON, with what Postrinch knows of it) in `record`, and repeats
+// in scalar fields what is filtered or sorted on. Nothing here is a
+// relation but a message's content: removing a social account removes its
+// objects one type at a time (social/accounts.rs), as calendars are.
+
+// A social account (SocialAccount): its profile, settings and device key id.
+// The private key is in the OS keychain, the password nowhere.
+type SocialAccount {
+    // The actor, lower-cased.
+    key: String @unique
+    // SocialAccountState, by name.
+    state: String @indexed
+    record: Json
+}
+
+// What Postrinch knows of a provider (SocialProvider), shared by every
+// account that talks to it: its discovery document, capabilities and clock
+// offset.
+type SocialProvider {
+    // The provider's domain, lower-cased.
+    domain: String @unique
+    record: Json
+}
+
+// A group an account belongs to or has seen (SocialGroup).
+type SocialGroup {
+    // "<account>\u001f<group URI>".
+    key: String @unique
+    account: String @indexed
+    // The domain of the provider that holds the group.
+    provider: String @indexed
+    record: Json
+}
+
+// A channel or a private conversation (SocialPlace).
+type SocialPlace {
+    // "<account>\u001f<channel URI or dmId>".
+    key: String @unique
+    account: String @indexed
+    // The channel's group URI; null for a private conversation.
+    group: String @indexed
+    // PlaceKind, by name.
+    kind: String @indexed
+    followed: Bool @indexed
+    // When its newest message was made; null before any.
+    last_activity: DateTime @indexed
+    record: Json
+}
+
+// A view the person made (SocialView): places and groups, with filters.
+type SocialView {
+    // The view's id.
+    key: String @unique
+    // Where it sits in the sidebar, smallest first.
+    order: u64 @indexed
+    record: Json
+}
+
+// rhypedb copies an object into the index of every @indexed field (when it
+// is small enough), and a message has several, so SocialMessage holds only
+// small scalars; the message whole, its reactions and its search text are
+// in its SocialMessageContent. `schema_keeps_social_message_small` guards
+// both, as `schema_keeps_message_small` does mail's.
+type SocialMessage {
+    // "<account>\u001f<place id>\u001f<message id>".
+    key: String @unique
+    // The place's key, "<account>\u001f<place id>".
+    place: String @indexed
+    // The author's actor.
+    author: String @indexed
+    // The message's type (chat, memo, article, ...).
+    kind: String @indexed
+    created: DateTime @indexed
+    // The id of the message it answers, in the same place; null for none.
+    parent: String @indexed
+    deleted: Bool @indexed
+    mentions_me: Bool @indexed
+    unread: Bool @indexed
+    content: [SocialMessageContent] @inverse(SocialMessageContent.message)
+}
+
+// What a social message says, apart from it (see SocialMessage). One
+// to-one relation and no @indexed field, so rhypedb copies it nowhere.
+type SocialMessageContent {
+    // As its message's.
+    key: String @unique
+    message: SocialMessage @on_delete(cascade)
+    // Its text and its author's name, for full-text search.
+    search_text: String @fulltext(analyzer: "english")
+    // The SocialMessage whole: the protocol message and its reactions.
+    record: Json
+}
+
+// A picture, video or file a message carries (SocialMedia); its bytes, once
+// fetched, are in the blob store.
+type SocialMedia {
+    // "<account>\u001f<provider domain>\u001f<attachment id>".
+    key: String @unique
+    account: String @indexed
+    url: String @indexed
+    // SHA-256 of the bytes in the blob store, hex; null until fetched.
+    blob: String @indexed
+    // When the bytes were fetched; null until they are.
+    fetched: DateTime @indexed
+    record: Json
+}
+
+// A post, reply or message being written (SocialDraft).
+type SocialDraft {
+    // The draft's id.
+    key: String @unique
+    account: String @indexed
+    // The place's key; null while it has none.
+    place: String @indexed
+    updated: DateTime @indexed
+    record: Json
+}
+
+// A notification from an account's home provider (SocialNotification).
+type SocialNotification {
+    // "<account>\u001f<notification id>".
+    key: String @unique
+    account: String @indexed
+    created: DateTime @indexed
+    read: Bool @indexed
+    record: Json
+}
+
+// A change made here, waiting to reach a provider (SocialOutboxEntry). The
+// pending entries are laid over every read, so sync never undoes one.
+type SocialOutbox {
+    // "<account>\u001f<client id>".
+    key: String @unique
+    account: String @indexed
+    // The place's key; null for a change of no place (the profile).
+    place: String @indexed
+    // The order changes were made in, across every account.
+    seq: u64 @indexed
+    record: Json
+}

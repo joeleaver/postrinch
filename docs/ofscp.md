@@ -249,8 +249,8 @@ when an account is deleted.
 | `SocialGroup` | acct + group URI | account, provider | group, my role, how it was found, notices |
 | `SocialPlace` | acct + channel URI or dmId | account, group (optional), kind, followed, last activity | channel or conversation, resume cursors, read marker, notices (channels) |
 | `SocialView` | view id | order | name, places and groups, filters, read as, count |
-| `SocialMessage` | acct + place + message id | place, author, type, created, parent, deleted, `mentions_me`, unread | the message whole, reactions summed |
-| `SocialMessageContent` | as message | `search_text @fulltext` | — |
+| `SocialMessage` | acct + place + message id | place, author, type, created, parent, deleted, `mentions_me`, unread | — (small scalars only) |
+| `SocialMessageContent` | as message | `search_text @fulltext` | the message whole, reactions summed |
 | `SocialMedia` | acct + provider + attachment id | URL, blob hash, fetched | mime, size, width, height, duration, poster |
 | `SocialDraft` | draft id | account, place, updated | kind, title, Markdown body, tags, cover, attachments (local files and uploaded ones) |
 | `SocialNotification` | acct + id | account, created, read | the notification |

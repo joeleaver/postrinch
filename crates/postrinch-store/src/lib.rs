@@ -35,6 +35,7 @@ mod people;
 mod rules;
 mod search_terms;
 mod sent_filing;
+mod social;
 mod threads;
 mod upkeep;
 mod views;
@@ -56,6 +57,7 @@ pub use outgoing_put_off::PutOff;
 pub use people::PersonEntry;
 pub use search_terms::{SearchToken, search_tokens, server_texts};
 pub use sent_filing::SentBackOff;
+pub use social::*;
 
 /// Label stats by account key, each with the write count it was read at.
 /// Undownloaded messages by account key, and when they were counted.
@@ -90,6 +92,9 @@ pub struct Store {
     /// back ([`Store::update_sync_cursor`]), as several connections of one
     /// account change it.
     cursor_lock: Arc<Mutex<()>>,
+    /// Held while a social object is read, changed and written back, and
+    /// while a social change takes the next sequence number (social/).
+    social_lock: Arc<Mutex<()>>,
     /// How many writes have gone through since the store opened.
     writes: Arc<AtomicU64>,
     /// Each account's label stats, with [`Store::writes`] as it was when
@@ -144,10 +149,11 @@ impl Store {
     }
 
     /// Delete raw messages no stored message refers to any more (after a
-    /// message or an account is removed), and attachments no queued mail
-    /// refers to. Blobs written in the last
-    /// `grace` are kept, for writers still between storing a blob and the
-    /// message that refers to it. Returns how many were deleted.
+    /// message or an account is removed), attachments no queued mail
+    /// refers to, and social media bytes no attachment or draft refers to.
+    /// Blobs written in the last `grace` are kept, for writers still
+    /// between storing a blob and what refers to it. Returns how many were
+    /// deleted.
     pub fn collect_garbage(&self, grace: Duration) -> StoreResult<usize> {
         let mut referenced: std::collections::HashSet<String> = self
             .db
@@ -160,6 +166,8 @@ impl Store {
         for outgoing in self.outgoing()? {
             referenced.extend(outgoing.draft.attachments.into_iter().map(|a| a.blob));
         }
+        referenced.extend(self.social_media_blobs()?);
+        referenced.extend(self.social_draft_blobs()?);
         Ok(self.blobs.retain(|hash| referenced.contains(hash), grace)?)
     }
 }
