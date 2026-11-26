@@ -137,7 +137,10 @@ mod tests {
         assert_eq!(found_id(ClientConfig::find_with(Some(&file), None)), None);
         assert_eq!(found_id(ClientConfig::find_with(None, None)), None);
         // An unset repository secret builds in as an empty string.
-        assert_eq!(found_id(ClientConfig::find_with(Some(&file), Some(""))), None);
+        assert_eq!(
+            found_id(ClientConfig::find_with(Some(&file), Some(""))),
+            None
+        );
         assert_eq!(found_id(ClientConfig::find_with(None, Some(" \n"))), None);
     }
 
@@ -159,7 +162,10 @@ mod tests {
         std::os::unix::fs::symlink(dir.path().join("gone.json"), &file).unwrap();
         let built_in = client_json("built-in");
         let err = ClientConfig::find_with(Some(&file), Some(&built_in)).unwrap_err();
-        assert!(err.to_string().contains("google-oauth-client.json"), "{err}");
+        assert!(
+            err.to_string().contains("google-oauth-client.json"),
+            "{err}"
+        );
     }
 
     #[test]
