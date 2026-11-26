@@ -2,7 +2,7 @@
 //! and once for every account at launch, on a thread of its own. Agents a
 //! rule asks are started one at a time, on another.
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, OnceLock};
 use std::thread;
@@ -12,6 +12,7 @@ use postrinch_agents::Agents;
 use postrinch_commands::{AgentAsk, Commands};
 use postrinch_model::EmailAddress;
 
+use crate::actions::Notice;
 use crate::rules_ui::now;
 use rinch::prelude::*;
 use tokio::sync::Notify;
@@ -22,8 +23,14 @@ const AGENT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 static DUE: OnceLock<Sender<EmailAddress>> = OnceLock::new();
 
 /// Start running rules. `send` wakes sync's sender for the changes rules
-/// make; `revision` reloads what the window shows.
-pub fn start(commands: Commands, send: Option<Arc<Notify>>, revision: Signal<u64>) {
+/// make; `revision` reloads what the window shows; `notice` tells the
+/// person what kept a rule from asking its agent.
+pub fn start(
+    commands: Commands,
+    send: Option<Arc<Notify>>,
+    revision: Signal<u64>,
+    notice: Signal<Option<Notice>>,
+) {
     let (due, waiting) = mpsc::channel::<EmailAddress>();
     let (ask, asks) = mpsc::channel::<AgentAsk>();
     if DUE.set(due).is_err() {
@@ -39,7 +46,7 @@ pub fn start(commands: Commands, send: Option<Arc<Notify>>, revision: Signal<u64
     }
     if let Err(e) = thread::Builder::new()
         .name("rule-agents".into())
-        .spawn(move || asks.iter().for_each(|a| ask_agent(&a)))
+        .spawn(move || asks.iter().for_each(|a| ask_agent(&a, notice)))
     {
         tracing::error!("rules cannot ask agents: {e}");
     }
@@ -147,7 +154,7 @@ fn prompt(ask: &AgentAsk, tools: &str) -> String {
 }
 
 /// Start the agent a rule asked and wait for it, up to [`AGENT_TIMEOUT`].
-fn ask_agent(ask: &AgentAsk) {
+fn ask_agent(ask: &AgentAsk, notice: Signal<Option<Notice>>) {
     let Some(agents) = load_agents() else {
         tracing::warn!("rule {}: the agents file does not read", ask.rule);
         return;
@@ -171,7 +178,15 @@ fn ask_agent(ask: &AgentAsk) {
     };
     let tools = format!("mcp__{entry}");
     let dir = std::env::temp_dir();
-    let mut command = Command::new("claude");
+    let Some(claude) = postrinch_agents::claude_code::find() else {
+        tracing::warn!("rule {}: Claude Code is not installed", ask.rule);
+        notice.send(Some(Notice {
+            text: postrinch_agents::claude_code::NOT_FOUND.into(),
+            trouble: true,
+        }));
+        return;
+    };
+    let mut command = claude.command();
     // The window is a GUI program on Windows: without this, Claude Code
     // would open a console window of its own for the whole run.
     #[cfg(windows)]
@@ -190,6 +205,13 @@ fn ask_agent(ask: &AgentAsk) {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("rule {}: Claude Code did not start: {e}", ask.rule);
+            notice.send(Some(Notice {
+                text: format!(
+                    "A rule asked an agent, but Claude Code ({}) did not start: {e}",
+                    claude.program.display()
+                ),
+                trouble: true,
+            }));
             return;
         }
     };
