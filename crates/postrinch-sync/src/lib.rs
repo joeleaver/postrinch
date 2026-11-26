@@ -15,6 +15,7 @@ mod backoff;
 mod compose;
 mod error;
 mod events;
+mod giving_way;
 pub mod google;
 pub mod imap;
 mod mail;

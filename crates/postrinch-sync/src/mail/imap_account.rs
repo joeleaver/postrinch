@@ -19,16 +19,22 @@
 //!
 //! The account is polled every [`KeepOptions::interval`], or every
 //! [`crate::IdleOptions::interval`] while an IDLE on its inbox tells of
-//! news at once (`imap_idle`); a wake starts a pass at once.
+//! news at once (`imap_idle`); a wake starts a pass at once. A pass's
+//! backfill gives way between batches once the next pass is due, woken
+//! or polled (`giving_way`): that pass runs at once, with no
+//! [`SyncEvent::Done`] for the one that gave way, and backfill carries
+//! on after its sync, its count with it.
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::FutureExt;
 use postrinch_model::EmailAddress;
 use tokio::sync::Notify;
 
 use super::imap_idle::Watching;
 use super::imap_keep::ImapKeeper;
+use crate::giving_way::{Backfilled, GiveWay, Tally};
 use crate::{KeepOptions, ProgressFn, SendReport, SyncError, SyncEvent};
 
 /// The services an account's servers are named by, as
@@ -43,6 +49,9 @@ enum Next {
     Pause(Duration),
     /// Wait until woken.
     UntilWoken,
+    /// Begin the next turn now: a pass is due that the last one's
+    /// backfill gave way to.
+    Again,
     /// Wait this long, or until woken, and then look at the busy
     /// server's wait again: a wake never cuts the wait short, but one that
     /// was forgotten meanwhile (the account removed, or added again) ends.
@@ -65,13 +74,14 @@ impl ImapKeeper {
     }
 
     async fn sync_loop(&self, account: &EmailAddress, wake: &Notify, watching: &Watching) {
+        let mut tally = Tally::default();
         loop {
             if !self.still_kept(account).await {
                 return;
             }
             let next = match self.busy.remaining(account, IMAP) {
                 Some(wait) => Next::WaitOut(wait),
-                None => self.sync_pass(account, watching).await,
+                None => self.sync_pass(account, wake, watching, &mut tally).await,
             };
             if !self.wait(next, wake).await {
                 return;
@@ -107,24 +117,43 @@ impl ImapKeeper {
                 }
             }
             Next::UntilWoken => wake.notified().await,
+            // A wake that came since the backfill gave way asked for the
+            // pass about to begin: it is taken, so it brings no other.
+            Next::Again => {
+                let _ = wake.notified().now_or_never();
+            }
             Next::Stop => return false,
         }
         true
     }
 
-    /// One pass: sync, then backfill.
-    async fn sync_pass(&self, account: &EmailAddress, watching: &Watching) -> Next {
+    /// One pass: sync, then backfill until it is done or the next pass is
+    /// due (woken, or the interval gone by since this one began).
+    async fn sync_pass(
+        &self,
+        account: &EmailAddress,
+        wake: &Notify,
+        watching: &Watching,
+        tally: &mut Tally,
+    ) -> Next {
         self.emit(SyncEvent::Started {
             account: account.clone(),
         });
         watching.pass_began();
-        let result = self.sync_and_download(account).await;
+        let mut give_way = GiveWay::new(wake);
+        let due = || give_way.due(watching.interval(&self.options));
+        let result = self.sync_and_download(account, tally, due).await;
         watching.pass_ended(result.is_ok());
         match result {
-            Ok(downloaded) => {
+            Ok(backfilled) if backfilled.gave_way => {
+                let why = if give_way.woken() { "woken" } else { "polled" };
+                tracing::debug!("{account}: backfill gives way to a pass ({why})");
+                Next::Again
+            }
+            Ok(backfilled) => {
                 self.emit(SyncEvent::Done {
                     account: account.clone(),
-                    downloaded,
+                    downloaded: backfilled.report.fetched,
                 });
                 Next::Pause(watching.interval(&self.options))
             }
@@ -136,7 +165,12 @@ impl ImapKeeper {
         }
     }
 
-    async fn sync_and_download(&self, account: &EmailAddress) -> Result<usize, SyncError> {
+    async fn sync_and_download(
+        &self,
+        account: &EmailAddress,
+        tally: &mut Tally,
+        give_way: impl FnMut() -> bool + Send,
+    ) -> Result<Backfilled, SyncError> {
         let progress: ProgressFn = {
             let (events, account) = (self.events.clone(), account.clone());
             Arc::new(move |progress| {
@@ -149,11 +183,17 @@ impl ImapKeeper {
         let report = self.sync.sync(account, progress.clone()).await?;
         // The pass signed in and read the folders: a busy wait is over.
         self.busy.reset(account, IMAP);
+        tally.synced(&report);
         self.emit(SyncEvent::Synced {
             account: account.clone(),
             report,
         });
-        Ok(self.sync.backfill(account, progress).await?.fetched)
+        let backfilled = self
+            .sync
+            .backfill_until(account, tally.progress(progress), give_way)
+            .await?;
+        tally.ended(&backfilled);
+        Ok(backfilled)
     }
 
     /// One turn of sending: the outbox over IMAP, then outgoing mail over

@@ -25,6 +25,10 @@ pub enum SyncEvent {
         report: SyncReport,
     },
     /// An account's pass finished: synced, and every body downloaded.
+    /// A pass whose backfill gave way to the next pass (woken, or polled,
+    /// while bodies were still left) ends without one: the next pass
+    /// begins at once, and its backfill's [`Progress`] goes on counting
+    /// from where the last one stopped.
     Done {
         account: EmailAddress,
         downloaded: usize,

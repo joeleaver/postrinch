@@ -4,26 +4,55 @@
 //! sync left as headers. Passes repeat every [`KeepOptions::interval`], or
 //! after [`KeepOptions::retry`] when an account failed: a network that drops
 //! for minutes at a time costs a wait, not the sync.
+//!
+//! Backfill gives way once the next pass is due, woken or with the
+//! interval gone by since this one began (`giving_way`): it starts no
+//! more downloads, and the accounts after it in the pass do one round of
+//! downloads at most. The next pass then begins at once, with no
+//! [`SyncEvent::Done`] for an account whose backfill gave way, and each
+//! backfill carries on after its account's sync, its count with it.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::FutureExt;
 use postrinch_model::{EmailAddress, Provider};
 use tokio::sync::Notify;
 
 use super::GmailSync;
+use crate::giving_way::{Backfilled, GiveWay, Tally};
 use crate::{KeepOptions, ProgressFn, SyncError, SyncEvent, SyncEventFn};
+
+/// How a pass over the accounts ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Passed {
+    /// Every account synced, and its bodies are downloaded.
+    Done,
+    /// An account failed: the next pass comes after the retry.
+    Failed,
+    /// An account's backfill gave way: the next pass is due now.
+    GaveWay,
+}
 
 impl GmailSync {
     /// Sync every signed-in Google account, again and again, until the
     /// future is dropped. Notifying `wake` starts the next pass at once:
     /// after an account signs in, or when the person asks.
     pub async fn keep_in_sync(&self, options: KeepOptions, events: SyncEventFn, wake: Arc<Notify>) {
+        // Each account's backfill count, by its address's key.
+        let mut tallies: HashMap<String, Tally> = HashMap::new();
         loop {
-            let pause = if self.pass(&options, &events).await {
-                options.interval
-            } else {
-                options.retry
+            let pause = match self.pass(&options, &events, &wake, &mut tallies).await {
+                Passed::Done => options.interval,
+                Passed::Failed => options.retry,
+                Passed::GaveWay => {
+                    // A wake that came since a backfill gave way asked for
+                    // the pass about to begin: it is taken, so it brings
+                    // no other.
+                    let _ = wake.notified().now_or_never();
+                    continue;
+                }
             };
             tokio::select! {
                 () = tokio::time::sleep(pause) => {}
@@ -113,28 +142,42 @@ impl GmailSync {
         all_sent
     }
 
-    /// One pass over the accounts. Returns whether every account succeeded.
-    async fn pass(&self, options: &KeepOptions, events: &SyncEventFn) -> bool {
+    /// One pass over the accounts, each synced and then backfilled until
+    /// the next pass is due.
+    async fn pass(
+        &self,
+        options: &KeepOptions,
+        events: &SyncEventFn,
+        wake: &Notify,
+        tallies: &mut HashMap<String, Tally>,
+    ) -> Passed {
         let accounts = match self.with_store(|s| s.accounts()).await {
             Ok(accounts) => accounts,
             Err(e) => {
                 tracing::error!("cannot read the accounts to sync: {e}");
-                return false;
+                return Passed::Failed;
             }
         };
-        let mut all_ok = true;
-        for account in accounts {
-            if account.provider != Provider::Google || !account.is_active() {
-                continue;
-            }
-            let address = account.address;
+        let kept: Vec<EmailAddress> = accounts
+            .into_iter()
+            .filter(|a| a.provider == Provider::Google && a.is_active())
+            .map(|a| a.address)
+            .collect();
+        // An account gone, or signed out, starts its count again.
+        tallies.retain(|key, _| kept.iter().any(|a| a.key() == *key));
+        let mut give_way = GiveWay::new(wake);
+        let (mut all_ok, mut gave_way) = (true, false);
+        for address in kept {
             events(SyncEvent::Started {
                 account: address.clone(),
             });
-            match self.sync_and_download(&address, events).await {
-                Ok(downloaded) => events(SyncEvent::Done {
+            let tally = tallies.entry(address.key()).or_default();
+            let due = || give_way.due(options.interval);
+            match self.sync_and_download(&address, events, tally, due).await {
+                Ok(backfilled) if backfilled.gave_way => gave_way = true,
+                Ok(backfilled) => events(SyncEvent::Done {
                     account: address,
-                    downloaded,
+                    downloaded: backfilled.report.fetched,
                 }),
                 Err(SyncError::NeedsSignIn(_)) => {
                     events(SyncEvent::NeedsSignIn { account: address })
@@ -149,14 +192,24 @@ impl GmailSync {
                 }
             }
         }
-        all_ok
+        if gave_way {
+            let why = if give_way.woken() { "woken" } else { "polled" };
+            tracing::debug!("Gmail: backfill gives way to a pass ({why})");
+            Passed::GaveWay
+        } else if all_ok {
+            Passed::Done
+        } else {
+            Passed::Failed
+        }
     }
 
     async fn sync_and_download(
         &self,
         account: &EmailAddress,
         events: &SyncEventFn,
-    ) -> Result<usize, SyncError> {
+        tally: &mut Tally,
+        give_way: impl FnMut() -> bool + Send,
+    ) -> Result<Backfilled, SyncError> {
         let progress: ProgressFn = {
             let (events, account) = (events.clone(), account.clone());
             Arc::new(move |progress| {
@@ -167,6 +220,7 @@ impl GmailSync {
             })
         };
         let report = self.sync(account, progress.clone()).await?;
+        tally.synced(&report);
         if self.rules_due(account).await {
             // Rules trouble is the rules' to show; mail keeps syncing.
             match self.sync_rules(account).await {
@@ -185,6 +239,10 @@ impl GmailSync {
             account: account.clone(),
             report,
         });
-        Ok(self.backfill(account, progress).await?.fetched)
+        let backfilled = self
+            .backfill_until(account, tally.progress(progress), give_way)
+            .await?;
+        tally.ended(&backfilled);
+        Ok(backfilled)
     }
 }

@@ -20,6 +20,7 @@ use super::folder_error::{FolderError, FolderResult};
 use super::places::live_copies;
 use super::wire::{Conn, Fetched, uid_set};
 use super::{ImapSync, Lane};
+use crate::giving_way::Backfilled;
 use crate::{Envelope, SyncResult, parse_message};
 use crate::{Phase, Progress, ProgressFn, SyncReport};
 
@@ -44,33 +45,53 @@ impl ImapSync {
         account: &EmailAddress,
         progress: ProgressFn,
     ) -> SyncResult<SyncReport> {
+        Ok(self
+            .backfill_until(account, progress, || false)
+            .await?
+            .report)
+    }
+
+    /// As [`Self::backfill`], giving way between batches when
+    /// `give_way` says a pass is due: after at least one batch, so each
+    /// call gets on however often passes come, and never after the last,
+    /// so one that finished says so.
+    pub(crate) async fn backfill_until(
+        &self,
+        account: &EmailAddress,
+        progress: ProgressFn,
+        mut give_way: impl FnMut() -> bool + Send,
+    ) -> SyncResult<Backfilled> {
         let a = account.clone();
         let ids = self.with_store(move |s| s.undownloaded(&a)).await?;
-        let mut report = SyncReport::default();
+        let mut out = Backfilled::default();
         let total = ids.len();
-        for (i, batch) in ids.chunks(BODY_BATCH).enumerate() {
-            progress(Progress::Working {
-                phase: Phase::Bodies,
-                done: i * BODY_BATCH,
-                total,
-            });
+        if total == 0 {
+            return Ok(out);
+        }
+        let working = |done| Progress::Working {
+            phase: Phase::Bodies,
+            done,
+            total,
+        };
+        progress(working(0));
+        for batch in ids.chunks(BODY_BATCH) {
             let batch = batch.to_vec();
+            let count = batch.len();
             let result = self
                 .over(account, Lane::Sync, async |conn| {
                     self.download(conn, account, batch).await
                 })
                 .await;
             self.note_sign_in(account, &result).await?;
-            report.fetched += result?;
+            out.report.fetched += result?;
+            out.through += count;
+            progress(working(out.through));
+            if out.through < total && give_way() {
+                out.gave_way = true;
+                break;
+            }
         }
-        if total > 0 {
-            progress(Progress::Working {
-                phase: Phase::Bodies,
-                done: total,
-                total,
-            });
-        }
-        Ok(report)
+        Ok(out)
     }
 
     /// Downloads these messages now, over the account's reader connection:

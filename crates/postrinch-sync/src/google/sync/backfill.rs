@@ -7,6 +7,7 @@ use tokio::sync::RwLock;
 
 use super::GmailSync;
 use crate::SyncResult;
+use crate::giving_way::Backfilled;
 use crate::google::api::Priority;
 use crate::{Phase, ProgressFn, SyncReport};
 
@@ -21,7 +22,22 @@ impl GmailSync {
         account: &EmailAddress,
         progress: ProgressFn,
     ) -> SyncResult<SyncReport> {
-        let mut report = SyncReport::default();
+        Ok(self
+            .backfill_until(account, progress, || false)
+            .await?
+            .report)
+    }
+
+    /// As [`Self::backfill`], starting no more downloads once `give_way`
+    /// says a pass is due (it is asked after each message, while some are
+    /// not started yet); those under way are seen through.
+    pub(crate) async fn backfill_until(
+        &self,
+        account: &EmailAddress,
+        progress: ProgressFn,
+        give_way: impl FnMut() -> bool + Send,
+    ) -> SyncResult<Backfilled> {
+        let mut out = Backfilled::default();
         let a = account.clone();
         let ids: Vec<String> = self
             .with_store(move |s| s.undownloaded(&a))
@@ -30,25 +46,29 @@ impl GmailSync {
             .map(|id| id.0)
             .collect();
         if ids.is_empty() {
-            return Ok(report);
+            return Ok(out);
         }
         let labels = Arc::new(RwLock::new(self.refresh_labels(account).await?));
         let account_for = account.clone();
-        self.for_each(
-            ids,
-            Phase::Bodies,
-            &progress,
-            &mut report,
-            move |sync, id| {
-                let (account, labels) = (account_for.clone(), Arc::clone(&labels));
-                async move {
-                    sync.fetch(&account, &id, &labels, Priority::Background)
-                        .await
-                }
-            },
-        )
-        .await?;
-        Ok(report)
+        let ran = self
+            .for_each_until(
+                ids,
+                Phase::Bodies,
+                &progress,
+                &mut out.report,
+                move |sync, id| {
+                    let (account, labels) = (account_for.clone(), Arc::clone(&labels));
+                    async move {
+                        sync.fetch(&account, &id, &labels, Priority::Background)
+                            .await
+                    }
+                },
+                give_way,
+            )
+            .await?;
+        out.through = ran.through;
+        out.gave_way = ran.gave_way;
+        Ok(out)
     }
 
     /// Download these messages now, at foreground priority: the person is
