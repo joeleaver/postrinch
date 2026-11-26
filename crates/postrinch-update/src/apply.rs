@@ -13,7 +13,10 @@ const WAIT: Duration = Duration::from_secs(60);
 
 /// First thing in the window, before the store is opened: wait for the
 /// process a restart replaces, then tidy what an earlier update left.
-pub fn at_start() {
+/// Answers what to log once logging has started, which it has not yet.
+#[must_use = "what it answers is to be logged"]
+pub fn at_start() -> Option<String> {
+    let mut said = None;
     if let Some(pid) = std::env::var(WAIT_ENV)
         .ok()
         .and_then(|p| p.parse::<u32>().ok())
@@ -21,12 +24,16 @@ pub fn at_start() {
         // SAFETY: called first in main, before any other thread exists.
         unsafe { std::env::remove_var(WAIT_ENV) };
         if !crate::process::wait_for_exit(pid, WAIT) {
-            tracing::warn!("the window this one replaces (pid {pid}) is still open");
+            said = Some(format!(
+                "the window this one replaces (pid {pid}) is still open after {}s",
+                WAIT.as_secs()
+            ));
         }
     }
     if let Some(dir) = managed_dir() {
         clean_up(&dir);
     }
+    said
 }
 
 fn clean_up(dir: &Path) {

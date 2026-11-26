@@ -40,7 +40,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutDir}
 OutputBaseFilename=postrinch-{#AppVersion}-windows-x86_64-setup
 SetupIconFile=..\..\crates\postrinch\assets\icons\postrinch.ico
-LicenseFile={#Stage}\LICENSE-MIT
 UninstallDisplayIcon={app}\postrinch.exe
 UninstallDisplayName=Postrinch
 WizardStyle=modern

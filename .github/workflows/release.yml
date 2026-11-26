@@ -130,15 +130,22 @@ jobs:
           Start-Process -Wait -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
           Check-Install "the Setup"
           if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Postrinch.lnk")) { throw "no Start-menu entry" }
+          # The uninstaller hands over to a copy of itself and returns at
+          # once, so wait (up to a minute) for it to have done its work.
           Start-Process -Wait -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
-          Start-Sleep -Seconds 3
+          $deadline = (Get-Date).AddSeconds(60)
+          while ((Test-Path "$app\postrinch.exe") -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
           if (Test-Path "$app\postrinch.exe") { throw "the uninstaller left postrinch.exe" }
           $unpacked = "$env:RUNNER_TEMP\postrinch-zip"
           New-Item -ItemType Directory -Force -Path $unpacked | Out-Null
           & "$env:SystemRoot\System32\tar.exe" -xf "dist/postrinch-$env:version-windows-x86_64.zip" -C $unpacked
           if ($LASTEXITCODE -ne 0) { throw "the system's tar could not unpack the zip" }
-          & "$unpacked\postrinch.exe" --install
-          if ($LASTEXITCODE -ne 0) { throw "postrinch.exe --install failed" }
+          # Captured, so PowerShell waits for the window program to exit
+          # (it would not for one writing to no pipe) and the exit code is its.
+          $said = & "$unpacked\postrinch.exe" --install 2>&1
+          $code = $LASTEXITCODE
+          Write-Host $said
+          if ($code -ne 0) { throw "postrinch.exe --install failed ($code)" }
           Check-Install "postrinch.exe --install"
           Write-Host "Setup: installed, marker $env:version, Start-menu entry, uninstalled cleanly; the zip: --install"
 

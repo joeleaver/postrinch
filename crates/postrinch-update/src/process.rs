@@ -9,6 +9,21 @@ pub(crate) fn wait_for_exit(pid: u32, timeout: Duration) -> bool {
     wait(pid, Instant::now() + timeout)
 }
 
+/// Windows: start `command` without a console window. The window is a GUI
+/// program with no console of its own, so a console program it starts
+/// (`tar.exe`) would otherwise open one of its own, a black window flashing
+/// up over Postrinch's. Elsewhere this does nothing.
+pub(crate) fn no_console(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
 /// Windows: the process's own handle, signalled when it exits. A pid that
 /// cannot be opened names no running process this user may wait on.
 #[cfg(windows)]
@@ -60,25 +75,51 @@ fn alive(pid: u32) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::process::{Child, Command, Stdio};
 
-    /// This test binary again, running only [`sleeper`]: a child process
-    /// that stays up, on every system, with nothing else installed.
-    fn sleeping_child() -> Child {
-        Command::new(std::env::current_exe().unwrap())
-            .args(["--ignored", "--exact", "process::tests::sleeper"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap()
+    /// Set in the environment of the children [`sleeper`] sleeps in.
+    pub(crate) const SLEEP_ENV: &str = "POSTRINCH_UPDATE_TEST_SLEEPER";
+
+    /// `program` (a copy of this test binary, or itself) running only
+    /// [`sleeper`]: a child process that stays up, on every system, with
+    /// nothing else installed. Linux refuses to run a file another thread's
+    /// child still holds open for writing for a moment after a copy
+    /// ("text file busy", as tests start children in parallel), so that is
+    /// tried again.
+    pub(crate) fn sleeping(program: &std::path::Path) -> Child {
+        let mut tries = 0;
+        loop {
+            let started = Command::new(program)
+                .args(["--ignored", "--exact", "process::tests::sleeper"])
+                .env(SLEEP_ENV, "1")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            match started {
+                // ETXTBSY
+                Err(e) if e.raw_os_error() == Some(26) && cfg!(unix) && tries < 50 => {
+                    tries += 1;
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                started => return started.unwrap(),
+            }
+        }
     }
 
+    fn sleeping_child() -> Child {
+        sleeping(&std::env::current_exe().unwrap())
+    }
+
+    /// Sleeps only as the child the other tests start, so `cargo test --
+    /// --ignored` passes over it.
     #[test]
     #[ignore = "the child the other tests start"]
     fn sleeper() {
-        std::thread::sleep(Duration::from_secs(60));
+        if std::env::var_os(SLEEP_ENV).is_some() {
+            std::thread::sleep(Duration::from_secs(60));
+        }
     }
 
     #[test]
@@ -86,7 +127,8 @@ mod tests {
         let mut child = sleeping_child();
         let started = Instant::now();
         assert!(!wait_for_exit(child.id(), Duration::from_millis(300)));
-        assert!(started.elapsed() >= Duration::from_millis(300));
+        // Windows' wait may end a hair before `Instant` says 300 ms passed.
+        assert!(started.elapsed() >= Duration::from_millis(250));
         child.kill().unwrap();
         child.wait().unwrap();
     }

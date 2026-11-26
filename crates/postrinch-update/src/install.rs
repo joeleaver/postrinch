@@ -123,12 +123,7 @@ mod tests {
         let dest = dir.path().join(exe("running"));
         // This test binary, copied, running its own test that only sleeps.
         std::fs::copy(std::env::current_exe().unwrap(), &dest).unwrap();
-        let mut running = std::process::Command::new(&dest)
-            .args(["--ignored", "--exact", "process::tests::sleeper"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
+        let mut running = crate::process::tests::sleeping(&dest);
         let new = dir.path().join("new");
         std::fs::write(&new, "new").unwrap();
         let replaced = replace_file(&new, &dest);

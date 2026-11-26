@@ -72,7 +72,7 @@ fn main() -> ExitCode {
     attach_parent_console();
     // Before anything else: a window restarted into an update waits here
     // for the one it replaces to let go of the store.
-    postrinch_update::at_start();
+    let waited = postrinch_update::at_start();
     // Notices name the app as the desktop shows it.
     rinch::notification::set_app_name("Postrinch");
     match std::env::args().nth(1).as_deref() {
@@ -102,6 +102,9 @@ fn main() -> ExitCode {
                 .with_filter(postrinch_log::filter("postrinch=info,postrinch_sync=info")),
         )
         .init();
+    if let Some(said) = waited {
+        tracing::warn!("{said}");
+    }
     let Some(data_dir) = Store::default_root() else {
         eprintln!("postrinch: this system has no data directory");
         return ExitCode::FAILURE;
@@ -149,7 +152,8 @@ fn main() -> ExitCode {
 
 /// Windows: borrow the console of the terminal this was started from, if it
 /// was, so `--install`, `--version`, a store that cannot open and the log
-/// print there, as they do on Linux. A window program has no console of its
+/// print there. The shell does not wait for a window program, so its prompt
+/// comes back at once and the log follows it. A window program has no console of its
 /// own; started any other way there is none to borrow, and nothing prints.
 /// Output already sent somewhere (`postrinch --version > file`, a pipe) has
 /// handles of its own, which are kept.

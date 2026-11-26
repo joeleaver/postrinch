@@ -94,7 +94,9 @@ fn stage(dir: &Path, version: &str, package: &[u8]) -> Result<(), String> {
     std::fs::create_dir_all(&stage).map_err(|e| format!("creating {}: {e}", stage.display()))?;
     let archive = stage.join(format!("package{}", package_suffix()));
     std::fs::write(&archive, package).map_err(|e| format!("saving the package: {e}"))?;
-    let unpacked = std::process::Command::new(tar())
+    let mut command = std::process::Command::new(tar());
+    crate::process::no_console(&mut command);
+    let unpacked = command
         .arg("-xf")
         .arg(&archive)
         .arg("-C")
