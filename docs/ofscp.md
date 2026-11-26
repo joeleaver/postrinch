@@ -80,7 +80,8 @@ Rust provider, on rhypedb, still being built. In both cases the spec decides beh
   PRs; how to find it is in re-ofscp's CLAUDE.md, "Protocol questions". When a protocol
   question isn't answered by the spec plus its open PRs, ask the oracle. Each question gives
   the section, the concrete case, and the default Postrinch would pick. **Postrinch never
-  ships a private guess.** Code that depends on an open spec PR names it in a comment.
+  ships a private guess.** Code that depends on an open spec PR names it in a comment, or, until the PR exists, the
+  decision's entry in the questions file ("Oracle answers").
 - **The spec work runs alongside the build.** These features are in the first wave, and each
   needs the spec to change first (numbers refer to the questions file):
   - posting memos, articles, replies and attachments (1, 5);
@@ -175,8 +176,11 @@ provider**, not by provider or group.
   - Pictures show large, and open full size over the window.
   - Videos play in place through `rinch-video` (libmpv).
   - Other files show as cards.
-  - Media is fetched through the signed client and kept in the content-addressed blob store,
-    as mail attachments are.
+  - Media is fetched by its URL, unsigned (attachment URLs are unguessable capability URLs,
+    possibly on a CDN or object store, not the provider), and kept in the content-addressed
+    blob store, as mail attachments are. A URL that stops working is fetched again from the
+    message, since providers may hand out short-lived URLs or revoke a deleted message's
+    files.
 - **Private messages** show the encryption banner the spec asks for, and presence on each
   avatar.
 - **Call channels** show who is in a call, and say that Postrinch can't join yet (calls come
@@ -191,8 +195,8 @@ provider**, not by provider or group.
     bitmap arrives as raw RGBA and is encoded to PNG before upload. Pasting copied *files*
     (a video copied in a file manager) needs `rinch-clipboard` to offer file lists, which it
     doesn't yet ([rinch#3092](https://github.com/joeleaver/rinch/issues/3092)).
-  - Uploads start at once and show their progress; Send waits for them. Which provider they
-    go to waits on spec question 16.
+  - Uploads start at once, to the account's home provider, and show their progress; Send
+    waits for them. The provider's `maxUploadBytes` is checked before uploading.
   - Enter sends; Shift+Enter starts a new line.
 - **The article and memo editor** opens in the main pane:
   - Article or Memo, and where it goes (▾ lists the places that allow that kind).
@@ -247,7 +251,7 @@ when an account is deleted.
 | `SocialView` | view id | order | name, places and groups, filters, read as, count |
 | `SocialMessage` | acct + place + message id | place, author, type, created, parent, deleted, `mentions_me`, unread | the message whole, reactions summed |
 | `SocialMessageContent` | as message | `search_text @fulltext` | — |
-| `SocialMedia` | URL | blob hash, fetched | mime, size, width, height, duration, poster |
+| `SocialMedia` | acct + provider + attachment id | URL, blob hash, fetched | mime, size, width, height, duration, poster |
 | `SocialDraft` | draft id | account, place, updated | kind, title, Markdown body, tags, cover, attachments (local files and uploaded ones) |
 | `SocialNotification` | acct + id | account, created, read | the notification |
 | `SocialOutbox` | acct + client id | account, place, seq | the change (post, reply, edit, delete, react, read marker, follow, DM pointer, profile), attempts, last error |
@@ -306,7 +310,8 @@ read markers, and the person's views.
 ## Build order: one PR each
 
 Each PR is a reviewable unit with its tests, and merges after an independent review and green
-CI. Some PRs (marked *spec*) wait for the spec to define something first.
+CI. Some PRs (marked *spec*) build on spec decisions Joe has made (2026-11-26) that are
+still on their way into the spec; their code names the spec PR once it exists.
 
 | # | PR | Needs |
 |---|---|---|
