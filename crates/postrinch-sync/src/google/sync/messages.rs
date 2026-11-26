@@ -213,7 +213,8 @@ impl GmailSync {
 
     /// Run `work` on every id, [`CONCURRENT_FETCHES`] at a time, reporting
     /// progress and tallying outcomes into `report`. The first error stops
-    /// the rest.
+    /// the rest: none is started after it, and those under way are seen
+    /// through.
     pub(super) async fn for_each<F, Fut>(
         &self,
         ids: Vec<String>,
@@ -234,8 +235,13 @@ impl GmailSync {
 
     /// As [`Self::for_each`], starting no more once `give_way` says so
     /// (it is asked after each id, while some are not started yet): those
-    /// under way are seen through, and the rest are left. A failure says
-    /// how many ids were gone through before it.
+    /// under way are seen through, and the rest are left.
+    ///
+    /// A failure, too, starts no more and sees those under way through,
+    /// counting and reporting each, then says how many ids were gone
+    /// through. Work under way is never cut off: a download cut off while
+    /// it stores its message would store it uncounted, after the failure
+    /// was reported, and the count would not match the store.
     pub(super) async fn for_each_until<F, Fut>(
         &self,
         ids: Vec<String>,
@@ -251,6 +257,7 @@ impl GmailSync {
     {
         let total = ids.len();
         let mut ran = Ran::default();
+        let mut failed: Option<SyncError> = None;
         let mut tasks = JoinSet::new();
         let mut ids = ids.into_iter();
         progress(Progress::Working {
@@ -260,32 +267,38 @@ impl GmailSync {
         });
         loop {
             while !ran.gave_way
+                && failed.is_none()
                 && tasks.len() < CONCURRENT_FETCHES
                 && let Some(id) = ids.next()
             {
                 tasks.spawn(work(self.clone(), id));
             }
             let Some(joined) = tasks.join_next().await else {
-                return Ok(ran);
-            };
-            match joined {
-                Ok(Ok(Outcome::Headers)) => report.headers += 1,
-                Ok(Ok(Outcome::Fetched)) => report.fetched += 1,
-                Ok(Ok(Outcome::Relabelled)) => report.relabelled += 1,
-                Ok(Ok(Outcome::Removed)) => report.removed += 1,
-                Ok(Err(error)) => {
-                    return Err(Unfinished {
+                return match failed {
+                    None => Ok(ran),
+                    Some(error) => Err(Unfinished {
                         through: ran.through,
                         error,
-                    });
+                    }),
+                };
+            };
+            let outcome = match joined {
+                Ok(Ok(outcome)) => outcome,
+                Ok(Err(error)) => {
+                    note_failure(&mut failed, error);
+                    continue;
                 }
                 Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
                 Err(e) => {
-                    return Err(Unfinished {
-                        through: ran.through,
-                        error: SyncError::Io(std::io::Error::other(e)),
-                    });
+                    note_failure(&mut failed, SyncError::Io(std::io::Error::other(e)));
+                    continue;
                 }
+            };
+            match outcome {
+                Outcome::Headers => report.headers += 1,
+                Outcome::Fetched => report.fetched += 1,
+                Outcome::Relabelled => report.relabelled += 1,
+                Outcome::Removed => report.removed += 1,
             }
             ran.through += 1;
             progress(Progress::Working {
@@ -293,7 +306,7 @@ impl GmailSync {
                 done: ran.through,
                 total,
             });
-            if !ran.gave_way && ids.len() > 0 && give_way() {
+            if !ran.gave_way && failed.is_none() && ids.len() > 0 && give_way() {
                 ran.gave_way = true;
             }
         }
@@ -310,6 +323,18 @@ impl GmailSync {
             Ok(result) => result,
             Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
             Err(e) => Err(SyncError::Io(std::io::Error::other(e))),
+        }
+    }
+}
+
+/// Keeps the first failure of [`GmailSync::for_each_until`]'s work, the
+/// one that stopped it; any after it, from work already under way, is
+/// logged.
+fn note_failure(failed: &mut Option<SyncError>, error: SyncError) {
+    match failed {
+        None => *failed = Some(error),
+        Some(first) => {
+            tracing::warn!("Gmail: also failed, after {first}: {error}");
         }
     }
 }

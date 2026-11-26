@@ -1,7 +1,8 @@
 //! Gmail's keep-in-sync loop and backfill (`google::sync::keep`,
 //! `giving_way`): every account syncs before any backfills, a wake
 //! during backfill gets a pass before it finishes, and a wake backfill
-//! took is answered whatever fails after it.
+//! took is answered whatever fails after it, and a failed download
+//! sees those under way through.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -43,8 +44,8 @@ fn ids() -> Vec<String> {
 }
 
 /// An account of [`MANY`] messages, stored by their headers first; the
-/// bodies of all but `failing` come at once.
-async fn mock_many_messages(f: &Fixture, failing: Option<&str>) {
+/// bodies of all but `failing` come `delay` after they are asked for.
+async fn mock_many_messages(f: &Fixture, failing: Option<&str>, delay: Duration) {
     get(
         &f.server,
         "profile",
@@ -60,10 +61,24 @@ async fn mock_many_messages(f: &Fixture, failing: Option<&str>) {
     for id in &ids() {
         mock_meta(&f.server, id, &["INBOX"], "Old").await;
         if failing != Some(id) {
-            mock_raw(&f.server, id, &["INBOX"], "Old").await;
+            mock_raw_after(&f.server, id, &["INBOX"], "Old", delay).await;
         }
     }
     mock_history(&f.server, "100", json!({"historyId": "100"})).await;
+}
+
+/// `id`'s body fails, `delay` after it is asked for.
+async fn mock_failing_body(f: &Fixture, id: &str, delay: Duration) {
+    Mock::given(method("GET"))
+        .and(path(format!("/gmail/messages/{id}")))
+        .and(query_param("format", "raw"))
+        .respond_with(
+            ResponseTemplate::new(400)
+                .set_body_string("no")
+                .set_delay(delay),
+        )
+        .mount(&f.server)
+        .await;
 }
 
 /// Runs the loop until `done` holds of what it reported (up to 10 s).
@@ -147,7 +162,7 @@ fn wake_at_first_sync(wake: &Arc<Notify>) -> impl Fn(&SyncEvent) + Send + Sync +
 #[tokio::test]
 async fn a_wake_during_backfill_gets_a_pass_before_it_finishes() {
     let f = fixture_with_quota(QUOTA).await;
-    mock_many_messages(&f, None).await;
+    mock_many_messages(&f, None, Duration::ZERO).await;
     let wake = Arc::new(Notify::new());
     let report = wake_at_first_sync(&wake);
     let events = keeping(&f, report, wake, |e| count(e, "done") == 1).await;
@@ -173,7 +188,7 @@ async fn a_wake_during_backfill_gets_a_pass_before_it_finishes() {
 #[tokio::test]
 async fn every_account_syncs_before_any_backfills() {
     let f = fixture_with_quota(QUOTA).await;
-    mock_many_messages(&f, None).await;
+    mock_many_messages(&f, None, Duration::ZERO).await;
     let other = EmailAddress::parse("other@example.org").unwrap();
     f.store
         .put_account(&Account::new(other.clone(), Provider::Google))
@@ -217,17 +232,8 @@ async fn a_wake_backfill_took_gets_its_pass_though_a_download_then_fails() {
     // so backfill has taken the wake (after the first download) when the
     // failure ends it.
     let failing = ids()[0].clone();
-    mock_many_messages(&f, Some(&failing)).await;
-    Mock::given(method("GET"))
-        .and(path(format!("/gmail/messages/{failing}")))
-        .and(query_param("format", "raw"))
-        .respond_with(
-            ResponseTemplate::new(400)
-                .set_body_string("no")
-                .set_delay(Duration::from_millis(300)),
-        )
-        .mount(&f.server)
-        .await;
+    mock_many_messages(&f, Some(&failing), Duration::ZERO).await;
+    mock_failing_body(&f, &failing, Duration::from_millis(300)).await;
     let wake = Arc::new(Notify::new());
     let report = wake_at_first_sync(&wake);
     // Each pass's backfill fails on that message; the retry is an hour
@@ -238,7 +244,8 @@ async fn a_wake_backfill_took_gets_its_pass_though_a_download_then_fails() {
         ["started", "synced", "failed", "started", "synced", "failed"]
     );
     // The count carried on from where the failed backfill got to, never
-    // back to nothing.
+    // back to nothing, and each backfill counted every download under way
+    // when it failed, however late it came.
     let counts = bodies(&events);
     assert!(counts.windows(2).all(|w| w[0].0 <= w[1].0), "{counts:?}");
     assert_eq!(counts.last(), Some(&(MANY - 1, MANY)), "{counts:?}");
@@ -246,4 +253,38 @@ async fn a_wake_backfill_took_gets_its_pass_though_a_download_then_fails() {
         f.store.undownloaded(&f.me).unwrap(),
         [ProviderMessageId(failing)]
     );
+}
+
+#[tokio::test]
+async fn a_failed_download_sees_those_under_way_through() {
+    let f = fixture_with_quota(QUOTA).await;
+    // The first message backfill starts fails at once; the others started
+    // with it come after.
+    let failing = ids()[0].clone();
+    mock_many_messages(&f, Some(&failing), Duration::from_millis(200)).await;
+    mock_failing_body(&f, &failing, Duration::ZERO).await;
+    f.sync.sync(&f.me, quiet()).await.unwrap();
+    let events: Events = Arc::default();
+    let (log, account) = (Arc::clone(&events), f.me.clone());
+    let progress = Arc::new(move |progress| {
+        let account = account.clone();
+        log.lock()
+            .unwrap()
+            .push(SyncEvent::Progress { account, progress });
+    });
+    assert!(f.sync.backfill(&f.me, progress).await.is_err());
+    // Gmail backfill starts ten at once. Those under way when one failed
+    // were stored and counted, and no more were started after it.
+    let started = 10;
+    let counts = bodies(&events.lock().unwrap());
+    assert_eq!(counts.last(), Some(&(started - 1, MANY)), "{counts:?}");
+    let mut left = f.store.undownloaded(&f.me).unwrap();
+    left.sort();
+    let mut not_started: Vec<_> = ids()[started..]
+        .iter()
+        .map(|id| ProviderMessageId(id.clone()))
+        .collect();
+    not_started.push(ProviderMessageId(failing));
+    not_started.sort();
+    assert_eq!(left, not_started);
 }
