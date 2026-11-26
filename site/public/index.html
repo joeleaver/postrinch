@@ -20,7 +20,6 @@
     <nav class="site-nav" aria-label="Main">
       <a href="#features">Features</a>
       <a href="#agents" class="hide-narrow">Agents</a>
-      <a href="/gmail-setup.html" class="hide-narrow">Set up Gmail</a>
       <a href="#download">Download</a>
     </nav>
   </div>
@@ -198,7 +197,6 @@
             <li><strong>Unpack and install.</strong> It installs into your home folder and your app menu, no root needed:
 <pre><code>mkdir postrinch &amp;&amp; tar -xzf <span data-file>postrinch-&lt;version&gt;-linux-x86_64.tar.gz</span> -C postrinch
 ./postrinch/postrinch --install</code></pre></li>
-            <li><strong>Set up Gmail sign-in.</strong> For now, Postrinch signs in with a Google client you make yourself: <a href="/gmail-setup.html">ten minutes, step by step</a>.</li>
             <li><strong>Add your accounts</strong> in Settings › Accounts, and connect an agent in Settings › Agents if you like.</li>
           </ol>
           <details>
@@ -212,8 +210,8 @@
         </div>
       </div>
       <div class="note">
-        <strong>Why your own Google client?</strong>
-        Google lets a new mail app sign in only a few listed testers until it has passed Google's review. Until Postrinch has, a client of your own puts you in charge of your own sign-in, and your mail still goes only between your computer and Google.
+        <strong>Signing in to Google</strong>
+        Gmail and Google Calendar sign in with Postrinch's own Google app, in your browser, and your mail still goes only between your computer and Google. Google is still verifying the app. Until it's done, Google's sign-in page warns that it hasn't verified this app: choose <em>Advanced</em>, then <em>Go to Postrinch</em>. If you made a Google client of your own for an earlier version, it keeps working. To use Postrinch's own app instead, delete <code>~/.config/postrinch/google-oauth-client.json</code>, restart Postrinch and sign in again.
       </div>
     </div>
   </section>
@@ -224,7 +222,6 @@
     <p><em>postrinner</em> (Older Scots): one who travels post-haste; a fast courier.<br>© 2026 LBME Publishing</p>
     <nav aria-label="Footer">
       <a href="https://github.com/joeleaver/postrinch">GitHub</a>
-      <a href="/gmail-setup.html">Set up Gmail</a>
       <a href="/privacy.html">Privacy</a>
       <a href="/terms.html">Terms</a>
     </nav>
