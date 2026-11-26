@@ -7,7 +7,7 @@ use postrinch_mailtest::{Extension, ImapConfig, SpecialUse};
 use postrinch_model::{FolderRole, FolderRoles, LabelKind, SystemLabel};
 use postrinch_sync::imap::message_id_without_header;
 
-use super::sync_support::{Fixture, fixture, fixture_with, fixture_without, mail};
+use super::sync_support::{Fixture, fixture, fixture_with, fixture_without, header_fetches, mail};
 
 #[tokio::test]
 async fn special_folders_are_the_system_labels() {
@@ -61,7 +61,7 @@ async fn the_persons_choice_of_folder_wins() {
 }
 
 #[tokio::test]
-async fn gmail_all_mail_is_the_archive_and_one_message_has_both_labels() {
+async fn gmail_all_mail_is_the_archive_and_no_label() {
     // Gmail says so with X-GM-EXT-1; elsewhere `\All` is a view, not synced.
     let f = fixture_with(ImapConfig::new().gmail(true), FolderRoles::default()).await;
     f.user.create_noselect_folder("[Gmail]").unwrap();
@@ -88,22 +88,89 @@ async fn gmail_all_mail_is_the_archive_and_one_message_has_both_labels() {
             .unwrap();
     }
     f.sync().await;
-    assert_eq!(
-        f.label_names(),
-        ["INBOX", "[Gmail]/All Mail", "[Gmail]/Sent Mail"]
-    );
-    let all = f.label_id("[Gmail]/All Mail");
+    // Synced, as the archive, but every message is in it: no label.
+    assert_eq!(f.label_names(), ["INBOX", "[Gmail]/Sent Mail"]);
+    let all = f.folder_id("[Gmail]/All Mail");
     let folder = f.store.imap_folder(&f.me, &all).unwrap().unwrap();
     assert_eq!(folder.role, Some(FolderRole::Archive));
-    let mut want = vec!["INBOX".to_owned(), all.clone()];
-    want.sort();
-    assert_eq!(f.labels("g@x"), want);
+    let copies = f.store.imap_folder_places(&f.me, &all).unwrap();
+    assert_eq!(copies.len(), 1, "its copy is kept");
+    assert_eq!(f.labels("g@x"), ["INBOX"]);
     assert!(f.message("g@x").unwrap().flags.starred);
     assert_eq!(f.message_count(), 1);
     // Archiving elsewhere: the inbox copy goes, the message stays.
     f.user.expunge("INBOX", 1).unwrap();
     f.sync().await;
-    assert_eq!(f.labels("g@x"), [all]);
+    assert!(f.labels("g@x").is_empty());
+    assert_eq!(f.message_count(), 1);
+}
+
+/// The chips the inbox's threads show, by name, sorted.
+fn inbox_chips(f: &Fixture) -> Vec<String> {
+    let commands = postrinch_commands::Commands::new(f.store.clone());
+    let inbox = postrinch_commands::Folder::Label {
+        account: f.me.clone(),
+        label: "INBOX".into(),
+    };
+    let page = commands.list_threads(&inbox, None, 0, 10).unwrap();
+    let mut chips: Vec<String> = page
+        .threads
+        .iter()
+        .flat_map(|t| t.chips.iter().map(|c| c.name.clone()))
+        .collect();
+    chips.sort();
+    chips
+}
+
+#[tokio::test]
+async fn gmail_all_mail_kept_as_a_label_before_goes_at_the_next_pass() {
+    let f = fixture_with(ImapConfig::new().gmail(true), FolderRoles::default()).await;
+    f.user.create_noselect_folder("[Gmail]").unwrap();
+    f.user
+        .create_special_folder("[Gmail]/All Mail", SpecialUse::All)
+        .unwrap();
+    f.user.create_folder("Work").unwrap();
+    for folder in ["INBOX", "[Gmail]/All Mail", "Work"] {
+        f.user
+            .append(folder, mail(Some("g@x"), "Gmail", ""))
+            .unwrap();
+    }
+    f.user
+        .append("[Gmail]/All Mail", mail(Some("h@x"), "Archived", ""))
+        .unwrap();
+    f.sync().await;
+    let (all, work) = (f.folder_id("[Gmail]/All Mail"), f.label_id("Work"));
+    // The store as a pass before this fix left it: All Mail an ordinary
+    // label, on every message, shown as a chip.
+    let mut label = postrinch_model::Label::new(&all, "[Gmail]/All Mail", LabelKind::User);
+    label.visibility = postrinch_model::LabelVisibility::Show;
+    f.store.put_label(&f.me, &label).unwrap();
+    for (header, labels) in [
+        ("g@x", vec!["INBOX".to_owned(), all.clone(), work.clone()]),
+        ("h@x", vec![all.clone()]),
+    ] {
+        let flags = f.message(header).unwrap().flags;
+        f.store
+            .set_message_labels(&f.me, &f.id(header), &labels, flags)
+            .unwrap();
+    }
+    // As the bug showed it: "All Mail" on every conversation.
+    assert_eq!(inbox_chips(&f), ["All Mail", "Work"]);
+    let before = f.server.commands().len();
+
+    f.sync().await;
+    assert_eq!(f.label_names(), ["INBOX", "Work"]);
+    assert_eq!(f.labels("g@x"), {
+        let mut want = vec!["INBOX".to_owned(), work];
+        want.sort();
+        want
+    });
+    assert!(f.labels("h@x").is_empty());
+    assert_eq!(inbox_chips(&f), ["Work"]);
+    // The folder is kept as it was: nothing is read over again.
+    assert_eq!(f.folder_id("[Gmail]/All Mail"), all);
+    assert_eq!(f.store.imap_folder_places(&f.me, &all).unwrap().len(), 2);
+    assert!(header_fetches(&f.server.commands()[before..]).is_empty());
 }
 
 #[tokio::test]

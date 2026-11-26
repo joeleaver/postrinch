@@ -66,7 +66,7 @@ impl ImapSync {
         let a = account.clone();
         let stored = self.with_store(move |s| s.imap_folders(&a)).await?;
         let renames = self.renames(conn, &listed, &stored).await?;
-        let planned = plan(&listed, &stored, &roles, &renames);
+        let planned = plan(&listed, &stored, &roles, &renames, gmail);
         let superseded = superseded(&stored, &planned);
         self.keep_folders(account, &planned).await?;
         for (i, folder) in planned.iter().enumerate() {
@@ -97,25 +97,28 @@ impl ImapSync {
                 .await?;
         }
         let a = account.clone();
-        let keep: HashSet<String> = planned
-            .iter()
-            .map(|p| p.label.provider_id.clone())
-            .collect();
+        let keep: HashSet<String> = planned.iter().map(|p| p.state.label_id.clone()).collect();
         report.removed += self
             .blocking(move |s| finish(s, &a, &keep, &superseded, number))
             .await?;
         Ok(report)
     }
 
-    /// Keeps each folder as a label with its state, forgetting the copies
-    /// kept under a label whose role moved to a folder of another name.
+    /// Keeps each folder with its state, and as a label unless it is none
+    /// (Gmail's All Mail): a label kept for such a folder by an earlier
+    /// pass goes, and with it the label on every message, while the folder
+    /// and its copies stay. Forgets the copies kept under a label whose
+    /// role moved to a folder of another name.
     async fn keep_folders(&self, account: &EmailAddress, planned: &[Planned]) -> SyncResult<()> {
         let (a, planned) = (account.clone(), planned.to_vec());
         self.blocking(move |s| {
             for p in &planned {
-                s.put_label(&a, &p.label)?;
+                match &p.label {
+                    Some(label) => s.put_label(&a, label)?,
+                    None => s.remove_label_keeping_folder(&a, &p.state.label_id)?,
+                }
                 if p.forget_places {
-                    pending::forget_folder(s, &a, &p.label.provider_id)?;
+                    pending::forget_folder(s, &a, &p.state.label_id)?;
                 }
                 s.put_imap_folder(&a, &p.state)?;
             }

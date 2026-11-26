@@ -67,12 +67,15 @@ async fn on_gmail_all_mail_keeps_what_a_deleted_label_held() {
     f.user.create_folder("Work").unwrap();
     put(&f, "a@x", &["Work", "[Gmail]/All Mail"]);
     f.sync().await;
-    let all = f.label_id("[Gmail]/All Mail");
+    let all = f.folder_id("[Gmail]/All Mail");
     let work = f.label_id("Work");
     f.sync.delete_label(&f.me, &work).await.unwrap();
     assert!(f.user.folder("Work").is_err());
     assert_eq!(f.server.command_count("UID COPY"), 0, "All Mail has it");
-    assert_eq!(f.labels("a@x"), [all]);
+    // Kept in All Mail, which is no label.
+    assert!(f.labels("a@x").is_empty());
+    let kept = f.store.imap_message_places(&f.me, &f.id("a@x")).unwrap();
+    assert_eq!(kept.iter().map(|p| &p.folder).collect::<Vec<_>>(), [&all]);
     sync_agrees(&f).await;
 }
 

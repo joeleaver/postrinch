@@ -130,6 +130,18 @@ impl Fixture {
             .provider_id
     }
 
+    /// The label id of a folder kept by sync, by its name on the server:
+    /// for a folder that is no label (Gmail's All Mail).
+    pub fn folder_id(&self, name: &str) -> String {
+        self.store
+            .imap_folders(&self.me)
+            .unwrap()
+            .into_iter()
+            .find(|f| f.name == name)
+            .unwrap_or_else(|| panic!("no folder {name}"))
+            .label_id
+    }
+
     pub fn label_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .store

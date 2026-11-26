@@ -4,7 +4,8 @@
 //! says, and every other folder keeps the id minted when it was first
 //! seen. Gmail's virtual `\Flagged` and `\Important` folders are left out:
 //! the flags carry what they mirror. So is a `\All` folder anywhere but
-//! Gmail ([`view_of_all`]).
+//! Gmail ([`view_of_all`]). Gmail's All Mail is synced but is no label
+//! ([`holds_everything`]).
 
 use postrinch_model::{
     FolderRole, FolderRoles, ImapFolder, Label, LabelKind, LabelVisibility, SystemLabel,
@@ -15,12 +16,13 @@ use super::utf7;
 use crate::imap::folders::{ListedFolder, SpecialUse};
 use crate::imap::mint_folder_label_id;
 
-/// One folder to sync this pass: its label, its state, and whether the
+/// One folder to sync this pass: its label (none for a folder that
+/// holds every message, [`holds_everything`]), its state, and whether the
 /// places kept under its label id belong to another folder (the role moved
 /// to a folder of another name), so must be forgotten before it is read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Planned {
-    pub label: Label,
+    pub label: Option<Label>,
     pub state: ImapFolder,
     pub forget_places: bool,
 }
@@ -197,6 +199,17 @@ pub(super) fn view_of_all(folder: &ListedFolder, gmail: bool) -> bool {
     !gmail && folder.special_use == Some(SpecialUse::All)
 }
 
+/// Whether a listed folder is Gmail's All Mail (`\All` where the server
+/// is Gmail, `gmail`), which holds a copy of every message but Trash's
+/// and Spam's. It is synced (it is the archive, keeps mail whatever labels
+/// go, and is where server search looks), but it is no label: every
+/// message would carry it, as a chip on every conversation, in the label
+/// lists and menus, and Gmail itself shows none. Its copies make no label
+/// on a message ([`super::places`]); the All mail view shows what it holds.
+pub(super) fn holds_everything(folder: &ListedFolder, gmail: bool) -> bool {
+    gmail && folder.special_use == Some(SpecialUse::All)
+}
+
 /// Whether a listed folder is synced: it can be selected, and is not one
 /// of Gmail's virtual folders.
 pub(super) fn syncable(folder: &ListedFolder) -> bool {
@@ -222,14 +235,16 @@ pub(super) fn role_folder<'a>(
         .find_map(|(r, folder)| (r == Some(role)).then_some(folder))
 }
 
-/// The folders to sync, in the order to sync them, from what LIST gave,
-/// the folders kept from earlier passes and the renames found among them
-/// (a renamed folder is the kept one under its new name).
+/// The folders to sync, in the order to sync them, from what LIST gave
+/// (on Gmail, `gmail`, or elsewhere), the folders kept from earlier passes
+/// and the renames found among them (a renamed folder is the kept one
+/// under its new name).
 pub(super) fn plan(
     listed: &[ListedFolder],
     stored: &[ImapFolder],
     roles: &FolderRoles,
     renames: &Renames,
+    gmail: bool,
 ) -> Vec<Planned> {
     let wanted: Vec<&ListedFolder> = listed.iter().filter(|f| syncable(f)).collect();
     let by_index = roles_by_index(&wanted, roles);
@@ -270,8 +285,11 @@ pub(super) fn plan(
                 Some(system) => LabelKind::System(system),
                 None => LabelKind::User,
             };
-            let mut label = Label::new(label_id.clone(), display_name(folder), kind);
-            label.visibility = LabelVisibility::Show;
+            let label = (!holds_everything(folder, gmail)).then(|| {
+                let mut label = Label::new(label_id.clone(), display_name(folder), kind);
+                label.visibility = LabelVisibility::Show;
+                label
+            });
             Planned {
                 label,
                 state,
@@ -284,143 +302,5 @@ pub(super) fn plan(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn folder(name: &str, special_use: Option<SpecialUse>) -> ListedFolder {
-        ListedFolder {
-            name: name.into(),
-            delimiter: Some('/'),
-            special_use,
-            selectable: true,
-            may_have_children: true,
-        }
-    }
-
-    fn ids(plan: &[Planned]) -> Vec<(&str, &str)> {
-        plan.iter()
-            .map(|p| (p.state.name.as_str(), p.label.provider_id.as_str()))
-            .collect()
-    }
-
-    #[test]
-    fn special_use_then_names_and_order() {
-        let listed = [
-            folder("Work", None),
-            folder("Trash", Some(SpecialUse::Trash)),
-            folder("Sent Items", None),
-            folder("INBOX", None),
-            folder("Junk E-mail", None),
-            folder("Archive", None),
-        ];
-        let plan = plan(&listed, &[], &FolderRoles::default(), &Renames::new());
-        let got = ids(&plan);
-        assert_eq!(got[0], ("INBOX", "INBOX"));
-        assert_eq!(got[1], ("Sent Items", "SENT"));
-        assert_eq!(got[2].0, "Work");
-        assert!(got[2].1.starts_with('f'));
-        assert_eq!(got[3].0, "Archive");
-        assert_eq!(plan[3].state.role, Some(FolderRole::Archive));
-        assert_eq!(got[4], ("Trash", "TRASH"));
-        assert_eq!(got[5], ("Junk E-mail", "SPAM"));
-    }
-
-    #[test]
-    fn the_persons_choice_wins() {
-        let listed = [
-            folder("INBOX", None),
-            folder("Trash", Some(SpecialUse::Trash)),
-            folder("Bin", None),
-        ];
-        let roles = FolderRoles {
-            trash: Some("Bin".into()),
-            ..FolderRoles::default()
-        };
-        let plan = plan(&listed, &[], &roles, &Renames::new());
-        let bin = plan.iter().find(|p| p.state.name == "Bin").unwrap();
-        assert_eq!(bin.label.provider_id, "TRASH");
-        let trash = plan.iter().find(|p| p.state.name == "Trash").unwrap();
-        assert_eq!(trash.state.role, None);
-        assert_eq!(trash.label.kind, LabelKind::User);
-    }
-
-    #[test]
-    fn gmail_all_mail_is_the_archive_and_virtual_folders_are_skipped() {
-        let listed = [
-            folder("INBOX", None),
-            ListedFolder {
-                selectable: false,
-                ..folder("[Gmail]", None)
-            },
-            folder("[Gmail]/All Mail", Some(SpecialUse::All)),
-            folder("[Gmail]/Starred", Some(SpecialUse::Flagged)),
-            folder("[Gmail]/Important", Some(SpecialUse::Important)),
-            folder("[Gmail]/Sent Mail", Some(SpecialUse::Sent)),
-        ];
-        let plan = plan(&listed, &[], &FolderRoles::default(), &Renames::new());
-        let names: Vec<_> = plan.iter().map(|p| p.state.name.as_str()).collect();
-        assert_eq!(names, ["INBOX", "[Gmail]/Sent Mail", "[Gmail]/All Mail"]);
-        assert_eq!(plan[2].state.role, Some(FolderRole::Archive));
-        assert_eq!(plan[2].label.name, "[Gmail]/All Mail");
-    }
-
-    #[test]
-    fn kept_folders_keep_their_ids_and_state() {
-        let mut work = ImapFolder::new("f0123456789ab", "Work");
-        work.uidvalidity = 7;
-        work.uidnext = 30;
-        let listed = [folder("INBOX", None), folder("Work", None)];
-        let plan = plan(
-            &listed,
-            &[work.clone()],
-            &FolderRoles::default(),
-            &Renames::new(),
-        );
-        let kept = plan.iter().find(|p| p.state.name == "Work").unwrap();
-        assert_eq!(kept.state.uidnext, 30);
-        assert_eq!(kept.label.provider_id, "f0123456789ab");
-        assert!(!kept.forget_places);
-    }
-
-    #[test]
-    fn a_role_moving_to_another_folder_forgets_the_old_places() {
-        let mut sent = ImapFolder::new("SENT", "Sent");
-        sent.uidvalidity = 3;
-        let listed = [
-            folder("INBOX", None),
-            folder("Sent Items", Some(SpecialUse::Sent)),
-        ];
-        let plan = plan(&listed, &[sent], &FolderRoles::default(), &Renames::new());
-        let new = plan.iter().find(|p| p.state.name == "Sent Items").unwrap();
-        assert_eq!(new.label.provider_id, "SENT");
-        assert_eq!(new.state.uidvalidity, 0);
-        assert!(new.forget_places);
-    }
-
-    #[test]
-    fn a_renamed_folder_keeps_its_id_state_and_places() {
-        let mut work = ImapFolder::new("f0123456789ab", "Work");
-        work.uidvalidity = 7;
-        work.uidnext = 30;
-        let listed = [folder("INBOX", None), folder("Projects", None)];
-        let renames = Renames::from([("Projects".to_owned(), work.label_id.clone())]);
-        let plan = plan(&listed, &[work], &FolderRoles::default(), &renames);
-        let renamed = plan.iter().find(|p| p.state.name == "Projects").unwrap();
-        assert_eq!(renamed.label.provider_id, "f0123456789ab");
-        assert_eq!(renamed.label.name, "Projects");
-        assert_eq!(renamed.state.uidnext, 30);
-        assert!(!renamed.forget_places);
-    }
-
-    #[test]
-    fn names_are_decoded_and_levels_shown_with_slashes() {
-        let listed = [ListedFolder {
-            delimiter: Some('.'),
-            ..folder("INBOX.Entw&APw-rfe", None)
-        }];
-        assert_eq!(display_name(&listed[0]), "INBOX/Entwürfe");
-        // "Drafts" under the inbox, by name, in German it is not: no role.
-        let plan = plan(&listed, &[], &FolderRoles::default(), &Renames::new());
-        assert_eq!(plan[0].state.role, None);
-    }
-}
+#[path = "folders_tests.rs"]
+mod tests;

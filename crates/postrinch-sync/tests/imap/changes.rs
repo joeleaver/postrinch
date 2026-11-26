@@ -135,11 +135,14 @@ async fn all_mail_is_left_alone_as_gmail_keeps_it() {
         .unwrap();
     put(&f, "a@x", &["INBOX", "[Gmail]/All Mail"]);
     f.sync().await;
-    let all = f.label_id("[Gmail]/All Mail");
+    let all = f.folder_id("[Gmail]/All Mail");
     // Archiving removes the inbox copy: Gmail drops the label.
     change(&f, &["a@x"], MessageChange::remove_label("INBOX")).await;
     assert_eq!((count(&f, "INBOX"), count(&f, "[Gmail]/All Mail")), (0, 1));
-    assert_eq!(f.labels("a@x"), std::slice::from_ref(&all));
+    // All Mail holds it still, and is no label.
+    assert!(f.labels("a@x").is_empty());
+    let kept = f.store.imap_message_places(&f.me, &f.id("a@x")).unwrap();
+    assert_eq!(kept.iter().map(|p| &p.folder).collect::<Vec<_>>(), [&all]);
     sync_agrees(&f).await;
     // Trash moves it out of All Mail, as Gmail does.
     change(&f, &["a@x"], MessageChange::add_label("TRASH")).await;

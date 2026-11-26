@@ -5,8 +5,9 @@
 //! it; on the server each level is in modified UTF-7, joined by the
 //! server's delimiter, under `INBOX` where the server keeps every folder
 //! there (Courier's way; see [`server_name`]). The special folders (the
-//! inbox, Sent, Drafts, Trash, Junk and the archive) are not renamed or
-//! deleted from here; deleting a label is [`super::drop_label`]'s.
+//! inbox, Sent, Drafts, Trash, Junk and the archive), Gmail's All Mail and
+//! a view of all mail are not renamed or deleted from here; deleting a
+//! label is [`super::drop_label`]'s.
 
 use postrinch_model::{
     EmailAddress, FolderRole, ImapFolder, Label, LabelKind, LabelVisibility, SystemLabel,
@@ -113,7 +114,21 @@ pub(super) fn changeable(folders: &Folders, id: &str) -> Outcome<ImapFolder> {
             shown(&folder.name)
         )));
     }
+    no_label(folders, folder)?;
     Ok(folder.clone())
+}
+
+/// Gmail's All Mail holds every message and is no label
+/// ([`super::super::folders::holds_everything`]): nothing here makes it
+/// one, by renaming it or by making a label of its name.
+fn no_label(folders: &Folders, folder: &ImapFolder) -> Outcome<()> {
+    match folders.holds_everything(&folder.label_id) {
+        true => Err(Failure::Refused(format!(
+            "{} holds every message, and is no label",
+            shown(&folder.name)
+        ))),
+        false => Ok(()),
+    }
 }
 
 pub(super) fn mailbox(verb: &str, name: &str) -> Outcome<Command> {
@@ -178,9 +193,18 @@ impl ImapSync {
                 })
                 .collect();
             let renamed = moved.iter().find(|f| f.label_id == id).cloned();
+            let everything: Vec<String> = moved
+                .iter()
+                .filter(|f| folders.holds_everything(&f.label_id))
+                .map(|f| f.label_id.clone())
+                .collect();
             self.with_store(move |s| {
                 for f in &moved {
                     s.put_imap_folder(&a, f)?;
+                    if everything.contains(&f.label_id) {
+                        // Gmail's All Mail under the folder: no label.
+                        continue;
+                    }
                     let mut label = s
                         .labels(&a)?
                         .into_iter()
@@ -252,6 +276,9 @@ impl ImapSync {
         role: Option<FolderRole>,
     ) -> Outcome<ImapFolder> {
         let name = server_name(folders, path)?;
+        if let Some(there) = folders.all().find(|f| f.name == name) {
+            no_label(folders, there)?;
+        }
         let what = format!("making the folder {}", shown(&name));
         if let Err(refused) = conn.folder_command(&what, &mailbox("CREATE", &name)?).await {
             // One there already (`[ALREADYEXISTS]`) will do.
@@ -317,6 +344,28 @@ mod tests {
             })
             .collect();
         Folders::new(stored, &[], false)
+    }
+
+    #[test]
+    fn gmail_all_mail_is_never_made_a_label() {
+        use crate::imap::folders::{ListedFolder, SpecialUse};
+        // The person chose another archive, so All Mail has no role.
+        let all = ImapFolder::new("f000000000001", "[Gmail]/All Mail");
+        let listed = [ListedFolder {
+            name: all.name.clone(),
+            delimiter: Some('/'),
+            special_use: Some(SpecialUse::All),
+            selectable: true,
+            may_have_children: false,
+        }];
+        let gmail = Folders::new(vec![all.clone()], &listed, true);
+        assert!(matches!(
+            changeable(&gmail, &all.label_id),
+            Err(Failure::Refused(why)) if why.contains("holds every message")
+        ));
+        assert!(no_label(&gmail, &all).is_err());
+        let elsewhere = Folders::new(vec![all.clone()], &[], true);
+        assert!(no_label(&elsewhere, &all).is_ok());
     }
 
     #[test]
