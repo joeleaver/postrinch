@@ -152,6 +152,7 @@ Decided and built 2026-11-04.
 ### The window
 
 - **A modes rail at the far left** (`ui/rail.rs`, after `design/mockups/ofscp-social.html`): Mail and Calendar, each an icon with its name under it and a badge of what's unread (Mail's is the inbox's unread threads, shown up to 99+), and Settings at its foot. It is there in every mode, Settings included, and replaces the Mail | Calendar switch that stood atop the sidebar and Settings' "Back to mail". Social joins it with its window (docs/ofscp.md). The panes beside it measure from its edge when dragged.
+- **Sync status is one small line at the foot of the left pane** (`ui/status_line.rs`, after `design/mockups/status-line.html`), the same in every mode. It sums up every account, worst first: "1 account needs sign-in", "Trouble with 2 accounts", why sync is off, "Syncing 2 of 3 accounts…" (with a thin bar while mail downloads), "Up to date". Trouble takes the warning colours. A click opens each account's own line above it, with "Sign in again…" (on the account's page in Settings › Accounts, where what the sign-in says shows) on one that needs it; Escape, a click outside or another click closes it. Each account's state comes from sync as `SyncHow` (working, idle, needs sign-in, other trouble).
 
 ### Views
 

@@ -11,7 +11,7 @@ use tokio::sync::Notify;
 
 pub use crate::sync_start::{SyncHandle, start};
 
-/// One account's sync, as the sidebar shows it.
+/// One account's sync, as the status line shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountSync {
     pub account: EmailAddress,
@@ -19,7 +19,26 @@ pub struct AccountSync {
     pub line: String,
     /// `done` of `total`, while downloading.
     pub progress: Option<(usize, usize)>,
-    pub trouble: bool,
+    pub how: SyncHow,
+}
+
+/// Where an account's sync stands, for the status line's summary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncHow {
+    /// Checking, fetching or downloading.
+    Working,
+    /// Its last pass ended well.
+    Idle,
+    /// It cannot sync until the person signs it in again.
+    NeedsSignIn,
+    /// Anything else that went wrong; it is tried again on its own.
+    Trouble,
+}
+
+impl SyncHow {
+    pub fn trouble(self) -> bool {
+        matches!(self, SyncHow::NeedsSignIn | SyncHow::Trouble)
+    }
 }
 
 /// The last of the accounts' passes to end, numbered so that the same
@@ -57,12 +76,12 @@ pub(crate) fn report(
     {
         pass_ended(ended, account.clone());
     }
-    let (account, line, progress, trouble, changed) = match event {
+    let (account, line, progress, how, changed) = match event {
         SyncEvent::Started { account } => (
             account,
             "Checking for new mail".to_owned(),
             None,
-            false,
+            SyncHow::Working,
             false,
         ),
         SyncEvent::Progress { account, progress } => {
@@ -70,7 +89,7 @@ pub(crate) fn report(
             // which for a new account's first sync is hours away.
             let changed = adds_mail(progress) && refresh_due();
             let (line, progress) = describe(progress);
-            (account, line, progress, false, changed)
+            (account, line, progress, SyncHow::Working, changed)
         }
         // A pass that found nothing new changes nothing the window shows.
         SyncEvent::Synced { account, report } => {
@@ -80,7 +99,7 @@ pub(crate) fn report(
                 account,
                 "New mail up to date".to_owned(),
                 None,
-                false,
+                SyncHow::Idle,
                 changed,
             )
         }
@@ -91,7 +110,7 @@ pub(crate) fn report(
             account,
             "Up to date".to_owned(),
             None,
-            false,
+            SyncHow::Idle,
             downloaded > 0,
         ),
         SyncEvent::Failed {
@@ -104,11 +123,15 @@ pub(crate) fn report(
                 "Could not sync; trying again in {} s",
                 retry_in.as_secs().max(1)
             );
-            (account, line, None, true, false)
+            (account, line, None, SyncHow::Trouble, false)
         }
-        SyncEvent::NeedsSignIn { account } => {
-            (account, "Needs to sign in".to_owned(), None, true, true)
-        }
+        SyncEvent::NeedsSignIn { account } => (
+            account,
+            "Needs to sign in".to_owned(),
+            None,
+            SyncHow::NeedsSignIn,
+            true,
+        ),
         // The server's limit, not the account's sign-in: say so in its
         // words, and when it is tried again; the account is left signed in.
         SyncEvent::Busy {
@@ -117,7 +140,13 @@ pub(crate) fn report(
             retry_in,
         } => {
             tracing::info!("{account}: server busy: {message}");
-            (account, busy_line(&message, retry_in), None, true, false)
+            (
+                account,
+                busy_line(&message, retry_in),
+                None,
+                SyncHow::Trouble,
+                false,
+            )
         }
         // Mail that went: show what is left to send, and fetch the server's
         // copy into Sent now rather than at the next check.
@@ -140,7 +169,7 @@ pub(crate) fn report(
                 1 => "The server refused a change; showing its mail".to_owned(),
                 n => format!("The server refused {n} changes; showing its mail"),
             };
-            (account, line, None, true, true)
+            (account, line, None, SyncHow::Trouble, true)
         }
         SyncEvent::SendFailed {
             account,
@@ -152,7 +181,7 @@ pub(crate) fn report(
                 "Could not send changes; trying again in {} s",
                 retry_in.as_secs().max(1)
             );
-            (account, line, None, true, false)
+            (account, line, None, SyncHow::Trouble, false)
         }
     };
     status.update_send(move |all| {
@@ -160,7 +189,7 @@ pub(crate) fn report(
             account: account.clone(),
             line,
             progress,
-            trouble,
+            how,
         };
         match all.iter_mut().find(|s| s.account == account) {
             Some(existing) => *existing = entry,

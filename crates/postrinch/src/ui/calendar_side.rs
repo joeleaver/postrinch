@@ -28,6 +28,7 @@ pub fn calendar_sidebar(state: State) -> NodeHandle {
                     }
                 }
             }
+            {crate::ui::status_line::status_line(__scope, state)}
         }
     }
 }

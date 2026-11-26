@@ -67,7 +67,8 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     gap: 18px;
     min-height: 0;
 }
-/* The labels scroll; the folders above and sync below stay put. */
+/* The views scroll; the status line at the foot stays put. */
+.folders { flex: 1; min-height: 0; overflow-y: auto; }
 .labels { flex: 1; min-height: 0; overflow-y: auto; }
 .folder-group { display: flex; flex-direction: column; gap: 2px; }
 .section-title {
@@ -186,17 +187,6 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     font-size: 12px;
     color: var(--muted);
 }
-.sync {
-    flex-shrink: 0;
-    padding: 12px 10px 0;
-    border-top: 1px solid var(--line);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-.sync .section-title { padding: 0; }
-.sync-account { display: flex; flex-direction: column; gap: 4px; }
-.sync-address { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sync-line { font-size: 12px; color: var(--muted); }
 .sync-line.trouble { color: var(--trouble); }
 .progress { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }

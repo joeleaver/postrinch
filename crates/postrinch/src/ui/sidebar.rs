@@ -1,7 +1,8 @@
 //! The sidebar, after the views mockup: the inbox (with each account's
 //! under it, when there are several) and its tabs, a thin
 //! line with + to make a view, the person's own views, another line, then
-//! Everything else, All mail, Sent and Drafts; and sync below.
+//! Everything else, All mail, Sent and Drafts; and the status line at
+//! its foot.
 
 use postrinch_commands::Place;
 use postrinch_model::{EmailAddress, SavedView};
@@ -49,19 +50,7 @@ pub fn sidebar(state: State) -> NodeHandle {
                     }
                 }
             }
-            div { class: "sync",
-                div { class: "section-title", "Sync" }
-                for why in state.sync_off.get() {
-                    div { key: why.clone(), class: "sync-line trouble", {why.clone()} }
-                }
-                // Keyed by account alone: a row is built once and its
-                // line and bar follow the account's sync in place.
-                for account in sync_accounts(state) {
-                    div { key: account.key(),
-                        {sync_row(__scope, state, account.clone())}
-                    }
-                }
-            }
+            {crate::ui::status_line::status_line(__scope, state)}
         }
     }
 }
@@ -287,45 +276,4 @@ fn account_dot(state: State, account: &EmailAddress) -> Option<&'static str> {
             .position(|a| &a.account.address == account)
             .map(account_color)
     })
-}
-
-fn sync_accounts(state: State) -> Vec<EmailAddress> {
-    state
-        .sync
-        .with(|all| all.iter().map(|s| s.account.clone()).collect())
-}
-
-#[component]
-fn sync_row(state: State, account: EmailAddress) -> NodeHandle {
-    let address = account.to_string();
-    let now = Memo::new(move || {
-        state
-            .sync
-            .with(|all| all.iter().find(|s| s.account == account).cloned())
-    });
-    let progress = move || now.get().and_then(|s| s.progress);
-    rsx! {
-        div { class: "sync-account",
-            div { class: "sync-address", {address} }
-            div {
-                class: {move || match now.get() {
-                    Some(s) if s.trouble => "sync-line trouble",
-                    _ => "sync-line",
-                }},
-                {move || now.get().map(|s| s.line).unwrap_or_default()}
-            }
-            div {
-                class: "progress",
-                style: {move || if progress().is_some() { "" } else { "display: none" }},
-                div {
-                    class: "progress-fill",
-                    style: {move || {
-                        let percent = progress()
-                            .map_or(0, |(done, total)| (done * 100).checked_div(total).unwrap_or(100));
-                        format!("width: {percent}%")
-                    }},
-                }
-            }
-        }
-    }
 }
