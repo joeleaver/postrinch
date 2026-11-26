@@ -15,6 +15,15 @@ use serde_json::json;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+/// How long a test's wait gives up after: only a hang ends one, so it is
+/// long enough for the slowest machine the tests run on. Windows' CI
+/// runner takes the whole suite about seven times as long as Linux's (the
+/// Gmail backfill tests take 6 to 7 s there, under a second here), and a
+/// sync of fifty messages there, beside the other tests, took over 10 s.
+/// A wait that must end sooner (`imap/oauth_robust.rs`, whose mock answers
+/// after a minute) keeps a guard of its own.
+pub const HUNG: Duration = Duration::from_secs(60);
+
 pub struct Fixture {
     pub server: MockServer,
     pub store: Store,
