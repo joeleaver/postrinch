@@ -228,7 +228,8 @@ spec PR.
     optional behind an allow-list, no auto-loaded remote content, optional `mentions`;
   - inline media in a body: `attachment:<id>` references, unused attachments after the body;
   - upload host and media access (16, 30): upload at home; unguessable capability URLs
-    fetched unsigned, dead once the message is deleted;
+    fetched unsigned, revoked when the message is deleted (SHOULD: removed within a bounded
+    time, or short-lived URLs refreshed from the message);
   - a video poster or thumbnail;
   - membership pointers (3, 29): `PUT/DELETE/GET /api/me/groups` and `groups.updated`;
   - reactions and edits on private messages sent across providers (6): subscribe to the

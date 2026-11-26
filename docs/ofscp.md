@@ -80,7 +80,8 @@ Rust provider, on rhypedb, still being built. In both cases the spec decides beh
   PRs; how to find it is in re-ofscp's CLAUDE.md, "Protocol questions". When a protocol
   question isn't answered by the spec plus its open PRs, ask the oracle. Each question gives
   the section, the concrete case, and the default Postrinch would pick. **Postrinch never
-  ships a private guess.** Code that depends on an open spec PR names it in a comment.
+  ships a private guess.** Code that depends on an open spec PR names it in a comment, or, until the PR exists, the
+  decision's entry in the questions file ("Oracle answers").
 - **The spec work runs alongside the build.** These features are in the first wave, and each
   needs the spec to change first (numbers refer to the questions file):
   - posting memos, articles, replies and attachments (1, 5);
@@ -250,7 +251,7 @@ when an account is deleted.
 | `SocialView` | view id | order | name, places and groups, filters, read as, count |
 | `SocialMessage` | acct + place + message id | place, author, type, created, parent, deleted, `mentions_me`, unread | the message whole, reactions summed |
 | `SocialMessageContent` | as message | `search_text @fulltext` | — |
-| `SocialMedia` | attachment id | URL, blob hash, fetched | mime, size, width, height, duration, poster |
+| `SocialMedia` | acct + provider + attachment id | URL, blob hash, fetched | mime, size, width, height, duration, poster |
 | `SocialDraft` | draft id | account, place, updated | kind, title, Markdown body, tags, cover, attachments (local files and uploaded ones) |
 | `SocialNotification` | acct + id | account, created, read | the notification |
 | `SocialOutbox` | acct + client id | account, place, seq | the change (post, reply, edit, delete, react, read marker, follow, DM pointer, profile), attempts, last error |
