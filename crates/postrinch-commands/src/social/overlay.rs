@@ -71,6 +71,13 @@ impl PlaceOutbox {
         })
     }
 
+    /// Whether an edit of `message` is being sent.
+    pub fn edits(&self, message: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|e| matches!(&e.change, SocialChange::Edit { message: id, .. } if id == message))
+    }
+
     /// `message` with its pending edits, delete and reactions made.
     pub fn lay_over(&self, mut message: SocialMessage) -> SocialItem {
         let mut pending = None;

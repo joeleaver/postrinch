@@ -129,7 +129,7 @@ impl<'a> Shown<'a> {
         // The index matched the words in the text it holds (the plain
         // text and the author's name), which the filter can't see; only an
         // edit being sent changes them.
-        let edited = item.pending.as_ref().is_some_and(|p| p.content.is_some());
+        let edited = outbox.edits(&item.message.id);
         let kept = match found {
             Found::ByIndex if !edited => filter.keeps_besides_words(&item.message),
             _ => filter.keeps(&item.message),

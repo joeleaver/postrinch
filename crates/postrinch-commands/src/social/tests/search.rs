@@ -137,3 +137,28 @@ fn a_deleted_message_is_not_found() {
             .is_empty()
     );
 }
+
+#[test]
+fn an_edit_being_sent_is_searched_as_edited_whatever_follows_it() {
+    let world = world();
+    world.put(&message(ADA, GENERAL, "m1", 1, ADA, "draft wording"));
+    let edit = postrinch_store::SocialContent {
+        body: "final wording".into(),
+        ..Default::default()
+    };
+    world
+        .commands
+        .edit_social_message(ADA, GENERAL, "m1", &edit)
+        .unwrap();
+    world
+        .commands
+        .react_social(ADA, GENERAL, "m1", "👍", true)
+        .unwrap();
+    assert!(
+        world
+            .commands
+            .search_social("draft", 10)
+            .unwrap()
+            .is_empty()
+    );
+}

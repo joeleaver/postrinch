@@ -41,7 +41,8 @@ impl Commands {
         let marked = self
             .store
             .set_social_messages_read(&account, &place.id, newest.created)?;
-        if self.move_marker(&place, &newest.id, newest.created)? && has_marker(&place) {
+        let marker = self.move_marker(&place, &newest.id, newest.created)?;
+        if marker != Marker::Behind && has_marker(&place) {
             let change = SocialChange::Read {
                 message: newest.id.clone(),
             };
@@ -71,24 +72,25 @@ impl Commands {
     }
 
     /// Move the place's read marker to `id`, made at `created`, if that is
-    /// further on than where it is. Returns whether it moved.
-    fn move_marker(&self, place: &SocialPlace, id: &str, created: i64) -> CommandResult<bool> {
+    /// further on than where it is.
+    fn move_marker(&self, place: &SocialPlace, id: &str, created: i64) -> CommandResult<Marker> {
         let account = social_account_key(&place.account);
         loop {
             let Some(now) = self.store.social_place(&account, &place.id)? else {
-                return Ok(false);
+                return Ok(Marker::Behind);
             };
             let marker = now.read_marker.clone();
             if let Some(at) = &marker {
-                // A marker at a message not kept here was set by sync, read
-                // elsewhere up to one not fetched yet: it can't be told to
-                // be behind, so it is not moved (markers move forward only).
-                let further = match self.store.social_message(&account, &place.id, at)? {
-                    Some(m) => (m.created, m.id.as_str()) >= (created, id),
-                    None => true,
-                };
-                if further {
-                    return Ok(false);
+                match self.store.social_message(&account, &place.id, at)? {
+                    Some(m) if (m.created, m.id.as_str()) >= (created, id) => {
+                        return Ok(Marker::Behind);
+                    }
+                    Some(_) => {}
+                    // A marker at a message not kept here (one not fetched
+                    // yet, newer or older) can't be ordered here: it stays,
+                    // and the provider, which moves markers forward only
+                    // (§7.7), decides.
+                    None => return Ok(Marker::Unknown),
                 }
             }
             // Only if sync did not move it meanwhile; else look again.
@@ -100,10 +102,21 @@ impl Commands {
                 }
             })?;
             if moved {
-                return Ok(true);
+                return Ok(Marker::Moved);
             }
         }
     }
+}
+
+/// Where a read marker is, against a message read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Marker {
+    /// Moved on to the message.
+    Moved,
+    /// At or past it already: nothing to tell the provider.
+    Behind,
+    /// At a message not kept here, so not known to be before or after it.
+    Unknown,
 }
 
 /// Whether the place has a read marker at its provider: a channel the

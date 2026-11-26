@@ -270,7 +270,7 @@ fn a_message_renders_with_its_fetched_pictures() {
 }
 
 #[test]
-fn a_marker_at_a_message_not_kept_here_is_not_moved() {
+fn a_marker_at_a_message_not_kept_here_stays_and_the_provider_decides() {
     let world = world();
     world.bob(GENERAL, "a", 1, "a");
     // Read elsewhere, up to a message sync has not fetched yet.
@@ -284,5 +284,6 @@ fn a_marker_at_a_message_not_kept_here_is_not_moved() {
     );
     let place = world.store.social_place(ADA, GENERAL).unwrap().unwrap();
     assert_eq!(place.read_marker.as_deref(), Some("unfetched"));
-    assert!(reads(&world).is_empty());
+    // Not known to be behind: the provider moves it forward only (§7.7).
+    assert_eq!(reads(&world), ["a"]);
 }
