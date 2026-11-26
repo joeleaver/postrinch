@@ -137,7 +137,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn without_files_nothing_is_set_up() {
+    fn without_files_only_a_built_in_google_client_is_set_up() {
         let dir = tempfile::tempdir().unwrap();
         let clients = OAuthClients::load_from(dir.path());
         assert!(!clients.is_set_up(OAuthProvider::Microsoft));

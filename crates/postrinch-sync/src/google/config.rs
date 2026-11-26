@@ -57,8 +57,14 @@ impl ClientConfig {
 
     /// [`Self::find`] with `built_in` in place of this build's client.
     fn find_with(path: Option<&Path>, built_in: Option<&str>) -> SyncResult<Option<Self>> {
-        if let Some(path) = path.filter(|p| p.exists()) {
-            return Self::load(path).map(Some);
+        if let Some(path) = path {
+            // Anything at the path (a broken link, a file that can't be
+            // read) is the person's client, not an absence of one.
+            match std::fs::symlink_metadata(path) {
+                Ok(_) => return Self::load(path).map(Some),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(SyncError::Config(format!("{}: {e}", path.display()))),
+            }
         }
         match built_in.filter(|text| !text.trim().is_empty()) {
             Some(text) => Self::parse(text)
@@ -143,6 +149,17 @@ mod tests {
         let built_in = client_json("built-in");
         let err = ClientConfig::find_with(Some(&file), Some(&built_in)).unwrap_err();
         assert!(err.to_string().contains("Desktop app"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_broken_link_is_an_error_not_passed_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("google-oauth-client.json");
+        std::os::unix::fs::symlink(dir.path().join("gone.json"), &file).unwrap();
+        let built_in = client_json("built-in");
+        let err = ClientConfig::find_with(Some(&file), Some(&built_in)).unwrap_err();
+        assert!(err.to_string().contains("google-oauth-client.json"), "{err}");
     }
 
     #[test]
