@@ -3,131 +3,175 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OFSCP Groups and Messages</title>
+<title>Social Mode</title>
 <!--
-  Mockup: Postrinch as an OFSCP client (docs/ofscp.md). A third mode beside
-  Mail and Calendar, "Social", with its own sidebar: Home (the feed of
-  followed channels), Mentions, Messages (private messages), then each
-  group the account belongs to, on any provider, with its channels.
-  States: a chat channel, a chat channel with a reply thread open, a posts
-  channel (articles and memos, read like mail: list then reader), the home
-  feed, private messages, and a call channel (calls are not in v1).
-  Colours are the window's own (crates/postrinch/src/ui/palette.rs).
+  Mockup: Postrinch's Social mode, as an OFSCP client (docs/ofscp.md), after
+  Joe's notes of 2026-11-26.
+  - A modes rail at the far left for the whole window (Mail, Calendar, Social,
+    and Settings at the foot), icons with their names under them. It replaces
+    the Mail | Calendar switch at the top of the sidebar.
+  - The sidebar is organized by the person's own views, as mail's is, not by
+    provider or group. A view gathers places (channels and conversations)
+    from any account on any provider; when it holds several, they show as
+    tabs in its header, with "All" merging them.
+  - Pictures, videos and avatars throughout; a picture opens full size.
+  Slack and Discord were looked at for the stream, threads and attachments,
+  not copied. Colours are the window's own (crates/postrinch/src/ui/palette.rs).
+  The composer, drag and drop, pasting and writing articles are in
+  ofscp-authoring.html.
 -->
 <style>
 :root {
-  --surface:#fff; --panel:#f4f5f7; --ink:#16181d; --ink-2:#3a3f4a; --muted:#5b6170; --faint:#8a909c;
+  --surface:#fff; --panel:#f4f5f7; --rail:#e9ebef; --ink:#16181d; --ink-2:#3a3f4a; --muted:#5b6170; --faint:#8a909c;
   --line:#dfe2e7; --line-soft:#eceef1; --field:#d4d8de; --hover:#eaecef; --row-hover:#f8f9fa;
-  --accent:#2456b8; --accent-tint:#e6eefb; --accent-ink:#173d84; --mark:#fbe7b0;
-  --warn-bg:#fdf4e3; --warn-line:#f0cf96; --trouble:#7a3f06; --green-tint:#d7f0e0; --green-ink:#1d5b36;
+  --accent:#2456b8; --accent-tint:#e6eefb; --accent-ink:#173d84; --mark:#fbe7b0; --scrim:rgba(10,12,16,.82);
+  --warn-bg:#fdf4e3; --warn-line:#f0cf96; --trouble:#7a3f06;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --surface:#16181d; --panel:#1d2026; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6; --faint:#6b717d;
+  --surface:#16181d; --panel:#1d2026; --rail:#121418; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6; --faint:#6b717d;
   --line:#2d3139; --line-soft:#262a31; --field:#3a3f49; --hover:#2a2e36; --row-hover:#1f2329;
   --accent:#6f9cf0; --accent-tint:#1f2d48; --accent-ink:#b6cdf7; --mark:#5c4a12;
-  --warn-bg:#3a2c12; --warn-line:#6b5220; --trouble:#f0b46a; --green-tint:#183826; --green-ink:#9fdcb5;
+  --warn-bg:#3a2c12; --warn-line:#6b5220; --trouble:#f0b46a;
 }}
 :root[data-theme="dark"] {
-  --surface:#16181d; --panel:#1d2026; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6; --faint:#6b717d;
+  --surface:#16181d; --panel:#1d2026; --rail:#121418; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6; --faint:#6b717d;
   --line:#2d3139; --line-soft:#262a31; --field:#3a3f49; --hover:#2a2e36; --row-hover:#1f2329;
   --accent:#6f9cf0; --accent-tint:#1f2d48; --accent-ink:#b6cdf7; --mark:#5c4a12;
-  --warn-bg:#3a2c12; --warn-line:#6b5220; --trouble:#f0b46a; --green-tint:#183826; --green-ink:#9fdcb5;
+  --warn-bg:#3a2c12; --warn-line:#6b5220; --trouble:#f0b46a;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--panel); color: var(--ink); font: 14px/1.45 "IBM Plex Sans", "Inter", system-ui, sans-serif; }
 .states { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .states button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--field); background: var(--surface); color: var(--ink-2); cursor: pointer; }
 .states button.on { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
-.note { max-width: 1180px; margin: 12px auto 0; padding: 0 16px; color: var(--muted); font-size: 12.5px; }
-.window { max-width: 1180px; margin: 10px auto 40px; display: grid; grid-template-columns: 240px 330px 1fr; background: var(--surface);
-  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; height: 640px; }
-.window.wide { grid-template-columns: 240px 1fr; }
-.window.wide.thread { grid-template-columns: 240px 1fr 360px; }
-@media (max-width: 760px) { .window, .window.wide, .window.wide.thread { grid-template-columns: 1fr; height: auto; } .list { max-height: 360px; } }
+.note { max-width: 1240px; margin: 12px auto 0; padding: 0 16px; color: var(--muted); font-size: 12.5px; }
+.window { max-width: 1240px; margin: 10px auto 40px; display: grid; grid-template-columns: 68px 230px 1fr; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; height: 680px; position: relative; }
+.main { display: grid; grid-template-columns: 1fr; min-width: 0; overflow: hidden; }
+.main.split { grid-template-columns: 320px 1fr; }
+.main.thread { grid-template-columns: 1fr 340px; }
+@media (max-width: 760px) { .window { grid-template-columns: 56px 1fr; height: auto; } .sidebar { display: none; } .main, .main.split, .main.thread { grid-template-columns: 1fr; } }
+/* Modes rail */
+.rail { background: var(--rail); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; }
+.mode { width: 56px; padding: 6px 0 5px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; gap: 2px; color: var(--ink-2); font-size: 11px; cursor: pointer; position: relative; }
+.mode svg { width: 22px; height: 22px; }
+.mode:hover { background: var(--hover); }
+.mode.on { background: var(--surface); color: var(--accent-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.mode .badge { position: absolute; top: 2px; right: 6px; }
+.rail .gap { flex: 1; }
 /* Sidebar */
 .sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 10px 8px; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
-.modes { display: flex; gap: 2px; padding: 2px; background: var(--hover); border-radius: 7px; margin: 0 4px 10px; }
-.modes span { flex: 1; text-align: center; font-size: 12.5px; padding: 4px 0; border-radius: 5px; color: var(--ink-2); }
-.modes span.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
-.folder { min-height: 30px; display: flex; align-items: center; gap: 7px; padding: 0 6px 0 12px; border-radius: 6px; cursor: pointer; }
+.side-head { display: flex; align-items: center; padding: 2px 6px 8px 10px; font-weight: 700; font-size: 15px; }
+.side-head span { flex: 1; }
+.folder { min-height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 10px; border-radius: 6px; cursor: pointer; }
 .folder:hover { background: var(--hover); }
 .folder.chosen { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
-.folder.chan { padding-left: 30px; min-height: 28px; font-size: 13.5px; }
 .folder.unread .name { font-weight: 600; }
+.folder .edit { display: none; color: var(--muted); font-size: 13px; padding: 0 4px; }
+.folder:hover .edit { display: inline; } .folder:hover .count, .folder:hover .badge { display: none; }
 .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .count { color: var(--muted); font-weight: 500; font-size: 12.5px; }
 .badge { background: var(--accent); color: #fff; border-radius: 9px; font-size: 11px; font-weight: 600; padding: 0 6px; line-height: 17px; }
-.glyph { width: 16px; color: var(--muted); text-align: center; flex-shrink: 0; font-size: 13px; }
-.group-head { display: flex; align-items: center; gap: 8px; padding: 10px 6px 4px 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
-.avatar { width: 20px; height: 20px; border-radius: 5px; color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.where { font-weight: 400; color: var(--faint); font-size: 11.5px; margin-left: auto; }
+.glyph { width: 18px; color: var(--muted); text-align: center; flex-shrink: 0; font-size: 13px; }
+.stack { display: inline-flex; flex-shrink: 0; } .stack .av { width: 16px; height: 16px; font-size: 8px; border: 1.5px solid var(--panel); margin-left: -5px; } .stack .av:first-child { margin-left: 0; }
+.section { font-size: 11.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; padding: 12px 10px 4px; }
 .line { height: 1px; background: var(--line); margin: 8px 4px; }
-.join { color: var(--muted); font-size: 13px; }
-/* Panes */
-.list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
-.bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px; border-bottom: 1px solid var(--line-soft); }
-.bar h2 { font-size: 15px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bar .sub { color: var(--muted); font-size: 12.5px; font-weight: 400; margin-left: 6px; }
-.write { width: 30px; height: 30px; flex-shrink: 0; border: 0; border-radius: 6px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; }
-.filter { width: 180px; height: 30px; border: 1px solid var(--field); border-radius: 6px; padding: 0 10px; font: inherit; font-size: 13px; background: var(--surface); color: var(--ink); }
+/* Avatars: pictures where people set one, initials otherwise */
+.av { width: 34px; height: 34px; border-radius: 50%; color: #fff; font-weight: 700; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; background-size: cover; }
+.av.sq { border-radius: 7px; }
+.p1 { background: radial-gradient(circle at 50% 38%, #f3d2b3 0 26%, transparent 27%), radial-gradient(circle at 50% 100%, #c2621a 0 45%, transparent 46%), linear-gradient(#ffe3c2, #f7b37a); }
+.p2 { background: radial-gradient(circle at 50% 38%, #d9b08c 0 26%, transparent 27%), radial-gradient(circle at 50% 100%, #3a3f4a 0 45%, transparent 46%), linear-gradient(#cfe0f5, #8fb3e3); }
+.p3 { background: radial-gradient(circle at 50% 38%, #f0c9a5 0 26%, transparent 27%), radial-gradient(circle at 50% 100%, #2f8a55 0 45%, transparent 46%), linear-gradient(#e3f3d6, #a7d88c); }
+.p4 { background: radial-gradient(circle at 50% 38%, #e8bf98 0 26%, transparent 27%), radial-gradient(circle at 50% 100%, #2456b8 0 45%, transparent 46%), linear-gradient(#e6e0f7, #b5a6e8); }
+/* Header with the view's places as tabs */
+.head { border-bottom: 1px solid var(--line-soft); padding: 10px 16px 0; }
+.head-row { display: flex; align-items: center; gap: 10px; }
+.head h2 { font-size: 16px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.head .sub { color: var(--muted); font-size: 12.5px; font-weight: 400; margin-left: 8px; }
+.tabs { display: flex; gap: 2px; margin-top: 8px; overflow-x: auto; }
+.tabs span { padding: 6px 10px; font-size: 13px; color: var(--ink-2); border-bottom: 2px solid transparent; white-space: nowrap; cursor: pointer; }
+.tabs span.on { border-color: var(--accent); color: var(--ink); font-weight: 600; }
+.tabs span b { font-size: 11px; color: var(--accent); margin-left: 3px; }
+.tabs .where { color: var(--faint); font-size: 11.5px; }
 .ghost { height: 30px; border: 1px solid var(--field); border-radius: 6px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12.5px; padding: 0 10px; }
-.rows { overflow-y: auto; flex: 1; }
-.row { padding: 10px 14px; border-bottom: 1px solid var(--line-soft); cursor: pointer; }
-.row:hover { background: var(--row-hover); }
-.row.chosen { background: var(--accent-tint); }
-.row .top { display: flex; gap: 8px; font-size: 12.5px; color: var(--muted); }
-.row .top b { color: var(--ink); font-weight: 600; }
-.row .top time { margin-left: auto; }
-.row .title { font-weight: 600; font-size: 14px; margin: 2px 0; }
-.row .snip { color: var(--muted); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.row.unread .title::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 6px; vertical-align: 2px; }
-.tag { display: inline-block; font-size: 11.5px; padding: 0 7px; border-radius: 9px; background: var(--hover); color: var(--ink-2); margin-right: 4px; }
-.kind { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
-.reader { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
-.scroll { overflow-y: auto; flex: 1; padding: 18px 22px; }
-.article h1 { font-size: 22px; margin: 0 0 6px; }
-.byline { color: var(--muted); font-size: 13px; margin-bottom: 14px; display: flex; gap: 8px; align-items: center; }
-.article p { margin: 0 0 12px; max-width: 70ch; }
-.article blockquote { margin: 0 0 12px; padding-left: 12px; border-left: 3px solid var(--line); color: var(--ink-2); }
-/* Messages in a stream */
-.stream { display: flex; flex-direction: column; gap: 2px; }
-.msg { display: grid; grid-template-columns: 36px 1fr; gap: 10px; padding: 6px 8px; border-radius: 6px; position: relative; }
-.msg:hover { background: var(--row-hover); }
-.msg:hover .tools { display: flex; }
-.msg .face { width: 34px; height: 34px; border-radius: 50%; color: #fff; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; }
-.msg.cont { padding-top: 0; } .msg.cont .face { visibility: hidden; height: 0; }
+.filter { width: 170px; height: 30px; border: 1px solid var(--field); border-radius: 6px; padding: 0 10px; font: inherit; font-size: 13px; background: var(--surface); color: var(--ink); }
+.write { width: 30px; height: 30px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; }
+.pane { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.pane + .pane { border-left: 1px solid var(--line); }
+.scroll { overflow-y: auto; flex: 1; padding: 10px 14px; }
+/* Messages */
+.msg { display: grid; grid-template-columns: 40px 1fr; gap: 8px; padding: 5px 8px; border-radius: 6px; position: relative; }
+.msg:hover { background: var(--row-hover); } .msg:hover .tools { display: flex; }
+.msg.cont { padding-top: 0; } .msg.cont > .av { visibility: hidden; height: 0; }
 .who { font-size: 13px; } .who b { font-weight: 600; } .who .h { color: var(--faint); margin-left: 4px; } .who time { color: var(--faint); margin-left: 8px; font-size: 12px; }
-.body { font-size: 14px; }
+.place { display: inline-block; font-size: 11.5px; color: var(--ink-2); background: var(--hover); border-radius: 9px; padding: 0 7px; margin-left: 6px; }
 .body .mention { background: var(--mark); border-radius: 3px; padding: 0 2px; }
 .body code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px; background: var(--hover); padding: 1px 4px; border-radius: 4px; }
 .edited { color: var(--faint); font-size: 12px; }
-.tomb { color: var(--faint); font-style: italic; font-size: 13px; }
 .reacts { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
 .reacts span { border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; font-size: 12px; background: var(--surface); }
 .reacts span.mine { border-color: var(--accent); background: var(--accent-tint); color: var(--accent-ink); }
-.replies { margin-top: 4px; font-size: 12.5px; color: var(--accent); font-weight: 600; cursor: pointer; }
+.replies { margin-top: 4px; font-size: 12.5px; color: var(--accent); font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; }
 .tools { position: absolute; right: 8px; top: -10px; display: none; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 2px; box-shadow: 0 2px 6px rgba(0,0,0,.08); }
 .tools span { width: 26px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 13px; color: var(--ink-2); }
-.tools span:hover { background: var(--hover); }
-.day { text-align: center; font-size: 12px; color: var(--faint); margin: 10px 0 6px; }
-.pending { opacity: .6; } .pending .who time::after { content: " · sending…"; }
-.attach { margin-top: 6px; display: inline-flex; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
-.attach i { width: 28px; height: 28px; background: var(--hover); border-radius: 5px; display: inline-block; }
-/* Composer */
+.day { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--faint); margin: 10px 0 6px; } .day::before, .day::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+/* Media */
+.media { display: grid; gap: 4px; margin-top: 6px; max-width: 460px; }
+.media.two { grid-template-columns: 1fr 1fr; }
+.pic { border-radius: 8px; height: 220px; cursor: zoom-in; position: relative; overflow: hidden; }
+.media.two .pic { height: 160px; }
+.pic.a { background: linear-gradient(160deg, #3b5b8c, #7fa3cf 45%, #e7c58f 46%, #b07c45); }
+.pic.b { background: linear-gradient(200deg, #2f3a2a, #5c7a4a 50%, #a8b98a); }
+.pic.c { background: linear-gradient(120deg, #6b4b7a, #c08aa8 60%, #f0d5c0); }
+.video { border-radius: 8px; height: 230px; max-width: 420px; margin-top: 6px; background: linear-gradient(135deg, #1b1f2a, #34405a); position: relative; display: flex; align-items: center; justify-content: center; color: #fff; }
+.video .play { width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center; font-size: 22px; }
+.video .bar { position: absolute; left: 10px; right: 10px; bottom: 8px; display: flex; gap: 8px; align-items: center; font-size: 11.5px; }
+.video .bar i { flex: 1; height: 3px; background: rgba(255,255,255,.3); border-radius: 2px; }
+.file { margin-top: 6px; display: inline-flex; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.file i { width: 28px; height: 28px; background: var(--hover); border-radius: 5px; display: inline-block; }
+/* Composer (detail in ofscp-authoring.html) */
 .composer { border-top: 1px solid var(--line); padding: 10px 14px 12px; }
-.composer .box { border: 1px solid var(--field); border-radius: 8px; padding: 8px 10px; min-height: 40px; color: var(--faint); display: flex; align-items: flex-end; gap: 8px; }
-.composer .box span { flex: 1; }
-.composer .send { height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: var(--accent); color: #fff; font: inherit; font-size: 13px; font-weight: 600; }
-.composer .hint { font-size: 11.5px; color: var(--faint); margin-top: 5px; display: flex; gap: 10px; }
-.typing { font-size: 12px; color: var(--muted); padding: 0 22px 4px; height: 18px; }
-/* Thread pane, banners */
-.thread-pane { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
-.banner { margin: 10px 14px 0; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--trouble); }
-.banner.info { background: var(--accent-tint); border-color: var(--accent-tint); color: var(--accent-ink); }
-.presence { width: 8px; height: 8px; border-radius: 50%; background: #2f8a55; display: inline-block; margin-left: 4px; }
+.box { border: 1px solid var(--field); border-radius: 8px; padding: 8px 10px; min-height: 42px; color: var(--faint); display: flex; align-items: center; gap: 8px; }
+.box span { flex: 1; } .box .t { color: var(--muted); font-size: 15px; }
+.send { height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: var(--accent); color: #fff; font: inherit; font-size: 13px; font-weight: 600; }
+.to { font-size: 12px; color: var(--muted); margin-bottom: 5px; } .to b { color: var(--ink-2); }
+/* Lists and readers */
+.row { padding: 10px 14px; border-bottom: 1px solid var(--line-soft); cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 0 10px; }
+.row:hover { background: var(--row-hover); } .row.chosen { background: var(--accent-tint); }
+.row .top { font-size: 12.5px; color: var(--muted); grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; } .row .top b { color: var(--ink); } .row .top time { margin-left: auto; }
+.row .title { font-weight: 600; margin: 2px 0; }
+.row .snip { color: var(--muted); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.row .thumb { width: 64px; height: 48px; border-radius: 6px; grid-row: 2 / span 2; grid-column: 2; }
+.row.unread .title::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 6px; vertical-align: 2px; }
+.kind { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
+.article { max-width: 680px; }
+.article .cover { height: 200px; border-radius: 10px; margin-bottom: 14px; }
+.article h1 { font-size: 24px; margin: 4px 0 6px; }
+.byline { color: var(--muted); font-size: 13px; margin-bottom: 14px; display: flex; gap: 8px; align-items: center; }
+.article p { margin: 0 0 12px; }
+.tag { display: inline-block; font-size: 11.5px; padding: 0 7px; border-radius: 9px; background: var(--hover); color: var(--ink-2); }
+.banner { margin: 10px 14px 0; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; background: var(--accent-tint); color: var(--accent-ink); }
+.presence { width: 9px; height: 9px; border-radius: 50%; background: #2f8a55; display: inline-block; border: 2px solid var(--surface); }
 .presence.away { background: #c2621a; }
-.empty { margin: auto; text-align: center; color: var(--muted); max-width: 360px; padding: 30px; }
-.empty b { display: block; color: var(--ink); font-size: 15px; margin-bottom: 6px; }
+/* Lightbox and view panel */
+.overlay { position: absolute; inset: 0; background: var(--scrim); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #fff; z-index: 3; }
+.overlay .big { width: min(760px, 86%); height: 470px; border-radius: 6px; }
+.overlay .cap { font-size: 13px; opacity: .85; display: flex; gap: 14px; }
+.overlay .x { position: absolute; top: 14px; right: 18px; font-size: 22px; opacity: .8; }
+.panel { position: absolute; top: 0; bottom: 0; left: 298px; width: 400px; background: var(--surface); border-right: 1px solid var(--line); box-shadow: 8px 0 24px rgba(0,0,0,.12); padding: 16px 18px; z-index: 2; overflow-y: auto; }
+.panel h3 { margin: 0 0 12px; font-size: 16px; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.field label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.field input, .field select { font: inherit; padding: 6px 9px; border: 1px solid var(--field); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; border: 1px solid var(--field); border-radius: 6px; padding: 6px; }
+.chip { font-size: 12.5px; background: var(--hover); border-radius: 12px; padding: 2px 8px; display: inline-flex; gap: 5px; align-items: center; }
+.chip small { color: var(--faint); } .chip.add { background: none; color: var(--accent); }
+.seg { display: flex; border: 1px solid var(--field); border-radius: 6px; overflow: hidden; } .seg span { flex: 1; text-align: center; padding: 5px 0; font-size: 13px; } .seg span.on { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
+.checks { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+.btn { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--field); background: var(--surface); color: var(--ink); }
+.btn.filled { background: var(--accent); border-color: var(--accent); color: #fff; } .btn.red { color: #a3271d; border-color: #a3271d; margin-right: auto; }
+.hint { color: var(--muted); font-size: 12.5px; margin: 4px 0 0; }
 svg { width: 16px; height: 16px; }
 </style>
 </head>
@@ -135,191 +179,156 @@ svg { width: 16px; height: 16px; }
 <div class="states" id="states"></div>
 <p class="note" id="note"></p>
 <div class="window" id="window"></div>
-
-<template id="sidebar">
-  <nav class="sidebar">
-    <div class="modes"><span>Mail</span><span>Calendar</span><span class="on">Social</span></div>
-    <div class="folder" data-s="feed"><span class="glyph">⌂</span><span class="name">Home</span><span class="count">8</span></div>
-    <div class="folder unread"><span class="glyph">@</span><span class="name">Mentions</span><span class="badge">2</span></div>
-    <div class="folder unread" data-s="dms"><span class="glyph">✉</span><span class="name">Messages</span><span class="badge">1</span></div>
-    <div class="line"></div>
-    <div class="group-head"><span class="avatar" style="background:#7a4fc2">R</span>Rust Audio<span class="where">forumall.app</span></div>
-    <div class="folder chan unread" data-s="chat"><span class="glyph">#</span><span class="name">general</span><span class="badge">3</span></div>
-    <div class="folder chan" data-s="posts"><span class="glyph">▤</span><span class="name">announcements</span></div>
-    <div class="folder chan" data-s="call"><span class="glyph">◖</span><span class="name">standup</span><span class="count">●</span></div>
-    <div class="group-head"><span class="avatar" style="background:#2f8a55">O</span>OFSCP Spec<span class="where">ofscp.org</span></div>
-    <div class="folder chan" data-s="posts2"><span class="glyph">▤</span><span class="name">proposals</span><span class="count">4</span></div>
-    <div class="folder chan"><span class="glyph">#</span><span class="name">chat</span></div>
-    <div class="group-head"><span class="avatar" style="background:#c2417a">B</span>Book club<span class="where">forumall.app</span></div>
-    <div class="folder chan"><span class="glyph">#</span><span class="name">this-month</span></div>
-    <div class="line"></div>
-    <div class="folder join"><span class="glyph">+</span><span class="name">Join a group…</span></div>
-  </nav>
-</template>
-
 <script>
-const icon = {
-  pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg>'
+const svg = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const I = {
+  mail: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>'),
+  cal: svg('<rect x="4" y="5" width="16" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 11h16"/>'),
+  social: svg('<path d="M21 14l-3-3h-7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v10"/><path d="M14 15v2a1 1 0 0 1-1 1H6l-3 3V11a1 1 0 0 1 1-1h2"/>'),
+  gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+  pen: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/>'),
 };
-const face = (l, c) => `<div class="face" style="background:${c}">${l}</div>`;
-const msg = (o) => `<div class="msg ${o.cls || ''}">${face(o.l, o.c)}<div>
-  <div class="who"><b>${o.n}</b><span class="h">${o.h}</span><time>${o.t}</time></div>
-  <div class="body">${o.b}</div>${o.x || ''}</div>
-  <div class="tools"><span title="React">☺</span><span title="Reply in thread">↩</span><span title="Edit">✎</span><span title="More">⋯</span></div></div>`;
+const av = (p, l = '', cls = '') => `<span class="av ${p} ${cls}">${l}</span>`;
+const people = { mira: ['p1', 'Mira', '@mira@forumall.app'], tomas: ['p2', 'Tomás', '@tomas@sonic.example'], ada: ['p3', 'Ada', '@ada@ofscp.org'], joe: ['p4', 'Joe', '@joe@forumall.app'] };
+const msg = (who, t, body, o = {}) => { const [p, n, h] = people[who]; return `<div class="msg ${o.cont ? 'cont' : ''}">${av(p)}<div>
+  ${o.cont ? '' : `<div class="who"><b>${n}</b><span class="h">${h}</span>${o.place ? `<span class="place">${o.place}</span>` : ''}<time>${t}</time></div>`}
+  <div class="body">${body}</div>${o.x || ''}</div>
+  <div class="tools"><span title="React">☺</span><span title="Reply in thread">↩</span><span title="Edit">✎</span><span title="More">⋯</span></div></div>`; };
+const rail = () => `<nav class="rail">
+  <div class="mode">${I.mail}<span>Mail</span><span class="badge">12</span></div>
+  <div class="mode">${I.cal}<span>Calendar</span></div>
+  <div class="mode on">${I.social}<span>Social</span><span class="badge">3</span></div>
+  <div class="gap"></div><div class="mode">${I.gear}<span>Settings</span></div></nav>`;
+const row = (key, glyph, name, tail = '', cls = '') => `<div class="folder ${cls}" data-s="${key}">${glyph}<span class="name">${name}</span>${tail}<span class="edit" title="Edit view">✎</span></div>`;
+const g = (c) => `<span class="glyph">${c}</span>`;
+const sidebar = (chosen) => `<nav class="sidebar"><div class="side-head"><span>Social</span></div>
+  ${row('home', g('⌂'), 'Home', '<span class="count">8</span>')}
+  ${row('mentions', g('@'), 'Mentions', '<span class="badge">2</span>', 'unread')}
+  ${row('dms', g('✉'), 'Messages', '<span class="badge">1</span>', 'unread')}
+  ${row('drafts', g('✎'), 'Drafts', '<span class="count">2</span>')}
+  <div class="section">Your views</div>
+  ${row('rust', av('', 'R', 'sq').replace('class="av ', 'style="width:18px;height:18px;font-size:10px;background:#7a4fc2" class="av '), 'Rust Audio', '<span class="badge">3</span>', 'unread')}
+  ${row('spec', `<span class="stack">${av('', 'O', 'sq').replace('class="av', 'style="background:#2f8a55" class="av')}${av('', 'R', 'sq').replace('class="av', 'style="background:#7a4fc2" class="av')}</span>`, 'Spec work', '<span class="count">4</span>')}
+  ${row('reading', g('▤'), 'Long reads', '<span class="count">6</span>')}
+  ${row('book', av('', 'B', 'sq').replace('class="av ', 'style="width:18px;height:18px;font-size:10px;background:#c2417a" class="av '), 'Book club')}
+  <div class="line"></div>
+  ${row('all', g('#'), 'All channels')}
+  <div class="folder" style="color:var(--muted)">${g('+')}<span class="name">New view…</span></div>
+</nav>`.replace(`data-s="${chosen}"`, `data-s="${chosen}" data-on`).replace(/class="folder ([^"]*)" data-s="([^"]+)" data-on/, 'class="folder $1 chosen" data-s="$2"');
 
-const chatStream = `<div class="stream">
+const composer = (to, place) => `<div class="composer">${place ? `<div class="to">Posting to <b>${place}</b> ▾</div>` : ''}
+  <div class="box"><span class="t" title="Attach">＋</span><span>Message ${to}</span><span class="t" title="Emoji" style="flex:0">☺</span><button class="send">Send</button></div></div>`;
+
+const rustHead = (tab) => `<div class="head"><div class="head-row"><h2>Rust Audio<span class="sub">forumall.app · 128 members</span></h2>
+  <input class="filter" placeholder="Filter Rust Audio"><button class="ghost">Following ✓</button></div>
+  <div class="tabs">${[['all', 'All'], ['general', '# general<b>3</b>'], ['ann', '▤ announcements'], ['standup', '◖ standup']].map(([k, n]) => `<span class="${k === tab ? 'on' : ''}" data-tab="${k}">${n}</span>`).join('')}</div></div>`;
+
+const generalStream = `<div class="scroll">
   <div class="day">Yesterday</div>
-  ${msg({l:'M', c:'#c2621a', n:'Mira', h:'@mira@forumall.app', t:'16:02', b:'Has anyone tried the new <code>cpal</code> release on PipeWire?'})}
-  ${msg({l:'T', c:'#5b6170', n:'Tomás', h:'@tomas@sonic.example', t:'16:10', b:'Yes. Latency is down to about 5 ms here.',
-    x:'<div class="reacts"><span class="mine">👍 3</span><span>🎉 1</span></div><div class="replies">4 replies · last 09:12</div>'})}
-  ${msg({l:'T', c:'#5b6170', n:'Tomás', h:'', t:'16:11', cls:'cont', b:'<span class="tomb">This message was deleted.</span>'})}
+  ${msg('mira', '16:02', 'Our new rack for the meetup! Took the whole weekend.', { x: '<div class="media two"><div class="pic a" data-zoom></div><div class="pic b" data-zoom></div></div><div class="reacts"><span class="mine">🔥 6</span><span>😍 2</span></div>' })}
+  ${msg('tomas', '16:10', 'Latency test with the new <code>cpal</code> on PipeWire, 256 frames:', { x: '<div class="video"><div class="play">▶</div><div class="bar">0:00<i></i>1:42</div></div><div class="replies" data-thread><span class="stack">' + av('p1') .replace('class="av', 'style="width:18px;height:18px" class="av') + av('p3').replace('class="av', 'style="width:18px;height:18px" class="av') + '</span>4 replies · last today 09:12</div>' })}
   <div class="day">Today</div>
-  ${msg({l:'M', c:'#c2621a', n:'Mira', h:'@mira@forumall.app', t:'09:30', b:'<span class="mention">@joe</span> could you post the mixer benchmark here? <span class="edited">(edited)</span>',
-    x:'<div class="attach"><i></i>bench-results.csv · 14 KB</div>'})}
-  ${msg({l:'J', c:'#2456b8', n:'Joe', h:'@joe@forumall.app', t:'09:41', cls:'pending', b:'On it, give me ten minutes.'})}
+  ${msg('mira', '09:30', '<span class="mention">@joe</span> could you post the mixer benchmark here? <span class="edited">(edited)</span>')}
+  ${msg('joe', '09:41', 'Here it is.', { x: '<div class="file"><i></i>bench-results.csv · 14 KB</div>' })}
+  ${msg('joe', '09:41', 'And the setup:', { cont: true, x: '<div class="media"><div class="pic c" data-zoom></div></div>' })}
 </div>`;
 
-const composer = (to) => `<div class="typing">Mira is typing…</div><div class="composer">
-  <div class="box"><span>Message ${to}</span><button class="send">Send</button></div>
-  <div class="hint"><span>Enter sends · Shift+Enter for a new line · Markdown</span><span style="margin-left:auto">as @joe@forumall.app</span></div></div>`;
+const chat = (thread) => `${rail()}${sidebar('rust')}<div class="main ${thread ? 'thread' : ''}"><div class="pane">${rustHead('general')}${generalStream}${composer('#general')}</div>
+${thread ? `<div class="pane"><div class="head" style="padding-bottom:10px"><div class="head-row"><h2>Thread<span class="sub"># general</span></h2><button class="ghost">✕</button></div></div>
+  <div class="scroll">${msg('tomas', 'Yesterday 16:10', 'Latency test with the new <code>cpal</code> on PipeWire, 256 frames:', { x: '<div class="video" style="height:150px"><div class="play">▶</div></div>' })}
+  <div class="day">4 replies</div>${msg('mira', '16:14', 'Which interface is that?')}${msg('tomas', '16:20', 'A Scarlett 2i2, 48 kHz.')}${msg('ada', '08:55', 'Same numbers on my laptop.')}${msg('joe', '09:12', 'Nice, thanks both.')}</div>
+  ${composer('the thread')}</div>` : ''}</div>`;
 
-const chat = (withThread) => `${sb('chat')}
-<section class="reader">
-  <div class="bar"><h2># general<span class="sub">Rust Audio · forumall.app · 128 members</span></h2>
-    <input class="filter" placeholder="Filter #general"><button class="ghost">Following ✓</button></div>
-  <div class="scroll">${chatStream}</div>
-  ${composer('#general')}
-</section>
-${withThread ? `<aside class="thread-pane">
-  <div class="bar"><h2>Thread<span class="sub"># general</span></h2><button class="ghost">✕</button></div>
-  <div class="scroll"><div class="stream">
-    ${msg({l:'T', c:'#5b6170', n:'Tomás', h:'@tomas@sonic.example', t:'Yesterday 16:10', b:'Yes. Latency is down to about 5 ms here.'})}
-    <div class="day">4 replies</div>
-    ${msg({l:'M', c:'#c2621a', n:'Mira', h:'', t:'16:14', b:'Which buffer size?'})}
-    ${msg({l:'T', c:'#5b6170', n:'Tomás', h:'', t:'16:20', b:'256 frames at 48 kHz.'})}
-    ${msg({l:'A', c:'#2f8a55', n:'Ada', h:'@ada@ofscp.org', t:'08:55', b:'Same numbers on my laptop.'})}
-    ${msg({l:'J', c:'#2456b8', n:'Joe', h:'', t:'09:12', b:'Nice, thanks both.'})}
+const spec = `${rail()}${sidebar('spec')}<div class="main"><div class="pane">
+  <div class="head"><div class="head-row"><h2>Spec work<span class="sub">3 places on 2 providers</span></h2><input class="filter" placeholder="Filter Spec work"></div>
+  <div class="tabs"><span class="on">All</span><span># chat <span class="where">OFSCP Spec</span></span><span>▤ proposals <span class="where">OFSCP Spec</span><b>4</b></span><span># ofscp <span class="where">Rust Audio</span></span></div></div>
+  <div class="scroll"><div class="day">Today</div>
+  ${msg('ada', '08:40', 'Pushed round two of the membership pointers proposal.', { place: 'OFSCP Spec › # chat' })}
+  ${msg('tomas', '09:02', 'Does the Rust provider handle <code>truncated</code> yet?', { place: 'Rust Audio › # ofscp' })}
+  ${msg('ada', '10:05', '<b>Membership pointers for remote groups</b> — a fresh device cannot find the groups its user joined on other providers…', { place: 'OFSCP Spec › ▤ proposals', x: '<div class="replies">Article · 6 replies · open</div>' })}
+  ${msg('joe', '10:12', 'Reading it now.', { place: 'OFSCP Spec › # chat' })}
+  </div>${composer('', 'OFSCP Spec › # chat')}</div></div>`;
+
+const postRow = (o) => `<div class="row ${o.cls || ''}"><div class="top">${av(o.p).replace('class="av', 'style="width:18px;height:18px" class="av')}<b>${o.a}</b><span class="kind">${o.k}</span><time>${o.t}</time></div>
+  <div><div class="title">${o.title}</div><div class="snip">${o.s}</div></div>${o.th ? `<div class="thumb pic ${o.th}"></div>` : ''}</div>`;
+
+const posts = `${rail()}${sidebar('reading')}<div class="main split"><div class="pane">
+  <div class="head" style="padding-bottom:10px"><div class="head-row"><h2>Long reads<span class="sub">articles from 5 places</span></h2><button class="write" title="Write an article">${I.pen}</button></div></div>
+  <div class="scroll" style="padding:0">
+  ${postRow({ cls: 'chosen unread', p: 'p2', a: 'Tomás', k: 'Article', t: '10:05', title: 'Building a ladder filter in Rust', s: 'Part three: the nonlinearity, and why oversampling matters.', th: 'a' })}
+  ${postRow({ cls: 'unread', p: 'p3', a: 'Ada', k: 'Article', t: 'Tue', title: 'Membership pointers for remote groups', s: 'A fresh device cannot find the groups its user joined…' })}
+  ${postRow({ p: 'p1', a: 'Mira', k: 'Memo', t: 'Mon', title: 'Meetup on 4 December', s: 'Library again. Bring a laptop with your setup.', th: 'b' })}
+  ${postRow({ p: 'p3', a: 'Ada', k: 'Article', t: '12 Nov', title: 'Content baseline: CommonMark and an allow-list', s: 'Proposal for the allowed mime set…' })}
   </div></div>
-  <div class="composer"><div class="box"><span>Reply in thread</span><button class="send">Reply</button></div></div>
-</aside>` : ''}`;
+  <div class="pane"><div class="scroll" style="padding:20px 26px"><div class="article">
+    <div class="kind">Article · Synth Makers › ▤ blog</div><h1>Building a ladder filter in Rust</h1>
+    <div class="byline">${av('p2').replace('class="av', 'style="width:24px;height:24px" class="av')}<span><b>Tomás</b> @tomas@sonic.example · Today 10:05 · 8 min read</span></div>
+    <div class="cover pic a"></div>
+    <p>Last time the filter was linear, which is why it sounded polite. A real ladder saturates in every stage, and that is where its character comes from.</p>
+    <p>Each stage gets a <code>tanh</code>. That makes the filter nonlinear, so it can't be solved in one step; we iterate, twice per sample, at four times the sample rate.</p>
+    <div class="video" style="max-width:100%"><div class="play">▶</div><div class="bar">0:00<i></i>3:10</div></div>
+    <div class="reacts" style="margin-top:12px"><span class="mine">👍 12</span><span>🎛 4</span></div>
+    <div class="day">9 replies</div>${msg('mira', '10:40', 'The sweep at 2:10 is lovely. What oversampling did you use?')}
+  </div></div>${composer('— reply to Tomás')}</div></div>`;
 
-const postRow = (o) => `<div class="row ${o.cls || ''}"><div class="top"><b>${o.a}</b><span class="kind">${o.k}</span><time>${o.t}</time></div>
-  <div class="title">${o.title}</div><div class="snip">${o.s}</div>
-  <div style="margin-top:6px">${(o.tags || []).map(t => `<span class="tag">${t}</span>`).join('')}<span class="count">${o.r} replies</span></div></div>`;
+const feedRow = (o) => `<div class="row ${o.cls || ''}"><div class="top"><span class="av sq" style="width:16px;height:16px;font-size:9px;background:${o.c}">${o.g[0]}</span><b>${o.g}</b> › ${o.ch}<time>${o.t}</time></div>
+  <div><div class="title">${o.title}</div><div class="snip">${o.s}</div></div>${o.th ? `<div class="thumb pic ${o.th}"></div>` : ''}</div>`;
+const home = `${rail()}${sidebar('home')}<div class="main split"><div class="pane">
+  <div class="head" style="padding-bottom:10px"><div class="head-row"><h2>Home<span class="sub">posts from 8 followed channels</span></h2></div></div>
+  <div class="scroll" style="padding:0">
+  ${feedRow({ cls: 'chosen unread', c: '#c2621a', g: 'Synth Makers', ch: 'blog', t: '10:05', title: 'Building a ladder filter in Rust', s: 'Tomás: part three of the series…', th: 'a' })}
+  ${feedRow({ cls: 'unread', c: '#7a4fc2', g: 'Rust Audio', ch: 'announcements', t: '08:00', title: 'Meetup on 4 December', s: 'Mira: library again…', th: 'b' })}
+  ${feedRow({ c: '#2f8a55', g: 'OFSCP Spec', ch: 'proposals', t: 'Tue', title: 'Membership pointers for remote groups', s: 'Ada: a fresh device cannot find…' })}
+  </div></div><div class="pane" style="align-items:center;justify-content:center;color:var(--muted)">The post opens here, as in Long reads.</div></div>`;
 
-const posts = `${sb('posts2')}
-<section class="list">
-  <div class="bar"><h2>▤ proposals<span class="sub">OFSCP Spec</span></h2>
-    <button class="write" title="New post" aria-label="New post">${icon.pen}</button></div>
-  <div class="rows">
-    ${postRow({cls:'chosen unread', a:'Ada', k:'Article', t:'10:05', title:'Membership pointers for remote groups', s:'A fresh device cannot find the groups its user joined on other providers. This proposes PUT /api/me/groups/{ref}…', tags:['federation','v0.2'], r:6})}
-    ${postRow({cls:'unread', a:'Seth', k:'Article', t:'Tue', title:'Message create over REST', s:'Today only the WebSocket can post, and only plain chat. A REST create with clientMessageId idempotency…', tags:['messaging'], r:11})}
-    ${postRow({a:'Kai', k:'Memo', t:'Mon', title:'Call signaling, round two', s:'Notes from the call: we need a target participant on offer and answer, and an event to deliver them.', tags:['calls'], r:3})}
-    ${postRow({a:'Ada', k:'Article', t:'12 Nov', title:'Content baseline: CommonMark plus a sanitizer list', s:'Proposal for the allowed mime set and an HTML allow-list…', tags:['content'], r:9})}
-  </div>
-</section>
-<section class="reader">
-  <div class="scroll"><div class="article">
-    <div class="kind">Article · proposals · OFSCP Spec</div>
-    <h1>Membership pointers for remote groups</h1>
-    <div class="byline">${face('A', '#2f8a55').replace('class="face"', 'class="face" style="width:24px;height:24px;font-size:11px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;background:#2f8a55"')}
-      <span><b>Ada</b> @ada@ofscp.org · Today 10:05</span><span class="tag">federation</span><span class="tag">v0.2</span></div>
-    <p>A user who joins a group hosted by another provider leaves no trace at home. On a new device, the client can find their follows and their private messages, but not their groups.</p>
-    <blockquote>Mirror §7.4: <code>PUT /api/me/groups/{groupRef}</code> when joining, <code>DELETE</code> when leaving, and a <code>groups.updated</code> event.</blockquote>
-    <p>Clients write the pointer after the join succeeds at the group's provider. Providers never relay; the pointer is only a list.</p>
-    <div class="reacts"><span class="mine">👍 7</span><span>👀 2</span></div>
-    <div class="day">6 replies</div>
-    <div class="stream">
-      ${msg({l:'S', c:'#c2417a', n:'Seth', h:'@seth@lostconnection.dev', t:'10:40', b:'Agreed. Should leaving be best-effort, or must the client retry?'})}
-      ${msg({l:'A', c:'#2f8a55', n:'Ada', h:'', t:'10:52', b:'Retry, the same way the DM pointer does.'})}
-    </div>
-  </div></div>
-  <div class="composer"><div class="box"><span>Reply to Ada's article</span><button class="send">Reply</button></div>
-    <div class="hint"><span>Members may only reply to articles in this channel</span></div></div>
-</section>`;
+const dmRow = (who, t, s, cls = '', pres = '') => { const [p, n, h] = people[who]; return `<div class="row ${cls}" style="grid-template-columns:auto 1fr"><span style="position:relative;grid-row:1 / span 2">${av(p)}${pres ? `<span class="presence ${pres}" style="position:absolute;right:-1px;bottom:-1px"></span>` : ''}</span>
+  <div class="top" style="grid-column:2"><b>${n}</b><span>${h}</span><time>${t}</time></div><div class="snip" style="grid-column:2">${s}</div></div>`; };
+const dms = `${rail()}${sidebar('dms')}<div class="main split"><div class="pane">
+  <div class="head" style="padding-bottom:10px"><div class="head-row"><h2>Messages</h2><button class="write" title="New message">${I.pen}</button></div></div>
+  <div class="scroll" style="padding:0">${dmRow('mira', '09:48', 'Thanks! Can you send the config too?', 'chosen unread', 'on')}${dmRow('ada', 'Tue', 'You: left a comment on your proposal.', '', 'away')}${dmRow('tomas', '2 Nov', 'See you at the meetup.')}</div></div>
+  <div class="pane"><div class="head" style="padding-bottom:10px"><div class="head-row">${av('p1')}<h2>Mira<span class="sub">@mira@forumall.app · online</span></h2><button class="ghost">Profile</button></div></div>
+  <div class="banner">Not end-to-end encrypted: forumall.app, which hosts you both, can read these messages.</div>
+  <div class="scroll">${msg('joe', '09:44', 'The numbers from this morning, and the rack.', { x: '<div class="file"><i></i>bench-results.csv · 14 KB</div><div class="media"><div class="pic c" data-zoom></div></div>' })}${msg('mira', '09:48', 'Thanks! Can you send the config too?', { x: '<div class="reacts"><span>❤ 1</span></div>' })}</div>
+  ${composer('Mira')}</div></div>`;
 
-const feedRow = (o) => `<div class="row ${o.cls || ''}"><div class="top"><span class="avatar" style="background:${o.c};width:16px;height:16px;font-size:9px">${o.g[0]}</span><b>${o.g}</b> › ${o.ch}<time>${o.t}</time></div>
-  <div class="title">${o.title}</div><div class="snip"><b style="color:var(--ink-2)">${o.a}:</b> ${o.s}</div></div>`;
+const panel = `${chat(false)}<div class="panel"><h3>Edit view</h3>
+  <div class="field"><label>Name</label><input value="Rust Audio"></div>
+  <div class="field"><label>Places</label><div class="chips">
+    <span class="chip">Rust Audio <small>every channel, now and later</small> ✕</span><span class="chip">Synth Makers › ▤ blog <small>sonic.example</small> ✕</span><span class="chip add">+ Add a place</span></div>
+    <p class="hint">Channels and conversations from any account, on any provider. A group means all its channels, including ones made later.</p></div>
+  <div class="field"><label>Show</label><div class="checks"><label><input type="checkbox" checked> Chat</label><label><input type="checkbox" checked> Memos</label><label><input type="checkbox" checked> Articles</label></div></div>
+  <div class="field"><label>Only</label><input placeholder="From, words, tags: from:mira tag:meetup"></div>
+  <div class="field"><label>Read as</label><div class="seg"><span class="on">Stream</span><span>List and reader</span></div></div>
+  <div class="field"><label>Notify me of</label><select><option>Mentions and replies</option><option>Everything</option><option>Nothing</option></select></div>
+  <div class="field"><label>Count</label><select><option>Unread</option><option>None</option></select></div>
+  <div class="actions"><button class="btn red">Delete view</button><button class="btn">Cancel</button><button class="btn filled">Save</button></div></div>`;
 
-const feed = `${sb('feed')}
-<section class="list">
-  <div class="bar"><h2>Home<span class="sub">8 channels followed</span></h2><input class="filter" placeholder="Filter Home" style="width:130px"></div>
-  <div class="rows">
-    ${feedRow({cls:'chosen unread', c:'#2f8a55', g:'OFSCP Spec', ch:'proposals', t:'10:05', title:'Membership pointers for remote groups', a:'Ada', s:'A fresh device cannot find the groups its user joined on other providers…'})}
-    ${feedRow({cls:'unread', c:'#7a4fc2', g:'Rust Audio', ch:'announcements', t:'08:00', title:'Meetup on 4 December', a:'Mira', s:'We are meeting at the library again. Bring a laptop with your setup.'})}
-    ${feedRow({c:'#c2621a', g:'Synth Makers', ch:'blog', t:'Tue', title:'Building a ladder filter in Rust', a:'Kai', s:'Part three of the series: the nonlinearity, and why oversampling matters.'})}
-    ${feedRow({c:'#2f8a55', g:'OFSCP Spec', ch:'proposals', t:'Tue', title:'Message create over REST', a:'Seth', s:'Today only the WebSocket can post, and only plain chat…'})}
-  </div>
-</section>
-<section class="reader"><div class="empty"><b>Membership pointers for remote groups</b>
-  The selected post opens here, as in the channel (same reader as ▤ proposals).<br><br>
-  Home lists posts from every channel you follow, on any provider, newest first. Chat messages stay in their channel; Home shows articles and memos.</div></section>`;
-
-const dmRow = (o) => `<div class="row ${o.cls || ''}"><div class="top"><b>${o.n}</b>${o.p ? `<span class="presence ${o.p}"></span>` : ''}<span>${o.h}</span><time>${o.t}</time></div><div class="snip">${o.s}</div></div>`;
-
-const dms = `${sb('dms')}
-<section class="list">
-  <div class="bar"><h2>Messages</h2><button class="write" title="New message" aria-label="New message">${icon.pen}</button></div>
-  <div class="rows">
-    ${dmRow({cls:'chosen unread', n:'Mira', p:'on', h:'@mira@forumall.app', t:'09:48', s:'Thanks! Can you also send the config you used?'})}
-    ${dmRow({n:'Ada', p:'away', h:'@ada@ofscp.org', t:'Tue', s:'You: I left a comment on your pointers proposal.'})}
-    ${dmRow({n:'Tomás', h:'@tomas@sonic.example', t:'2 Nov', s:'See you at the meetup.'})}
-  </div>
-</section>
-<section class="reader">
-  <div class="bar"><h2>Mira<span class="sub">@mira@forumall.app · online</span></h2><button class="ghost">Profile</button></div>
-  <div class="banner info">Private messages are not end-to-end encrypted: forumall.app, which hosts you both, can read them.</div>
-  <div class="scroll"><div class="stream">
-    ${msg({l:'J', c:'#2456b8', n:'Joe', h:'', t:'09:44', b:'Here are the numbers from this morning.', x:'<div class="attach"><i></i>bench-results.csv · 14 KB</div>'})}
-    ${msg({l:'M', c:'#c2621a', n:'Mira', h:'', t:'09:48', b:'Thanks! Can you also send the config you used?', x:'<div class="reacts"><span>❤ 1</span></div>'})}
-  </div></div>
-  ${composer('Mira')}
-</section>`;
-
-const call = `${sb('call')}
-<section class="reader"><div class="bar"><h2>◖ standup<span class="sub">Rust Audio · call channel</span></h2></div>
-  <div class="empty"><b>A call is on in standup</b>Mira, Tomás and Ada are in it.<br><br>
-  Postrinch doesn't join calls yet. Calls in OFSCP v0.1 can't be joined from another client: the spec doesn't yet say how the connection details reach the others.<br><br>
-  <button class="ghost">Open forumall.app in the browser</button></div></section>`;
-
-function sb(chosen) {
-  const t = document.getElementById('sidebar').content.cloneNode(true);
-  const wrap = document.createElement('div'); wrap.appendChild(t);
-  wrap.querySelectorAll('[data-s]').forEach(e => e.classList.toggle('chosen', e.dataset.s === chosen));
-  return wrap.innerHTML;
-}
+const lightbox = `${chat(false)}<div class="overlay"><span class="x">✕</span><div class="big pic a"></div>
+  <div class="cap"><span>Mira · # general · Yesterday 16:02</span><span>1 of 2</span><span>Save…</span><span>Copy</span><span>Open in browser</span></div></div>`;
 
 const states = {
-  chat:   { label: 'Chat channel', wide: true, html: () => chat(false),
-            note: 'A text channel whose posts are chat messages reads as one stream, the whole width, with the box at the bottom. Hover a message for react, reply in thread, edit (own, until editUntil) and more. Your own message shows faded until the provider confirms it.' },
-  thread: { label: 'Reply thread', wide: true, thread: true, html: () => chat(true),
-            note: '“4 replies” opens the thread beside the stream. Replies are flat under the message they answer (OFSCP has one level of reply).' },
-  posts:  { label: 'Posts channel', html: () => posts,
-            note: 'A channel of articles and memos reads like mail: the list of posts, then the post and its replies in the reader. ✎ writes a new post (where the channel lets you). Here members may only reply.' },
-  feed:   { label: 'Home feed', html: () => feed,
-            note: 'Home is the feed of channels you follow, from every provider, built by Postrinch (OFSCP providers keep no feed). Follow or unfollow from a channel\'s header.' },
-  dms:    { label: 'Private messages', html: () => dms,
-            note: 'Messages lists your conversations, newest first. The banner says who can read them, as the spec asks clients to. The dot is the other person\'s presence.' },
-  call:   { label: 'Call channel (not in v1)', wide: true, html: () => call,
-            note: 'If calls are out of v1, call channels still show, with who is in a call, and say plainly that Postrinch can\'t join yet.' },
+  chat: { label: 'A view, chat with media', html: () => chat(false), note: 'The rail at the far left holds the modes; Social is the third. The sidebar is your views. "Rust Audio" is a view of one group, so its channels are tabs. Pictures show large, videos play in place (rinch-video), and everyone has an avatar where they set one. Click a picture.' },
+  thread: { label: 'Thread', html: () => chat(true), note: 'Replies open beside the stream, the thread\'s own composer at its foot.' },
+  spec: { label: 'A mixed view', html: () => spec, note: '"Spec work" gathers channels from two groups on two providers. In "All", each message says where it is from, and the composer says where it posts (the last place you posted, or the place of the message you reply to; ▾ changes it).' },
+  posts: { label: 'Articles, list and reader', html: () => posts, note: 'A view read as list and reader, like mail: "Long reads" shows only articles, from five places. Articles have a cover, pictures and videos inline, and replies below.' },
+  home: { label: 'Home', html: () => home, note: 'Home is a built-in view: posts from every channel you follow. It can be edited like any view.' },
+  dms: { label: 'Messages', html: () => dms, note: 'Private messages, newest first, with presence on each face and the encryption banner the spec asks for.' },
+  panel: { label: 'Edit a view', html: () => panel, note: '✎ on a view\'s row (shown on hover, as in Mail) opens its one panel: name, places from any account and provider, which kinds, a filter, how it reads, notices and its count.' },
+  lightbox: { label: 'Picture, full size', html: () => lightbox, note: 'A picture opens over the window; arrows move through the message\'s pictures.' },
 };
 const strip = document.getElementById('states');
 function show(name) {
   const st = states[name], w = document.getElementById('window');
-  w.className = 'window' + (st.wide ? ' wide' : '') + (st.thread ? ' thread' : '');
-  w.innerHTML = st.html();
-  document.getElementById('note').textContent = st.note;
+  w.innerHTML = st.html(); document.getElementById('note').textContent = st.note;
   strip.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.name === name));
-  w.querySelectorAll('[data-s]').forEach(e => e.onclick = () => {
-    const map = { chat: 'chat', posts2: 'posts', posts: 'posts', feed: 'feed', dms: 'dms', call: 'call' };
-    if (map[e.dataset.s]) show(map[e.dataset.s]);
-  });
-  w.querySelectorAll('.replies').forEach(e => e.onclick = () => show('thread'));
+  const go = { rust: 'chat', spec: 'spec', reading: 'posts', home: 'home', dms: 'dms' };
+  w.querySelectorAll('[data-s]').forEach(e => e.onclick = () => go[e.dataset.s] && show(go[e.dataset.s]));
+  w.querySelectorAll('.edit').forEach(e => e.onclick = (ev) => { ev.stopPropagation(); show('panel'); });
+  w.querySelectorAll('[data-thread]').forEach(e => e.onclick = () => show('thread'));
+  w.querySelectorAll('[data-zoom]').forEach(e => e.onclick = () => show('lightbox'));
+  w.querySelectorAll('.overlay .x').forEach(e => e.onclick = () => show('chat'));
 }
-Object.keys(states).forEach(name => {
-  const b = document.createElement('button'); b.textContent = states[name].label; b.dataset.name = name;
-  b.onclick = () => show(name); strip.appendChild(b);
-});
+Object.keys(states).forEach(name => { const b = document.createElement('button'); b.textContent = states[name].label; b.dataset.name = name; b.onclick = () => show(name); strip.appendChild(b); });
 show('chat');
 </script>
 </body>

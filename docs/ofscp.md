@@ -1,273 +1,361 @@
-# OFSCP: groups, channels and private messages
+# OFSCP: groups, channels, posts and private messages
 
-**Status: proposed (2026-11-26), waiting on Joe's decisions (the end of this file). No code yet.**
+**Status: planned, 2026-11-26.** Joe's decisions are recorded at the end of this file. One
+question is still open: whether an agent's posts go out at once.
 
 Postrinch becomes a client of OFSCP, the Open Federated Social Communications Protocol
 (`~/dev/ofscp`, v0.1): forums, blogs, group chat and private messages, with one account usable
-from any client. It sits beside mail and calendar as a third kind of account, local-first like
-the rest: what Postrinch has seen is kept on the machine, searchable, and reachable by agents.
+from any client. It sits beside mail and calendar as a third kind of account. It is
+local-first like the rest: what Postrinch has seen is kept on the machine, searchable, and
+reachable by agents. It is also meant to be **a first-class tool for writing memos and
+articles**, with pictures and video from the first wave. Building it is also a way to push the
+spec forward: where the spec falls short, the fix goes into the spec (below, "Working with the
+spec").
 
-Mockups: [design/mockups/ofscp-add-account.html](../design/mockups/ofscp-add-account.html) and
-[design/mockups/ofscp-social.html](../design/mockups/ofscp-social.html).
-Spec questions found on the way: [docs/research/ofscp-spec-questions.md](research/ofscp-spec-questions.md).
+Mockups:
+- [ofscp-social.html](../design/mockups/ofscp-social.html): the window, views, media, threads,
+  articles, Home, messages, editing a view, a picture at full size.
+- [ofscp-authoring.html](../design/mockups/ofscp-authoring.html): the composer with pasted and
+  dropped files, dragging files over the window, the article and memo editor, preview, the
+  profile picture.
+- [ofscp-add-account.html](../design/mockups/ofscp-add-account.html): adding an account.
+
+Spec questions: [docs/research/ofscp-spec-questions.md](research/ofscp-spec-questions.md).
 
 ## OFSCP in one page, as a client sees it
 
-- **An account is a handle on a provider**, `joe@forumall.app`. The part after the @ *is* the
-  provider's address; discovery is `GET https://{domain}/.well-known/ofscp-provider`.
-- **There is no OAuth and there are no access tokens.** The client sends the handle and password
-  to the home provider once (`/api/auth/login`), gets a one-use token valid for 300 s, and with it
-  registers an Ed25519 public key it made for this device (`POST /api/auth/device-keys`, answer
-  `key_id`). From then on **every request to every provider is signed with that key** (custom
-  `X-OFSCP-*` headers over a fixed seven-line string). Keys never expire; signing out is revoking
-  one's own key; a password reset revokes them all. Requests more than ±300 s off the provider's
-  clock are refused; a `503` is retried with a fresh signature.
-- **Federation is client-driven fan-out.** The home provider never relays. The client talks
-  straight to whichever provider holds a thing, with the same key: a group's channels on the
-  group's provider (REST and its own WebSocket), a private message to the *recipient's* provider
-  (then a pointer at home). Remote providers check signatures by fetching the user's keys from
-  the user's home.
-- **Real time** is one WebSocket per provider (`wss://{domain}/api/ws`), signed in by answering a
-  challenge. Channel events come by subscription; on reconnect the client re-subscribes with each
-  channel's last cursor and the provider replays what was missed, or says `truncated` and the
-  client backfills over REST. Delivery is at-least-once (dedupe by id). Private messages,
-  notifications and read markers come on the home socket without subscribing and are never
-  replayed: re-read them over REST after a reconnect.
-- **Things:** groups (join policy, tier, roles, an action→roles permission map), channels (only
-  `text` or `call`), messages (`message` = chat line, `memo` = short post, `article` = long post,
-  in `text/plain`, `text/markdown` or html), one level of replies (`reference.id`), edits,
-  deletes as tombstones, reactions (no server counts), attachments (uploaded first to
-  `/api/media`), private conversations between two people (`dmId` = hash of both handles),
-  contacts, follows (pointers only: **the home feed is built by the client**), notifications and
-  read markers (both only for channels on the home provider), presence, privacy settings.
-  Forum and blog are not channel types: a "blog" is a text channel where only some roles may post
-  articles; a "forum" one where members may only reply.
-- **Calls** are WebRTC peer to peer with the provider only coordinating, and the spec does not yet
-  define how offers and answers reach the other participants (spec question 2).
-- **No end-to-end encryption** in v0.1; the spec asks clients to say so.
+- **An account is a handle on a provider**, such as `joe@forumall.app`. The part after the @
+  *is* the provider's address. Discovery is `GET https://{domain}/.well-known/ofscp-provider`.
+- **There is no OAuth, and there are no access tokens.**
+  - The client sends the handle and password to the home provider once (`/api/auth/login`)
+    and gets back a one-use token valid for 300 s.
+  - With that token it registers an Ed25519 public key it made for this device
+    (`POST /api/auth/device-keys`), and the provider answers with a `key_id`.
+  - From then on, **every request to every provider is signed with that key**, in custom
+    `X-OFSCP-*` headers over a fixed seven-line string.
+  - Keys never expire. Signing out means revoking your own key; a password reset revokes them
+    all.
+  - Providers refuse requests more than ±300 s off their clock. A `503` is retried with a
+    fresh signature.
+- **Federation is driven by the client.** The home provider never relays anything.
+  - The client talks straight to whichever provider holds a thing, with the same key: a
+    group's channels on the group's provider (REST, plus that provider's own WebSocket); a
+    private message on the *recipient's* provider, followed by a pointer at home.
+  - Remote providers check a signature by fetching the user's keys from the user's home
+    provider.
+- **Real time** is one WebSocket per provider (`wss://{domain}/api/ws`), signed in by answering
+  a challenge.
+  - Channel events come by subscription. On reconnect the client subscribes again with each
+    channel's last cursor. The provider replays what was missed, or answers `truncated`, and
+    then the client backfills over REST.
+  - Delivery is at-least-once, so the client deduplicates by id.
+  - Private messages, notifications and read markers arrive on the home socket without a
+    subscription, and are never replayed. After a reconnect the client reads them again over
+    REST.
+- **Things in the protocol:**
+  - Groups, each with a join policy, a tier, roles and a map of which roles may do which
+    actions.
+  - Channels, only `text` or `call`.
+  - Messages of three types: `message` (a chat line), `memo` (a short post) and `article`
+    (a long post). Content is `text/plain`, `text/markdown` or HTML.
+  - One level of replies, edits, deletes left as tombstones, and reactions (the server keeps
+    no counts).
+  - Attachments, uploaded first to `/api/media`.
+  - Private conversations between two people. A conversation's `dmId` is a hash of both
+    handles.
+  - Contacts, and follows. A follow is only a pointer, so the client builds the feed itself.
+  - Notifications and read markers, both for channels on the home provider only.
+  - Presence and profiles with avatars.
+- **Forum and blog are not channel types.** They come from the message types and the
+  channel's permissions: a blog is a channel where only some roles may post articles.
+- **No end-to-end encryption** in v0.1, and the spec asks clients to say so.
 
-Forumall (`~/dev/forumall`) is the reference provider and web client. It shows the wire mechanics
-well but was finished in June and predates several spec changes (DM pointers, read markers,
-notifications, mentions), so the spec decides behaviour and Forumall is for interop testing.
+There are two other implementations. Forumall (`~/dev/forumall`) is the reference provider
+and web client, but it predates several spec changes. re-ofscp (`~/dev/re-ofscp`) is Joe's
+Rust provider, on rhypedb, still being built. In both cases the spec decides behaviour.
+
+## Working with the spec
+
+- **The OFSCP oracle session owns the spec.** It works in `~/dev/ofscp` and writes the spec
+  PRs; how to find it is in re-ofscp's CLAUDE.md, "Protocol questions". When a protocol
+  question isn't answered by the spec plus its open PRs, ask the oracle. Each question gives
+  the section, the concrete case, and the default Postrinch would pick. **Postrinch never
+  ships a private guess.** Code that depends on an open spec PR names it in a comment.
+- **The spec work runs alongside the build.** These features are in the first wave, and each
+  needs the spec to change first (numbers refer to the questions file):
+  - posting memos, articles, replies and attachments (1, 5);
+  - content format and sanitizing (14);
+  - media upload and access (16);
+  - finding remote groups on a new device (3);
+  - live reactions and edits on your own private messages (6);
+  - mentions on other providers (8);
+  - the echo of `clientMessageId` (28).
+- **Interop:** Forumall to start. re-ofscp, Joe's own provider, as it grows. And the spec
+  itself, through shared vectors.
 
 ## Where it fits in Postrinch
 
+### The window: a modes rail
+
+The whole window gets **a narrow rail at the far left**: Mail, Calendar and Social, each an
+icon with its name under it and a badge of what's unread, with Settings at its foot. It
+replaces the Mail | Calendar switch at the top of the sidebar. It is its own PR, done early,
+and it changes mail and calendar too.
+
 ### Accounts and sign-in
 
-- **An OFSCP account is its own kind, not a mail `Account`.** It gets its own store type,
-  `SocialAccount`, keyed by the canonical handle (`joe@forumall.app`, lower-cased). Mail's
-  `Account` is keyed by `EmailAddress` and every place that matches on `Provider` assumes labels,
-  folders and an outbox of mail; a third `Provider` arm would be "not applicable" almost
-  everywhere. Settings › Accounts lists both kinds together; the agents file names either.
-- **Adding one** is a fourth choice in Add account, "Groups and messages" (mockup states 1–5):
-  the handle, discovery shown before the password, the password sent once, a key made and
-  registered as "Postrinch on {hostname}", then the first sync. Nothing is kept until every step
-  passes. **The password is never stored**; the private key is, in the OS keychain
-  (`Keychain::OFSCP`, service `postrinch.ofscp`, keyed by handle), with the `key_id` in the store.
-- **Needs to sign in** (key revoked: WebSocket close 4003, or 401 on a fresh signature) is a state
-  of the account, shown on it, as for mail. Signing in again makes a new key.
-- **Clock skew** is detected from the provider's `Date` header and kept per provider as an
-  offset used when signing; if it is past the limit anyway, the account says so plainly
-  (mockup "Clock is off").
-- **Making an account** happens on the provider's site, in the browser (registration modes,
-  invites and terms differ per provider).
-- **Sign out and remove** revokes this computer's key at the provider, then deletes the keychain
-  entry and everything stored for the account.
+- **An OFSCP account is its own kind** (decided): a `SocialAccount`, keyed by the lower-cased
+  handle. It is not a third `Provider` on mail's `Account`. Settings › Accounts lists both
+  kinds together, and the agents file names either kind.
+- **Adding one** is a fourth choice in Add account, "Groups and messages":
+  1. Enter the handle.
+  2. Postrinch shows what discovery found before it asks for the password.
+  3. The password is sent once.
+  4. Postrinch makes a key and registers it as "Postrinch on {hostname}".
+  5. The first sync runs.
+
+  Nothing is kept until every step passes. **The password is never stored.** The private key
+  is, in the OS keychain (service `postrinch.ofscp`, keyed by handle), and the `key_id` goes in
+  the store.
+- **Needs to sign in** (the key was revoked: WebSocket close 4003, or a 401 on a fresh
+  signature) is a state of the account, as it is for mail. Signing in again makes a new key.
+- **Clock skew:** Postrinch learns each provider's offset from its `Date` header and signs
+  with it. If the offset is past the limit anyway, the account says so plainly.
+- **Making an account** happens on the provider's site, in the browser.
+- **The profile** has a name, an about line and an avatar. The picture can be chosen,
+  dropped or pasted, and is then cropped and uploaded.
+- **Sign out and remove** revokes this computer's key, then deletes the keychain entry and
+  everything stored for the account.
+
+### Organizing: views, not providers
+
+Places are organized the way mail is: **by the person's own views, across every account and
+provider**, not by provider or group.
+
+- **A place** is a channel or a private conversation.
+- **A view** is a saved selection of places, with optional filters:
+  - kinds (chat, memo, article);
+  - words, `from:` and `tag:`;
+  - how it reads (a stream, or a list with a reader);
+  - its notices (everything, mentions and replies, or nothing);
+  - its count.
+
+  A group in a view means all of that group's channels, including ones made later.
+- **Built-in views:** Home (posts from followed channels), Mentions, Messages (private
+  conversations), Drafts, and, at the foot, All channels (every place Postrinch knows, to
+  browse, join and follow from). Built-in views can be edited like any other.
+- **Your views** come next, in your order. ✎ on a row opens the view's one panel, as in Mail.
+- **Joining a group offers a view for it.** The person can keep it, or add the group to a view
+  they already have.
+- **A view with several places** shows them as tabs in its header, with "All" merging them.
+  In "All", each message says where it comes from, and the composer says where it posts: the
+  last place posted to, or the place of the message being answered. ▾ changes it.
+- **One view type for both modes?** Not yet. Mail's `SavedView` is a query over mail; a social
+  view is a selection of places plus filters. They share the panel's design and the sidebar
+  behaviour, not the type. Merging them is a later question, once both are used.
+
+### Reading
+
+- **Streams** (chat), loosely after Slack and Discord without copying them:
+  - messages grouped by author, with avatars;
+  - a toolbar on hover: react, reply in a thread, edit (your own, until `editUntil`), and
+    more;
+  - "N replies" opens the thread beside the stream;
+  - your own message shows faded until the provider confirms it.
+- **Lists and a reader** (posts) read like mail. An article has its cover, its title,
+  pictures and videos inline, and its replies below.
+- **Media:**
+  - Pictures show large, and open full size over the window.
+  - Videos play in place through `rinch-video` (libmpv).
+  - Other files show as cards.
+  - Media is fetched through the signed client and kept in the content-addressed blob store,
+    as mail attachments are.
+- **Private messages** show the encryption banner the spec asks for, and presence on each
+  avatar.
+- **Call channels** show who is in a call, and say that Postrinch can't join yet (calls come
+  in a later wave).
+
+### Writing
+
+- **The composer:**
+  - Markdown, with buttons for the common marks.
+  - Pictures pasted with Ctrl+V (`rinch-clipboard`), files dropped onto the window
+    (`ondropfiles`) or picked with ＋ all go to a tray above the text, each with ✕.
+  - Uploads start at once, to the provider the message is going to, and show their progress.
+    Send waits for them.
+  - Enter sends; Shift+Enter starts a new line.
+- **The article and memo editor** opens in the main pane:
+  - Article or Memo, and where it goes (▾ lists the places that allow that kind).
+  - Article: a cover, a title, tags, and the body in rinch's rich-text editor
+    (`rinch-editor-core` already reads and writes Markdown), with pictures and videos placed
+    at the caret.
+  - Memo: a title, plain text and pictures.
+  - Drafts save as you type and are listed in Drafts. Preview shows the post exactly as a
+    reader will see it.
+  - Publish is the rightmost button.
+- **Editing a published post** uses the same editor.
 
 ### Crates
 
 | Crate | Holds | New? |
 |---|---|---|
 | `postrinch-sync-core` | What every sync engine shares, moved out of `postrinch-sync` unchanged: `SecretStore`, `Keychain`, `MemorySecrets`, the Linux default-keyring step, `Backoff`. | new (extracted) |
-| `postrinch-ofscp` | The protocol, with no store and no Postrinch types. `wire/`: serde types for every schema used; `sign/`: the canonical string, Ed25519 signing, WS-auth string, dmId; `http/`: a signed reqwest client per provider (discovery, auth bootstrap, device keys, the endpoints, problem-details errors, 503 retry, clock offset); `ws/`: tokio-tungstenite socket (challenge auth, ping/pong, close codes, subscribe/resume, correlation of commands to answers). Usable outside Postrinch. | new |
-| `postrinch-ofscp-fake` | A fake OFSCP provider on loopback for tests, like `postrinch-mailtest`: REST and WS for what the client uses, several providers at once for federation, and switchable faults (`truncated`, duplicates, 503, 4003, clock skew, dropped sockets). | new, tests only |
-| `postrinch-social` | The OFSCP sync engine: accounts and sign-in, one session per (account, provider), initial sync, live events, resume and backfill, the outbox of changes, private-message merging, mention detection. Writes the store; reports `SocialEvent`s. | new |
+| `postrinch-ofscp` | The protocol, with no store and no Postrinch types. `wire/`: serde types; `sign/`: the canonical string, Ed25519 signing, the WS-auth string, dmId; `http/`: a signed reqwest client per provider (discovery, sign-in and device keys, endpoints, media upload with progress, problem-details errors, 503 retry, clock offset); `ws/`: the socket (challenge auth, ping, close codes, subscribe/resume, correlation). | new |
+| `postrinch-ofscp-fake` | A fake provider on loopback for tests, like `postrinch-mailtest`: several providers at once, signatures checked as the spec says, switchable faults. | new, tests only |
+| `postrinch-social` | The sync engine: accounts and sign-in, a session per (account, provider), first sync, live events, resume and backfill, the outbox, media upload and fetch, private-message merging, mention scanning. | new |
 | `postrinch-store` | New types (below), a format bump, and the reads and writes. | changed |
-| `postrinch-render` | `social.rs`: message content to rinch DOM. Plain text linkified (`quotes::linked`); `text/markdown` through `pulldown-cmark` to HTML; HTML through the same `rinch_html::clean` and picture policy as mail (`notes.rs` path). | changed |
-| `postrinch-commands` | `social/`: places, pages, threads, feed, search, post/reply/edit/delete/react (into the outbox), read markers, follows. | changed |
-| `postrinch-agents`, `postrinch-mcp` | `social_tools.rs` router and wire calls (below). | changed |
-| `postrinch` | The Social mode, its sidebar and panes, add-account steps, settings page, notices. | changed |
-| `postrinch-cli` | `add-ofscp`, `ofscp sync`, `ofscp post` for development. | changed |
+| `postrinch-render` | `social.rs`: plain text linkified; Markdown through `pulldown-cmark`; HTML through `rinch_html::clean` and the picture policy, as mail is; mentions marked. | changed |
+| `postrinch-commands` | `social/`: views, places, pages, threads, search, drafts, posting and changes (into the outbox), read markers, follows, the profile. | changed |
+| `postrinch-agents`, `postrinch-mcp` | `social_tools.rs` and its wire calls. | changed |
+| `postrinch` | The modes rail, the Social mode, the composer and editor, the add-account steps, the settings page, notices. | changed |
+| `postrinch-cli` | `add-ofscp`, `ofscp sync`, `ofscp post`, for development. | changed |
 
-Why a separate engine crate rather than a module of `postrinch-sync`: that crate is mail-shaped
-(`MailSync`, passes on a timer, IMAP IDLE) and already large, while OFSCP is long-lived sockets
-to many providers. They share only the keychain and backoff, hence `postrinch-sync-core`. The app
-starts `Social::keep_connected` on the same sync thread and tokio runtime as `keep_in_sync`.
+- **Why a separate engine crate:** `postrinch-sync` is shaped by mail (passes on a timer,
+  IMAP IDLE) and is already large, while OFSCP keeps sockets open to many providers. The two
+  share only the keychain and backoff, hence `postrinch-sync-core`. The app starts
+  `Social::keep_connected` on the same sync thread and tokio runtime as `keep_in_sync`.
+- **Shared with re-ofscp:** re-ofscp already has `re-ofscp-types` (wire types, no I/O, builds
+  for wasm). One Rust crate for the wire types, signing and dmId, used by the server and the
+  client, would keep them honest with each other. Proposed: build `postrinch-ofscp`'s I/O-free
+  core so that it can move into that shared crate, and agree it with re-ofscp's session
+  before PR 2.
 
 ### Storage (rhypedb)
 
-Following the calendar's precedent: indexed fields for what is filtered and sorted on, the
-protocol object kept whole as JSON, keys `"<account>\u001f<id>"`, cascades on account delete.
+The same pattern as the calendar: indexed fields for whatever is filtered or sorted on, the
+protocol object kept whole as JSON, keys of the form `"<account>\u001f<id>"`, and cascades
+when an account is deleted.
 
 | Type | Key | Indexed / linked | JSON |
 |---|---|---|---|
 | `SocialAccount` | handle | state | profile, settings, `key_id` |
-| `SocialProvider` | domain | — | discovery document, capabilities, clock offset, fetched at |
-| `SocialGroup` | acct + group URI | account link, provider domain | group, my role, how found (joined here, a follow, an invite) |
-| `SocialPlace` | acct + channel URI or dmId | account, group (optional), kind (`chat`/`posts`/`call`/`dm`), followed, last activity | channel or conversation, resume cursors (two for a DM, one per provider), read marker, notify mode |
-| `SocialMessage` | acct + place + message id | place link, author, type, created, parent id, deleted, `mentions_me`, unread | the message whole (attachments, metadata), aggregated reactions |
-| `SocialMessageContent` | as message | `search_text @fulltext(english)` | — |
+| `SocialProvider` | domain | — | discovery document, capabilities, clock offset |
+| `SocialGroup` | acct + group URI | account, provider | group, my role, how it was found |
+| `SocialPlace` | acct + channel URI or dmId | account, group (optional), kind, followed, last activity | channel or conversation, resume cursors, read marker |
+| `SocialView` | view id | order | name, places and groups, filters, read as, notices, count |
+| `SocialMessage` | acct + place + message id | place, author, type, created, parent, deleted, `mentions_me`, unread | the message whole, reactions summed |
+| `SocialMessageContent` | as message | `search_text @fulltext` | — |
+| `SocialMedia` | URL | blob hash, fetched | mime, size, width, height, duration, poster |
+| `SocialDraft` | draft id | account, place, updated | kind, title, Markdown body, tags, cover, attachments (local files and uploaded ones) |
 | `SocialNotification` | acct + id | account, created, read | the notification |
-| `SocialOutbox` | acct + client id | account, place, seq | the change (post, reply, edit, delete, react, unreact, read marker, follow, DM pointer), attempts, last error |
+| `SocialOutbox` | acct + client id | account, place, seq | the change (post, reply, edit, delete, react, read marker, follow, DM pointer, profile), attempts, last error |
 
-- A place is a channel or a private conversation, so messages, the stream, the composer and
-  search are one code path. A channel's **kind** is derived for display: `posts` where the
-  channel's permissions allow memos/articles and not chat, or most of its messages are posts;
-  `call` for call channels; otherwise `chat`. The person can switch a channel's display.
-- Message stays small (the mail rule, guarded by a test the same way); content lives apart.
-- **History depth:** a place keeps what has been fetched: the newest page (50) when first seen,
-  everything live after that, older pages on scroll. No full-history download.
-- Presence and typing are kept in memory only.
-- The pending outbox is laid over every read, as mail's outbox is, so a message being sent shows
-  in the stream (faded) and sync never undoes a pending change.
+- Messages stay small (mail's rule, and the same guard test). Media bytes live in the blob
+  store.
+- **History:** a place keeps the newest page when first seen, everything live after that, and
+  older pages when you scroll (decided).
+- Presence and typing indicators are kept in memory only.
+- The pending outbox is laid over every read, so a message being sent shows up, and sync never
+  undoes a pending change.
 
 ### Sync engine (`postrinch-social`)
 
-- **Sessions.** One per (account, provider) that hosts something the account keeps: the home
-  provider always, plus each provider with a joined group or a followed channel. A session owns
-  the signed HTTP client and the socket. Reconnect backs off 0.5 s doubling to 30 s with jitter;
-  4003 stops the session and marks the account Needs to sign in; 4001 retries.
-- **After every (re)connect:** subscribe each place on that provider with its stored cursor;
-  `truncated` → REST backfill from the cursor forward; the home session also re-reads private
-  conversations, notifications, read markers and follows over REST, since those are not replayed.
-- **Writes are idempotent** (upsert by id), because delivery is at-least-once.
-- **The outbox** sends in order per place, over the socket (`message.create` with a
-  `clientMessageId`, edits, deletes, reactions) or REST, and survives disconnects and restarts
-  (Forumall's client drops commands while disconnected; Postrinch retries them). A sent message
-  is matched to the provider's copy by `clientMessageId`, else by the command's correlation id.
-- **Private messages:** sending posts to the recipient's provider, then puts the conversation
-  pointer at home; reading merges both providers' pages by `createdAt`, deduped by id, with a
-  cursor per side.
-- **Mentions:** notifications from the home provider; for channels elsewhere, which produce no
-  notification (spec question 8), Postrinch scans incoming messages for `@handle` and
-  `@handle@domain` itself.
-- **Unread:** read markers where the home provider keeps them; local markers for remote channels
-  (they cannot sync between devices; spec question 18).
-- **Groups on other providers** are remembered locally. On a new computer they are found again
-  only through follows and invites, until the spec adds membership pointers (spec question 3).
-- `SocialEvent` (started, synced, failed, needs sign-in, message arrived, sent, send failed)
-  feeds the window as `SyncEvent` does: sidebar status lines, the `revision` bump, notices.
-
-### The window
-
-- **A third mode, Social, beside Mail and Calendar** (mockup ofscp-social). Its sidebar: Home
-  (the feed), Mentions, Messages (private), then each group with its provider's domain and its
-  channels (`#` chat, `▤` posts, `◖` call), then "Join a group…". Counts are unread; badges are
-  mentions and private messages.
-- **Chat places** take the list and reader's width as one stream with the composer at the
-  bottom; "N replies" opens the thread beside it. Hover tools: react, reply in thread, edit
-  (own, until `editUntil`), more (delete, copy link, open in browser).
-- **Posts places** read like mail: the list of posts, then the post and its replies in the
-  reader; ✎ writes a new post where the channel allows it.
-- **Home** lists articles and memos from every followed channel, newest first, opening in the
-  same reader. Follow and unfollow are on the channel's header (one affordance, on the object).
-- **Messages** lists conversations, newest activity first; a conversation is a chat place with
-  the encryption banner the spec asks for and the other person's presence.
-- **Call channels** show who is in a call and say plainly that Postrinch can't join (v1).
-- **Composer:** plain text with Markdown; Enter sends, Shift+Enter breaks a line; spelling as in
-  mail; attachments when the spec lets a message carry them (spec question 1).
-- **Notices** (`notify.rs`): mentions, replies to me, private messages, per place's notify mode
-  (all / mentions / none; the provider's setting where it keeps one).
-- **Settings › Accounts** shows the account (mockup state 5): provider, groups, connected
-  providers, the key's name, presence, Profile…, Privacy…, Sign out and remove.
+- **Sessions:** one per (account, provider) that hosts something the account keeps. The home
+  provider always has one, and so does every provider with a joined group or a followed
+  channel.
+  - Reconnects back off from 0.5 s, doubling to 30 s, with jitter.
+  - Close code 4003 marks the account as needing to sign in. Close code 4001 retries.
+- **After every reconnect:** subscribe each place with its stored cursor. A `truncated`
+  answer means a REST backfill. The home session also reads private conversations,
+  notifications, read markers and follows again.
+- **Writes are idempotent** (upserts by id).
+- **The outbox:**
+  - Sends in order, per place.
+  - Survives dropped sockets and restarts.
+  - Matches a sent message to the provider's copy by `clientMessageId`.
+  - Media is uploaded before the message that carries it.
+- **Private messages:** sending goes to the recipient's provider, then the pointer is written
+  at home. Reading merges both providers by `createdAt`, deduplicated by id.
+- **Mentions:** the home provider's notifications cover home channels. For channels elsewhere,
+  Postrinch scans for the handle itself, until the spec covers them.
+- **Unread:** the provider's read markers at home; local markers elsewhere.
+- **Groups on other providers** are remembered locally. On a new computer they come back
+  through follows and invites, until the spec adds membership pointers (questions 3 and 29,
+  in progress with the oracle).
 
 ### Agents (MCP)
 
-New router `social_tools.rs`, one call each through the running app, everything a third party
-wrote under `untrusted`:
+**Every action in Social is an agent tool (Joe: "everything"):**
+- Reads: views, places, pages, threads, search, conversations, mentions, drafts.
+- Writing: drafts, posts, replies, private messages, reactions, edits, deletes.
+- Read markers, follows, joining, and the views themselves.
 
-- Reads, at once: `list_groups`, `list_places`, `read_place` (a page, newest first, `before`),
-  `read_social_thread`, `search_social`, `list_conversations`, `list_mentions`.
-- Changes that stay with the person, at once: `mark_read`, `follow` / `unfollow` (a follow is a
-  private pointer).
-- **Everything others would see is a proposal** the person sends or not, as mail is:
-  `propose_post` (a post, a reply, a private message; opens in the composer with the agent's
-  reason), `propose_reaction`, and edits and deletes of the person's own messages.
-- The agents file's reach names social accounts as it names mail accounts.
+Everything a third party wrote goes under `untrusted`.
+
+**Open:** whether an agent's posts, replies, private messages and reactions go out at once,
+or as proposals the person sends (how mail works today). See the question at the end.
 
 ## Build order: one PR each
 
-Each is a reviewable unit with its tests; independent review and green CI before merging.
+Each PR is a reviewable unit with its tests, and merges after an independent review and green
+CI. Some PRs (marked *spec*) wait for the spec to define something first.
 
 | # | PR | Needs |
 |---|---|---|
-| 0 | This design: `docs/ofscp.md`, spec questions, mockups, DESIGN.md section | — |
-| 1 | Extract `postrinch-sync-core` from `postrinch-sync` (no behaviour change) | — |
-| 2 | `postrinch-ofscp` core: wire types, signing, WS-auth string, dmId; golden vectors | — |
-| 3 | `postrinch-ofscp-fake`: the fake provider, several at once, faults | 2 |
-| 4 | `postrinch-ofscp` transport: signed HTTP client, discovery, sign-in and device keys, WebSocket client | 2, 3 |
-| 5 | Store: the social types, format bump, reads and writes | — |
-| 6 | Render: social content (plain, Markdown via `pulldown-cmark`, HTML), mentions | — |
-| 7 | `postrinch-social` I: add, sign in again, sign out; first sync (me, groups, places, follows); CLI `add-ofscp`, `ofscp sync` | 1, 4, 5 |
-| 8 | `postrinch-social` II: live sessions, subscribe/resume/backfill, read markers, notifications, mentions, presence | 7 |
-| 9 | `postrinch-social` III: the outbox (post, reply, edit, delete, react, read, follow) | 8 |
-| 10 | `postrinch-social` IV: private messages (send to their provider + pointer, merged reading) | 9 |
-| 11 | Commands: `social/` | 5, 6 |
-| 12 | Window: add account and the settings page | 7, 11 |
-| 13 | Window: Social mode, sidebar, chat stream, composer, thread pane | 9, 11 |
-| 14 | Window: posts places and Home | 13 |
-| 15 | Window: private messages | 10, 13 |
-| 16 | Notices and unread counts | 8, 13 |
-| 17 | Agents: social tools and proposals | 11 |
-| 18 | Joining: invite links and join requests (if in v1) | 9, 13 |
-| 19 | Demo seed, screenshots, DESIGN.md brought up to date | 15 |
+| 1 | Modes rail for the whole window; the sidebar's Mail \| Calendar switch removed | — |
+| 2 | `postrinch-sync-core` extracted (no behaviour change) | — |
+| 3 | `postrinch-ofscp` core: wire types, signing, the WS-auth string, dmId; golden vectors (agree sharing with re-ofscp first) | — |
+| 4 | `postrinch-ofscp-fake` | 3 |
+| 5 | `postrinch-ofscp` transport: signed HTTP, discovery, sign-in and device keys, media upload, WebSocket | 3, 4 |
+| 6 | Store: the social types, a format bump | — |
+| 7 | Render: social content (plain, Markdown, HTML), mentions | — |
+| 8 | Engine I: add, sign in again, sign out; first sync; CLI | 2, 5, 6 |
+| 9 | Engine II: live sessions, resume and backfill, read markers, notifications, mentions, presence | 8 |
+| 10 | Engine III: the outbox (chat messages, edits, deletes, reactions, read, follow) | 9 |
+| 11 | Engine IV: media, both ways (upload with progress, fetch and cache, avatars) | 10 |
+| 12 | Engine V: private messages | 10 |
+| 13 | Commands: `social/` (views, places, pages, threads, search, drafts, changes, profile) | 6, 7 |
+| 14 | Window: add account, settings page, profile and avatar | 8, 13 |
+| 15 | Window: Social mode, views in the sidebar, the view panel, tabs | 1, 13 |
+| 16 | Window: streams, threads, the composer (paste, drop, tray, uploads) | 10, 11, 15 |
+| 17 | Window: pictures and video (inline, full size, rinch-video), file cards | 11, 16 |
+| 18 | Window: lists and the reader, Home | 15 |
+| 19 | Window: private messages | 12, 16 |
+| 20 | Editor: articles and memos, drafts, preview, publishing (*spec*, question 1) | 13, 17 |
+| 21 | Replies and attachments on posts sent (*spec*, question 1) | 16 |
+| 22 | Notices and unread counts, on the rail too | 9, 15 |
+| 23 | Agents: the social tools | 13 |
+| 24 | Joining: invite links, join requests, All channels | 10, 15 |
+| 25 | Demo seed, visual tests, interop CI, DESIGN.md | 19 |
 
-Can run side by side: 1, 2, 5 and 6 from the start; 3 after 2; 11 after 5 and 6; 17 after 11;
-14, 15 and 16 after 13.
+- **In parallel from the start:** 1, 2, 3, 6 and 7, plus the spec work with the oracle.
+- **After 13:** 23. **After 15:** 18, 22 and 24.
+- **Packaging:** `rinch-video` needs libmpv in every release (Linux, Windows, macOS). This is
+  checked with the release work before PR 17.
 
 ## Tests
 
-- **Protocol:** the spec's signing vectors (`~/dev/ofscp/tests/`, never run upstream until now)
-  and Forumall's golden vectors (`packages/shared`), copied as fixtures with their source named;
-  the dmId example from the spec; every wire type round-trips the spec's example JSON.
-- **Transport and engine against the fake provider:** sign-in and key registration; signatures
-  checked by the fake exactly as the spec says; reconnect and resume; `truncated` → backfill;
-  duplicate events; 503 with a fresh signature; 4003 → Needs to sign in; skew; two providers
-  for a remote group and a cross-provider private conversation; outbox retried after a dropped
-  socket and a restart; pending matched to confirmed.
-- **Store and commands:** as the mail tests do (tempdir store, seeded accounts), including the
-  "message stays small" guard and cascades on removal.
-- **Window:** the demo seed gains social accounts; rinch visual tests for the stream, posts and
-  messages panes.
-- **Interop with Forumall:** `#[ignore]`d tests run by a CI job like the GreenMail one (bun, two
-  Forumall instances on loopback for federation, users registered by the test). Forumall lags
-  the spec, so these cover sign-in, signing, groups, chat and resume, not DM pointers, read
-  markers or notifications.
+- **Protocol:** the spec's signing vectors, Forumall's golden vectors, and the spec's dmId
+  example, as fixtures that name their source. Every wire type round-trips the spec's example
+  JSON.
+- **Against the fake provider:**
+  - sign-in and key registration, with signatures checked by the fake;
+  - reconnect and resume; `truncated` followed by a backfill; duplicate events;
+  - a `503` retried with a fresh signature; close 4003; clock skew;
+  - two providers, for a remote group and for a private conversation;
+  - the outbox retried after a dropped socket and after a restart;
+  - an upload interrupted part-way; media fetched once and then served from the cache.
+- **Store and commands:** like the mail tests, including the guard that keeps messages small,
+  cascades, and drafts surviving a restart.
+- **Window:** social accounts in the demo seed, and rinch visual tests for the rail, streams,
+  the editor and media.
+- **Interop:** `#[ignore]`d tests run by a CI job, like the GreenMail job, against Forumall (two
+  instances, for federation), and against re-ofscp once it serves the protocol.
 
-## What waits on the spec
+## Decisions (Joe, 2026-11-26)
 
-Postrinch works around none of these; the feature waits for the spec (Joe contributes there).
+1. **v1 scope:** as proposed, but organized by the person's views across providers, like
+   mail, not by provider or group. Also in the first wave: full multimedia (pictures, videos,
+   drag and drop, pasting pictures and videos, avatars), and writing memos, articles, replies
+   and attachments, pushed through the spec with the oracle.
+2. **Calls:** a later wave (rinch already has WebRTC: `rinch-rtc`, `rinch-av`).
+3. **Postrinch is a first-class tool for writing memos and articles.** Replies and attachments
+   too. The spec gets fixed for them; the client doesn't work around it.
+4. **The mode is called Social.** A modes rail at the far left replaces the Mail | Calendar
+   switch.
+5. **A separate account type.**
+6. **Agents: everything** (open: whether posts go out at once or as proposals).
+7. **Forumall is a start, not the interop target;** the spec is pushed as Postrinch is built.
+8. **History:** the newest page, then live, with older pages on scroll.
 
-- **Posting anything but a plain chat line** (memos, articles, replies, attachments): the
-  WebSocket `message.create` has no `type`, `reference` or `attachments`, and there is no REST
-  create (question 1). Forumall's client sends extra fields the spec doesn't define.
-- **Calls:** signaling is undefined (question 2).
-- **Finding remote groups on a new computer** (question 3).
-- **Seeing reactions and edits others make to my private messages live** (question 6).
-- **Mentions on other providers** come from Postrinch's own scan until the spec defines them
-  (question 8).
-
-## Decisions for Joe
-
-1. **v1 scope.** Proposed in: sign in to an existing account; groups and channels on any
-   provider; reading everything (chat, memos, articles, replies, reactions, attachments);
-   sending chat messages, edits, deletes and reactions; private messages; follows and Home;
-   mentions, notifications, unread counts, presence; agents' tools; joining by invite link.
-   Proposed out: calls; making an account in the app; running groups (creating groups and
-   channels, roles, invites, approving join requests); contacts; editing privacy settings beyond
-   presence; guest accounts.
-2. **Video calls: out of v1** (recommended). The spec can't be implemented for calls yet
-   (question 2), and they need a full WebRTC stack in Rust with a peer connection to every other
-   participant. Call channels still show who's in a call.
-3. **Posting memos, articles, replies and attachments:** wait for the spec to define them in
-   `message.create` (recommended, and Joe can drive the fix), or send Forumall's undefined
-   extra fields now.
-4. **The third mode, "Social"**, beside Mail and Calendar, rather than groups mixed into the
-   mail sidebar. The name is open ("Social", "Groups", "Chat").
-5. **A separate account type** (`SocialAccount`) rather than a third `Provider` on mail's
-   `Account`.
-6. **Agents:** reads, read markers and follows at once; posts, replies, private messages,
-   reactions, edits and deletes as proposals.
-7. **Interop CI against Forumall** with bun in a separate job, knowing Forumall lags the spec.
-8. **History depth:** newest page plus everything live, older on scroll, rather than
-   downloading channels' whole history.
+Slack and Discord are the inspiration for the window, not something to copy.
