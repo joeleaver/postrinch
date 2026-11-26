@@ -91,6 +91,13 @@ fn a_store_of_the_last_release_is_upgraded_and_keeps_its_mail() {
         key_id: Some("dk_1".into()),
     };
     store.put_social_account(&account).unwrap();
+    // The last release's info has no outbox counter: the first change
+    // takes the first number.
+    let change = &serde_json::json!({ "profile": {} });
+    let queued = store
+        .queue_social_change(&account.actor, "c1", None, change, &[], 1)
+        .unwrap();
+    assert_eq!(queued.seq, 1);
     drop(store);
     let store = Store::open(dir.path()).expect("the upgraded store opens again");
     assert_eq!(recorded_format(&store), CURRENT);
