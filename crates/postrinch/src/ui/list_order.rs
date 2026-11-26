@@ -5,6 +5,7 @@
 //! The order lives only here, never also in the view panel.
 
 use postrinch_model::ListOrder;
+use rinch::core::reactive::on_cleanup;
 use rinch::prelude::*;
 
 use crate::state::State;
@@ -42,6 +43,9 @@ fn order_icon(order: ListOrder) -> Icon {
 #[component]
 pub fn order_menu(state: State) -> NodeHandle {
     let open = state.ordering;
+    // Taken down while open (Ctrl+, to Settings, say), the menu never
+    // closes itself: put the flag back, or the window's keys stay off.
+    on_cleanup(move || open.set(false));
     let shown = Memo::new(move || state.shown_order());
     rsx! {
         DropdownMenu {
@@ -107,8 +111,8 @@ pub const CSS: &str = r#"
     border: 0; border-radius: 6px; background: transparent; color: var(--ink);
     font: inherit; font-size: 13px; text-align: left; cursor: pointer;
 }
-.order-choice:focus { background: var(--hover); }
-.order-choice:hover { background: var(--hover); }
+.order-menu .order-choice:focus { background: var(--hover); }
+.order-menu .order-choice:hover { background: var(--hover); }
 .order-choice.on { color: var(--accent-ink); font-weight: 600; }
 .order-tick { width: 12px; flex-shrink: 0; }
 .order-choice-icon { display: flex; color: var(--muted); }
