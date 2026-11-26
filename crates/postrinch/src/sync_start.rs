@@ -158,22 +158,25 @@ pub fn start(
     Ok((handle, google_off))
 }
 
-/// Google sign-in, from this copy's OAuth client file.
+/// Google sign-in, with this computer's OAuth client file or else the
+/// client this build carries ([`ClientConfig::find`]).
 fn google() -> Result<Arc<GoogleAuth>, SyncOff> {
-    let Some(path) = ClientConfig::default_path() else {
-        return Err(SyncOff::new(
-            "Google accounts are off: this computer has no settings folder.",
-            "no configuration directory",
-        ));
+    let path = ClientConfig::default_path();
+    let config = match ClientConfig::find(path.as_deref()) {
+        Ok(Some(config)) => config,
+        Ok(None) => {
+            return Err(SyncOff::new(
+                "Google accounts are off: Google sign-in is not set up on this computer.",
+                "no client file and no built-in client",
+            ));
+        }
+        Err(e) => {
+            return Err(SyncOff::new(
+                "Google accounts are off: the Google sign-in settings could not be read.",
+                e.to_string(),
+            ));
+        }
     };
-    let config = ClientConfig::load(&path).map_err(|e| {
-        let said = if path.exists() {
-            "Google accounts are off: the Google sign-in settings could not be read."
-        } else {
-            "Google accounts are off: Google sign-in is not set up on this computer."
-        };
-        SyncOff::new(said, format!("{}: {e}", path.display()))
-    })?;
     let auth = GoogleAuth::new(config, Arc::new(Keychain::GOOGLE), ImapSecrets::keychain())
         .map_err(|e| {
             SyncOff::new(

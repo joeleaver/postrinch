@@ -21,13 +21,14 @@ pub struct Context {
 }
 
 impl Context {
-    /// Google sign-in, from the client file.
+    /// Google sign-in, with the client file --client names, or else the
+    /// one in the config directory or the client this build carries.
     pub fn auth(&self) -> Result<Arc<GoogleAuth>> {
-        let path = match &self.client {
-            Some(path) => path.clone(),
-            None => ClientConfig::default_path().ok_or("no config directory; pass --client")?,
+        let config = match &self.client {
+            Some(path) => ClientConfig::load(path)?,
+            None => ClientConfig::find(ClientConfig::default_path().as_deref())?
+                .ok_or("Google sign-in is not set up on this computer; pass --client")?,
         };
-        let config = ClientConfig::load(&path)?;
         Ok(Arc::new(GoogleAuth::new(
             config,
             Arc::new(Keychain::GOOGLE),
@@ -56,7 +57,7 @@ impl Context {
     }
 
     /// The sync for every account. Without Google sign-in (no client
-    /// file), Google accounts are off and say so when synced; IMAP
+    /// file and none built in), Google accounts are off and say so when synced; IMAP
     /// accounts work all the same, unless --client named a file that
     /// cannot be read.
     pub fn mail(&self) -> Result<MailSync> {

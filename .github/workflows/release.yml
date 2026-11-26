@@ -36,8 +36,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Postrinch's own Google client is built in (google/config.rs). A
+      # release without it could not sign in to Google, so a tag needs it.
       - name: Build (release)
-        run: cargo build --release --locked -p postrinch -p postrinch-mcp -p postrinch-cli
+        env:
+          POSTRINCH_GOOGLE_CLIENT: ${{ secrets.POSTRINCH_GOOGLE_CLIENT }}
+        run: |
+          if [ -z "$POSTRINCH_GOOGLE_CLIENT" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "POSTRINCH_GOOGLE_CLIENT is not set: gh secret set POSTRINCH_GOOGLE_CLIENT < the client's JSON" >&2
+            exit 1
+          fi
+          cargo build --release --locked -p postrinch -p postrinch-mcp -p postrinch-cli
 
       # A tag must name the version the programs carry, or every installed
       # copy would offer the same update again after restarting into it.
