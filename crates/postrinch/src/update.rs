@@ -145,8 +145,19 @@ pub fn install() -> Result<String, String> {
         );
     }
     let dir = postrinch_update::install(&ICONS)?;
+    // On Windows the Start-menu entry is the Setup's to make (and its
+    // uninstaller's to take away); this puts the programs where they keep
+    // themselves current.
+    let start = if cfg!(windows) {
+        format!(
+            "Start it as {}; the Setup also puts it in the Start menu.",
+            dir.join("postrinch.exe").display()
+        )
+    } else {
+        "Start it from the menu, or as `postrinch`.".to_owned()
+    };
     Ok(format!(
-        "Installed Postrinch {} in {}. Start it from the menu, or as `postrinch`.",
+        "Installed Postrinch {} in {}. {start}",
         postrinch_update::CURRENT,
         dir.display()
     ))

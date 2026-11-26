@@ -166,6 +166,7 @@ section.band + section.band { border-top: 1px solid var(--line); }
 .download {
   display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start;
 }
+.dl-boxes { display: grid; gap: 18px; }
 .dl-box {
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 24px; box-shadow: var(--shadow);

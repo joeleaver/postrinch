@@ -146,6 +146,7 @@ impl Files for DiskFiles {
 }
 
 /// Whether `path` itself is a symbolic link (not what it points to).
+#[cfg(unix)]
 fn is_link(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
 }
@@ -172,18 +173,31 @@ fn open_unfollowed(path: &Path) -> io::Result<File> {
         })
 }
 
-/// Opens `path` to read, refusing it when it is a link. Without
-/// `O_NOFOLLOW` the name is looked at first and then opened, which
-/// leaves a race: something that can write in the profile's folder could
-/// put a link there between the two, and the open would follow it.
-/// Postrinch looks for Thunderbird only on Linux ([`crate::INSTALLS`]),
-/// so this is only a build elsewhere's.
-#[cfg(not(unix))]
+/// Opens `path` to read, refusing it when it is a link. Opened with
+/// `FILE_FLAG_OPEN_REPARSE_POINT`, a symbolic link or junction is opened
+/// itself rather than followed, and the handle then says what it is, so
+/// nothing can be swapped in between. Any other reparse point (a cloud
+/// file's placeholder, say) is not a plain file. `FILE_FLAG_BACKUP_SEMANTICS`
+/// lets a folder open too, to be refused as not plain rather than failing
+/// as a file the system would not let be read.
+#[cfg(windows)]
 fn open_unfollowed(path: &Path) -> io::Result<File> {
-    if is_link(path) {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    };
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if metadata.file_type().is_symlink() {
         return Err(refused(path, Refusal::Link));
     }
-    File::open(path)
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(refused(path, Refusal::NotPlain));
+    }
+    Ok(file)
 }
 
 #[cfg(test)]
@@ -242,10 +256,30 @@ mod tests {
         );
     }
 
+    /// A symbolic link at `link` to the file `target`. On Windows that
+    /// takes Developer Mode or an administrator (CI's runners are one).
+    fn link_file(target: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(target, link).expect(
+            "a symbolic link: on Windows, turn on Developer Mode or run as an administrator",
+        );
+    }
+
+    /// A symbolic link at `link` to the folder `target`.
+    fn link_dir(target: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(target, link).expect(
+            "a symbolic link: on Windows, turn on Developer Mode or run as an administrator",
+        );
+    }
+
     /// A profile folder holding a readable passwords file: had a link
     /// been followed, its open would succeed and the read would return
     /// the file, so the test below fails unless the link is refused.
-    #[cfg(unix)]
     fn decoy() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let logins = dir.path().join("logins.json");
@@ -253,13 +287,12 @@ mod tests {
         (dir, logins)
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_linked_settings_file_is_refused_without_opening_what_it_points_to() {
         let (dir, logins) = decoy();
         for name in SETTINGS_FILES {
             let path = dir.path().join(name);
-            std::os::unix::fs::symlink(&logins, &path).unwrap();
+            link_file(&logins, &path);
             let e = DiskFiles.read(&path).unwrap_err();
             assert_eq!(refusal(&e), Some(Refusal::Link), "{name}: {e}");
             assert_eq!(
@@ -276,12 +309,11 @@ mod tests {
         assert!(DiskFiles.read(&prefs).is_ok());
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_dangling_link_is_refused_not_missing() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("user.js");
-        std::os::unix::fs::symlink(dir.path().join("gone"), &path).unwrap();
+        link_file(&dir.path().join("gone"), &path);
         let e = DiskFiles.read(&path).unwrap_err();
         assert_eq!(refusal(&e), Some(Refusal::Link));
     }
@@ -300,7 +332,6 @@ mod tests {
         assert_eq!(refusal(&e), Some(Refusal::NotPlain));
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_linked_profile_folder_is_read() {
         let dir = tempfile::tempdir().unwrap();
@@ -308,7 +339,7 @@ mod tests {
         std::fs::create_dir(&real).unwrap();
         std::fs::write(real.join("prefs.js"), "user_pref(\"a\", 1);").unwrap();
         let linked = dir.path().join("linked");
-        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        link_dir(&real, &linked);
         let text = DiskFiles.read(&linked.join("prefs.js")).unwrap();
         assert_eq!(text.as_deref(), Some("user_pref(\"a\", 1);"));
     }

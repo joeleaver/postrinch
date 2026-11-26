@@ -28,14 +28,14 @@
 <main id="main">
   <div class="hero">
     <div class="wrap">
-      <span class="badge">Early preview · Linux</span>
+      <span class="badge">Early preview · Linux and Windows</span>
       <h1>Your mail, on your computer, open to your agents.</h1>
       <p class="lede">Postrinch is a fast desktop mail client for Gmail and any IMAP account, written in Rust, with your calendar beside it and search that runs on your own machine. Everything you can do in the window, Claude can do too, through MCP, and nothing that leaves your account goes without your say.</p>
       <div class="actions">
-        <a class="btn btn-primary" href="#download">Download for Linux</a>
+        <a class="btn btn-primary" href="#download">Download</a>
         <a class="btn btn-quiet" href="https://github.com/joeleaver/postrinch">Source on GitHub</a>
       </div>
-      <p class="fineprint" data-release-line>Linux x86-64 · keeps itself up to date</p>
+      <p class="fineprint" data-release-line>Linux and Windows, x86-64 · keeps itself up to date</p>
       <figure class="shot shot-hero">
         <picture><source media="(prefers-color-scheme: dark)" srcset="/assets/shots/mail-dark.png"><img src="/assets/shots/mail.png" width="1440" height="900" alt="The Postrinch window: views in the sidebar, the inbox in the middle, a conversation open on the right."></picture>
       </figure>
@@ -154,8 +154,8 @@
           <p>Mail, people, labels and views are stored and searched by <a href="https://github.com/joeleaver/rhypedb">rhypedb</a>, an embedded database in Rust that runs inside Postrinch, not beside it.</p>
         </div>
         <div class="card">
-          <h3>Windows and macOS<span class="tag">Coming</span></h3>
-          <p>Linux first. The same app, packaged for the others, is next.</p>
+          <h3>macOS<span class="tag">Coming</span></h3>
+          <p>Linux and Windows today. The same app, packaged for the Mac, is next.</p>
         </div>
       </div>
     </div>
@@ -182,20 +182,32 @@
       <h2>Download</h2>
       <p class="intro">Postrinch is an early preview. It works every day for the person who makes it, and it will change as it grows.</p>
       <div class="download">
-        <div class="dl-box" data-download>
-          <h3>Linux</h3>
-          <p class="dl-version" data-version>The latest release, from GitHub</p>
-          <a class="btn btn-primary" data-package href="https://github.com/joeleaver/postrinch/releases/latest">Download for Linux (x86-64)</a>
-          <ul class="dl-files">
-            <li><a data-signature href="https://github.com/joeleaver/postrinch/releases/latest">Signature</a> · <a href="/postrinch-update-key.pem">release key</a></li>
-            <li><a href="https://github.com/joeleaver/postrinch/releases">All releases</a></li>
-          </ul>
-          <p class="fineprint dl-req">64-bit x86 with glibc 2.39 or newer (Ubuntu 24.04, Fedora 40, Debian 13 or later), GTK 3, libxdo (the <code>libxdo3</code> or <code>xdotool</code> package), a keyring (GNOME Keyring or KDE Wallet). Spellcheck uses your language's Hunspell dictionary if one is installed (such as <code>hunspell-en-us</code>).</p>
+        <div class="dl-boxes">
+          <div class="dl-box" data-download="linux">
+            <h3>Linux</h3>
+            <p class="dl-version" data-version>The latest release, from GitHub</p>
+            <a class="btn btn-primary" data-package href="https://github.com/joeleaver/postrinch/releases/latest">Download for Linux (x86-64)</a>
+            <ul class="dl-files">
+              <li><a data-signature href="https://github.com/joeleaver/postrinch/releases/latest">Signature</a> · <a href="/postrinch-update-key.pem">release key</a></li>
+              <li><a href="https://github.com/joeleaver/postrinch/releases">All releases</a></li>
+            </ul>
+            <p class="fineprint dl-req">64-bit x86 with glibc 2.39 or newer (Ubuntu 24.04, Fedora 40, Debian 13 or later), GTK 3, libxdo (the <code>libxdo3</code> or <code>xdotool</code> package), a keyring (GNOME Keyring or KDE Wallet). Spellcheck uses your language's Hunspell dictionary if one is installed (such as <code>hunspell-en-us</code>).</p>
+          </div>
+          <div class="dl-box" data-download="windows">
+            <h3>Windows</h3>
+            <p class="dl-version" data-version>The latest release, from GitHub</p>
+            <a class="btn btn-primary" data-package href="https://github.com/joeleaver/postrinch/releases/latest">Download for Windows (x86-64)</a>
+            <ul class="dl-files">
+              <li><a data-signature href="https://github.com/joeleaver/postrinch/releases/latest">Signature</a> · <a href="/postrinch-update-key.pem">release key</a></li>
+              <li><a data-also href="https://github.com/joeleaver/postrinch/releases/latest">The programs as a zip</a> (<a data-also-signature href="https://github.com/joeleaver/postrinch/releases/latest">signature</a>)</li>
+            </ul>
+            <p class="fineprint dl-req">64-bit Windows 10 or 11. The Setup installs Postrinch for you alone, with no administrator needed, and your sign-ins go in Windows' Credential Manager. The Setup isn't code-signed yet, so the first time Windows SmartScreen may warn about it: choose More info, then Run anyway.</p>
+          </div>
         </div>
         <div>
           <ol class="steps">
-            <li><strong>Unpack and install.</strong> It installs into your home folder and your app menu, no root needed:
-<pre><code>mkdir postrinch &amp;&amp; tar -xzf <span data-file>postrinch-&lt;version&gt;-linux-x86_64.tar.gz</span> -C postrinch
+            <li><strong>Install.</strong> On Windows, run the Setup: it puts Postrinch in your Start menu. On Linux, unpack it and install it into your home folder and your app menu, no root needed:
+<pre><code>mkdir postrinch &amp;&amp; tar -xzf <span data-file="linux">postrinch-&lt;version&gt;-linux-x86_64.tar.gz</span> -C postrinch
 ./postrinch/postrinch --install</code></pre></li>
             <li><strong>Add your accounts</strong> in Settings › Accounts, and connect an agent in Settings › Agents if you like.</li>
           </ol>
@@ -203,9 +215,9 @@
             <summary>Check the download's signature</summary>
 <pre><code>openssl pkeyutl -verify -rawin -pubin \
   -inkey postrinch-update-key.pem \
-  -in <span data-file>postrinch-&lt;version&gt;-linux-x86_64.tar.gz</span> \
-  -sigfile <span data-file>postrinch-&lt;version&gt;-linux-x86_64.tar.gz</span>.sig</code></pre>
-            <p class="fineprint">The same key is built into Postrinch, which refuses any update it doesn't verify.</p>
+  -in <span data-file="linux">postrinch-&lt;version&gt;-linux-x86_64.tar.gz</span> \
+  -sigfile <span data-file="linux">postrinch-&lt;version&gt;-linux-x86_64.tar.gz</span>.sig</code></pre>
+            <p class="fineprint">Every file has its signature beside it, the Windows Setup and zip too: name the one you downloaded. The same key is built into Postrinch, which refuses any update it doesn't verify.</p>
           </details>
         </div>
       </div>

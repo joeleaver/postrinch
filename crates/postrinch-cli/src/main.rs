@@ -21,7 +21,8 @@ use tracing_subscriber::prelude::*;
     about = "Postrinch from the command line"
 )]
 struct Cli {
-    /// Where the store lives. Defaults to `<data dir>/postrinch`.
+    /// Where the store lives. Defaults to `<local data dir>/postrinch`
+    /// (`Store::default_root`).
     #[arg(long, global = true)]
     data_dir: Option<PathBuf>,
     /// The Google OAuth client file. Defaults to

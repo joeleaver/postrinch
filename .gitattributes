@@ -1,0 +1,5 @@
+# Every text file is checked out as it is stored, with LF line ends, on every
+# system. Git for Windows (and GitHub's Windows runners) would otherwise turn
+# them into CRLF, changing the bytes of the mail fixtures and of everything
+# `include_str!` builds in. Binary files are left alone.
+* text=auto eol=lf

@@ -2,7 +2,7 @@
 //! new window started, and (at its start) the old one waited out.
 
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::install::{managed_dir, replace_file, write_marker};
 use crate::{PROGRAMS, STAGE, WAIT_ENV, exe, newer_than_current, staged_version};
@@ -20,30 +20,12 @@ pub fn at_start() {
     {
         // SAFETY: called first in main, before any other thread exists.
         unsafe { std::env::remove_var(WAIT_ENV) };
-        let deadline = Instant::now() + WAIT;
-        while process_alive(pid) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(100));
+        if !crate::process::wait_for_exit(pid, WAIT) {
+            tracing::warn!("the window this one replaces (pid {pid}) is still open");
         }
     }
     if let Some(dir) = managed_dir() {
         clean_up(&dir);
-    }
-}
-
-fn process_alive(pid: u32) -> bool {
-    if cfg!(target_os = "linux") {
-        Path::new(&format!("/proc/{pid}")).exists()
-    } else if cfg!(windows) {
-        std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
-            .unwrap_or(false)
-    } else {
-        std::process::Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .status()
-            .is_ok_and(|s| s.success())
     }
 }
 

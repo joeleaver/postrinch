@@ -1,7 +1,7 @@
 //! Finding profiles and their accounts in the fixture homes under
 //! `tests/fixtures`: a usual Thunderbird with several profiles (one with
 //! a damaged prefs.js, one whose folder is gone), the Snap's and the
-//! Flatpak's layouts, all three at once, and a profile at an absolute
+//! Flatpak's layouts, Windows', all three Linux ones at once, and a profile at an absolute
 //! path. And that nothing but the settings files is ever asked for.
 
 mod support;
@@ -170,6 +170,26 @@ fn the_snap_layout() {
 }
 
 #[test]
+fn the_windows_layout() {
+    let home = fixture("windows");
+    let found = find(&home);
+    assert_eq!(found.profiles.len(), 1);
+    let profile = &found.profiles[0];
+    assert_eq!(profile.install, Install::Native);
+    assert!(profile.default, "named by its Install section");
+    assert_eq!(
+        profile.dir,
+        home.join("AppData/Roaming/Thunderbird")
+            .join("Profiles/w1.default-release")
+    );
+    let imap = profile.accounts[0].incoming.as_ref().unwrap();
+    assert_eq!(
+        (imap.host.as_str(), imap.port, imap.security),
+        ("imap.acme.co", 993, Security::Tls)
+    );
+}
+
+#[test]
 fn the_flatpak_layout() {
     let found = find(&fixture("flatpak"));
     assert_eq!(found.profiles.len(), 1);
@@ -288,13 +308,12 @@ fn each_problem_names_its_file() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_linked_user_js_is_refused_and_the_profile_says_so() {
     let home = one_profile("user_pref(\"a\", 1);\n", None);
     let dir = home.path().join(".thunderbird/one");
     std::fs::write(dir.join("logins.json"), "{}").unwrap();
-    std::os::unix::fs::symlink(dir.join("logins.json"), dir.join("user.js")).unwrap();
+    support::link_file(&dir.join("logins.json"), &dir.join("user.js"));
     let found = find(home.path());
     assert_eq!(
         found.profiles[0].problems,
@@ -305,13 +324,12 @@ fn a_linked_user_js_is_refused_and_the_profile_says_so() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_linked_profiles_ini_is_refused() {
     let home = one_profile("user_pref(\"a\", 1);\n", None);
     let root = home.path().join(".thunderbird");
     std::fs::rename(root.join("profiles.ini"), root.join("real.ini")).unwrap();
-    std::os::unix::fs::symlink(root.join("real.ini"), root.join("profiles.ini")).unwrap();
+    support::link_file(&root.join("real.ini"), &root.join("profiles.ini"));
     let found = find(home.path());
     assert!(found.profiles.is_empty());
     assert_eq!(
@@ -348,7 +366,7 @@ fn only_settings_files_are_ever_asked_for() {
                 .exists()
         );
     }
-    for home in ["normal", "snap", "flatpak"] {
+    for home in ["normal", "snap", "flatpak", "windows"] {
         let asked = asked_for(&fixture(home));
         assert!(!asked.is_empty());
         for path in &asked {
@@ -374,6 +392,7 @@ fn only_settings_files_are_ever_asked_for() {
             tb.join("b3.broken/user.js"),
             tb.join("w2.work/prefs.js"),
             tb.join("w2.work/user.js"),
+            normal.join("AppData/Roaming/Thunderbird/profiles.ini"),
             normal.join("snap/thunderbird/common/.thunderbird/profiles.ini"),
             normal.join(".var/app/org.mozilla.Thunderbird/.thunderbird/profiles.ini"),
         ]

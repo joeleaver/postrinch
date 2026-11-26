@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 postrinch-model = { workspace = true }
 postrinch-rules = { workspace = true }
+dirs = "7"
 rhypedb-engine = { workspace = true }
 rhypedb-schema = { workspace = true }
 serde = { workspace = true }

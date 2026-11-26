@@ -2,7 +2,8 @@
 //! into Postrinch (docs/imap.md, "Adding an account").
 //!
 //! [`find`] reads `profiles.ini` in each place Thunderbird keeps its
-//! profiles ([`INSTALLS`]: its own package, the Snap and the Flatpak),
+//! profiles ([`INSTALLS`]: on Linux its own package, the Snap and the
+//! Flatpak; on Windows its installer's),
 //! then each profile's `prefs.js` and, over it, `user.js`, and maps their
 //! prefs to [`Account`]s. That is all it reads. Thunderbird's saved
 //! passwords and certificates (`logins.json`, `key4.db`, `key3.db`,
@@ -28,7 +29,8 @@ pub use profiles::{ProfileEntry, profiles_in};
 /// How Thunderbird is installed, which says where its profiles are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Install {
-    /// Its own package or a distribution's: `~/.thunderbird`.
+    /// Its own package or a distribution's: `~/.thunderbird` on Linux;
+    /// on Windows its installer's, `%APPDATA%\Thunderbird`.
     Native,
     /// The Snap: `~/snap/thunderbird/common/.thunderbird`.
     Snap,
@@ -37,8 +39,13 @@ pub enum Install {
 }
 
 /// Where each installation keeps `profiles.ini`, under the home folder.
-pub const INSTALLS: [(Install, &str); 3] = [
+/// Every place is looked in on every system: one that is not there is
+/// passed over, and a home laid out for another system is read the same.
+/// On Windows that is the usual `%APPDATA%`, the roaming profile's
+/// `AppData\Roaming`.
+pub const INSTALLS: [(Install, &str); 4] = [
     (Install::Native, ".thunderbird"),
+    (Install::Native, "AppData/Roaming/Thunderbird"),
     (Install::Snap, "snap/thunderbird/common/.thunderbird"),
     (
         Install::Flatpak,

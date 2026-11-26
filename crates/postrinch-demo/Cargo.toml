@@ -18,7 +18,6 @@ postrinch-rules = { workspace = true }
 postrinch-store = { workspace = true }
 postrinch-sync = { workspace = true }
 base64 = "0.22"
-dirs = "7"
 jiff = "0.2"
 thiserror = { workspace = true }
 

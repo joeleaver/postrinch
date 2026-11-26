@@ -14,6 +14,16 @@ pub fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// A symbolic link at `link` to the file `target`. On Windows that takes
+/// Developer Mode or an administrator (CI's runners are one).
+pub fn link_file(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(target, link)
+        .expect("a symbolic link: on Windows, turn on Developer Mode or run as an administrator");
+}
+
 /// The disk, noting each file asked for, in order.
 #[derive(Default)]
 pub struct Recording {
