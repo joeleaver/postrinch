@@ -59,6 +59,11 @@ impl ViewEdit {
         }
     }
 
+    /// Whether the panel is changing the saved view `key`.
+    pub fn is_of(&self, key: &str) -> bool {
+        self.kind == Editing::View && self.draft.key == key
+    }
+
     /// The view to list while the panel is open: the draft, when its
     /// search reads. A search lists through search instead.
     pub fn listed(&self) -> Option<SavedView> {
@@ -344,5 +349,22 @@ impl State {
                 v.query = format!("{} {term}", v.query).trim().to_owned();
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_panel_is_of_a_view_only_while_changing_that_saved_view() {
+        let mut inbox = blank("in:inbox");
+        inbox.key = "inbox".into();
+        let edit = ViewEdit::new(inbox.clone(), Editing::View);
+        assert!(edit.is_of("inbox"));
+        assert!(!edit.is_of("sent"));
+        // A search or a view not made yet is no saved view's, whatever its key.
+        assert!(!ViewEdit::new(inbox.clone(), Editing::Search).is_of("inbox"));
+        assert!(!ViewEdit::new(inbox, Editing::New).is_of("inbox"));
     }
 }

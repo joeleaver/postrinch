@@ -19,29 +19,13 @@ html, body { margin: 0; height: 100%; background: transparent; }
 .logo-line { stroke: var(--logo-line); }
 .logo-outline { stroke: var(--logo-line); fill: var(--logo-line); }
 .title-status { display: flex; align-items: center; gap: 12px; padding-right: 8px; }
-/* Write and search, centred on the window whatever is either side. */
+/* Search, centred on the window whatever is either side. */
 .rinch-borderlesswindow__titlebar { position: relative; }
 .title-parts { display: flex; align-items: center; }
 .title-center {
-    position: absolute; top: 0; bottom: 0; left: 50%; width: 400px; margin-left: -200px;
+    position: absolute; top: 0; bottom: 0; left: 50%; width: 360px; margin-left: -180px;
     display: flex; align-items: center; gap: 8px;
 }
-/* Write, in the title bar beside search: the accent, so it is easy to find. */
-.title-write {
-    width: 30px;
-    height: 26px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: none;
-    border-radius: 6px;
-    background: var(--accent);
-    color: #ffffff;
-    cursor: pointer;
-}
-.title-write:hover { filter: brightness(1.1); }
-.title-write svg { width: 16px; height: 16px; }
 .title-search { flex: 1; min-width: 0; }
 .title-search .rinch-text-input__input {
     height: 26px;
@@ -128,6 +112,30 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     font: inherit; font-size: 15px; cursor: pointer;
 }
 .folder.unsaved .row-close { display: flex; }
+/* ✎ on a view's row: unseen at rest and taking no room; while the row
+   is hovered, or ✎ has the focus, it stands over the count's place.
+   Transparent rather than sizeless, since rinch leaves a sizeless
+   button out of the Tab order. */
+.view-row { position: relative; }
+.row-edit {
+    position: absolute; right: 4px; top: 4px;
+    width: 24px; height: 24px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+    border: 0; border-radius: 5px; background: transparent; color: var(--muted);
+    cursor: pointer;
+}
+.row-edit svg { width: 14px; height: 14px; }
+.view-row:hover .row-edit { opacity: 1; }
+.view-row:hover .count { visibility: hidden; }
+/* Focused without the pointer: a solid face over the count. */
+.row-edit:focus { opacity: 1; background: var(--field); color: var(--ink); }
+.row-edit:hover { background: var(--field); color: var(--ink); }
+.folder.chosen .row-edit { color: var(--accent-ink); }
+/* Open in the panel: wins over the chosen row's colour and the focus face. */
+.view-row .row-edit.pressed { background: var(--accent); color: var(--surface); }
+/* The search's row keeps × at its end: ✎ stands just before it. */
+.folder.unsaved .row-edit { right: 30px; }
 .row-close:hover { background: var(--field); }
 .folder.chosen { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
 .folder-name {

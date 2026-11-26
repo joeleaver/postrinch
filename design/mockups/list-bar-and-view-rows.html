@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>List Bar and Views</title>
+<!--
+  Mockup: the bar over the list and the sidebar's view rows, after Joe's
+  notes of 2026-11-26. Write moves out of the title bar into the list bar,
+  beside the filter. The order is a button showing only its icon, which
+  opens the same three choices. ✎ leaves the list bar for each view's row
+  in the sidebar, shown only while the row is hovered (or the pencil has
+  keyboard focus), in place of the row's count. The menu bar's View menu
+  also has "Edit view…", which opens the same panel on the open view.
+  Colours are the window's own (crates/postrinch/src/ui/palette.rs).
+-->
+<style>
+:root {
+  --surface:#fff; --panel:#f4f5f7; --ink:#16181d; --ink-2:#3a3f4a; --muted:#5b6170;
+  --line:#dfe2e7; --field:#d4d8de; --hover:#eaecef; --accent:#2456b8;
+  --accent-tint:#e6eefb; --accent-ink:#173d84;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface:#16181d; --panel:#1d2026; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6;
+  --line:#2d3139; --field:#3a3f49; --hover:#2a2e36; --accent:#6f9cf0;
+  --accent-tint:#1f2d48; --accent-ink:#b6cdf7;
+}}
+:root[data-theme="dark"] {
+  --surface:#16181d; --panel:#1d2026; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6;
+  --line:#2d3139; --field:#3a3f49; --hover:#2a2e36; --accent:#6f9cf0;
+  --accent-tint:#1f2d48; --accent-ink:#b6cdf7;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--panel); color: var(--ink); font: 14px/1.45 "Inter", system-ui, sans-serif; }
+.note { max-width: 900px; margin: 14px auto 0; padding: 0 16px; color: var(--muted); font-size: 12.5px; }
+.window { max-width: 900px; margin: 12px auto 40px; display: grid; grid-template-columns: 230px 1fr; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: visible; min-height: 340px; }
+@media (max-width: 640px) { .window { grid-template-columns: 1fr; } }
+/* Sidebar */
+.sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
+.folder { height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 4px 0 16px; border-radius: 6px; cursor: pointer; }
+.folder:hover { background: var(--hover); }
+.folder.chosen { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
+.name { flex: 1; min-width: 0; }
+.count { color: var(--muted); font-weight: 500; padding-right: 4px; }
+.folder.chosen .count { color: var(--accent-ink); }
+/* ✎ on the row: nothing at rest, in place of the count while hovered. */
+.row-edit { width: 0; height: 24px; padding: 0; border: 0; border-radius: 5px; opacity: 0; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; background: transparent; color: var(--muted); cursor: pointer; flex-shrink: 0; }
+.row-edit svg { width: 14px; height: 14px; }
+.folder:hover .row-edit, .row-edit:focus { width: 24px; opacity: 1; }
+.folder:hover .count { display: none; }
+.row-edit:hover { background: var(--field); color: var(--ink); }
+.folder.chosen .row-edit { color: var(--accent-ink); }
+.line { height: 1px; background: var(--line); margin: 8px 4px; }
+/* List */
+.list { display: flex; flex-direction: column; min-width: 0; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px 0; }
+.write { width: 30px; height: 30px; flex-shrink: 0; border: 0; border-radius: 6px; background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.filter { flex: 1; min-width: 0; height: 30px; border: 1px solid var(--field); border-radius: 6px; padding: 0 10px; font: inherit; font-size: 13px; background: var(--surface); color: var(--ink); }
+.icon-button { width: 30px; height: 30px; flex-shrink: 0; border: 1px solid var(--field); border-radius: 6px; background: var(--surface); color: var(--ink-2);
+  display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
+.icon-button.open { background: var(--hover); }
+.order-wrap { position: relative; }
+.menu { position: absolute; right: 0; top: 34px; width: 170px; padding: 5px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.12); display: none; z-index: 2; }
+.menu.shown { display: block; }
+.menu div { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px; font-size: 13px; cursor: pointer; }
+.menu div:hover { background: var(--hover); }
+.menu div.on { color: var(--accent-ink); font-weight: 600; }
+.menu .tick { width: 12px; }
+.actions { display: flex; gap: 4px; padding: 8px 14px; }
+.actions span { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 6px; }
+.row { padding: 10px 14px; border-top: 1px solid var(--line); }
+.row b { display: block; font-size: 13px; }
+.row span { color: var(--muted); font-size: 12.5px; }
+svg { width: 16px; height: 16px; }
+</style>
+</head>
+<body>
+<p class="note">Hover a view in the sidebar to see ✎ (it takes the count's place; Tab to it works too). Click the order button to open its menu. The menu bar's View menu gains “Edit view…” and “New view…”.</p>
+<div class="window">
+  <nav class="sidebar">
+    <div class="folder chosen"><span class="name">Inbox</span><span class="count">12</span>
+      <button class="row-edit" title="Edit Inbox" aria-label="Edit Inbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg></button></div>
+    <div class="folder"><span class="name">Everything else</span><span class="count">3</span>
+      <button class="row-edit" title="Edit Everything else" aria-label="Edit Everything else"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg></button></div>
+    <div class="line"></div>
+    <div class="folder"><span class="name">All mail</span>
+      <button class="row-edit" title="Edit All mail" aria-label="Edit All mail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg></button></div>
+    <div class="folder"><span class="name">Sent</span>
+      <button class="row-edit" title="Edit Sent" aria-label="Edit Sent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg></button></div>
+    <div class="folder"><span class="name">Drafts</span><span class="count">1</span>
+      <button class="row-edit" title="Edit Drafts" aria-label="Edit Drafts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg></button></div>
+  </nav>
+  <section class="list">
+    <div class="bar">
+      <button class="write" title="Write (C)" aria-label="Write"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg></button>
+      <input class="filter" placeholder="Filter Inbox">
+      <div class="order-wrap">
+        <button class="icon-button" id="order" title="Order: Newest first" aria-label="Order: Newest first" aria-haspopup="menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M3 16l4 4 4-4"/><path d="M13 6h8M13 12h6M13 18h4"/></svg>
+        </button>
+        <div class="menu" id="menu" role="menu">
+          <div class="on" role="menuitemradio" aria-checked="true"><span class="tick">✓</span>Newest first</div>
+          <div role="menuitemradio" aria-checked="false"><span class="tick"></span>Oldest first</div>
+          <div role="menuitemradio" aria-checked="false"><span class="tick"></span>Unread first</div>
+        </div>
+      </div>
+    </div>
+    <div class="actions"><span></span><span></span><span></span><span></span><span></span></div>
+    <div class="row"><b>no-reply@example.org</b><span>A reminder about your account</span></div>
+    <div class="row"><b>Lost Connection</b><span>(no subject)</span></div>
+  </section>
+</div>
+<script>
+const b = document.getElementById('order'), m = document.getElementById('menu');
+b.onclick = () => { m.classList.toggle('shown'); b.classList.toggle('open'); };
+</script>
+</body>
+</html>

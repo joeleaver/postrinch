@@ -9,6 +9,7 @@ use rinch::batch;
 
 use crate::appearance::Settings;
 use crate::state::{PAGE, State, View};
+use crate::view_edit::Editing;
 
 /// The view the window opens on.
 pub const FIRST: &str = "inbox";
@@ -62,11 +63,41 @@ impl State {
         }
     }
 
-    /// ✎ over the list: open the panel on what is shown, or close it.
-    pub fn toggle_edit(self) {
-        if self.view_edit.with(|e| e.is_some()) {
+    /// ✎ on a view's row in the sidebar: open the panel on that view, or
+    /// close it when it is open on that view already.
+    pub fn toggle_edit_of(self, key: &str) {
+        if self
+            .view_edit
+            .with(|e| e.as_ref().is_some_and(|e| e.is_of(key)))
+        {
             self.finish_edit();
-        } else if self.search.get().is_some() {
+        } else {
+            self.edit_view(key);
+        }
+    }
+
+    /// ✎ on the search's row in the sidebar: refine the search in the
+    /// panel, or close the panel.
+    pub fn toggle_edit_search(self) {
+        if self
+            .view_edit
+            .with(|e| e.as_ref().is_some_and(|e| e.kind == Editing::Search))
+        {
+            self.finish_edit();
+        } else {
+            self.edit_search();
+        }
+    }
+
+    /// The View menu's "Edit view…": the panel on what is shown, the
+    /// search or the open view; left as it is when it is open already.
+    pub fn edit_shown(self) {
+        // From the calendar or settings too: the panel is in the mail.
+        self.view.set(View::Mail);
+        if self.view_edit.with(|e| e.is_some()) {
+            return;
+        }
+        if self.search.get().is_some() {
             self.edit_search();
         } else {
             self.edit_view(&self.open_view.get());

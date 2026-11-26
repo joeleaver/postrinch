@@ -1,6 +1,6 @@
 //! The row above the list, after the list header mockup: what can be done
 //! to the open conversation (archive, trash, mark unread, its labels, the
-//! star). The filter, the order and ✎ are in the bar above (list_bar.rs).
+//! star). Write, the filter and the order are in the bar above (list_bar.rs).
 
 use rinch::prelude::*;
 
