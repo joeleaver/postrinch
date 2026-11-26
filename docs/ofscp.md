@@ -1,7 +1,6 @@
 # OFSCP: groups, channels, posts and private messages
 
-**Status: planned, 2026-11-26.** Joe's decisions are recorded at the end of this file. One
-question is still open: whether an agent's posts go out at once.
+**Status: planned, 2026-11-26.** Joe's decisions are recorded at the end of this file.
 
 Postrinch becomes a client of OFSCP, the Open Federated Social Communications Protocol
 (`~/dev/ofscp`, v0.1): forums, blogs, group chat and private messages, with one account usable
@@ -282,8 +281,11 @@ when an account is deleted.
 
 Everything a third party wrote goes under `untrusted`.
 
-**Open:** whether an agent's posts, replies, private messages and reactions go out at once,
-or as proposals the person sends (how mail works today). See the question at the end.
+**Anything that speaks for the person to others is a proposal** (decided), as with mail's
+`propose_message`: posts, replies, private messages, reactions, edits and deletes of
+published messages, joining, and follows. Each opens in Postrinch with the agent's reason
+and goes out only when the person presses its button. Local changes apply at once: drafts,
+read markers, and the person's views.
 
 ## Build order: one PR each
 
@@ -354,7 +356,8 @@ CI. Some PRs (marked *spec*) wait for the spec to define something first.
 4. **The mode is called Social.** A modes rail at the far left replaces the Mail | Calendar
    switch.
 5. **A separate account type.**
-6. **Agents: everything** (open: whether posts go out at once or as proposals).
+6. **Agents: everything**, with anything that speaks for the person to others as a
+   proposal the person sends, as mail does.
 7. **Forumall is a start, not the interop target;** the spec is pushed as Postrinch is built.
 8. **History:** the newest page, then live, with older pages on scroll.
 
