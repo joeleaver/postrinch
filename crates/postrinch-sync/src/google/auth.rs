@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use postrinch_model::{Account, EmailAddress, Provider, SignInReason};
+use postrinch_sync_core::{KeychainError, KeychainResult, SecretStore};
 use tokio::sync::Mutex;
 
 use super::ClientConfig;
@@ -12,7 +13,6 @@ use super::grant::GoogleGrants;
 use super::oauth::{Endpoints, api_spec, check_scopes};
 use crate::imap::ImapSecrets;
 use crate::oauth::{Granted, OAuthFlow, OAuthTimeouts, browser_sign_in, http_client};
-use crate::secrets::SecretStore;
 use crate::{SyncError, SyncResult};
 
 /// Refresh an access token this long before Google says it expires.
@@ -247,12 +247,13 @@ impl GoogleAuth {
     async fn secret<T: Send + 'static>(
         &self,
         account: &EmailAddress,
-        call: impl FnOnce(&dyn SecretStore, &EmailAddress) -> SyncResult<T> + Send + 'static,
+        call: impl FnOnce(&dyn SecretStore, &EmailAddress) -> KeychainResult<T> + Send + 'static,
     ) -> SyncResult<T> {
         let secrets = Arc::clone(&self.secrets);
         let account = account.clone();
-        tokio::task::spawn_blocking(move || call(secrets.as_ref(), &account))
+        let result = tokio::task::spawn_blocking(move || call(secrets.as_ref(), &account))
             .await
-            .map_err(|e| SyncError::Keychain(format!("keychain task failed: {e}")))?
+            .map_err(|e| KeychainError::new(format!("keychain task failed: {e}")))?;
+        Ok(result?)
     }
 }

@@ -15,11 +15,11 @@ use postrinch_model::{
     SignInMethod,
 };
 use postrinch_store::{Outgoing, OutgoingKind, SentBackOff, Store};
-use postrinch_sync::MemorySecrets;
 use postrinch_sync::ProgressFn;
 use postrinch_sync::imap::{
     Connector, ImapSecret, ImapSecrets, ImapSync, SentLookup, Timeouts, TlsConfig, message_id,
 };
+use postrinch_sync_core::MemorySecrets;
 
 use super::support::{PASSWORD, Tokens, USER, account, server, settings};
 

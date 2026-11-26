@@ -21,8 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use postrinch_model::EmailAddress;
-
-use crate::Backoff;
+use postrinch_sync_core::Backoff;
 
 /// One server's state: how long its waits have grown, and until when
 /// nothing is to be asked of it.

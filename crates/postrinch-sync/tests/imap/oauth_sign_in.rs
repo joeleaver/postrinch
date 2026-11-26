@@ -2,8 +2,9 @@
 //! Microsoft and Google endpoints.
 
 use postrinch_model::{EmailAddress, SignInMethod};
+use postrinch_sync::SyncError;
 use postrinch_sync::imap::{AccessTokens, ImapOAuth, ImapSecrets, OAuthClients, OAuthProvider};
-use postrinch_sync::{MemorySecrets, SyncError};
+use postrinch_sync_core::MemorySecrets;
 use serde_json::json;
 use std::sync::Arc;
 use wiremock::matchers::{body_string_contains, method, path};

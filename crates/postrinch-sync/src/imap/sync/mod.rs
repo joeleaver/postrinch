@@ -160,7 +160,7 @@ impl ImapSync {
     }
 
     /// Waits out busy servers from `first`, doubling up to `cap`, in place
-    /// of [`crate::Backoff::new`]'s (for tests). Clones made before this
+    /// of [`postrinch_sync_core::Backoff::new`]'s (for tests). Clones made before this
     /// keep the waits they had.
     pub fn with_busy_backoff(mut self, first: Duration, cap: Duration) -> Self {
         self.busy = BusyGate::with_policy(first, cap);

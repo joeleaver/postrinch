@@ -4613,6 +4613,7 @@ dependencies = [
  "postrinch-rules",
  "postrinch-store",
  "postrinch-sync",
+ "postrinch-sync-core",
  "postrinch-thunderbird",
  "postrinch-update",
  "reqwest",
@@ -4664,6 +4665,7 @@ dependencies = [
  "postrinch-model",
  "postrinch-store",
  "postrinch-sync",
+ "postrinch-sync-core",
  "rpassword",
  "tempfile",
  "tokio",
@@ -4842,8 +4844,6 @@ dependencies = [
  "dirs",
  "futures-util",
  "jiff",
- "keyring",
- "keyring-core",
  "lettre",
  "mail-builder",
  "mail-parser",
@@ -4853,11 +4853,11 @@ dependencies = [
  "postrinch-model",
  "postrinch-rules",
  "postrinch-store",
+ "postrinch-sync-core",
  "rand 0.10.3",
  "reqwest",
  "rustls",
  "rustls-platform-verifier",
- "secret-service",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4868,6 +4868,19 @@ dependencies = [
  "tracing",
  "url",
  "wiremock",
+]
+
+[[package]]
+name = "postrinch-sync-core"
+version = "0.1.38"
+dependencies = [
+ "keyring",
+ "keyring-core",
+ "postrinch-model",
+ "rand 0.10.3",
+ "secret-service",
+ "thiserror 2.0.21",
+ "tracing",
 ]
 
 [[package]]

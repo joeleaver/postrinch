@@ -49,6 +49,7 @@ Planned crates (a Cargo workspace, names provisional):
 | `postrinch-model` | Accounts, messages, threads, labels/folders, views; no I/O. |
 | `postrinch-store` | The rhypedb schema and every read and write of it; full-text and vector indexing; embeddings in the background. |
 | `postrinch-sync` | Sync for every account through the `MailSync` façade, which sends each call to the account's provider: Google sign-in and Gmail sync, and IMAP/SMTP (docs/imap.md). |
+| `postrinch-sync-core` | What every sync engine shares: secrets in the OS keychain (`SecretStore`, `Keychain`, `MemorySecrets`, and on Linux making sure the Secret Service has a default keyring), and `Backoff` for busy servers. |
 | `postrinch-cli` | `postrinch-cli`: add accounts (`add-google`, `add-imap`), sync, search, show a message. For development and scripts. |
 | `postrinch-render` | MIME to displayable parts; HTML parse and sanitize; remote content policy; handing a document to rinch. |
 | `postrinch-commands` | The command layer: every action, its arguments, its result, and whether it needs the person's confirmation. |

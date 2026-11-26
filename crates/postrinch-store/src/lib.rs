@@ -109,7 +109,7 @@ impl Store {
     /// `%LOCALAPPDATA%\postrinch` on Windows. Local, never roaming: a
     /// Windows roaming profile would copy gigabytes of mail to every machine
     /// the person signs in to, while the keychain keeps its secrets on this
-    /// one (`postrinch_sync::Keychain`). `None` on a system with no such
+    /// one (`postrinch_sync_core::Keychain`). `None` on a system with no such
     /// folder.
     pub fn default_root() -> Option<PathBuf> {
         dirs::data_local_dir().map(|dir| dir.join("postrinch"))

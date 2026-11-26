@@ -11,14 +11,13 @@ postrinch-discover = { workspace = true }
 postrinch-model = { workspace = true }
 postrinch-rules = { workspace = true }
 postrinch-store = { workspace = true }
+postrinch-sync-core = { workspace = true }
 async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"] }
 base64 = "0.22"
 bytes = "1"
 dirs = "7"
 futures-util = "0.3"
 jiff = "0.2"
-keyring = "4.2"
-keyring-core = "1"
 # SMTP: only the transport (the message bytes come from mail-builder),
 # over rustls with aws-lc-rs and the platform's verifier, as reqwest.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls", "rustls-platform-verifier", "aws-lc-rs"] }
@@ -37,10 +36,6 @@ tokio = { version = "1", features = ["rt", "net", "io-util", "time", "sync", "ma
 tokio-rustls = { version = "0.26", default-features = false }
 tracing = "0.1"
 url = "2"
-
-# The Secret Service, to create a default keyring when there is none.
-[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
-secret-service = { version = "5.2", features = ["crypto-rust"] }
 
 [dev-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std"] }

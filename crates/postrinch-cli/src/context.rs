@@ -8,9 +8,10 @@ use std::sync::Arc;
 
 use postrinch_model::Provider;
 use postrinch_store::Store;
+use postrinch_sync::MailSync;
 use postrinch_sync::google::{ClientConfig, GmailApi, GmailSync, GoogleAuth};
 use postrinch_sync::imap::{Connector, ImapOAuth, ImapSecrets, ImapSync, OAuthClients, TlsConfig};
-use postrinch_sync::{Keychain, MailSync};
+use postrinch_sync_core::Keychain;
 
 use crate::commands::Result;
 

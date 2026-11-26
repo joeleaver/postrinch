@@ -7,13 +7,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use postrinch_model::{EmailAddress, SignInReason};
+use postrinch_sync_core::SecretStore;
 use tokio::sync::Mutex;
 
 use super::{OAuthClients, OAuthProvider};
 use crate::google::GoogleGrants;
 use crate::imap::{AccessTokens, ImapSecret, ImapSecrets, TokenFuture};
 use crate::oauth::{OAuthFlow, OAuthTimeouts, Tokens, http_client};
-use crate::secrets::SecretStore;
 use crate::{SyncError, SyncResult};
 
 /// Refresh an access token this long before the provider says it expires.

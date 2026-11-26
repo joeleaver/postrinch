@@ -16,6 +16,7 @@ postrinch-render = { workspace = true }
 postrinch-rules = { workspace = true }
 postrinch-store = { workspace = true }
 postrinch-sync = { workspace = true }
+postrinch-sync-core = { workspace = true }
 postrinch-thunderbird = { workspace = true }
 postrinch-update = { workspace = true }
 base64 = "0.22"

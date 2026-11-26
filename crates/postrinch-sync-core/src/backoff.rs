@@ -1,5 +1,5 @@
 //! How long to wait before trying again a server that said it is busy
-//! ([`SyncError::Busy`](crate::SyncError::Busy)): exponential, with
+//! (`postrinch_sync::SyncError::Busy`): exponential, with
 //! jitter, capped, and back to the start once a try succeeds.
 //!
 //! The numbers ([`Backoff::FIRST`], [`Backoff::CAP`]) are for the limits
@@ -23,12 +23,11 @@
 //! its step) keeps the clients of several accounts on one server, or one
 //! account's IMAP and SMTP, from all knocking at the same moment.
 //!
-//! The IMAP keep-in-sync and sending loops (`imap::busy`) keep one
-//! `Backoff` per account and server, take [`Backoff::next_delay`] on each
-//! [`SyncError::Busy`](crate::SyncError::Busy), [`Backoff::reset`] it on
-//! the next pass that signs in, and send
-//! [`SyncEvent::Busy`](crate::SyncEvent::Busy) with that wait
-//! (docs/imap.md, "Sync").
+//! The IMAP keep-in-sync and sending loops (`postrinch_sync::imap::busy`)
+//! keep one `Backoff` per account and server, take
+//! [`Backoff::next_delay`] on each `SyncError::Busy`, [`Backoff::reset`]
+//! it on the next pass that signs in, and send `SyncEvent::Busy` with
+//! that wait (docs/imap.md, "Sync").
 
 use std::time::Duration;
 

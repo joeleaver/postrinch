@@ -17,10 +17,11 @@ use postrinch_model::{
     SignInMethod, SystemLabel,
 };
 use postrinch_store::Store;
+use postrinch_sync::MailSync;
 use postrinch_sync::imap::{
     Connector, ImapOAuth, ImapSecret, ImapSecrets, ImapSync, OAuthClients, TlsConfig,
 };
-use postrinch_sync::{MailSync, MemorySecrets};
+use postrinch_sync_core::MemorySecrets;
 use tokio::runtime::Runtime;
 
 use super::RemoteMail;

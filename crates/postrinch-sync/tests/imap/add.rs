@@ -10,11 +10,12 @@ use postrinch_model::{
     Account, AccountState, FolderRoles, Provider, Security, SignInMethod, SignInReason,
 };
 use postrinch_store::Store;
+use postrinch_sync::SyncError;
 use postrinch_sync::imap::{
     Added, CheckFailure, ImapOAuth, ImapSecret, ImapSecrets, ImapSync, NewImapAccount, NewSignIn,
     OAuthClients, OAuthProvider, SignInAgain,
 };
-use postrinch_sync::{MemorySecrets, SecretStore, SyncError};
+use postrinch_sync_core::{MemorySecrets, SecretStore};
 use wiremock::MockServer;
 
 use super::check::Fakes;

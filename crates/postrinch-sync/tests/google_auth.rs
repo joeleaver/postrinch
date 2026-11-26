@@ -4,9 +4,10 @@
 use std::sync::Arc;
 
 use postrinch_model::{EmailAddress, SignInReason};
+use postrinch_sync::SyncError;
 use postrinch_sync::google::{ClientConfig, Endpoints, GoogleAuth};
 use postrinch_sync::imap::ImapSecrets;
-use postrinch_sync::{MemorySecrets, SecretStore, SyncError};
+use postrinch_sync_core::{KeychainError, KeychainResult, MemorySecrets, SecretStore};
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -238,13 +239,13 @@ async fn refreshes_and_reports_a_revoked_token() {
 struct BrokenKeychain;
 
 impl SecretStore for BrokenKeychain {
-    fn get(&self, _: &EmailAddress) -> postrinch_sync::SyncResult<Option<String>> {
+    fn get(&self, _: &EmailAddress) -> KeychainResult<Option<String>> {
         Ok(None)
     }
-    fn set(&self, _: &EmailAddress, _: &str) -> postrinch_sync::SyncResult<()> {
-        Err(SyncError::Keychain("no collection".into()))
+    fn set(&self, _: &EmailAddress, _: &str) -> KeychainResult<()> {
+        Err(KeychainError::new("no collection"))
     }
-    fn delete(&self, _: &EmailAddress) -> postrinch_sync::SyncResult<()> {
+    fn delete(&self, _: &EmailAddress) -> KeychainResult<()> {
         Ok(())
     }
 }
