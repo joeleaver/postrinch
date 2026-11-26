@@ -1,5 +1,7 @@
 //! The install: a folder of the person's own holding the three programs and
-//! the marker, plus (on Linux) links on the PATH and a menu entry.
+//! the marker, plus its place on the desktop (`desktop`): on Linux links on
+//! the PATH and a menu entry, on Windows a Start-menu entry, the PATH and
+//! Apps & features.
 
 use std::path::{Path, PathBuf};
 
@@ -25,10 +27,21 @@ pub fn managed_dir() -> Option<PathBuf> {
     dir.join(MARKER).is_file().then_some(dir)
 }
 
+/// What [`install`] did.
+#[derive(Debug)]
+pub struct Installed {
+    /// The install folder.
+    pub dir: PathBuf,
+    /// Sentences for the person: what was left alone, what changed that
+    /// they should know of. `--install` runs before logging starts, so the
+    /// caller prints them.
+    pub notes: Vec<String>,
+}
+
 /// `postrinch --install`: copy the three programs from the running one's
 /// folder into [`install_dir`], mark it, and put it on the PATH and in the
-/// menu. Answers the folder.
-pub fn install(icons: &Icons) -> Result<PathBuf, String> {
+/// menu.
+pub fn install(icons: &Icons) -> Result<Installed, String> {
     let dir = install_dir().ok_or("this system has no local data folder to install into")?;
     let exe_path = std::env::current_exe().map_err(|e| format!("finding this program: {e}"))?;
     let from = exe_path.parent().ok_or("this program has no folder")?;
@@ -56,8 +69,8 @@ pub fn install(icons: &Icons) -> Result<PathBuf, String> {
         }
     }
     write_marker(&dir, CURRENT)?;
-    desktop::integrate(&dir, icons)?;
-    Ok(dir)
+    let notes = desktop::integrate(&dir, icons)?;
+    Ok(Installed { dir, notes })
 }
 
 pub(crate) fn write_marker(dir: &Path, version: &str) -> Result<(), String> {

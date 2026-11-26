@@ -2,7 +2,8 @@
 //! signed GitHub releases (DESIGN.md, "Installing and updating").
 //!
 //! `postrinch --install` copies the three programs (the window,
-//! `postrinch-mcp` and `postrinch-cli`) into [`install_dir`] and marks it. A
+//! `postrinch-mcp` and `postrinch-cli`) into [`install_dir`], marks it and
+//! puts it on the desktop as the system expects (`desktop`). A
 //! window running from a marked folder checks the latest release, downloads
 //! and verifies its package, and stages it inside the install; "Restart to
 //! update" moves all three into place together, because the bridge and the
@@ -13,12 +14,20 @@ mod apply;
 mod check;
 mod desktop;
 mod install;
+#[cfg(any(windows, test))]
+mod path_list;
 mod process;
+#[cfg(windows)]
+mod win;
 
 pub use apply::{apply, at_start};
 pub use check::{check_and_stage, staged_version};
 pub use desktop::Icons;
-pub use install::{install, install_dir, managed_dir};
+pub use install::{Installed, install, install_dir, managed_dir};
+/// `postrinch.exe --uninstall`, which Apps & features runs for an install
+/// from the zip.
+#[cfg(windows)]
+pub use win::uninstall;
 
 /// This build's version.
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");

@@ -33,6 +33,8 @@ pub fn at_start() -> Option<String> {
     if let Some(dir) = managed_dir() {
         clean_up(&dir);
     }
+    #[cfg(windows)]
+    crate::win::uninstall::clear_leftovers();
     said
 }
 
@@ -57,6 +59,12 @@ pub fn apply(args: &[String]) -> Result<String, String> {
         replace_file(&stage.join(exe(name)), &dir.join(exe(name)))?;
     }
     write_marker(&dir, &version)?;
+    // Apps & features shows the version the install's entry says. The
+    // update is in place by now, so a registry that will not take the new
+    // version is worth a line in the log, not a failed update.
+    if let Err(e) = crate::desktop::record_version(&version) {
+        tracing::warn!("the update to {version} is installed, but {e}");
+    }
     let _ = std::fs::remove_dir_all(&stage);
     std::process::Command::new(dir.join(exe(PROGRAMS[0])))
         .args(args)

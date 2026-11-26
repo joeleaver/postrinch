@@ -144,21 +144,51 @@ pub fn install() -> Result<String, String> {
                 .into(),
         );
     }
-    let dir = postrinch_update::install(&ICONS)?;
-    // On Windows the Start-menu entry is the Setup's to make (and its
-    // uninstaller's to take away); this puts the programs where they keep
-    // themselves current.
+    let installed = postrinch_update::install(&ICONS)?;
+    let dir = &installed.dir;
     let start = if cfg!(windows) {
-        format!(
-            "Start it as {}; the Setup also puts it in the Start menu.",
-            dir.join("postrinch.exe").display()
-        )
+        "Start it from the Start menu; Apps & features can remove it."
     } else {
-        "Start it from the menu, or as `postrinch`.".to_owned()
+        "Start it from the menu, or as `postrinch`."
     };
-    Ok(format!(
+    let mut said = format!(
         "Installed Postrinch {} in {}. {start}",
         postrinch_update::CURRENT,
         dir.display()
-    ))
+    );
+    for note in &installed.notes {
+        said.push('\n');
+        said.push_str(note);
+    }
+    Ok(said)
+}
+
+/// `postrinch --uninstall [--quiet]`, which Apps & features runs for an
+/// install from the zip: asks first and shows the outcome in a message box,
+/// as an uninstaller started from there does (it has no console), unless
+/// `--quiet`, when it only prints.
+#[cfg(windows)]
+pub fn uninstall(quiet: bool) -> std::process::ExitCode {
+    use postrinch_update::uninstall::{confirm, tell, uninstall};
+    use std::process::ExitCode;
+    if !quiet && !confirm() {
+        return ExitCode::SUCCESS;
+    }
+    let (said, failed) = match uninstall() {
+        Ok(said) => (said, false),
+        Err(e) => (format!("Postrinch could not be removed: {e}"), true),
+    };
+    if failed {
+        eprintln!("postrinch: {said}");
+    } else {
+        println!("{said}");
+    }
+    if !quiet {
+        tell(&said, failed);
+    }
+    if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }
