@@ -133,7 +133,7 @@ pub struct State {
     /// Whether the order menu over the list is open; the window's own keys
     /// leave its arrows, Enter and Escape to it (keys.rs).
     pub ordering: Signal<bool>,
-    /// Whether the status line's detail is open; Escape is left to it.
+    /// Whether the status line's detail is open.
     pub status_open: Signal<bool>,
     /// Actions shown but not yet in every list loaded (see changes.rs).
     pub pending: Signal<Vec<Change>>,

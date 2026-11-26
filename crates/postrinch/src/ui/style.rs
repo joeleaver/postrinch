@@ -69,7 +69,6 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 }
 /* The views scroll; the status line at the foot stays put. */
 .folders { flex: 1; min-height: 0; overflow-y: auto; }
-.labels { flex: 1; min-height: 0; overflow-y: auto; }
 .folder-group { display: flex; flex-direction: column; gap: 2px; }
 .section-title {
     padding: 0 10px 4px;
@@ -187,10 +186,6 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
     font-size: 12px;
     color: var(--muted);
 }
-.sync-line { font-size: 12px; color: var(--muted); }
-.sync-line.trouble { color: var(--trouble); }
-.progress { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
-.progress-fill { height: 100%; background: var(--accent); }
 
 /* Thread list */
 .list {

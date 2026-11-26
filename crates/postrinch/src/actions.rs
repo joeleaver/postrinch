@@ -162,11 +162,14 @@ impl State {
         let Some(sync) = sync() else {
             return self.notice(sync_off());
         };
-        let (notice, revision) = (self.notice, self.revision);
+        let (notice, revision, status) = (self.notice, self.revision, self.sync);
         sync.runtime.clone().spawn(async move {
             let text = match remove(&sync, &account).await {
                 Ok(_) => {
                     sync.accounts_changed();
+                    // Its last word on sync goes with it.
+                    let gone = account.clone();
+                    status.update_send(move |all| all.retain(|s| s.account != gone));
                     Notice {
                         text: format!("{account} is removed from this computer."),
                         trouble: false,

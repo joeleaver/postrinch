@@ -3,11 +3,12 @@
 //! sync. A click opens each account's own line above it, with "Sign in
 //! again…" on one that needs it.
 
-use postrinch_model::EmailAddress;
+use postrinch_model::{Account, AccountState, EmailAddress};
 use rinch::prelude::*;
 
 use crate::state::{SettingsSection, State, View};
-use crate::sync::{AccountSync, SyncHow};
+use crate::sync::{AccountSync, NEEDS_SIGN_IN, SyncHow};
+use crate::ui::sidebar::account_dot;
 
 /// How the line looks: quiet, busy, or calling for the person.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +24,51 @@ struct Summary {
     text: String,
     tone: Tone,
     progress: Option<(usize, usize)>,
+}
+
+/// Where each account stands: what sync last said of it, but an account
+/// the store says must sign in again does, whatever sync said. Sync
+/// passes such an account by without a word, so after a restart its
+/// sign-in is known only from the store.
+fn standing(accounts: &[Account], reports: &[AccountSync]) -> Vec<AccountSync> {
+    let signing = |address: &EmailAddress| {
+        accounts
+            .iter()
+            .any(|a| &a.address == address && matches!(a.state, AccountState::NeedsSignIn(_)))
+    };
+    let mut all: Vec<AccountSync> = reports
+        .iter()
+        .map(|r| match signing(&r.account) {
+            true => needs_sign_in(r.account.clone()),
+            false => r.clone(),
+        })
+        .collect();
+    for account in accounts {
+        if signing(&account.address) && !all.iter().any(|s| s.account == account.address) {
+            all.push(needs_sign_in(account.address.clone()));
+        }
+    }
+    all
+}
+
+fn needs_sign_in(account: EmailAddress) -> AccountSync {
+    AccountSync {
+        account,
+        line: NEEDS_SIGN_IN.to_owned(),
+        progress: None,
+        how: SyncHow::NeedsSignIn,
+    }
+}
+
+/// Every account's standing, from the sync reports and the store's
+/// accounts (once the sidebar has them).
+fn standing_now(state: State) -> Vec<AccountSync> {
+    let accounts: Vec<Account> = state.sidebar.with(|s| {
+        s.as_ref()
+            .map(|s| s.accounts.iter().map(|a| a.account.clone()).collect())
+            .unwrap_or_default()
+    });
+    state.sync.with(|reports| standing(&accounts, reports))
 }
 
 /// "1 account" or "3 accounts".
@@ -94,9 +140,10 @@ fn percent((done, total): (usize, usize)) -> usize {
 
 #[component]
 pub fn status_line(state: State) -> NodeHandle {
+    let all = Memo::new(move || standing_now(state));
     let now = Memo::new(move || {
         let off = state.sync_off.get();
-        state.sync.with(|all| summary(all, off.as_deref()))
+        summary(&all.get(), off.as_deref())
     });
     rsx! {
         div { class: "status-foot",
@@ -137,10 +184,10 @@ pub fn status_line(state: State) -> NodeHandle {
                         }
                         // Keyed by account alone: a row is built once and its
                         // line and bar follow the account's sync in place.
-                        for account in synced(state) {
-                            div { key: account.key(), {account_row(__scope, state, account.clone())} }
+                        for account in all.get().into_iter().map(|s| s.account) {
+                            div { key: account.key(), {account_row(__scope, state, all, account.clone())} }
                         }
-                        if state.sync.with(|all| all.is_empty()) && state.sync_off.with(|o| o.is_none()) {
+                        if all.get().is_empty() && state.sync_off.with(|o| o.is_none()) {
                             div { class: "status-none", "No account has synced yet." }
                         }
                     }
@@ -150,37 +197,38 @@ pub fn status_line(state: State) -> NodeHandle {
     }
 }
 
-fn synced(state: State) -> Vec<EmailAddress> {
-    state
-        .sync
-        .with(|all| all.iter().map(|s| s.account.clone()).collect())
-}
-
 /// One account's own line: its address, what it is doing, a bar while
 /// downloading, and "Sign in again…" when it needs it.
 #[component]
-fn account_row(state: State, account: EmailAddress) -> NodeHandle {
+fn account_row(state: State, all: Memo<Vec<AccountSync>>, account: EmailAddress) -> NodeHandle {
     let address = account.to_string();
-    let again = account.clone();
-    let now = Memo::new(move || {
-        state
-            .sync
-            .with(|all| all.iter().find(|s| s.account == account).cloned())
-    });
+    let (again, marked) = (account.clone(), account.clone());
+    let now = Memo::new(move || all.get().into_iter().find(|s| s.account == account));
+    // The account's colour, as the sidebar marks it (when there are several).
+    let dot = Memo::new(move || account_dot(state, &marked));
     let progress = move || now.get().and_then(|s| s.progress);
     let how = move || now.get().map(|s| s.how);
     rsx! {
         div { class: "status-account",
-            div { class: "status-address", {address} }
+            div { class: "status-address",
+                span {
+                    class: "dot",
+                    style: {move || match dot.get() {
+                        Some(color) => format!("background: {color}"),
+                        None => "display: none".to_owned(),
+                    }},
+                }
+                span { class: "status-address-text", {address} }
+            }
             div {
-                class: {move || if how().is_some_and(SyncHow::trouble) { "sync-line trouble" } else { "sync-line" }},
+                class: {move || if how().is_some_and(SyncHow::trouble) { "status-account-line trouble" } else { "status-account-line" }},
                 {move || now.get().map(|s| s.line).unwrap_or_default()}
             }
             div {
-                class: "progress",
+                class: "status-progress",
                 style: {move || if progress().is_some() { "" } else { "display: none" }},
                 div {
-                    class: "progress-fill",
+                    class: "status-progress-fill",
                     style: {move || format!("width: {}%", progress().map_or(0, percent))},
                 }
             }
@@ -239,8 +287,12 @@ pub const CSS: &str = r#"
 .status-off { font-size: 12.5px; color: var(--trouble); }
 .status-none { font-size: 12.5px; color: var(--muted); }
 .status-account { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
-.status-account .progress { align-self: stretch; }
-.status-address { font-size: 13px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-address { display: flex; align-items: center; gap: 6px; max-width: 100%; font-size: 13px; }
+.status-address-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-account-line { font-size: 12px; color: var(--muted); }
+.status-account-line.trouble { color: var(--trouble); }
+.status-progress { align-self: stretch; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.status-progress-fill { height: 100%; background: var(--accent); }
 "#;
 
 #[cfg(test)]

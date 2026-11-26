@@ -265,7 +265,7 @@ fn search_edit(__scope: &mut RenderScope, state: State) -> NodeHandle {
 }
 
 /// The colour that marks an account, when there is more than one.
-fn account_dot(state: State, account: &EmailAddress) -> Option<&'static str> {
+pub(crate) fn account_dot(state: State, account: &EmailAddress) -> Option<&'static str> {
     state.sidebar.with(|s| {
         let accounts = &s.as_ref()?.accounts;
         if accounts.len() < 2 {

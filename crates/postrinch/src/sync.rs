@@ -22,6 +22,9 @@ pub struct AccountSync {
     pub how: SyncHow,
 }
 
+/// What the status line says of an account that has to sign in again.
+pub const NEEDS_SIGN_IN: &str = "Needs to sign in";
+
 /// Where an account's sync stands, for the status line's summary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncHow {
@@ -58,7 +61,7 @@ pub fn pass_ended(ended: Signal<Option<PassEnd>>, account: EmailAddress) {
     });
 }
 
-/// Turn a sync event into the sidebar's line for the account, from the
+/// Turn a sync event into the status line's word on the account, from the
 /// sync thread. `ended` is told of each pass that ended: once its sync
 /// part is done ([`SyncEvent::Synced`], before the hours a first
 /// download can take), or when it stopped short.
@@ -127,7 +130,7 @@ pub(crate) fn report(
         }
         SyncEvent::NeedsSignIn { account } => (
             account,
-            "Needs to sign in".to_owned(),
+            NEEDS_SIGN_IN.to_owned(),
             None,
             SyncHow::NeedsSignIn,
             true,
@@ -245,7 +248,7 @@ fn describe(progress: Progress) -> (String, Option<(usize, usize)>) {
     }
 }
 
-/// The sidebar's line for a busy server: when it is tried again, then
+/// An account's line for a busy server: when it is tried again, then
 /// the server's own sentence.
 fn busy_line(message: &str, retry_in: Duration) -> String {
     let message = message.trim();
@@ -257,7 +260,7 @@ fn busy_line(message: &str, retry_in: Duration) -> String {
     }
 }
 
-/// A wait as the sidebar says it: seconds under two minutes, else whole
+/// A wait in words: seconds under two minutes, else whole
 /// minutes, rounded up so it never promises sooner than it is.
 fn wait_in_words(wait: Duration) -> String {
     let secs = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
@@ -310,6 +313,66 @@ mod tests {
         assert_eq!(wait_in_words(Duration::from_secs(120)), "2 min");
         assert_eq!(wait_in_words(Duration::from_secs(121)), "3 min");
         assert_eq!(wait_in_words(Duration::from_secs(900)), "15 min");
+    }
+
+    /// Where each event leaves the account, as the status line sums it up.
+    #[test]
+    fn each_event_says_where_the_account_stands() {
+        use postrinch_model::EmailAddress;
+        use postrinch_sync::{Phase, Progress, SyncEvent};
+        use rinch::prelude::Signal;
+
+        use super::{NEEDS_SIGN_IN, SyncHow, report};
+
+        let status = Signal::new(Vec::new());
+        let (revision, ended) = (Signal::new(0), Signal::new(None));
+        let wake = tokio::sync::Notify::new();
+        let account = EmailAddress::parse("ada@example.org").unwrap();
+        let after = |event: SyncEvent| {
+            report(event, status, revision, ended, &wake);
+            let all = status.get();
+            assert_eq!(all.len(), 1, "one entry per account");
+            (all[0].how, all[0].line.clone(), all[0].progress)
+        };
+        let a = || account.clone();
+        assert_eq!(
+            after(SyncEvent::Started { account: a() }).0,
+            SyncHow::Working
+        );
+        let working = after(SyncEvent::Progress {
+            account: a(),
+            progress: Progress::Working {
+                phase: Phase::Bodies,
+                done: 3,
+                total: 10,
+            },
+        });
+        assert_eq!((working.0, working.2), (SyncHow::Working, Some((3, 10))));
+        assert_eq!(
+            after(SyncEvent::Done {
+                account: a(),
+                downloaded: 0
+            })
+            .0,
+            SyncHow::Idle
+        );
+        let failed = SyncEvent::Failed {
+            account: a(),
+            error: "no route".into(),
+            retry_in: Duration::from_secs(30),
+        };
+        assert_eq!(after(failed).0, SyncHow::Trouble);
+        let busy = SyncEvent::Busy {
+            account: a(),
+            message: String::new(),
+            retry_in: Duration::from_secs(30),
+        };
+        assert_eq!(after(busy).0, SyncHow::Trouble);
+        let signing = after(SyncEvent::NeedsSignIn { account: a() });
+        assert_eq!(
+            (signing.0, signing.1.as_str()),
+            (SyncHow::NeedsSignIn, NEEDS_SIGN_IN)
+        );
     }
 
     #[test]

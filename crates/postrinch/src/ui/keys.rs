@@ -30,14 +30,6 @@ pub fn listen(root: NodeHandle, state: State) {
         if state.ordering.get() {
             return false;
         }
-        // Escape closes the status line's detail, and does nothing else.
-        if state.status_open.get() {
-            if key.is_down() && key.key == "Escape" {
-                state.status_open.set(false);
-                return true;
-            }
-            return false;
-        }
         if !key.is_down() || in_field || key.ctrl || key.alt || key.meta {
             return false;
         }

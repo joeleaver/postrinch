@@ -1,5 +1,3 @@
-use postrinch_model::EmailAddress;
-
 use super::*;
 
 fn sync(address: &str, how: SyncHow, progress: Option<(usize, usize)>) -> AccountSync {
@@ -103,4 +101,49 @@ fn only_sign_in_and_trouble_are_trouble() {
     assert!(SyncHow::Trouble.trouble());
     assert!(!SyncHow::Working.trouble());
     assert!(!SyncHow::Idle.trouble());
+}
+
+fn account(address: &str, signing: bool) -> Account {
+    let mut a = Account::new(
+        EmailAddress::parse(address).unwrap(),
+        postrinch_model::Provider::Google,
+    );
+    if signing {
+        a.state = AccountState::NeedsSignIn(postrinch_model::SignInReason::NoCredential);
+    }
+    a
+}
+
+#[test]
+fn an_account_the_store_says_must_sign_in_shows_so_though_sync_said_nothing() {
+    // After a restart sync passes it by in silence.
+    let accounts = [
+        account("a@example.org", false),
+        account("b@example.org", true),
+    ];
+    let all = standing(&accounts, &[idle("a@example.org")]);
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[1].how, SyncHow::NeedsSignIn);
+    assert_eq!(all[1].line, NEEDS_SIGN_IN);
+    assert_eq!(summary(&all, None).text, "1 account needs sign-in");
+}
+
+#[test]
+fn the_stores_sign_in_outweighs_an_older_word_from_sync() {
+    let accounts = [account("a@example.org", true)];
+    let all = standing(
+        &accounts,
+        &[sync("a@example.org", SyncHow::Working, Some((1, 9)))],
+    );
+    assert_eq!(all.len(), 1);
+    assert_eq!((all[0].how, all[0].progress), (SyncHow::NeedsSignIn, None));
+}
+
+#[test]
+fn an_account_signed_in_again_shows_what_sync_says() {
+    let accounts = [account("a@example.org", false)];
+    let reports = [sync("a@example.org", SyncHow::Working, None)];
+    assert_eq!(standing(&accounts, &reports), reports);
+    // Before the sidebar knows the accounts, sync's word stands alone.
+    assert_eq!(standing(&[], &reports), reports);
 }
