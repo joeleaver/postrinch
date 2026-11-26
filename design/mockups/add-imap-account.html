@@ -235,7 +235,7 @@ const states = {
   },
   oauth: {
     label: '4a · Sign in with Microsoft',
-    note: 'OAuth comes first wherever Postrinch has a client for the provider (Microsoft, Google over IMAP): the browser signs in, no password is typed here. Microsoft takes no passwords at all, so there is no other way in here; for a provider that still takes app passwords (Google), "Use an app password instead" sits left of Back.',
+    note: 'OAuth comes first wherever Postrinch has a client for the provider (Microsoft, Google over IMAP): the browser signs in, no password is typed here. Neither takes a password from Postrinch (Microsoft has turned them off; Google no longer reliably offers app passwords), so there is no other way in here.',
     dialog: `
       <h2>Other mail account</h2><p class="sub">ada@outlook.com</p>
       <div class="found"><div class="row"><span class="who">Outlook.com</span><span class="spacer"></span><button class="btn link" data-go="manual">Change</button></div>
@@ -277,7 +277,7 @@ const states = {
   },
   workspace: {
     label: '4c · Google underneath',
-    note: 'When the domain\'s mail is hosted by Google (from its MX records), the dialog says Google sign-in is better, and still allows IMAP.',
+    note: 'When the domain\'s mail is hosted by Google (from its MX records), the dialog says Google sign-in is better, and still allows IMAP, signing in with Google in the browser: never an app password. Without Google\'s sign-in over IMAP in this copy, Use IMAP anyway is not offered.',
     dialog: `
       <h2>Other mail account</h2><p class="sub">sam@acme.co</p>
       <div class="warn">acme.co's mail is hosted by <b>Google Workspace</b>. Added as a Google account it keeps Gmail's labels, categories and calendars.</div>

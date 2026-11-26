@@ -3,11 +3,12 @@
 //! discovery when none are given; the password from standard input or a
 //! prompt that does not echo it, never from an argument, which other
 //! users of the machine can see; or the account signs in in the browser
-//! with `--oauth`. Both servers are checked before anything is kept.
+//! with `--oauth`. Google's mail signs in only in the browser. Both
+//! servers are checked before anything is kept.
 
 use std::io::{BufRead, IsTerminal};
 
-use postrinch_discover::{Candidate, Discoverer, Discovery};
+use postrinch_discover::{Candidate, Discoverer, Discovery, HostedBy, known_host};
 use postrinch_model::{EmailAddress, FolderRoles, ImapSettings, Security, Server, SignInMethod};
 use postrinch_sync::imap::{
     Added, ImapOAuth, ImapSecret, ImapSync, NewImapAccount, NewSignIn, OAuthProvider,
@@ -121,10 +122,26 @@ pub async fn add_imap(
     passwords: &mut dyn Passwords,
 ) -> Result<()> {
     let address = EmailAddress::parse(&args.address)?;
-    let mut settings = match &args.imap_host {
+    let settings = match &args.imap_host {
         Some(_) => given_settings(&args, &address),
         None => discovered_settings(&args, &address).await?,
     };
+    add_with_settings(sync, oauth, args, address, settings, passwords).await
+}
+
+/// Adds the account to the servers chosen (from the options or
+/// discovery): the sign-in, then the check.
+async fn add_with_settings(
+    sync: &ImapSync,
+    oauth: &ImapOAuth,
+    args: AddImapArgs,
+    address: EmailAddress,
+    mut settings: ImapSettings,
+    passwords: &mut dyn Passwords,
+) -> Result<()> {
+    if args.oauth.is_none() {
+        takes_a_password(&address, &settings.imap)?;
+    }
     let sign_in = match args.oauth {
         Some(provider) => NewSignIn::OAuth {
             provider: provider.into(),
@@ -165,6 +182,19 @@ pub async fn add_imap(
             Err(format!("{address} was not added; nothing was kept.\n{check}").into())
         }
     }
+}
+
+/// Refuses a password for Google's mail (its IMAP server is Google's,
+/// whether the options name it or discovery found it), which signs in
+/// only in the browser: Google no longer reliably offers app passwords.
+fn takes_a_password(address: &EmailAddress, imap: &Server) -> Result<()> {
+    if known_host(&imap.host).hosted_by == Some(HostedBy::Google) {
+        return Err(format!(
+            "{address}'s mail is Google's, which signs in only in the browser: pass --oauth google"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// The servers the options name.
@@ -241,7 +271,9 @@ fn settings_from_discovery(
                 .into(),
         );
     }
-    if let Some(provider) = postrinch_sync::imap::OAuthProvider::for_discovery(discovery)
+    // Google's mail takes no password at all (`takes_a_password`).
+    if let Some(provider) = OAuthProvider::for_discovery(discovery)
+        && provider != OAuthProvider::Google
         && args.oauth.is_none()
     {
         eprintln!(

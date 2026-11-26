@@ -1,7 +1,7 @@
 //! What Postrinch knows about a few big providers beyond what autoconfig
 //! files say: who hosts a domain's mail, and where to make an app password.
 
-use crate::types::{Candidate, HostedBy};
+use crate::types::{Candidate, Discovery, HostedBy};
 
 /// Who hosts mail whose MX record points at `exchange` (lower case, no
 /// trailing dot).
@@ -41,6 +41,8 @@ fn hosted_by_host(host: &str) -> Option<HostedBy> {
 
 /// Providers that need an app password for mail apps, by the domain their
 /// IMAP servers are under: their name, and the page that makes one.
+/// Google is not among them: it no longer reliably offers app passwords,
+/// so its mail signs in only in the browser (see `settle_sign_in`).
 const APP_PASSWORD_PAGES: &[(&str, &str, &str)] = &[
     (
         "fastmail.com",
@@ -58,11 +60,6 @@ const APP_PASSWORD_PAGES: &[(&str, &str, &str)] = &[
         "https://login.yahoo.com/account/security",
     ),
     ("aol.com", "AOL", "https://login.aol.com/account/security"),
-    (
-        "gmail.com",
-        "Google",
-        "https://myaccount.google.com/apppasswords",
-    ),
 ];
 
 /// The page for making an app password, when the first IMAP server belongs
@@ -79,6 +76,22 @@ fn app_password_provider(host: &str) -> Option<(&'static str, &'static str)> {
         .iter()
         .find(|(domain, _, _)| ends_with_domain(host, domain))
         .map(|(_, name, url)| (*name, *url))
+}
+
+/// Settles how the provider of mail `found` signs mail apps in, by who
+/// hosts it. Google's mail (Gmail and Workspace) signs in only in the
+/// browser, whatever its autoconfig file lists: Google no longer reliably
+/// offers app passwords, so none is offered. Microsoft's is left to the
+/// app, which knows Microsoft has turned passwords off for mail apps.
+pub(crate) fn settle_sign_in(found: Discovery) -> Discovery {
+    match found.hosted_by {
+        Some(HostedBy::Google) => Discovery {
+            oauth2_only: true,
+            app_password_url: None,
+            ..found
+        },
+        Some(HostedBy::Microsoft) | None => found,
+    }
 }
 
 /// What Postrinch knows of a provider from its IMAP server's name alone,
@@ -169,6 +182,11 @@ mod tests {
         let gmail = known_host("IMAP.Gmail.com.");
         assert_eq!(gmail.hosted_by, Some(HostedBy::Google));
         assert_eq!(gmail.provider_name, Some("Google"));
+        assert_eq!(
+            gmail.app_password_url, None,
+            "Google signs in in the browser"
+        );
+        assert_eq!(known_host("imap.googlemail.com").app_password_url, None);
         let outlook = known_host("outlook.office365.com");
         assert_eq!(outlook.hosted_by, Some(HostedBy::Microsoft));
         assert_eq!(outlook.provider_name, Some("Microsoft"));
@@ -188,5 +206,24 @@ mod tests {
         assert!(app_password_url(&imap("imap.fastmail.com")).is_some());
         assert_eq!(app_password_url(&imap("imap.example.org")), None);
         assert_eq!(app_password_url(&[]), None);
+        assert_eq!(app_password_url(&imap("imap.gmail.com")), None);
+    }
+
+    #[test]
+    fn google_signs_in_only_in_the_browser() {
+        let mut found = Discovery::nothing();
+        found.hosted_by = Some(HostedBy::Google);
+        found.app_password_url = Some("https://example.com/app-passwords".into());
+        let found = settle_sign_in(found);
+        assert!(found.oauth2_only);
+        assert_eq!(found.app_password_url, None);
+
+        // Others keep what was found.
+        let mut fastmail = Discovery::nothing();
+        fastmail.app_password_url = Some("https://example.com/app-passwords".into());
+        assert_eq!(settle_sign_in(fastmail.clone()), fastmail);
+        let mut microsoft = Discovery::nothing();
+        microsoft.hosted_by = Some(HostedBy::Microsoft);
+        assert_eq!(settle_sign_in(microsoft.clone()), microsoft);
     }
 }

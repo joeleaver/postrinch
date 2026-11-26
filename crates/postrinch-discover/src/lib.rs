@@ -54,54 +54,65 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 ///
 /// Only an address that is not one fails; finding nothing answers
 /// [`Source::Nothing`]. Mail hosted by Google or Microsoft has
-/// [`Discovery::hosted_by`] set whichever step answered.
+/// [`Discovery::hosted_by`] set whichever step answered; Google's is
+/// [`Discovery::oauth2_only`], with no app password page.
 pub async fn discover(
     address: &str,
     discoverer: &Discoverer,
-    mut progress: impl FnMut(Progress) + Send,
+    progress: impl FnMut(Progress) + Send,
 ) -> Result<Discovery, AddressError> {
     let address = address::Address::parse(address)?;
+    let found = find(&address, discoverer, progress).await;
+    Ok(providers::settle_sign_in(found))
+}
+
+/// Runs the steps in turn until one answers, with who hosts the mail
+/// filled in from the MX records when the answering step could not say.
+async fn find(
+    address: &address::Address,
+    d: &Discoverer,
+    mut progress: impl FnMut(Progress) + Send,
+) -> Discovery {
     let mut report = |step, state| progress(Progress { step, state });
-    let d = discoverer;
 
     report(Step::DomainSettings, StepState::Running);
-    if let Some(found) = steps::domain_autoconfig(d, &address).await {
+    if let Some(found) = steps::domain_autoconfig(d, address).await {
         report(Step::DomainSettings, StepState::Found);
-        return Ok(found);
+        return found;
     }
     report(Step::DomainSettings, StepState::NothingFound);
 
     report(Step::ProviderList, StepState::Running);
-    if let Some(found) = steps::ispdb(d, &address, &address.domain, Source::Ispdb).await {
+    if let Some(found) = steps::ispdb(d, address, &address.domain, Source::Ispdb).await {
         report(Step::ProviderList, StepState::Found);
-        return Ok(found);
+        return found;
     }
     report(Step::ProviderList, StepState::NothingFound);
 
     report(Step::DnsRecords, StepState::Running);
-    let mx = steps::mx(d, &address).await;
+    let mx = steps::mx(d, address).await;
     let hosted_by = mx.hosted_by;
     if let Some(found) = mx.found {
         report(Step::DnsRecords, StepState::Found);
-        return Ok(found);
+        return found;
     }
-    if let Some(found) = steps::srv(d, &address).await {
+    if let Some(found) = steps::srv(d, address).await {
         report(Step::DnsRecords, StepState::Found);
-        return Ok(Discovery {
+        return Discovery {
             hosted_by: found.hosted_by.or(hosted_by),
             ..found
-        });
+        };
     }
     report(Step::DnsRecords, StepState::NothingFound);
 
     report(Step::CommonNames, StepState::Running);
-    if let Some(found) = steps::common_names(d, &address).await {
+    if let Some(found) = steps::common_names(d, address).await {
         report(Step::CommonNames, StepState::Found);
-        return Ok(Discovery { hosted_by, ..found });
+        return Discovery { hosted_by, ..found };
     }
     report(Step::CommonNames, StepState::NothingFound);
-    Ok(Discovery {
+    Discovery {
         hosted_by,
         ..Discovery::nothing()
-    })
+    }
 }

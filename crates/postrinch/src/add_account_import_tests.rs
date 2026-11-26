@@ -49,7 +49,7 @@ fn each_picked_account_takes_its_turn() {
     let form = ui.form.get();
     assert_eq!(form.kind, Kind::Thunderbird);
     assert_eq!(form.address, "ada@fastmail.com");
-    assert_eq!(form.way, Way::Password);
+    assert_eq!(form.way(), Way::Password);
 
     // Gmail's turn: the form holds only its address, for the heading.
     ui.edit(|f| f.password = "typed".into());
@@ -61,7 +61,7 @@ fn each_picked_account_takes_its_turn() {
     ui.skip_import();
     ui.skip_import();
     assert_eq!(current(ui).as_deref(), Some("ada@outlook.com"));
-    assert_eq!(ui.form.get().way, Way::Browser(OAuthProvider::Microsoft));
+    assert_eq!(ui.form.get().way(), Way::Browser(OAuthProvider::Microsoft));
     ui.skip_import();
     assert_eq!(ui.step.get(), Some(Step::ImportDone));
     assert_eq!(ui.import.get().unwrap().ended.len(), 4);

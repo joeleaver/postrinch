@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use postrinch_discover::{Discovery, HostedBy, Source};
 use postrinch_mailtest::{
     ImapConfig, ImapServer, SmtpConfig, SmtpServer, SpecialUse as FakeSpecialUse,
 };
@@ -162,6 +163,29 @@ fn a_refused_password_stays_where_it_was_given() {
         "{error}"
     );
     assert!(!error.contains("wrong"), "the password is never shown");
+    assert!(f.store.account(&ada()).unwrap().is_none(), "nothing kept");
+}
+
+#[test]
+fn googles_mail_is_never_added_with_a_password() {
+    let f = fixture();
+    // Discovery's answer for Google's mail: OAuth 2 only, no app password
+    // page; and no Google sign-in over IMAP in this copy.
+    let mut google = Discovery::nothing();
+    google.source = Source::IspdbViaMx;
+    google.provider_name = Some("Google".into());
+    google.hosted_by = Some(HostedBy::Google);
+    google.oauth2_only = true;
+    let mut form = f.form(PASSWORD);
+    let servers = (form.imap.clone(), form.smtp.clone());
+    form.take_discovery(&google, |_| false);
+    // Even with servers and a password typed in by hand.
+    (form.imap, form.smtp) = servers;
+    form.password = PASSWORD.into();
+    assert_eq!(form.found.app_password_url, None);
+    assert!(!form.asks_password());
+    let error = form.to_add().unwrap_err();
+    assert!(error.contains("only in the browser"), "{error}");
     assert!(f.store.account(&ada()).unwrap().is_none(), "nothing kept");
 }
 

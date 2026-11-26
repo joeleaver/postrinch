@@ -197,10 +197,41 @@ async fn google_workspace_from_the_mx() {
     assert_eq!(found.hosted_by, Some(HostedBy::Google));
     assert_eq!(hosts(&found.imap), [("imap.gmail.com", 993)]);
     assert_eq!(found.imap[0].username, Username::Address);
+    assert!(found.oauth2_only, "Google's mail signs in in the browser");
+    assert_eq!(found.app_password_url, None);
     assert_eq!(
         reports.all().last(),
         Some(&p(Step::DnsRecords, StepState::Found))
     );
+}
+
+#[tokio::test]
+async fn gmail_signs_in_only_in_the_browser_whatever_its_file_lists() {
+    // Google's ISPDB entry lists passwords beside OAuth 2.
+    let server = MockServer::start().await;
+    serve(&server, "/ispdb/gmail.com", support::GMAIL).await;
+    let d = discoverer(&server, Arc::default(), Arc::default());
+
+    let found = discover("ada@gmail.com", &d, |_| {}).await.unwrap();
+
+    assert_eq!(found.source, Source::Ispdb);
+    assert_eq!(found.hosted_by, Some(HostedBy::Google));
+    assert!(found.oauth2_only);
+    assert_eq!(found.app_password_url, None, "no app password page");
+}
+
+#[tokio::test]
+async fn google_hosted_mail_found_by_no_file_still_signs_in_in_the_browser() {
+    let server = MockServer::start().await;
+    let resolver = Arc::new(FakeResolver::default().with_mx("acme.co", "aspmx.l.google.com"));
+    let d = discoverer(&server, resolver, Arc::default());
+
+    let found = discover("sam@acme.co", &d, |_| {}).await.unwrap();
+
+    assert_eq!(found.source, Source::Nothing);
+    assert_eq!(found.hosted_by, Some(HostedBy::Google));
+    assert!(found.oauth2_only);
+    assert_eq!(found.app_password_url, None);
 }
 
 #[tokio::test]

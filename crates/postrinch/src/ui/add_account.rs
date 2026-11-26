@@ -2,20 +2,21 @@
 //! address, discovery's steps as they run, what was found with the
 //! password or the browser sign-in, Google's mail offered as a Google
 //! account, the wait for the browser and the check. The chooser is in
-//! `add_account_choose`, the servers panel in `add_account_servers`, the
-//! import from Thunderbird in `add_account_import`; the state and slow
-//! work in `add_account_run`.
+//! `add_account_choose`, the found step's ways in in `add_account_sign_in`,
+//! the servers panel in `add_account_servers`, the import from
+//! Thunderbird in `add_account_import`; the state and slow work in
+//! `add_account_run`.
 
 use rinch::prelude::*;
 
-use crate::add_account::{AddForm, Kind, Step, Way};
+use crate::add_account::{AddForm, Kind, Step};
 use crate::add_account_run::{AddUi, LOOK_STEPS, adding_address, look_line};
 use crate::state::State;
 use crate::ui::add_account_choose::choose;
 use crate::ui::add_account_import::{import_done, import_list, import_sign_in};
 use crate::ui::add_account_servers::servers_panel;
+use crate::ui::add_account_sign_in::found;
 use postrinch_discover::{Step as LookStep, StepState};
-use postrinch_sync::imap::OAuthProvider;
 
 #[component]
 pub fn add_account_dialog(state: State) -> NodeHandle {
@@ -216,7 +217,7 @@ pub fn found_box(__scope: &mut RenderScope, ui: AddUi, form: &AddForm, back: Ste
     let domain = adding_address(form)
         .rsplit_once('@')
         .map_or(String::new(), |(_, d)| d.to_owned());
-    let who = form.found.provider.clone().unwrap_or(domain);
+    let who = form.provider().map_or(domain, str::to_owned);
     let source = form.found.source.unwrap_or("");
     let (imap, smtp) = (
         format!("Incoming  {}", form.imap.line()),
@@ -236,143 +237,15 @@ pub fn found_box(__scope: &mut RenderScope, ui: AddUi, form: &AddForm, back: Ste
     }
 }
 
-/// "Sign in with Microsoft".
-pub fn provider_name(provider: OAuthProvider) -> &'static str {
-    match provider {
-        OAuthProvider::Google => "Google",
-        OAuthProvider::Microsoft => "Microsoft",
-        _ => "the provider",
-    }
-}
-
-#[component]
-fn found(state: State) -> NodeHandle {
-    let ui = state.adding;
-    let form = ui.form.get();
-    let sub = adding_address(&form);
-    // Only a change of way redraws the part below the found box, not
-    // each key typed into the password.
-    let way = Memo::new(move || ui.form.get().way);
-    rsx! {
-        div { class: "dialog",
-            {head(__scope, kind_title(&form), sub)}
-            {found_box(__scope, ui, &form, Step::Found)}
-            match way.get() {
-                Way::Browser(provider) => {browser_way(__scope, state, provider)},
-                Way::Password => {password_way(__scope, state)},
-            }
-        }
-    }
-}
-
-#[component]
-fn browser_way(state: State, provider: OAuthProvider) -> NodeHandle {
-    let ui = state.adding;
-    let name = provider_name(provider);
-    let takes_passwords = ui.form.get().found.takes_passwords;
-    rsx! {
-        div { class: "dialog",
-            {browser_hint(__scope, name)}
-            {error_line(__scope, ui)}
-            div { class: "dialog-actions",
-                if takes_passwords {
-                    span { class: "add-link", onclick: move || ui.edit(|f| f.way = Way::Password), "Use an app password instead" }
-                }
-                span { class: "add-spacer" }
-                Button { variant: "default", size: "sm", onclick: move || ui.go(Step::Address), "Back" }
-                Button { variant: "filled", size: "sm", onclick: move || ui.add(state), {format!("Sign in with {name}")} }
-            }
-        }
-    }
-}
-
-/// What the browser sign-in does with the person's password.
-pub fn browser_hint(__scope: &mut RenderScope, name: &str) -> NodeHandle {
-    rsx! {
-        p { class: "settings-hint",
-            {format!("{name} signs you in in your browser. Postrinch keeps only a token, in the system keyring, and never sees your password.")}
-        }
-    }
-}
-
-#[component]
-fn password_way(state: State) -> NodeHandle {
-    let ui = state.adding;
-    rsx! {
-        div { class: "dialog",
-            {password_body(__scope, ui, &ui.form.get())}
-            {error_line(__scope, ui)}
-            div { class: "dialog-actions",
-                span { class: "add-spacer" }
-                Button { variant: "default", size: "sm", onclick: move || ui.go(Step::Address), "Back" }
-                Button { variant: "filled", size: "sm", onclick: move || ui.add(state), "Add account" }
-            }
-        }
-    }
-}
-
-/// The password, or app password with the provider's page for making
-/// one, and the trust asked for servers nobody vouches for.
-pub fn password_body(__scope: &mut RenderScope, ui: AddUi, form: &AddForm) -> NodeHandle {
-    let app_page = form.found.app_password_url.clone();
-    let who = form
-        .found
-        .provider
-        .clone()
-        .unwrap_or_else(|| "This provider".to_owned());
-    let label = if app_page.is_some() {
-        "App password"
-    } else {
-        "Password"
-    };
-    let confirm = form.found.confirm_servers;
-    rsx! {
-        div { class: "dialog",
-            for url in app_page.clone() {
-                div { key: url.clone(), class: "add-warn",
-                    {format!("{who} needs an app password for mail apps, not your usual one. ")}
-                    {app_password_link(__scope, ui, url.clone(), who.clone())}
-                }
-            }
-            {password_field(__scope, ui, label.to_owned(), |f| f.password.clone(), |f, v| f.password = v)}
-            p { class: "settings-hint", "Kept in the system keyring, never in Postrinch's files." }
-            if confirm {
-                Checkbox {
-                    label: "These servers are outside the address's domain, and I trust them",
-                    checked_fn: move || ui.form.get().trusted,
-                    onchange: move || ui.edit(|f| f.trusted = !f.trusted),
-                }
-            }
-        }
-    }
-}
-
-/// "Make one at Fastmail ↗": the provider's page, in the browser.
-pub fn app_password_link(
-    __scope: &mut RenderScope,
-    ui: AddUi,
-    url: String,
-    who: String,
-) -> NodeHandle {
-    rsx! {
-        span {
-            class: "add-link",
-            onclick: move || {
-                if let Err(e) = open::that_detached(&url) {
-                    ui.error.set(Some(format!("The browser did not open: {e}")));
-                }
-            },
-            {format!("Make one at {who} ↗")}
-        }
-    }
-}
-
 #[component]
 fn workspace(state: State) -> NodeHandle {
     let ui = state.adding;
     let form = ui.form.get();
     let address = adding_address(&form);
     let domain = address.rsplit_once('@').map_or("", |(_, d)| d).to_owned();
+    // Over IMAP, Google's mail signs in only in the browser: without that
+    // sign-in here, IMAP is not offered.
+    let imap_way = form.no_way_in().is_none();
     rsx! {
         div { class: "dialog",
             {head(__scope, kind_title(&form), address.clone())}
@@ -381,14 +254,13 @@ fn workspace(state: State) -> NodeHandle {
             }
             {error_line(__scope, ui)}
             div { class: "dialog-actions",
-                Button {
-                    variant: "default",
-                    size: "sm",
-                    onclick: move || {
-                        ui.edit(AddForm::use_imap_anyway);
-                        ui.go(Step::Found);
-                    },
-                    "Use IMAP anyway"
+                if imap_way {
+                    Button {
+                        variant: "default",
+                        size: "sm",
+                        onclick: move || ui.go(Step::Found),
+                        "Use IMAP anyway"
+                    }
                 }
                 Button { variant: "filled", size: "sm", onclick: move || ui.add_as_google(state), "Add as a Google account" }
             }

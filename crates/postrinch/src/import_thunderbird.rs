@@ -238,6 +238,9 @@ fn row(
     }
     listed.push(key);
     match known.hosted_by {
+        // Google's sign-in in the browser, even when Thunderbird signs in
+        // with a password (an app password): Postrinch never asks Google's
+        // mail for one.
         Some(HostedBy::Google) => {
             row.how = "Sign in with Google".to_owned();
             row.route = Some(Route::Google(address));
@@ -247,7 +250,7 @@ fn row(
         }
         _ => {
             let form = form_for(account, incoming, &address, known, oauth_ready);
-            row.how = match form.way {
+            row.how = match form.way() {
                 Way::Browser(_) => "Sign in with Microsoft".to_owned(),
                 Way::Password if form.found.app_password_url.is_some() => "App password".to_owned(),
                 Way::Password => "Password".to_owned(),
@@ -261,7 +264,9 @@ fn row(
 /// Why Postrinch cannot sign in to an account's servers as Thunderbird
 /// does, or none when it can: a password, which Postrinch asks for, or
 /// OAuth 2, where Postrinch asks for the password (or app password)
-/// instead, having a browser sign-in only for Google and Microsoft.
+/// instead, having a browser sign-in only for Google and Microsoft. Not
+/// asked of Google's and Microsoft's accounts, which sign in only in the
+/// browser.
 fn sign_in_trouble(account: &tb::Account) -> Option<String> {
     let servers = [
         ("incoming", account.incoming.as_ref()),
@@ -316,15 +321,12 @@ fn form_for(
         source: Some(FROM_THUNDERBIRD),
         app_password_url: known.app_password_url.map(str::to_owned),
         oauth,
-        // Microsoft has turned passwords off for mail apps.
-        takes_passwords: !microsoft,
+        // Microsoft has turned passwords off for mail apps. (Google's
+        // accounts never come here: they are added as Google accounts.)
+        browser_only: microsoft,
         google: false,
         // The person's own Thunderbird vouches for its servers.
         confirm_servers: false,
-    };
-    form.way = match oauth {
-        Some(provider) => Way::Browser(provider),
-        None => Way::Password,
     };
     form
 }

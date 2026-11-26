@@ -5,7 +5,7 @@
 //! leaves the person. The slow work is in `add_account_flow`, and the
 //! window's part in `add_account_run` and `ui::add_account`.
 
-use postrinch_discover::{Candidate, Discovery, HostedBy, Source};
+use postrinch_discover::{Candidate, Discovery, HostedBy, Source, known_host};
 use postrinch_model::{EmailAddress, FolderRoles, ImapSettings, Security, Server, SignInMethod};
 use postrinch_sync::imap::{ImapSecret, NewImapAccount, OAuthProvider};
 
@@ -130,8 +130,11 @@ pub struct Found {
     pub app_password_url: Option<String>,
     /// The browser sign-in Postrinch has for the provider, if any.
     pub oauth: Option<OAuthProvider>,
-    /// The provider still takes passwords (app passwords) from mail apps.
-    pub takes_passwords: bool,
+    /// The provider signs mail apps in only in the browser, so no password
+    /// (or app password) is ever asked for: Google's mail, which Google no
+    /// longer reliably lets mail apps sign in to with app passwords, and
+    /// Microsoft's, which has turned passwords off for them.
+    pub browser_only: bool,
     /// The domain's mail is Google's (Gmail or Workspace).
     pub google: bool,
     /// The servers are outside the domain and nobody vouches for them:
@@ -147,13 +150,27 @@ pub struct AddForm {
     pub name: String,
     pub imap: ServerForm,
     pub smtp: ServerForm,
-    pub way: Way,
     pub password: String,
     pub separate_smtp: bool,
     pub smtp_password: String,
     /// The person trusts servers discovery could not vouch for.
     pub trusted: bool,
+    /// What discovery found for the address. Only discovery (or the
+    /// import) writes it: Google's servers typed in by hand are kept
+    /// apart, in `typed_google`.
     pub found: Found,
+    /// "Check and add" took the incoming server typed in as Google's
+    /// (`take_google_servers`). It counts only while that server is still
+    /// Google's, so changing the host away from Google's brings back what
+    /// discovery found.
+    pub typed_google: Option<TypedGoogle>,
+}
+
+/// Google's servers typed in by hand, taken as Google's mail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TypedGoogle {
+    /// Google's browser sign-in over IMAP, when this copy has it set up.
+    pub oauth: Option<OAuthProvider>,
 }
 
 impl AddForm {
@@ -170,12 +187,12 @@ impl AddForm {
             name: String::new(),
             imap: blank(993, Security::Tls),
             smtp: blank(465, Security::Tls),
-            way: Way::Password,
             password: String::new(),
             separate_smtp: false,
             smtp_password: String::new(),
             trusted: false,
             found: Found::default(),
+            typed_google: None,
         }
     }
 
@@ -228,7 +245,8 @@ impl AddForm {
             OAuthProvider::for_discovery(discovery)
         }
         .filter(|p| oauth_ready(*p));
-        let takes_passwords = !microsoft && !discovery.oauth2_only;
+        // Discovery says Google's mail is OAuth 2 only.
+        let browser_only = microsoft || discovery.oauth2_only;
         self.found = Found {
             provider: discovery
                 .provider_name
@@ -237,22 +255,18 @@ impl AddForm {
             source: source_line(discovery.source),
             app_password_url: discovery.app_password_url.clone(),
             oauth,
-            takes_passwords,
+            browser_only,
             google: discovery.hosted_by == Some(HostedBy::Google),
             confirm_servers: discovery.confirm_servers,
         };
-        // The browser first, wherever Postrinch has one for the provider.
-        self.way = match oauth {
-            Some(provider) => Way::Browser(provider),
-            None => Way::Password,
-        };
+        self.typed_google = None;
         self.trusted = false;
     }
 
     /// The step after discovery: Google's mail offers Google's own
     /// sign-in first; nothing found opens the servers.
     pub fn step_after_discovery(&self) -> Step {
-        if self.found.google && self.kind == Kind::Other {
+        if self.google() && self.kind == Kind::Other {
             Step::Workspace
         } else if self.found.source.is_none() {
             Step::Servers
@@ -265,10 +279,10 @@ impl AddForm {
     /// provider that takes only its browser sign-in, which this copy of
     /// Postrinch does not have set up.
     pub fn no_way_in(&self) -> Option<String> {
-        if self.found.oauth.is_some() || self.found.takes_passwords {
+        if self.oauth().is_some() || !self.browser_only() {
             return None;
         }
-        let who = self.found.provider.as_deref().unwrap_or("This provider");
+        let who = self.provider_name();
         Some(format!(
             "{who} signs mail apps in only in the browser, and that sign-in is not set up in this copy of Postrinch."
         ))
@@ -285,8 +299,14 @@ impl AddForm {
                 "Say that you trust these servers before Postrinch signs in to them.".into(),
             );
         }
-        let (sign_in, secret) = match self.way {
+        let (sign_in, secret) = match self.way() {
             Way::Browser(provider) => (provider.sign_in_method(), None),
+            Way::Password if self.browser_only() => {
+                let who = self.provider_name();
+                return Err(self.no_way_in().unwrap_or_else(|| {
+                    format!("{who} signs mail apps in only in the browser, not with a password.")
+                }));
+            }
             Way::Password => {
                 let (method, secret) = self.password_secret()?;
                 (method, Some(secret))
@@ -306,6 +326,83 @@ impl AddForm {
             },
         };
         Ok((new, secret))
+    }
+
+    /// The form asks for a password: signing in with one, to a provider
+    /// that takes them.
+    pub fn asks_password(&self) -> bool {
+        self.way() == Way::Password && !self.browser_only()
+    }
+
+    /// How the account will sign in: the browser first, wherever Postrinch
+    /// has one for the provider, otherwise a password.
+    pub fn way(&self) -> Way {
+        match self.oauth() {
+            Some(provider) => Way::Browser(provider),
+            None => Way::Password,
+        }
+    }
+
+    /// The browser sign-in Postrinch has for the provider: Google's for
+    /// Google's servers typed in by hand, otherwise discovery's.
+    pub fn oauth(&self) -> Option<OAuthProvider> {
+        match self.typed_google_now() {
+            Some(typed) => typed.oauth,
+            None => self.found.oauth,
+        }
+    }
+
+    /// The mail is Google's: discovery said so, or "Check and add" took
+    /// the Google servers typed in, which are still there.
+    pub fn google(&self) -> bool {
+        self.found.google || self.typed_google_now().is_some()
+    }
+
+    /// `typed_google`, while the incoming server is still Google's.
+    fn typed_google_now(&self) -> Option<TypedGoogle> {
+        self.typed_google.filter(|_| self.google_servers())
+    }
+
+    /// The provider signs mail apps in only in the browser: discovery said
+    /// so, or the incoming server typed in is Google's (by hand, after a
+    /// lookup that found nothing, or changed after it).
+    pub fn browser_only(&self) -> bool {
+        self.found.browser_only || self.google_servers()
+    }
+
+    /// The incoming server is Google's, whatever discovery found.
+    pub fn google_servers(&self) -> bool {
+        known_host(&self.imap.host).hosted_by == Some(HostedBy::Google)
+    }
+
+    /// The provider as the dialog names it: Google for Google's servers,
+    /// whatever discovery named.
+    pub fn provider(&self) -> Option<&str> {
+        if self.google_servers() {
+            return Some("Google");
+        }
+        self.found.provider.as_deref()
+    }
+
+    fn provider_name(&self) -> &str {
+        self.provider().unwrap_or("This provider")
+    }
+
+    /// "Check and add" on servers typed by hand that are Google's, though
+    /// discovery did not say the mail is: the form takes it as Google's
+    /// mail, as discovery would have (no password, Google's browser sign-in
+    /// over IMAP when this copy has it), and says whether the dialog
+    /// should now offer Google's own sign-in first (`Step::Workspace`).
+    /// What discovery found is kept as it was: this holds only while the
+    /// incoming server stays Google's (`typed_google`).
+    /// `oauth_ready` says which browser sign-ins this copy has set up.
+    pub fn take_google_servers(&mut self, oauth_ready: impl Fn(OAuthProvider) -> bool) -> bool {
+        if self.google() || !self.google_servers() || self.kind != Kind::Other {
+            return false;
+        }
+        let oauth = Some(OAuthProvider::Google).filter(|p| oauth_ready(*p));
+        self.typed_google = Some(TypedGoogle { oauth });
+        true
     }
 
     /// The password (and SMTP's own) as a secret, or why there is none.
@@ -354,15 +451,6 @@ impl AddForm {
         if self.parsed_address().is_ok() && self.imap.host.is_empty() {
             self.take_discovery(&Discovery::nothing(), |_| false);
         }
-    }
-
-    /// "Use IMAP anyway" on Google's mail: Google's browser sign-in over
-    /// IMAP when this copy has it, else an app password.
-    pub fn use_imap_anyway(&mut self) {
-        self.way = match self.found.oauth {
-            Some(provider) => Way::Browser(provider),
-            None => Way::Password,
-        };
     }
 
     /// Forgets the passwords typed (after the account is added, or the

@@ -221,15 +221,15 @@ impl AddUi {
                 Ok(discovery) => {
                     ui.form
                         .update(|f| f.take_discovery(&discovery, |p| ready.contains(&p)));
-                    let form = ui.form.get();
-                    let next = form.step_after_discovery();
+                    // The found step says when there is no way in; Google's
+                    // step then offers only Google's own sign-in.
+                    let next = ui.form.get().step_after_discovery();
                     if next == Step::Servers {
                         // The panel's head says these are guesses; it is
                         // not an error.
                         ui.servers(Step::Address);
                     } else {
                         ui.go(next);
-                        ui.error.set(form.no_way_in());
                     }
                 }
                 Err(error) => {
@@ -248,15 +248,21 @@ impl AddUi {
             return;
         }
         let from = self.step.get().unwrap_or(Step::Found);
-        let form = self.form.get();
+        let Some(sync) = sync() else {
+            return self.error.set(Some(sync_off()));
+        };
+        let mut form = self.form.get();
+        // Google's servers typed by hand take no password: Google's own
+        // sign-in is offered first, as when discovery finds them.
+        if form.take_google_servers(|p| sync.imap_oauth.is_set_up(p)) {
+            self.form.set(form);
+            return self.go(Step::Workspace);
+        }
         let (new, secret) = match form.to_add() {
             Ok(add) => add,
             Err(error) => return self.error.set(Some(error)),
         };
-        let Some(sync) = sync() else {
-            return self.error.set(Some(sync_off()));
-        };
-        let how = match (form.way, secret) {
+        let how = match (form.way(), secret) {
             (Way::Browser(provider), _) => How::Browser(provider),
             (Way::Password, Some(secret)) => How::Password(secret),
             (Way::Password, None) => return self.error.set(Some("Give the password.".into())),
