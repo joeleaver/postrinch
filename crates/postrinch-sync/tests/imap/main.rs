@@ -23,6 +23,7 @@ mod connect;
 mod idle;
 mod idle_gaps;
 mod idle_support;
+mod keep_backfill;
 mod keep_support;
 mod limits;
 mod mail_keep;

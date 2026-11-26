@@ -10,10 +10,20 @@ use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 
 use super::{CONCURRENT_FETCHES, GmailSync};
+use crate::giving_way::Unfinished;
 use crate::google::api::{MetadataMessage, MinimalMessage, Priority, RawMessage};
 use crate::google::labels::split_label_ids;
 use crate::{Envelope, SyncError, SyncResult, parse_headers, parse_message};
 use crate::{Phase, Progress, ProgressFn, SyncReport};
+
+/// How far [`GmailSync::for_each_until`] went.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Ran {
+    /// The ids it saw through.
+    pub(super) through: usize,
+    /// Whether it gave way with ids not started.
+    pub(super) gave_way: bool,
+}
 
 /// What became of one message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,31 +226,76 @@ impl GmailSync {
         F: Fn(GmailSync, String) -> Fut,
         Fut: Future<Output = SyncResult<Outcome>> + Send + 'static,
     {
+        self.for_each_until(ids, phase, progress, report, work, || false)
+            .await
+            .map(|_| ())
+            .map_err(|unfinished| unfinished.error)
+    }
+
+    /// As [`Self::for_each`], starting no more once `give_way` says so
+    /// (it is asked after each id, while some are not started yet): those
+    /// under way are seen through, and the rest are left. A failure says
+    /// how many ids were gone through before it.
+    pub(super) async fn for_each_until<F, Fut>(
+        &self,
+        ids: Vec<String>,
+        phase: Phase,
+        progress: &ProgressFn,
+        report: &mut SyncReport,
+        work: F,
+        mut give_way: impl FnMut() -> bool + Send,
+    ) -> Result<Ran, Unfinished>
+    where
+        F: Fn(GmailSync, String) -> Fut,
+        Fut: Future<Output = SyncResult<Outcome>> + Send + 'static,
+    {
         let total = ids.len();
-        let mut done = 0;
+        let mut ran = Ran::default();
         let mut tasks = JoinSet::new();
         let mut ids = ids.into_iter();
-        progress(Progress::Working { phase, done, total });
+        progress(Progress::Working {
+            phase,
+            done: 0,
+            total,
+        });
         loop {
-            while tasks.len() < CONCURRENT_FETCHES
+            while !ran.gave_way
+                && tasks.len() < CONCURRENT_FETCHES
                 && let Some(id) = ids.next()
             {
                 tasks.spawn(work(self.clone(), id));
             }
             let Some(joined) = tasks.join_next().await else {
-                return Ok(());
+                return Ok(ran);
             };
             match joined {
                 Ok(Ok(Outcome::Headers)) => report.headers += 1,
                 Ok(Ok(Outcome::Fetched)) => report.fetched += 1,
                 Ok(Ok(Outcome::Relabelled)) => report.relabelled += 1,
                 Ok(Ok(Outcome::Removed)) => report.removed += 1,
-                Ok(Err(e)) => return Err(e),
+                Ok(Err(error)) => {
+                    return Err(Unfinished {
+                        through: ran.through,
+                        error,
+                    });
+                }
                 Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
-                Err(e) => return Err(SyncError::Io(std::io::Error::other(e))),
+                Err(e) => {
+                    return Err(Unfinished {
+                        through: ran.through,
+                        error: SyncError::Io(std::io::Error::other(e)),
+                    });
+                }
             }
-            done += 1;
-            progress(Progress::Working { phase, done, total });
+            ran.through += 1;
+            progress(Progress::Working {
+                phase,
+                done: ran.through,
+                total,
+            });
+            if !ran.gave_way && ids.len() > 0 && give_way() {
+                ran.gave_way = true;
+            }
         }
     }
 
