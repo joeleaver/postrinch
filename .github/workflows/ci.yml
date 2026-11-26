@@ -48,8 +48,11 @@ jobs:
         shell: pwsh
         run: |
           cargo build -p postrinch
-          $said = & target/debug/postrinch.exe --version
-          if ($said -notmatch '^postrinch \d+\.\d+\.\d+$') { throw "postrinch.exe --version said '$said'" }
+          . tools/windows/invoke.ps1
+          $run = Invoke-Program target/debug/postrinch.exe --version
+          if ($run.Code -ne 0 -or $run.Out -notmatch '^postrinch \d+\.\d+\.\d+$') {
+            throw "postrinch.exe --version exited $($run.Code), saying '$($run.Out)'"
+          }
 
   # The IMAP/SMTP smoke test against a real server, GreenMail, which the
   # test starts from its standalone jar (docs/imap.md, "Testing"). The

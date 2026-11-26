@@ -99,7 +99,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          $built = (& target/release/postrinch.exe --version).Split(" ")[1]
+          . tools/windows/invoke.ps1
+          $built = (Invoke-Program target/release/postrinch.exe --version).Out.Split(" ")[1]
           if ("v$built" -ne $env:GITHUB_REF_NAME) {
             throw "the tag is $env:GITHUB_REF_NAME but the programs are ${built}: bump [workspace.package] version"
           }
@@ -108,7 +109,9 @@ jobs:
         shell: pwsh
         run: |
           tools/windows/package.ps1 -BinDir target/release -OutDir dist
-          $version = (& target/release/postrinch.exe --version).Split(" ")[1]
+          . tools/windows/invoke.ps1
+          $version = (Invoke-Program target/release/postrinch.exe --version).Out.Split(" ")[1]
+          if (-not $version) { throw "postrinch.exe --version named no version" }
           "version=$version" >> $env:GITHUB_ENV
 
       - name: Build the installer
@@ -124,6 +127,7 @@ jobs:
       - name: Check the installer and the zip
         shell: pwsh
         run: |
+          . tools/windows/invoke.ps1
           $app = "$env:LOCALAPPDATA\Programs\Postrinch"
           $programs = "postrinch.exe", "postrinch-mcp.exe", "postrinch-cli.exe"
           function Check-Install($how) {
@@ -132,7 +136,7 @@ jobs:
             }
             $marker = Get-Content "$app\postrinch-install.json" | ConvertFrom-Json
             if ($marker.version -ne $env:version) { throw "$how wrote a marker saying $($marker.version), not $env:version" }
-            $said = & "$app\postrinch.exe" --version
+            $said = (Invoke-Program "$app\postrinch.exe" --version).Out
             if ($said -ne "postrinch $env:version") { throw "the installed window says '$said'" }
           }
           $setup = "dist/postrinch-$env:version-windows-x86_64-setup.exe"
@@ -149,12 +153,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path $unpacked | Out-Null
           & "$env:SystemRoot\System32\tar.exe" -xf "dist/postrinch-$env:version-windows-x86_64.zip" -C $unpacked
           if ($LASTEXITCODE -ne 0) { throw "the system's tar could not unpack the zip" }
-          # Captured, so PowerShell waits for the window program to exit
-          # (it would not for one writing to no pipe) and the exit code is its.
-          $said = & "$unpacked\postrinch.exe" --install 2>&1
-          $code = $LASTEXITCODE
-          Write-Host $said
-          if ($code -ne 0) { throw "postrinch.exe --install failed ($code)" }
+          $run = Invoke-Program "$unpacked\postrinch.exe" --install
+          Write-Host $run.Out
+          if ($run.Code -ne 0) { throw "postrinch.exe --install failed ($($run.Code))" }
           Check-Install "postrinch.exe --install"
           Write-Host "Setup: installed, marker $env:version, Start-menu entry, uninstalled cleanly; the zip: --install"
 
