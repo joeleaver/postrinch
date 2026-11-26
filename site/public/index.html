@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Postrinch: mail and calendar, on your computer, open to your agents</title>
-<meta name="description" content="A fast desktop mail client for Gmail and IMAP, written in Rust, with your calendar beside it and search that runs on your own computer. Everything you can do in the window, Claude can do too, through MCP.">
+<meta name="description" content="A fast desktop mail client for Gmail, Outlook and any IMAP account, written in Rust, with your calendar beside it and search that runs on your own computer. Everything you can do in the window, Claude can do too, through MCP.">
 <meta name="theme-color" content="#2456b8">
 <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
 <link rel="icon" href="/assets/icon-96.png" type="image/png" sizes="96x96">
@@ -31,7 +31,7 @@
     <div class="wrap">
       <span class="badge">Early preview · Linux</span>
       <h1>Your mail, on your computer, open to your agents.</h1>
-      <p class="lede">Postrinch is a fast desktop mail client for Gmail and, soon, any IMAP account, written in Rust, with your calendar beside it and search that runs on your own machine. Everything you can do in the window, Claude can do too, through MCP, and nothing that leaves your account goes without your say.</p>
+      <p class="lede">Postrinch is a fast desktop mail client for Gmail, Outlook and any IMAP account, written in Rust, with your calendar beside it and search that runs on your own machine. Everything you can do in the window, Claude can do too, through MCP, and nothing that leaves your account goes without your say.</p>
       <div class="actions">
         <a class="btn btn-primary" href="#download">Download for Linux</a>
         <a class="btn btn-quiet" href="https://github.com/joeleaver/postrinch">Source on GitHub</a>
@@ -74,7 +74,7 @@
         <div class="feature-text">
           <h3>Search for what you remember<span class="tag">Coming</span></h3>
           <p>You remember what an email was about, not the words in it. Ask for "the email where someone offered to cover my shift" and Postrinch will find it by meaning, with a language model that runs on your computer. Your mail never goes to a search service.</p>
-          <p>Today, search covers every account at once, by words, people, labels, dates and attachments, with the filters you know from Gmail. Words alone search 64,000 messages in tens of milliseconds. Mail that hasn't downloaded yet is asked of Gmail and listed below.</p>
+          <p>Today, search covers every account at once, by words, people, labels, dates and attachments, with the filters you know from Gmail. Words alone search 64,000 messages in tens of milliseconds. Mail that hasn't downloaded yet is asked of your mail server and listed below.</p>
         </div>
         <figure class="shot"><picture><source media="(prefers-color-scheme: dark)" srcset="/assets/shots/search-dark.png"><img src="/assets/shots/search.png" width="1440" height="900" alt="A search with operators in the box and its results." loading="lazy"></picture></figure>
       </div>
@@ -83,7 +83,7 @@
         <div class="feature-text">
           <h3>Rules that run where they should</h3>
           <p>One set of rules per account: label it, file it, flag it, forward it, or ask an agent to summarise it.</p>
-          <p>A rule runs on Gmail when Gmail matches exactly the same mail, so it works while your computer is off, and in Postrinch when Gmail can't. You never have to think about which.</p>
+          <p>In a Gmail account, a rule runs on Gmail when Gmail matches exactly the same mail, so it works while your computer is off, and in Postrinch when Gmail can't. You never have to think about which. In other accounts, rules run in Postrinch.</p>
         </div>
         <figure class="shot"><picture><source media="(prefers-color-scheme: dark)" srcset="/assets/shots/rules-dark.png"><img src="/assets/shots/rules.png" width="1440" height="900" alt="The rule editor in Settings › Rules." loading="lazy"></picture></figure>
       </div>
@@ -124,11 +124,15 @@
       <div class="cards">
         <div class="card">
           <h3>Every account, one inbox or many</h3>
-          <p>Every Gmail account you have, side by side or together in one inbox. Fastmail, iCloud, Outlook and your work server join them over IMAP soon<span class="tag">Coming</span>, with the same views, search, rules and agents.</p>
+          <p>Gmail, Outlook and Microsoft 365, Fastmail, iCloud, your work server: any account with IMAP and SMTP, side by side or together in one inbox, with the same views, search, rules and agents. Give your address and Postrinch finds the servers.</p>
+        </div>
+        <div class="card">
+          <h3>Moving from Thunderbird</h3>
+          <p>Postrinch finds the accounts in your Thunderbird profiles and adds the ones you tick, with their servers as Thunderbird has them. Your passwords stay in Thunderbird: you sign in to each account once.</p>
         </div>
         <div class="card">
           <h3>Works on a train</h3>
-          <p>Archive, label, star or trash and it happens at once. Postrinch tells Gmail in the background, in the order you did things, even after a day offline.</p>
+          <p>Archive, label, star or trash and it happens at once. Postrinch tells your mail server in the background, in the order you did things, even after a day offline.</p>
         </div>
         <div class="card">
           <h3>Mail that can't follow you</h3>
