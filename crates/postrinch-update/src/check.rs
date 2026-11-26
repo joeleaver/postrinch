@@ -90,7 +90,8 @@ fn pick(assets: &[Asset]) -> Option<(Asset, Asset)> {
 /// Unpack `package` into `dir/update` and mark it ready.
 fn stage(dir: &Path, version: &str, package: &[u8]) -> Result<(), String> {
     let stage = dir.join(STAGE);
-    let _ = std::fs::remove_dir_all(&stage);
+    // An earlier, unfinished stage; its programs may be held a moment.
+    let _ = crate::busy::retry(|| std::fs::remove_dir_all(&stage));
     std::fs::create_dir_all(&stage).map_err(|e| format!("creating {}: {e}", stage.display()))?;
     let archive = stage.join(format!("package{}", package_suffix()));
     std::fs::write(&archive, package).map_err(|e| format!("saving the package: {e}"))?;

@@ -46,6 +46,66 @@ fn wait(pid: u32, deadline: Instant) -> bool {
     }
 }
 
+/// Windows: the processes other than this one running a program from
+/// `dir`, which an uninstall must not pull the files from under.
+#[cfg(windows)]
+pub(crate) fn running_from(dir: &std::path::Path) -> Vec<u32> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW,
+    };
+    let Some(dir) = dir.canonicalize().ok() else {
+        return Vec::new();
+    };
+    let own = std::process::id();
+    let mut found = Vec::new();
+    // SAFETY: plain Win32 calls on structures sized as they ask; every
+    // handle is closed before returning.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return found;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut more = Process32FirstW(snapshot, &mut entry) != 0;
+        while more {
+            let pid = entry.th32ProcessID;
+            if pid != own {
+                let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+                if !process.is_null() {
+                    let mut name = [0u16; 1024];
+                    let mut len = name.len() as u32;
+                    let named = QueryFullProcessImageNameW(
+                        process,
+                        PROCESS_NAME_WIN32,
+                        name.as_mut_ptr(),
+                        &mut len,
+                    ) != 0;
+                    CloseHandle(process);
+                    let image =
+                        std::path::PathBuf::from(String::from_utf16_lossy(&name[..len as usize]));
+                    let in_dir = image
+                        .parent()
+                        .and_then(|p| p.canonicalize().ok())
+                        .is_some_and(|p| p == dir);
+                    if named && in_dir {
+                        found.push(pid);
+                    }
+                }
+            }
+            more = Process32NextW(snapshot, &mut entry) != 0;
+        }
+        CloseHandle(snapshot);
+    }
+    found
+}
+
 /// Elsewhere, look every tenth of a second.
 #[cfg(not(windows))]
 fn wait(pid: u32, deadline: Instant) -> bool {
@@ -120,6 +180,25 @@ pub(crate) mod tests {
         if std::env::var_os(SLEEP_ENV).is_some() {
             std::thread::sleep(Duration::from_secs(60));
         }
+    }
+
+    /// What `--uninstall` looks for: a window (or bridge) still running
+    /// from the install it is about to empty.
+    #[cfg(windows)]
+    #[test]
+    fn a_program_running_from_a_folder_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let copy = dir.path().join("running.exe");
+        std::fs::copy(std::env::current_exe().unwrap(), &copy).unwrap();
+        assert!(running_from(dir.path()).is_empty());
+        let mut child = sleeping(&copy);
+        let found = running_from(dir.path());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let pid = child.id();
+        drop(child);
+        assert_eq!(found, [pid]);
+        assert!(running_from(dir.path()).is_empty());
     }
 
     #[test]

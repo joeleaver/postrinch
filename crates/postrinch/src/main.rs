@@ -88,6 +88,19 @@ fn main() -> ExitCode {
                 }
             };
         }
+        #[cfg(windows)]
+        Some("--uninstall") => {
+            let quiet = std::env::args().nth(2).as_deref() == Some("--quiet");
+            return update::uninstall(quiet);
+        }
+        #[cfg(not(windows))]
+        Some("--uninstall") => {
+            eprintln!(
+                "postrinch: --uninstall is what Windows' Apps & features runs; \
+                 on this system Postrinch has no uninstaller yet"
+            );
+            return ExitCode::FAILURE;
+        }
         Some("--version") => {
             println!("postrinch {}", postrinch_update::CURRENT);
             return ExitCode::SUCCESS;

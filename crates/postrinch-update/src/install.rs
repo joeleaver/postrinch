@@ -1,8 +1,11 @@
 //! The install: a folder of the person's own holding the three programs and
-//! the marker, plus (on Linux) links on the PATH and a menu entry.
+//! the marker, plus its place on the desktop (`desktop`): on Linux links on
+//! the PATH and a menu entry, on Windows a Start-menu entry, the PATH and
+//! Apps & features.
 
 use std::path::{Path, PathBuf};
 
+use crate::busy;
 use crate::desktop::{self, Icons};
 use crate::{CURRENT, MARKER, PROGRAMS, exe};
 
@@ -25,10 +28,21 @@ pub fn managed_dir() -> Option<PathBuf> {
     dir.join(MARKER).is_file().then_some(dir)
 }
 
+/// What [`install`] did.
+#[derive(Debug)]
+pub struct Installed {
+    /// The install folder.
+    pub dir: PathBuf,
+    /// Sentences for the person: what was left alone, what changed that
+    /// they should know of. `--install` runs before logging starts, so the
+    /// caller prints them.
+    pub notes: Vec<String>,
+}
+
 /// `postrinch --install`: copy the three programs from the running one's
 /// folder into [`install_dir`], mark it, and put it on the PATH and in the
-/// menu. Answers the folder.
-pub fn install(icons: &Icons) -> Result<PathBuf, String> {
+/// menu.
+pub fn install(icons: &Icons) -> Result<Installed, String> {
     let dir = install_dir().ok_or("this system has no local data folder to install into")?;
     let exe_path = std::env::current_exe().map_err(|e| format!("finding this program: {e}"))?;
     let from = exe_path.parent().ok_or("this program has no folder")?;
@@ -56,8 +70,8 @@ pub fn install(icons: &Icons) -> Result<PathBuf, String> {
         }
     }
     write_marker(&dir, CURRENT)?;
-    desktop::integrate(&dir, icons)?;
-    Ok(dir)
+    let notes = desktop::integrate(&dir, icons)?;
+    Ok(Installed { dir, notes })
 }
 
 pub(crate) fn write_marker(dir: &Path, version: &str) -> Result<(), String> {
@@ -69,6 +83,13 @@ pub(crate) fn write_marker(dir: &Path, version: &str) -> Result<(), String> {
 /// never half written.
 fn copy_over(from: &Path, to: &Path) -> Result<(), String> {
     let tmp = to.with_extension("incoming");
+    // One an earlier, interrupted install left, perhaps held a moment.
+    match busy::retry(|| std::fs::remove_file(&tmp)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return Err(format!("removing {}: {e}", tmp.display()));
+        }
+        _ => {}
+    }
     std::fs::copy(from, &tmp).map_err(|e| format!("copying {}: {e}", from.display()))?;
     replace_file(&tmp, to)
 }
@@ -76,14 +97,22 @@ fn copy_over(from: &Path, to: &Path) -> Result<(), String> {
 /// Move `new` over `dest`. On Linux and macOS a rename: a running `dest`
 /// keeps its open file. Windows will not replace a running program, but it
 /// will rename one, so the old file steps aside to `*.old` first (removed
-/// at the next start).
+/// at the next start). A file another process holds for a moment (Defender
+/// scanning it) is waited for (`busy`).
 pub(crate) fn replace_file(new: &Path, dest: &Path) -> Result<(), String> {
     if cfg!(windows) && dest.exists() {
         let old = dest.with_extension("old");
-        let _ = std::fs::remove_file(&old);
-        std::fs::rename(dest, &old).map_err(|e| format!("moving {} aside: {e}", dest.display()))?;
+        match busy::retry(|| std::fs::remove_file(&old)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(format!("removing {}: {e}", old.display()));
+            }
+            _ => {}
+        }
+        busy::retry(|| std::fs::rename(dest, &old))
+            .map_err(|e| format!("moving {} aside: {e}", dest.display()))?;
     }
-    std::fs::rename(new, dest).map_err(|e| format!("putting {} in place: {e}", dest.display()))?;
+    busy::retry(|| std::fs::rename(new, dest))
+        .map_err(|e| format!("putting {} in place: {e}", dest.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -132,5 +161,20 @@ mod tests {
         replaced.unwrap();
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new");
         assert_eq!(dest.with_extension("old").exists(), cfg!(windows));
+    }
+
+    /// The update's rename while a scanner holds the program: it waits
+    /// for the scanner to let go rather than failing the update.
+    #[cfg(windows)]
+    #[test]
+    fn a_program_held_for_a_moment_is_still_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let (new, dest) = (dir.path().join("new"), dir.path().join(exe("program")));
+        std::fs::write(&dest, "old").unwrap();
+        std::fs::write(&new, "new").unwrap();
+        let held = crate::busy::tests::hold(&dest, std::time::Duration::from_millis(300));
+        replace_file(&new, &dest).unwrap();
+        held.join().unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new");
     }
 }

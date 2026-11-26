@@ -1,8 +1,10 @@
 ; The Windows installer (DESIGN.md, "Installing and updating"): a per-user
 ; Setup that needs no administrator and puts Postrinch where its own updater
 ; keeps it current (%LOCALAPPDATA%\Programs\Postrinch, postrinch-update's
-; install_dir), with the install marker, a Start-menu entry and an
-; uninstaller in Apps & features.
+; install_dir), with the install marker, a Start-menu entry, the folder on
+; the person's PATH and an uninstaller in Apps & features: what
+; `postrinch.exe --install` from the zip leaves too (postrinch-update's
+; win module), so the two routes end in the same install.
 ;
 ; Built by .github/workflows/release.yml with Inno Setup 6:
 ;   iscc /DAppVersion=X.Y.Z /DStage=<folder with the three programs, the
@@ -49,6 +51,9 @@ SolidCompression=yes
 ; postrinch-mcp.exe: Setup offers to close them.
 CloseApplications=yes
 RestartApplications=no
+; The PATH changes ([Code]): Setup and its uninstaller tell running programs
+; to read the environment again.
+ChangesEnvironment=yes
 
 [Tasks]
 Name: "desktopicon"; Description: "Put Postrinch on the desktop"; GroupDescription: "Shortcuts:"; Flags: unchecked
@@ -66,8 +71,9 @@ Source: "{#Stage}\LICENSE-APACHE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Stage}\LICENSE-IBM-Plex.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{userprograms}\Postrinch"; Filename: "{app}\postrinch.exe"
-Name: "{userdesktop}\Postrinch"; Filename: "{app}\postrinch.exe"; Tasks: desktopicon
+; The entry `--install` makes the same (postrinch-update's win/shortcut.rs).
+Name: "{userprograms}\Postrinch"; Filename: "{app}\postrinch.exe"; WorkingDir: "{app}"; Comment: "Your mail, on your computer, with agents you let in"
+Name: "{userdesktop}\Postrinch"; Filename: "{app}\postrinch.exe"; WorkingDir: "{app}"; Comment: "Your mail, on your computer, with agents you let in"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\postrinch.exe"; Description: "Open Postrinch"; Flags: nowait postinstall skipifsilent
@@ -79,3 +85,132 @@ Filename: "{app}\postrinch.exe"; Description: "Open Postrinch"; Flags: nowait po
 Type: filesandordirs; Name: "{app}\update"
 Type: files; Name: "{app}\*.old"
 Type: files; Name: "{app}\*.incoming"
+
+[Code]
+{ The folder on the person's own PATH (HKCU\Environment, Path), as
+  postrinch-update's win/path.rs does it: added once, and recorded in
+  HKCU\Software\Postrinch (PathAdded) so the uninstaller removes only an
+  entry an install added, never one the person had. Entries compare case
+  aside, a trailing backslash aside and environment variables expanded. }
+
+const
+  EnvKey = 'Environment';
+  StateKey = 'Software\Postrinch';
+  ZipEntryKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\Postrinch';
+
+function ExpandEnvironmentStrings(Src: String; Dst: String; Size: DWORD): DWORD;
+  external 'ExpandEnvironmentStringsW@kernel32.dll stdcall';
+
+function Expanded(S: String): String;
+var
+  Buf: String;
+  N: DWORD;
+begin
+  Result := S;
+  if Pos('%', S) = 0 then exit;
+  SetLength(Buf, 4096);
+  N := ExpandEnvironmentStrings(S, Buf, 4096);
+  if (N > 0) and (N <= 4096) then
+    Result := Copy(Buf, 1, N - 1);
+end;
+
+function Normal(Entry: String): String;
+begin
+  Entry := Trim(Entry);
+  StringChangeEx(Entry, '"', '', True);
+  Entry := Expanded(Entry);
+  StringChangeEx(Entry, '/', '\', True);
+  while (Length(Entry) > 0) and (Entry[Length(Entry)] = '\') do
+    Delete(Entry, Length(Entry), 1);
+  Result := Lowercase(Entry);
+end;
+
+{ The person's PATH without the entries that are Dir, the rest as they were;
+  Found says whether there were any. }
+function Without(Path: String; Dir: String; var Found: Boolean): String;
+var
+  Rest, Entry, Want: String;
+  P: Integer;
+begin
+  Want := Normal(Dir);
+  Found := False;
+  Result := '';
+  Rest := Path;
+  while Length(Rest) > 0 do begin
+    P := Pos(';', Rest);
+    if P = 0 then begin
+      Entry := Rest;
+      Rest := '';
+    end else begin
+      Entry := Copy(Rest, 1, P - 1);
+      Delete(Rest, 1, P);
+    end;
+    if (Trim(Entry) <> '') and (Normal(Entry) = Want) then
+      Found := True
+    else if Result = '' then
+      Result := Entry
+    else
+      Result := Result + ';' + Entry;
+  end;
+  while (Length(Result) > 0) and (Result[Length(Result)] = ';') do
+    Delete(Result, Length(Result), 1);
+end;
+
+function ReadPath(var Path: String): Boolean;
+begin
+  Path := '';
+  Result := RegQueryStringValue(HKCU, EnvKey, 'Path', Path);
+end;
+
+procedure WritePath(Path: String);
+begin
+  RegWriteExpandStringValue(HKCU, EnvKey, 'Path', Path);
+end;
+
+procedure AddToPath(Dir: String);
+var
+  Path, Trimmed: String;
+  Found: Boolean;
+begin
+  ReadPath(Path);
+  Without(Path, Dir, Found);
+  if Found then exit;
+  Trimmed := Path;
+  while (Length(Trimmed) > 0) and (Trimmed[Length(Trimmed)] = ';') do
+    Delete(Trimmed, Length(Trimmed), 1);
+  if Trim(Trimmed) = '' then
+    WritePath(Dir)
+  else
+    WritePath(Trimmed + ';' + Dir);
+  RegWriteStringValue(HKCU, StateKey, 'PathAdded', Dir);
+end;
+
+procedure RemoveFromPath;
+var
+  Added, Path, Left: String;
+  Found: Boolean;
+begin
+  if not RegQueryStringValue(HKCU, StateKey, 'PathAdded', Added) then exit;
+  if ReadPath(Path) then begin
+    Left := Without(Path, Added, Found);
+    if Found then WritePath(Left);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then begin
+    AddToPath(ExpandConstant('{app}'));
+    { Over an install from the zip: this Setup's entry in Apps & features
+      stands for the folder from now on, not the zip install's own. }
+    RegDeleteKeyIncludingSubkeys(HKCU, ZipEntryKey);
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then begin
+    RemoveFromPath;
+    RegDeleteKeyIncludingSubkeys(HKCU, StateKey);
+  end;
+end;

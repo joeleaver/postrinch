@@ -123,14 +123,22 @@ jobs:
 
       # The runner is a real Windows: install from the Setup and look, then
       # uninstall and look again; then install from the zip as `--install`
-      # does, which writes the marker itself.
+      # does, which must leave the same (marker, Start-menu entry, one PATH
+      # entry, Apps & features), twice over, and `--uninstall` it; then a
+      # PATH entry the person made themselves, which nothing removes.
       - name: Check the installer and the zip
         shell: pwsh
         run: |
           . tools/windows/invoke.ps1
           $app = "$env:LOCALAPPDATA\Programs\Postrinch"
           $programs = "postrinch.exe", "postrinch-mcp.exe", "postrinch-cli.exe"
-          function Check-Install($how) {
+          $lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Postrinch.lnk"
+          $uninstall = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
+          $setupKey = "$uninstall\{18A87A0C-8DA8-4CF8-98D3-AE6B5E169DF9}_is1"
+          $zipKey = "$uninstall\Postrinch"
+          function User-Path { (Get-ItemProperty HKCU:\Environment -Name Path -ErrorAction SilentlyContinue).Path }
+          function Path-Entries { @((User-Path) -split ';' | Where-Object { $_.TrimEnd('\') -ieq $app }).Count }
+          function Check-Install($how, $entryKey) {
             foreach ($f in $programs + "postrinch-install.json") {
               if (-not (Test-Path "$app\$f")) { throw "$how did not put $f in $app" }
             }
@@ -138,26 +146,79 @@ jobs:
             if ($marker.version -ne $env:version) { throw "$how wrote a marker saying $($marker.version), not $env:version" }
             $said = (Invoke-Program "$app\postrinch.exe" --version).Out
             if ($said -ne "postrinch $env:version") { throw "the installed window says '$said'" }
+            if (-not (Test-Path $lnk)) { throw "$how made no Start-menu entry" }
+            $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath
+            if ($target -ine "$app\postrinch.exe") { throw "$how's Start-menu entry starts '$target'" }
+            if ((Path-Entries) -ne 1) { throw "$how left $(Path-Entries) PATH entries for $app in '$(User-Path)'" }
+            $shown = (Get-ItemProperty $entryKey -ErrorAction SilentlyContinue).DisplayVersion
+            if ($shown -ne $env:version) { throw "Apps & features shows '$shown' for $how" }
           }
+          # An uninstaller's last steps (the Setup's [Code], its own files)
+          # come after postrinch.exe is gone: every condition is waited for,
+          # up to a minute, before one is called a failure.
+          function Check-Gone($how) {
+            $deadline = (Get-Date).AddSeconds(60)
+            do {
+              $left = @()
+              if (Test-Path "$app\postrinch.exe") { $left += "postrinch.exe" }
+              if ((Test-Path "$app\unins000.exe") -or (Uninstaller-Running)) { $left += "the Setup's uninstaller" }
+              if (Test-Path $lnk) { $left += "the Start-menu entry" }
+              if ((Path-Entries) -ne 0) { $left += "$app on the PATH ('$(User-Path)')" }
+              if ((Test-Path $setupKey) -or (Test-Path $zipKey)) { $left += "Postrinch in Apps & features" }
+              if (Test-Path HKCU:\Software\Postrinch) { $left += "HKCU\Software\Postrinch" }
+              if ($left.Count -eq 0) { return }
+              Start-Sleep -Milliseconds 500
+            } while ((Get-Date) -lt $deadline)
+            throw "$how left $($left -join ', ')"
+          }
+          # The Setup's uninstaller works from a copy of itself in %TEMP%
+          # (`_iu*.tmp`); it is done when that copy has exited.
+          function Uninstaller-Running { @(Get-Process | Where-Object { $_.ProcessName -like '_iu*' }).Count -gt 0 }
+          function Wait-SetupUninstalled {
+            $deadline = (Get-Date).AddSeconds(60)
+            while (((Uninstaller-Running) -or (Test-Path "$app\unins000.exe") -or (Test-Path $setupKey)) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+            if ((Uninstaller-Running) -or (Test-Path "$app\unins000.exe") -or (Test-Path $setupKey)) { throw "the Setup's uninstaller did not finish" }
+          }
+
           $setup = "dist/postrinch-$env:version-windows-x86_64-setup.exe"
           Start-Process -Wait -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
-          Check-Install "the Setup"
-          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Postrinch.lnk")) { throw "no Start-menu entry" }
+          Check-Install "the Setup" $setupKey
           # The uninstaller hands over to a copy of itself and returns at
-          # once, so wait (up to a minute) for it to have done its work.
+          # once; Check-Gone waits for it to have done its work.
           Start-Process -Wait -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
-          $deadline = (Get-Date).AddSeconds(60)
-          while ((Test-Path "$app\postrinch.exe") -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
-          if (Test-Path "$app\postrinch.exe") { throw "the uninstaller left postrinch.exe" }
+          Check-Gone "the Setup's uninstaller"
+
           $unpacked = "$env:RUNNER_TEMP\postrinch-zip"
           New-Item -ItemType Directory -Force -Path $unpacked | Out-Null
           & "$env:SystemRoot\System32\tar.exe" -xf "dist/postrinch-$env:version-windows-x86_64.zip" -C $unpacked
           if ($LASTEXITCODE -ne 0) { throw "the system's tar could not unpack the zip" }
-          $run = Invoke-Program "$unpacked\postrinch.exe" --install
+          foreach ($time in "once", "twice") {
+            $run = Invoke-Program "$unpacked\postrinch.exe" --install
+            Write-Host $run.Out
+            if ($run.Code -ne 0) { throw "postrinch.exe --install ($time) failed ($($run.Code))" }
+            Check-Install "postrinch.exe --install ($time)" $zipKey
+          }
+          $quiet = (Get-ItemProperty $zipKey).QuietUninstallString
+          if ($quiet -ne "`"$app\postrinch.exe`" --uninstall --quiet") { throw "the zip install's quiet uninstaller is '$quiet'" }
+          $run = Invoke-Program "$app\postrinch.exe" --uninstall --quiet
           Write-Host $run.Out
-          if ($run.Code -ne 0) { throw "postrinch.exe --install failed ($($run.Code))" }
-          Check-Install "postrinch.exe --install"
-          Write-Host "Setup: installed, marker $env:version, Start-menu entry, uninstalled cleanly; the zip: --install"
+          if ($run.Code -ne 0) { throw "postrinch.exe --uninstall failed ($($run.Code))" }
+          Check-Gone "postrinch.exe --uninstall"
+
+          # The person's own entry, written their way: it stays through an
+          # install and an uninstall by either route.
+          $theirs = "C:\Tools;$($app.ToUpper())\"
+          Set-ItemProperty HKCU:\Environment -Name Path -Value $theirs -Type ExpandString
+          foreach ($run in (Invoke-Program "$unpacked\postrinch.exe" --install), (Invoke-Program "$app\postrinch.exe" --uninstall --quiet)) {
+            if ($run.Code -ne 0) { throw "with the person's PATH entry: $($run.Out) $($run.Err)" }
+          }
+          if ((User-Path) -ne $theirs) { throw "--install and --uninstall changed the person's PATH to '$(User-Path)'" }
+          Start-Process -Wait -FilePath $setup -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          if ((User-Path) -ne $theirs) { throw "the Setup changed the person's PATH to '$(User-Path)'" }
+          Start-Process -Wait -FilePath "$app\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          Wait-SetupUninstalled
+          if ((User-Path) -ne $theirs) { throw "an uninstall changed the person's PATH to '$(User-Path)'" }
+          Write-Host "Setup and zip: marker $env:version, Start-menu entry, one PATH entry, Apps & features; both uninstalled cleanly; the person's own PATH entry kept"
 
       - uses: actions/upload-artifact@v4
         with:
