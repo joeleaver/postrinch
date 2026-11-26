@@ -83,6 +83,13 @@ pub(crate) fn write_marker(dir: &Path, version: &str) -> Result<(), String> {
 /// never half written.
 fn copy_over(from: &Path, to: &Path) -> Result<(), String> {
     let tmp = to.with_extension("incoming");
+    // One an earlier, interrupted install left, perhaps held a moment.
+    match busy::retry(|| std::fs::remove_file(&tmp)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return Err(format!("removing {}: {e}", tmp.display()));
+        }
+        _ => {}
+    }
     std::fs::copy(from, &tmp).map_err(|e| format!("copying {}: {e}", from.display()))?;
     replace_file(&tmp, to)
 }
