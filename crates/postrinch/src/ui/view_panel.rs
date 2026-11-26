@@ -2,8 +2,9 @@
 //! about a view in one place, opened by the pencil on its row (or + for a
 //! new view, or the pencil on a search's row). It stands where the reader
 //! does, so the list beside it shows the view as changed. Which mail it
-//! shows is in view_panel_mail.rs; here are the list's order, how the
-//! sidebar lists it, and Save.
+//! shows is in view_panel_mail.rs; here are how it shows, how the
+//! sidebar lists it, and Save. Its order is only in the list bar
+//! (list_order.rs).
 
 use postrinch_commands::built_in_holds;
 use postrinch_model::{SavedView, ViewCount, ViewRows};

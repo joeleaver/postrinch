@@ -171,8 +171,13 @@ impl State {
         }
     }
 
-    /// Open the panel on a view, opening the view first.
+    /// Open the panel on a view, opening the view first. A panel open on
+    /// something else (a new view being named, say) is finished first, so
+    /// what it holds is kept, as opening another view keeps it.
     pub fn edit_view(self, key: &str) {
+        if self.view_edit.with(|e| e.is_some()) {
+            self.finish_edit();
+        }
         if self.open_view.get() != key || self.search.get().is_some() {
             self.open_view(key);
         }

@@ -128,10 +128,13 @@ mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2
 .row-edit svg { width: 14px; height: 14px; }
 .view-row:hover .row-edit { opacity: 1; }
 .view-row:hover .count { visibility: hidden; }
-/* Focused without the pointer: a solid face over the count. */
-.row-edit:focus { opacity: 1; background: var(--field); color: var(--ink); }
-.row-edit:hover { background: var(--field); color: var(--ink); }
+/* Room for ✎ while it shows, so a long name ends in an ellipsis rather
+   than under it. */
+.view-row:hover .row-open { padding-right: 26px; }
 .folder.chosen .row-edit { color: var(--accent-ink); }
+/* Focused without the pointer: a solid face over the count. */
+.view-row .row-edit:focus { opacity: 1; background: var(--field); color: var(--ink); }
+.view-row .row-edit:hover { background: var(--field); color: var(--ink); }
 /* Open in the panel: wins over the chosen row's colour and the focus face. */
 .view-row .row-edit.pressed { background: var(--accent); color: var(--surface); }
 /* The search's row keeps × at its end: ✎ stands just before it. */

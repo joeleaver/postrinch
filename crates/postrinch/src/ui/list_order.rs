@@ -1,5 +1,7 @@
 //! The open view's order, in the bar over the list: a button showing only
 //! the order's icon, named in its tooltip, which opens the three orders.
+//! A rinch DropdownMenu, so the keyboard works as in any menu: Enter or
+//! Space opens it, the arrows move, Enter picks, Escape closes.
 //! The order lives only here, never also in the view panel.
 
 use postrinch_model::ListOrder;
@@ -39,15 +41,15 @@ fn order_icon(order: ListOrder) -> Icon {
 
 #[component]
 pub fn order_menu(state: State) -> NodeHandle {
-    let open = Signal::new(false);
+    let open = state.ordering;
     let shown = Memo::new(move || state.shown_order());
     rsx! {
-        Popover {
+        DropdownMenu {
             opened_fn: move || open.get(),
-            onclose: move || open.set(false),
+            on_close: move || open.set(false),
             position: "bottom-end",
             width: "180px",
-            PopoverTarget {
+            DropdownMenuTarget {
                 button {
                     class: {move || if open.get() { "icon-button list-order open" } else { "icon-button list-order" }},
                     title: {move || order_title(shown.get())},
@@ -67,12 +69,15 @@ pub fn order_menu(state: State) -> NodeHandle {
                     }
                 }
             }
-            PopoverDropdown {
+            DropdownMenuDropdown {
                 div { class: "order-menu", role: "menu", aria-label: "Order",
+                    // The menu's own item class, which its arrow keys and
+                    // type-ahead move among; radio items of our own, to tick
+                    // the order that is on.
                     for order in ORDERS {
-                        div {
+                        button {
                             key: format!("{order:?}"),
-                            class: {move || if shown.get() == order { "order-choice on" } else { "order-choice" }},
+                            class: {move || if shown.get() == order { "rinch-dropdown-menu__item order-choice on" } else { "rinch-dropdown-menu__item order-choice" }},
                             role: "menuitemradio",
                             aria-checked: {move || if shown.get() == order { "true" } else { "false" }},
                             onclick: move || {
@@ -81,7 +86,7 @@ pub fn order_menu(state: State) -> NodeHandle {
                             },
                             span { class: "order-tick", {move || if shown.get() == order { "\u{2713}" } else { "" }} }
                             span { class: "order-choice-icon", {icon(__scope, order_icon(order))} }
-                            span { {order_name(order)} }
+                            span { class: "rinch-dropdown-menu__item-label", {order_name(order)} }
                         }
                     }
                 }
@@ -92,12 +97,17 @@ pub fn order_menu(state: State) -> NodeHandle {
 
 /// The order button's and menu's styles.
 pub const CSS: &str = r#"
-.list-bar .rinch-popover,
-.list-bar .rinch-popover__target { display: flex; }
+.list-bar .rinch-dropdown-menu,
+.list-bar .rinch-dropdown-menu__target { display: flex; }
 .list-order { width: 30px; height: 30px; flex-shrink: 0; border: 1px solid var(--field); }
 .order-icon { display: flex; }
-.order-menu { display: flex; flex-direction: column; padding: 5px; }
-.order-choice { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.order-menu { display: flex; flex-direction: column; }
+.order-choice {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    border: 0; border-radius: 6px; background: transparent; color: var(--ink);
+    font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.order-choice:focus { background: var(--hover); }
 .order-choice:hover { background: var(--hover); }
 .order-choice.on { color: var(--accent-ink); font-weight: 600; }
 .order-tick { width: 12px; flex-shrink: 0; }
