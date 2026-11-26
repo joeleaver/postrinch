@@ -80,16 +80,17 @@ Rust provider, on rhypedb, still being built. In both cases the spec decides beh
   PRs; how to find it is in re-ofscp's CLAUDE.md, "Protocol questions". When a protocol
   question isn't answered by the spec plus its open PRs, ask the oracle. Each question gives
   the section, the concrete case, and the default Postrinch would pick. **Postrinch never
-  ships a private guess.** Code that depends on an open spec PR names it in a comment, or, until the PR exists, the
-  decision's entry in the questions file ("Oracle answers").
-- **The spec work runs alongside the build.** These features are in the first wave, and each
-  needs the spec to change first (numbers refer to the questions file):
-  - posting memos, articles, replies and attachments (1, 5);
-  - content format and sanitizing (14);
-  - media upload and access (16);
-  - finding remote groups on a new device (3);
-  - live reactions and edits on your own private messages (6);
-  - the echo of `clientMessageId` (28).
+  ships a private guess.** Code that depends on an open spec PR names it in a comment.
+- **The first round of spec work is merged** (2026-11-26) as
+  [ofscp#23](https://github.com/lost-conn/ofscp/pull/23) (`message.create` over WS and REST,
+  full messages in events, the `clientMessageId` echo, the avatar flow) and
+  [ofscp#24](https://github.com/lost-conn/ofscp/pull/24) (article title, summary and cover;
+  the Markdown baseline; mentions; `attachment:<id>` references; upload `target`; capability
+  and short-lived media URLs; thumbnails; `/api/me/groups`; subscribing to a `dmId` on the
+  other provider; edits without a time limit), with Forumall following in forumall#30 and #31.
+  Also relevant: ofscp#26 (hidden channels answer 404; presence PUT replaces, privacy PUT
+  merges) and ofscp#28 (`public_key` is the raw 32-byte key, padded base64). Code cites the
+  spec section it implements.
 - **Where each question stands** is at the end of the questions file, "Oracle answers".
   Notifications for mentions in remote channels are deferred past v0.1 by the spec (§10.1,
   §13), so Postrinch marks them locally only.
@@ -177,10 +178,12 @@ provider**, not by provider or group.
   - Videos play in place through `rinch-video` (libmpv).
   - Other files show as cards.
   - Media is fetched by its URL, unsigned (attachment URLs are unguessable capability URLs,
-    possibly on a CDN or object store, not the provider), and kept in the content-addressed
-    blob store, as mail attachments are. A URL that stops working is fetched again from the
+    possibly on a CDN or object store, not the provider), checked against the attachment's
+    `hash` when it has one, and kept in the content-addressed blob store, as mail attachments
+    are. A URL past its `expiresAt`, or one that stops working, is fetched again from the
     message, since providers may hand out short-lived URLs or revoke a deleted message's
     files.
+  - A video shows its `thumbnail` as the poster until it plays.
 - **Private messages** show the encryption banner the spec asks for, and presence on each
   avatar.
 - **Call channels** show who is in a call, and say that Postrinch can't join yet (calls come
@@ -195,8 +198,10 @@ provider**, not by provider or group.
     bitmap arrives as raw RGBA and is encoded to PNG before upload. Pasting copied *files*
     (a video copied in a file manager) needs `rinch-clipboard` to offer file lists, which it
     doesn't yet ([rinch#3092](https://github.com/joeleaver/rinch/issues/3092)).
-  - Uploads start at once, to the account's home provider, and show their progress; Send
-    waits for them. The provider's `maxUploadBytes` is checked before uploading.
+  - Uploads start at once, to the account's home provider with `target` set to the provider
+    the message goes to (§5.8), and show their progress; Send waits for them. The provider's
+    `maxUploadBytes` is checked before uploading. A video's poster frame, when Postrinch can
+    take one, goes up with it as the `thumbnail` part.
   - Enter sends; Shift+Enter starts a new line.
 - **The article and memo editor** opens in the main pane:
   - Article or Memo, and where it goes (▾ lists the places that allow that kind).
@@ -254,7 +259,7 @@ when an account is deleted.
 | `SocialMedia` | acct + provider + attachment id | URL, blob hash, fetched | mime, size, width, height, duration, poster |
 | `SocialDraft` | draft id | account, place, updated | kind, title, Markdown body, tags, cover, attachments (local files and uploaded ones) |
 | `SocialNotification` | acct + id | account, created, read | the notification |
-| `SocialOutbox` | acct + client id | account, place, seq | the change (post, reply, edit, delete, react, read marker, follow, DM pointer, profile), attempts, last error |
+| `SocialOutbox` | acct + client id | account, place, seq | the change (post, reply, edit, delete, react, read marker, follow, DM pointer, group pointer, profile), attempts, last error |
 
 - Messages stay small (mail's rule, and the same guard test). Media bytes live in the blob
   store.
@@ -281,16 +286,18 @@ when an account is deleted.
   - Matches a sent message to the provider's copy by `clientMessageId`.
   - Media is uploaded before the message that carries it.
 - **Private messages:** sending goes to the recipient's provider, then the pointer is written
-  at home. Reading merges both providers by `createdAt`, deduplicated by id.
+  at home. Reading merges both providers by `createdAt`, deduplicated by id. Reactions and
+  edits on messages sent to another provider come from subscribing to the `dmId` there.
 - **Mentions:** the home provider's notifications cover home channels. For every place,
   Postrinch also marks `mentions_me` from the messages it syncs, using the spec's mention
   syntax (§10.1). That is the design, not a stopgap: it is local and needs nothing from the
   provider. What the spec lacks (question 8) is a notification for a remote mention that
   reaches the person's other clients.
 - **Unread:** the provider's read markers at home; local markers elsewhere.
-- **Groups on other providers** are remembered locally. On a new computer they come back
-  through follows and invites, until the spec adds membership pointers (questions 3 and 29,
-  in progress with the oracle).
+- **Groups on other providers** are kept as pointers at home (`/api/me/groups`, updated live
+  by `groups.updated`), so a new computer finds them. Postrinch drops a pointer only on a
+  group-level signal: a 403 or 404 from `GET /api/groups/{id}`, or no longer being listed as
+  a member. A channel's 404 or `access_revoked` doesn't count.
 
 ### Agents (MCP)
 
@@ -310,8 +317,7 @@ read markers, and the person's views.
 ## Build order: one PR each
 
 Each PR is a reviewable unit with its tests, and merges after an independent review and green
-CI. Some PRs (marked *spec*) build on spec decisions Joe has made (2026-11-26) that are
-still on their way into the spec; their code names the spec PR once it exists.
+CI. Rows marked *spec* depend on the spec changes above, all merged on 2026-11-26.
 
 | # | PR | Needs |
 |---|---|---|
@@ -341,7 +347,7 @@ still on their way into the spec; their code names the spec PR once it exists.
 | 24 | Joining: invite links, join requests, All channels | 10, 15 |
 | 25 | Demo seed, visual tests, interop CI, DESIGN.md | 17, 19, 20 |
 
-- **In parallel from the start:** 1, 2, 3, 6 and 7, plus the spec work with the oracle.
+- **In parallel from the start:** 1, 2, 3, 6 and 7, plus any further spec questions with the oracle.
 - **After 15:** 22 and 24 (once 9 and 10 are in); 18 once 17 is in. 23 comes after the
   composer, editor and private messages (16, 19, 20).
 - **Packaging:** `rinch-video` needs libmpv in every release (Linux, Windows, macOS). This is
