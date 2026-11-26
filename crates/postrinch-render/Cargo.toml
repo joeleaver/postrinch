@@ -12,3 +12,10 @@ base64 = "0.22"
 mail-parser = "1.0"
 jiff = "0.2"
 postrinch-model = { workspace = true }
+# OFSCP bodies (src/social): CommonMark, without the binary's getopts.
+pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
+# Bare web addresses in a body's text made links.
+linkify = "0.12.0"
+# The tokenizer that reads a cleaned body back (social/finish.rs): the
+# version rinch-html is on, so no second copy.
+html5ever = "0.40"

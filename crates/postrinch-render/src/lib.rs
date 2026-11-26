@@ -9,6 +9,9 @@
 //! (`cid:`) are inlined; pictures on the web are held back unless the person
 //! asked for them, as loading them tells the sender the mail was opened
 //! (sanitize.rs). A message with no HTML part is its text, escaped.
+//!
+//! OFSCP message bodies (groups, channels, private messages) are rendered by
+//! [`social`], under the same cleaner and picture rule.
 
 mod calendar_share;
 mod colour;
@@ -21,6 +24,7 @@ mod parts;
 mod plain;
 mod quotes;
 mod sanitize;
+pub mod social;
 mod vtimezone;
 
 use mail_parser::{MessageParser, PartKind};
