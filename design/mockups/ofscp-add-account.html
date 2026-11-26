@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add OFSCP Account</title>
+<!--
+  Mockup: adding an OFSCP account (groups, channels and private messages)
+  to Postrinch, and the account in Settings › Accounts once added. The
+  design for docs/ofscp.md "Accounts and sign-in". OFSCP has no OAuth: the
+  handle and password go to the person's own provider once, which answers
+  with a short-lived token; Postrinch then registers a key made on this
+  computer and signs every request with it. The password is never kept.
+  Styles are add-imap-account.html's; colours are the window's own
+  (crates/postrinch/src/ui/palette.rs). The strip switches states.
+-->
+<style>
+:root {
+  --surface:#fff; --panel:#f4f5f7; --ink:#16181d; --ink-2:#3a3f4a; --muted:#5b6170; --faint:#8a909c;
+  --line:#dfe2e7; --line-soft:#eceef1; --field:#d4d8de; --hover:#eaecef; --accent:#2456b8;
+  --accent-tint:#e6eefb; --accent-ink:#173d84; --danger:#a3271d; --trouble:#7a3f06;
+  --warn-bg:#fdf4e3; --warn-line:#f0cf96; --green-tint:#d7f0e0; --green-ink:#1d5b36;
+  --scrim: rgba(22,24,29,.35);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface:#16181d; --panel:#1d2026; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6; --faint:#6b717d;
+  --line:#2d3139; --line-soft:#262a31; --field:#3a3f49; --hover:#2a2e36; --accent:#6f9cf0;
+  --accent-tint:#1f2d48; --accent-ink:#b6cdf7; --danger:#f0897c; --trouble:#f0b46a;
+  --warn-bg:#3a2c12; --warn-line:#6b5120; --green-tint:#183526; --green-ink:#9fd9b4; --scrim: rgba(0,0,0,.5);
+}}
+:root[data-theme="dark"] {
+  --surface:#16181d; --panel:#1d2026; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6; --faint:#6b717d;
+  --line:#2d3139; --line-soft:#262a31; --field:#3a3f49; --hover:#2a2e36; --accent:#6f9cf0;
+  --accent-tint:#1f2d48; --accent-ink:#b6cdf7; --danger:#f0897c; --trouble:#f0b46a;
+  --warn-bg:#3a2c12; --warn-line:#6b5120; --green-tint:#183526; --green-ink:#9fd9b4; --scrim: rgba(0,0,0,.5);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--panel); color: var(--ink); font: 14px/1.45 "Inter", system-ui, sans-serif; }
+.states { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.states button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--field); background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.states button.on { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.note { max-width: 860px; margin: 10px auto 0; padding: 0 16px; color: var(--muted); font-size: 12.5px; }
+/* The settings window behind the dialog */
+.settings { max-width: 860px; margin: 14px auto 40px; display: grid; grid-template-columns: 170px 1fr; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; min-height: 560px; position: relative; }
+.settings nav { background: var(--panel); border-right: 1px solid var(--line); padding: 12px 8px; }
+.settings nav div { padding: 6px 10px; border-radius: 6px; color: var(--ink-2); }
+.settings nav div.on { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
+.page { padding: 18px 22px; display: grid; grid-template-columns: 240px 1fr; gap: 18px; }
+.page h1 { grid-column: 1 / -1; margin: 0; font-size: 18px; }
+.list { display: flex; flex-direction: column; gap: 4px; }
+.acct { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 8px; cursor: default; }
+.acct.on { background: var(--accent-tint); }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.acct .a { display: block; font-weight: 600; font-size: 13px; }
+.acct .s { display: block; font-size: 12px; color: var(--muted); }
+.add { margin-top: 6px; }
+.detail h2 { margin: 0 0 2px; font-size: 16px; }
+.facts { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; margin: 14px 0; font-size: 13px; }
+.facts .k { color: var(--muted); }
+.hint { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+.trouble { color: var(--trouble); }
+.ok { color: var(--green-ink); }
+.row { display: flex; gap: 8px; align-items: center; }
+.spacer { flex: 1; }
+.section { border-top: 1px solid var(--line-soft); padding-top: 12px; margin-top: 14px; }
+.section h3 { margin: 0 0 8px; font-size: 13px; }
+/* Buttons as the window draws them */
+.btn { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--field); background: var(--surface); color: var(--ink); cursor: pointer; }
+.btn.filled { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.red { color: var(--danger); border-color: var(--danger); background: transparent; }
+.btn.link { border: 0; background: none; color: var(--accent); padding: 0; }
+.btn[disabled] { opacity: .5; cursor: default; }
+/* The dialog */
+.scrim { position: absolute; inset: 0; background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding-top: 48px; }
+.dialog { width: min(480px, calc(100% - 32px)); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: 0 12px 32px rgba(0,0,0,.18); }
+.dialog h2 { margin: 0 0 4px; font-size: 16px; }
+.dialog .sub { color: var(--muted); margin: 0 0 14px; font-size: 13px; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.field label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.field input, .field select { font: inherit; padding: 6px 9px; border: 1px solid var(--field); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.field input:focus { outline: none; border-color: var(--accent); }
+.actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; align-items: center; }
+.choice { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+.choice:hover { background: var(--hover); }
+.choice b { display: block; }
+.choice span { color: var(--muted); font-size: 12.5px; }
+.found { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
+.found .who { font-weight: 600; }
+.found .srv { color: var(--ink-2); font-family: ui-monospace, monospace; font-size: 12px; }
+.steps { list-style: none; padding: 0; margin: 6px 0 0; font-size: 13px; }
+.steps li { padding: 3px 0; display: flex; gap: 8px; }
+.steps .i { width: 16px; text-align: center; }
+.warn { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px; padding: 9px 11px; font-size: 13px; margin-bottom: 12px; }
+.err { color: var(--danger); font-size: 13px; margin: 4px 0 10px; }
+.servers { display: grid; grid-template-columns: 1fr 72px 120px; gap: 6px 8px; align-items: end; }
+.servers h4 { grid-column: 1 / -1; margin: 8px 0 0; font-size: 12.5px; }
+.servers .field { margin: 0; }
+/* Importing from Thunderbird */
+.profile { margin: 10px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.imp { display: grid; grid-template-columns: 20px 1fr auto; gap: 0 8px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; font-size: 13px; }
+.imp input { margin: 3px 0 0; }
+.imp .who { font-weight: 600; }
+.imp .name { color: var(--muted); }
+.imp .srv { grid-column: 2; color: var(--ink-2); font-family: ui-monospace, monospace; font-size: 12px; }
+.imp .how { grid-column: 3; grid-row: 1 / span 2; align-self: center; color: var(--ink-2); font-size: 12.5px; text-align: right; max-width: 150px; }
+.imp .srv { overflow-wrap: anywhere; }
+.imp.off { color: var(--faint); background: var(--panel); }
+.imp.off .who, .imp.off .name, .imp.off .srv, .imp.off .how { color: var(--faint); }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s .8s linear infinite; }
+@keyframes s { to { transform: rotate(360deg); } }
+@media (max-width: 720px) {
+  .settings { grid-template-columns: 1fr; margin: 12px 16px; }
+  .settings nav { display: none; }
+  .page { grid-template-columns: 1fr; }
+  .servers { grid-template-columns: 1fr 64px; }
+  .servers .sec { grid-column: 1 / -1; }
+}
+</style>
+</head>
+<body>
+<div class="states" id="states"></div>
+<p class="note" id="note"></p>
+
+<div class="settings">
+  <nav><div>Appearance</div><div>Reading</div><div class="on">Accounts</div><div>Rules</div><div>Agents</div><div>Notices</div></nav>
+  <div class="page">
+    <h1>Accounts</h1>
+    <div class="list">
+      <div class="acct"><span class="dot" style="background:#2456b8"></span><span><span class="a">joe@joeleaver.com</span><span class="s">Google · Signed in</span></span></div>
+      <div class="acct" id="newAcct" hidden><span class="dot" style="background:#7a4fc2"></span><span><span class="a">@joe@forumall.app</span><span class="s" id="newAcctState">OFSCP · Connected</span></span></div>
+      <div class="add"><button class="btn" data-go="choose">Add account…</button></div>
+    </div>
+    <div class="detail" id="detail"></div>
+  </div>
+  <div class="scrim" id="scrim" hidden><div class="dialog" id="dialog"></div></div>
+</div>
+
+<script>
+const gmailDetail = `
+  <h2>joe@joeleaver.com</h2><span class="s" style="color:var(--muted)">Google · Signed in</span>
+  <div class="facts"><span class="k">Sync</span><span>Up to date</span></div>`;
+
+const ofscpDetail = (state) => `
+  <h2>@joe@forumall.app</h2>
+  <span class="${state === 'trouble' ? 'trouble' : 's'}" style="${state === 'trouble' ? '' : 'color:var(--muted)'}">
+    ${state === 'trouble' ? 'OFSCP · Needs to sign in: forumall.app no longer accepts this computer’s key (it was signed out elsewhere, or the password was changed)' : 'OFSCP · Connected'}</span>
+  <div class="facts">
+    <span class="k">Name</span><span>Joe Leaver</span>
+    <span class="k">Provider</span><span>Forumall · forumall.app</span>
+    <span class="k">Groups</span><span>3 groups on 2 providers · 8 channels followed</span>
+    <span class="k">Connected to</span><span>${state === 'trouble' ? '—' : 'forumall.app, ofscp.org'}</span>
+    <span class="k">Signs in with</span><span>A key made on this computer (“Postrinch on hal”), kept in the system keyring</span>
+    <span class="k">Presence</span><span><select style="font:inherit;font-size:13px"><option>Online while Postrinch is open</option><option>Away</option><option>Do not disturb</option></select></span>
+  </div>
+  <div class="row">
+    ${state === 'trouble' ? '<button class="btn" data-go="again">Sign in again…</button>' : '<button class="btn">Profile…</button><button class="btn">Privacy…</button>'}
+    <span class="spacer"></span>
+    <button class="btn red">Sign out and remove</button>
+  </div>
+  <p class="hint">Sign out tells forumall.app to forget this computer's key. Your groups and messages stay on their providers.</p>`;
+
+const states = {
+  choose: {
+    label: '1 · Which kind',
+    note: 'A fourth kind joins the chooser. It names what the person gets (groups, channels, messages), with the protocol\'s name as the small print.',
+    dialog: `
+      <h2>Add an account</h2><p class="sub">Which kind of account is it?</p>
+      <div class="choice"><span>🅖</span><div><b>Google</b><span>Gmail and Google Workspace. Mail, labels and calendars.</span></div></div>
+      <div class="choice"><span>✉</span><div><b>Other mail account</b><span>Any IMAP and SMTP account. Mail only.</span></div></div>
+      <div class="choice" data-go="handle"><span>#</span><div><b>Groups and messages</b><span>An OFSCP account, such as one on forumall.app: groups, channels, posts and private messages.</span></div></div>
+      <div class="actions"><button class="btn">Cancel</button></div>`,
+  },
+  handle: {
+    label: '2 · Handle',
+    note: 'The handle names the provider: everything after the @ is its address. Postrinch reads the provider\'s discovery document before asking for the password, so a mistyped provider fails here, plainly.',
+    dialog: `
+      <h2>Groups and messages</h2><p class="sub">Sign in with the account you already have.</p>
+      <div class="field"><label>Handle</label><input value="joe@forumall.app" placeholder="you@provider"></div>
+      <p class="hint">No account yet? <button class="btn link" data-go="create">Make one on a provider…</button></p>
+      <div class="actions"><button class="btn">Cancel</button><button class="btn filled" data-go="password">Continue</button></div>`,
+  },
+  password: {
+    label: '3 · Provider found',
+    note: 'What discovery found is shown. The password goes to forumall.app once, over TLS, and is not kept: what is kept is the key Postrinch makes for this computer.',
+    dialog: `
+      <h2>Groups and messages</h2><p class="sub">@joe@forumall.app</p>
+      <div class="found"><div class="row"><span class="who">Forumall</span><span class="spacer"></span><span class="ok">OFSCP 0.1</span></div>
+        <div class="srv">https://forumall.app · wss://forumall.app/api/ws</div>
+        <div class="hint" style="margin-top:4px">Private messages, follows, read markers and notifications are offered here.</div></div>
+      <div class="field"><label>Password</label><input type="password" value="••••••••••••"></div>
+      <div class="actions"><button class="btn" data-go="handle">Back</button><button class="btn filled" data-go="signing">Sign in</button></div>`,
+  },
+  signing: {
+    label: '4 · Signing in',
+    note: 'The steps show while they run. Nothing is kept until all of them pass.',
+    dialog: `
+      <h2>Groups and messages</h2><p class="sub">@joe@forumall.app</p>
+      <ul class="steps">
+        <li><span class="i ok">✓</span>Signed in to forumall.app</li>
+        <li><span class="i ok">✓</span>Made a key for this computer and registered it as “Postrinch on hal”</li>
+        <li><span class="i"><span class="spin"></span></span>Finding your groups, follows and messages…</li>
+      </ul>
+      <div class="actions"><button class="btn" data-go="done">(next)</button></div>`,
+  },
+  done: {
+    label: '5 · Added',
+    note: 'The account is listed with the mail accounts, and Social appears beside Mail and Calendar. Groups on other providers are found from the account\'s follows and messages; one the spec gives no way to find is joined again from its invite link (a spec question).',
+    dialog: null, added: true, detail: () => ofscpDetail('ok'),
+  },
+  skew: {
+    label: 'Clock is off',
+    note: 'Every OFSCP request carries the time, and providers refuse one more than five minutes off. Postrinch tells the person rather than failing quietly.',
+    dialog: `
+      <h2>Groups and messages</h2><p class="sub">@joe@forumall.app</p>
+      <div class="warn">forumall.app's clock and this computer's differ by 7 minutes, so it refuses Postrinch's requests. Set this computer's clock to set itself (Settings › Date &amp; Time), then try again.</div>
+      <div class="actions"><button class="btn" data-go="handle">Back</button><button class="btn filled" data-go="signing">Try again</button></div>`,
+  },
+  create: {
+    label: 'Make an account',
+    note: 'Making an account happens on the provider\'s own site, in the browser: registration modes, invites and terms differ per provider. Postrinch lists providers it knows of only as a starting point (proposed for v1: making an account in the app is out).',
+    dialog: `
+      <h2>Make an account</h2><p class="sub">OFSCP accounts live on a provider you choose. Any of them can talk to all the others.</p>
+      <div class="choice"><span>◎</span><div><b>forumall.app</b><span>The reference provider. Opens its sign-up page in your browser.</span></div></div>
+      <div class="field"><label>Or another provider</label><input placeholder="provider address, such as social.example.com"></div>
+      <p class="hint">Come back here with your new handle once it's made.</p>
+      <div class="actions"><button class="btn" data-go="handle">Back</button></div>`,
+  },
+  trouble: {
+    label: 'Needs to sign in',
+    note: 'A refused key (close code 4003, or 401 on a fresh signature) is a state of the account, as with mail: shown on it, never a stream of errors.',
+    dialog: null, added: true, troubled: true, detail: () => ofscpDetail('trouble'),
+  },
+  again: {
+    label: 'Sign in again',
+    note: 'Signing in again makes a new key; the old one is already gone.',
+    dialog: `
+      <h2>Sign in again</h2><p class="sub">@joe@forumall.app</p>
+      <div class="field"><label>Password</label><input type="password" value=""></div>
+      <div class="actions"><button class="btn" data-go="trouble">Cancel</button><button class="btn filled" data-go="done">Sign in</button></div>`,
+  },
+};
+
+const order = Object.keys(states);
+function show(name) {
+  const st = states[name];
+  document.getElementById('note').textContent = st.note;
+  document.getElementById('newAcct').hidden = !st.added;
+  document.getElementById('newAcctState').textContent = st.troubled ? 'OFSCP · Needs to sign in' : 'OFSCP · Connected';
+  document.getElementById('newAcctState').className = st.troubled ? 's trouble' : 's';
+  document.getElementById('detail').innerHTML = st.detail ? st.detail() : gmailDetail;
+  document.querySelectorAll('.acct').forEach(a => a.classList.remove('on'));
+  (st.added ? document.getElementById('newAcct') : document.querySelector('.acct')).classList.add('on');
+  const scrim = document.getElementById('scrim');
+  scrim.hidden = !st.dialog;
+  if (st.dialog) document.getElementById('dialog').innerHTML = st.dialog;
+  document.querySelectorAll('#states button').forEach(b => b.classList.toggle('on', b.dataset.name === name));
+  document.querySelectorAll('[data-go]').forEach(e => e.onclick = () => show(e.dataset.go));
+}
+const strip = document.getElementById('states');
+order.forEach(name => {
+  const b = document.createElement('button'); b.textContent = states[name].label; b.dataset.name = name;
+  b.onclick = () => show(name); strip.appendChild(b);
+});
+show('choose');
+</script>
+</body>
+</html>

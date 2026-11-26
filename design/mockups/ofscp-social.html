@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OFSCP Groups and Messages</title>
+<!--
+  Mockup: Postrinch as an OFSCP client (docs/ofscp.md). A third mode beside
+  Mail and Calendar, "Social", with its own sidebar: Home (the feed of
+  followed channels), Mentions, Messages (private messages), then each
+  group the account belongs to, on any provider, with its channels.
+  States: a chat channel, a chat channel with a reply thread open, a posts
+  channel (articles and memos, read like mail: list then reader), the home
+  feed, private messages, and a call channel (calls are not in v1).
+  Colours are the window's own (crates/postrinch/src/ui/palette.rs).
+-->
+<style>
+:root {
+  --surface:#fff; --panel:#f4f5f7; --ink:#16181d; --ink-2:#3a3f4a; --muted:#5b6170; --faint:#8a909c;
+  --line:#dfe2e7; --line-soft:#eceef1; --field:#d4d8de; --hover:#eaecef; --row-hover:#f8f9fa;
+  --accent:#2456b8; --accent-tint:#e6eefb; --accent-ink:#173d84; --mark:#fbe7b0;
+  --warn-bg:#fdf4e3; --warn-line:#f0cf96; --trouble:#7a3f06; --green-tint:#d7f0e0; --green-ink:#1d5b36;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface:#16181d; --panel:#1d2026; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6; --faint:#6b717d;
+  --line:#2d3139; --line-soft:#262a31; --field:#3a3f49; --hover:#2a2e36; --row-hover:#1f2329;
+  --accent:#6f9cf0; --accent-tint:#1f2d48; --accent-ink:#b6cdf7; --mark:#5c4a12;
+  --warn-bg:#3a2c12; --warn-line:#6b5220; --trouble:#f0b46a; --green-tint:#183826; --green-ink:#9fdcb5;
+}}
+:root[data-theme="dark"] {
+  --surface:#16181d; --panel:#1d2026; --ink:#e7e9ee; --ink-2:#c4c8d0; --muted:#949aa6; --faint:#6b717d;
+  --line:#2d3139; --line-soft:#262a31; --field:#3a3f49; --hover:#2a2e36; --row-hover:#1f2329;
+  --accent:#6f9cf0; --accent-tint:#1f2d48; --accent-ink:#b6cdf7; --mark:#5c4a12;
+  --warn-bg:#3a2c12; --warn-line:#6b5220; --trouble:#f0b46a; --green-tint:#183826; --green-ink:#9fdcb5;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--panel); color: var(--ink); font: 14px/1.45 "IBM Plex Sans", "Inter", system-ui, sans-serif; }
+.states { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.states button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--field); background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.states button.on { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.note { max-width: 1180px; margin: 12px auto 0; padding: 0 16px; color: var(--muted); font-size: 12.5px; }
+.window { max-width: 1180px; margin: 10px auto 40px; display: grid; grid-template-columns: 240px 330px 1fr; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; height: 640px; }
+.window.wide { grid-template-columns: 240px 1fr; }
+.window.wide.thread { grid-template-columns: 240px 1fr 360px; }
+@media (max-width: 760px) { .window, .window.wide, .window.wide.thread { grid-template-columns: 1fr; height: auto; } .list { max-height: 360px; } }
+/* Sidebar */
+.sidebar { background: var(--panel); border-right: 1px solid var(--line); padding: 10px 8px; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
+.modes { display: flex; gap: 2px; padding: 2px; background: var(--hover); border-radius: 7px; margin: 0 4px 10px; }
+.modes span { flex: 1; text-align: center; font-size: 12.5px; padding: 4px 0; border-radius: 5px; color: var(--ink-2); }
+.modes span.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.folder { min-height: 30px; display: flex; align-items: center; gap: 7px; padding: 0 6px 0 12px; border-radius: 6px; cursor: pointer; }
+.folder:hover { background: var(--hover); }
+.folder.chosen { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
+.folder.chan { padding-left: 30px; min-height: 28px; font-size: 13.5px; }
+.folder.unread .name { font-weight: 600; }
+.name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.count { color: var(--muted); font-weight: 500; font-size: 12.5px; }
+.badge { background: var(--accent); color: #fff; border-radius: 9px; font-size: 11px; font-weight: 600; padding: 0 6px; line-height: 17px; }
+.glyph { width: 16px; color: var(--muted); text-align: center; flex-shrink: 0; font-size: 13px; }
+.group-head { display: flex; align-items: center; gap: 8px; padding: 10px 6px 4px 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.avatar { width: 20px; height: 20px; border-radius: 5px; color: #fff; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.where { font-weight: 400; color: var(--faint); font-size: 11.5px; margin-left: auto; }
+.line { height: 1px; background: var(--line); margin: 8px 4px; }
+.join { color: var(--muted); font-size: 13px; }
+/* Panes */
+.list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px; border-bottom: 1px solid var(--line-soft); }
+.bar h2 { font-size: 15px; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar .sub { color: var(--muted); font-size: 12.5px; font-weight: 400; margin-left: 6px; }
+.write { width: 30px; height: 30px; flex-shrink: 0; border: 0; border-radius: 6px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; }
+.filter { width: 180px; height: 30px; border: 1px solid var(--field); border-radius: 6px; padding: 0 10px; font: inherit; font-size: 13px; background: var(--surface); color: var(--ink); }
+.ghost { height: 30px; border: 1px solid var(--field); border-radius: 6px; background: var(--surface); color: var(--ink-2); font: inherit; font-size: 12.5px; padding: 0 10px; }
+.rows { overflow-y: auto; flex: 1; }
+.row { padding: 10px 14px; border-bottom: 1px solid var(--line-soft); cursor: pointer; }
+.row:hover { background: var(--row-hover); }
+.row.chosen { background: var(--accent-tint); }
+.row .top { display: flex; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.row .top b { color: var(--ink); font-weight: 600; }
+.row .top time { margin-left: auto; }
+.row .title { font-weight: 600; font-size: 14px; margin: 2px 0; }
+.row .snip { color: var(--muted); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.row.unread .title::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 6px; vertical-align: 2px; }
+.tag { display: inline-block; font-size: 11.5px; padding: 0 7px; border-radius: 9px; background: var(--hover); color: var(--ink-2); margin-right: 4px; }
+.kind { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
+.reader { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.scroll { overflow-y: auto; flex: 1; padding: 18px 22px; }
+.article h1 { font-size: 22px; margin: 0 0 6px; }
+.byline { color: var(--muted); font-size: 13px; margin-bottom: 14px; display: flex; gap: 8px; align-items: center; }
+.article p { margin: 0 0 12px; max-width: 70ch; }
+.article blockquote { margin: 0 0 12px; padding-left: 12px; border-left: 3px solid var(--line); color: var(--ink-2); }
+/* Messages in a stream */
+.stream { display: flex; flex-direction: column; gap: 2px; }
+.msg { display: grid; grid-template-columns: 36px 1fr; gap: 10px; padding: 6px 8px; border-radius: 6px; position: relative; }
+.msg:hover { background: var(--row-hover); }
+.msg:hover .tools { display: flex; }
+.msg .face { width: 34px; height: 34px; border-radius: 50%; color: #fff; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+.msg.cont { padding-top: 0; } .msg.cont .face { visibility: hidden; height: 0; }
+.who { font-size: 13px; } .who b { font-weight: 600; } .who .h { color: var(--faint); margin-left: 4px; } .who time { color: var(--faint); margin-left: 8px; font-size: 12px; }
+.body { font-size: 14px; }
+.body .mention { background: var(--mark); border-radius: 3px; padding: 0 2px; }
+.body code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12.5px; background: var(--hover); padding: 1px 4px; border-radius: 4px; }
+.edited { color: var(--faint); font-size: 12px; }
+.tomb { color: var(--faint); font-style: italic; font-size: 13px; }
+.reacts { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+.reacts span { border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; font-size: 12px; background: var(--surface); }
+.reacts span.mine { border-color: var(--accent); background: var(--accent-tint); color: var(--accent-ink); }
+.replies { margin-top: 4px; font-size: 12.5px; color: var(--accent); font-weight: 600; cursor: pointer; }
+.tools { position: absolute; right: 8px; top: -10px; display: none; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 2px; box-shadow: 0 2px 6px rgba(0,0,0,.08); }
+.tools span { width: 26px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 13px; color: var(--ink-2); }
+.tools span:hover { background: var(--hover); }
+.day { text-align: center; font-size: 12px; color: var(--faint); margin: 10px 0 6px; }
+.pending { opacity: .6; } .pending .who time::after { content: " · sending…"; }
+.attach { margin-top: 6px; display: inline-flex; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.attach i { width: 28px; height: 28px; background: var(--hover); border-radius: 5px; display: inline-block; }
+/* Composer */
+.composer { border-top: 1px solid var(--line); padding: 10px 14px 12px; }
+.composer .box { border: 1px solid var(--field); border-radius: 8px; padding: 8px 10px; min-height: 40px; color: var(--faint); display: flex; align-items: flex-end; gap: 8px; }
+.composer .box span { flex: 1; }
+.composer .send { height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: var(--accent); color: #fff; font: inherit; font-size: 13px; font-weight: 600; }
+.composer .hint { font-size: 11.5px; color: var(--faint); margin-top: 5px; display: flex; gap: 10px; }
+.typing { font-size: 12px; color: var(--muted); padding: 0 22px 4px; height: 18px; }
+/* Thread pane, banners */
+.thread-pane { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.banner { margin: 10px 14px 0; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--trouble); }
+.banner.info { background: var(--accent-tint); border-color: var(--accent-tint); color: var(--accent-ink); }
+.presence { width: 8px; height: 8px; border-radius: 50%; background: #2f8a55; display: inline-block; margin-left: 4px; }
+.presence.away { background: #c2621a; }
+.empty { margin: auto; text-align: center; color: var(--muted); max-width: 360px; padding: 30px; }
+.empty b { display: block; color: var(--ink); font-size: 15px; margin-bottom: 6px; }
+svg { width: 16px; height: 16px; }
+</style>
+</head>
+<body>
+<div class="states" id="states"></div>
+<p class="note" id="note"></p>
+<div class="window" id="window"></div>
+
+<template id="sidebar">
+  <nav class="sidebar">
+    <div class="modes"><span>Mail</span><span>Calendar</span><span class="on">Social</span></div>
+    <div class="folder" data-s="feed"><span class="glyph">⌂</span><span class="name">Home</span><span class="count">8</span></div>
+    <div class="folder unread"><span class="glyph">@</span><span class="name">Mentions</span><span class="badge">2</span></div>
+    <div class="folder unread" data-s="dms"><span class="glyph">✉</span><span class="name">Messages</span><span class="badge">1</span></div>
+    <div class="line"></div>
+    <div class="group-head"><span class="avatar" style="background:#7a4fc2">R</span>Rust Audio<span class="where">forumall.app</span></div>
+    <div class="folder chan unread" data-s="chat"><span class="glyph">#</span><span class="name">general</span><span class="badge">3</span></div>
+    <div class="folder chan" data-s="posts"><span class="glyph">▤</span><span class="name">announcements</span></div>
+    <div class="folder chan" data-s="call"><span class="glyph">◖</span><span class="name">standup</span><span class="count">●</span></div>
+    <div class="group-head"><span class="avatar" style="background:#2f8a55">O</span>OFSCP Spec<span class="where">ofscp.org</span></div>
+    <div class="folder chan" data-s="posts2"><span class="glyph">▤</span><span class="name">proposals</span><span class="count">4</span></div>
+    <div class="folder chan"><span class="glyph">#</span><span class="name">chat</span></div>
+    <div class="group-head"><span class="avatar" style="background:#c2417a">B</span>Book club<span class="where">forumall.app</span></div>
+    <div class="folder chan"><span class="glyph">#</span><span class="name">this-month</span></div>
+    <div class="line"></div>
+    <div class="folder join"><span class="glyph">+</span><span class="name">Join a group…</span></div>
+  </nav>
+</template>
+
+<script>
+const icon = {
+  pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg>'
+};
+const face = (l, c) => `<div class="face" style="background:${c}">${l}</div>`;
+const msg = (o) => `<div class="msg ${o.cls || ''}">${face(o.l, o.c)}<div>
+  <div class="who"><b>${o.n}</b><span class="h">${o.h}</span><time>${o.t}</time></div>
+  <div class="body">${o.b}</div>${o.x || ''}</div>
+  <div class="tools"><span title="React">☺</span><span title="Reply in thread">↩</span><span title="Edit">✎</span><span title="More">⋯</span></div></div>`;
+
+const chatStream = `<div class="stream">
+  <div class="day">Yesterday</div>
+  ${msg({l:'M', c:'#c2621a', n:'Mira', h:'@mira@forumall.app', t:'16:02', b:'Has anyone tried the new <code>cpal</code> release on PipeWire?'})}
+  ${msg({l:'T', c:'#5b6170', n:'Tomás', h:'@tomas@sonic.example', t:'16:10', b:'Yes. Latency is down to about 5 ms here.',
+    x:'<div class="reacts"><span class="mine">👍 3</span><span>🎉 1</span></div><div class="replies">4 replies · last 09:12</div>'})}
+  ${msg({l:'T', c:'#5b6170', n:'Tomás', h:'', t:'16:11', cls:'cont', b:'<span class="tomb">This message was deleted.</span>'})}
+  <div class="day">Today</div>
+  ${msg({l:'M', c:'#c2621a', n:'Mira', h:'@mira@forumall.app', t:'09:30', b:'<span class="mention">@joe</span> could you post the mixer benchmark here? <span class="edited">(edited)</span>',
+    x:'<div class="attach"><i></i>bench-results.csv · 14 KB</div>'})}
+  ${msg({l:'J', c:'#2456b8', n:'Joe', h:'@joe@forumall.app', t:'09:41', cls:'pending', b:'On it, give me ten minutes.'})}
+</div>`;
+
+const composer = (to) => `<div class="typing">Mira is typing…</div><div class="composer">
+  <div class="box"><span>Message ${to}</span><button class="send">Send</button></div>
+  <div class="hint"><span>Enter sends · Shift+Enter for a new line · Markdown</span><span style="margin-left:auto">as @joe@forumall.app</span></div></div>`;
+
+const chat = (withThread) => `${sb('chat')}
+<section class="reader">
+  <div class="bar"><h2># general<span class="sub">Rust Audio · forumall.app · 128 members</span></h2>
+    <input class="filter" placeholder="Filter #general"><button class="ghost">Following ✓</button></div>
+  <div class="scroll">${chatStream}</div>
+  ${composer('#general')}
+</section>
+${withThread ? `<aside class="thread-pane">
+  <div class="bar"><h2>Thread<span class="sub"># general</span></h2><button class="ghost">✕</button></div>
+  <div class="scroll"><div class="stream">
+    ${msg({l:'T', c:'#5b6170', n:'Tomás', h:'@tomas@sonic.example', t:'Yesterday 16:10', b:'Yes. Latency is down to about 5 ms here.'})}
+    <div class="day">4 replies</div>
+    ${msg({l:'M', c:'#c2621a', n:'Mira', h:'', t:'16:14', b:'Which buffer size?'})}
+    ${msg({l:'T', c:'#5b6170', n:'Tomás', h:'', t:'16:20', b:'256 frames at 48 kHz.'})}
+    ${msg({l:'A', c:'#2f8a55', n:'Ada', h:'@ada@ofscp.org', t:'08:55', b:'Same numbers on my laptop.'})}
+    ${msg({l:'J', c:'#2456b8', n:'Joe', h:'', t:'09:12', b:'Nice, thanks both.'})}
+  </div></div>
+  <div class="composer"><div class="box"><span>Reply in thread</span><button class="send">Reply</button></div></div>
+</aside>` : ''}`;
+
+const postRow = (o) => `<div class="row ${o.cls || ''}"><div class="top"><b>${o.a}</b><span class="kind">${o.k}</span><time>${o.t}</time></div>
+  <div class="title">${o.title}</div><div class="snip">${o.s}</div>
+  <div style="margin-top:6px">${(o.tags || []).map(t => `<span class="tag">${t}</span>`).join('')}<span class="count">${o.r} replies</span></div></div>`;
+
+const posts = `${sb('posts2')}
+<section class="list">
+  <div class="bar"><h2>▤ proposals<span class="sub">OFSCP Spec</span></h2>
+    <button class="write" title="New post" aria-label="New post">${icon.pen}</button></div>
+  <div class="rows">
+    ${postRow({cls:'chosen unread', a:'Ada', k:'Article', t:'10:05', title:'Membership pointers for remote groups', s:'A fresh device cannot find the groups its user joined on other providers. This proposes PUT /api/me/groups/{ref}…', tags:['federation','v0.2'], r:6})}
+    ${postRow({cls:'unread', a:'Seth', k:'Article', t:'Tue', title:'Message create over REST', s:'Today only the WebSocket can post, and only plain chat. A REST create with clientMessageId idempotency…', tags:['messaging'], r:11})}
+    ${postRow({a:'Kai', k:'Memo', t:'Mon', title:'Call signaling, round two', s:'Notes from the call: we need a target participant on offer and answer, and an event to deliver them.', tags:['calls'], r:3})}
+    ${postRow({a:'Ada', k:'Article', t:'12 Nov', title:'Content baseline: CommonMark plus a sanitizer list', s:'Proposal for the allowed mime set and an HTML allow-list…', tags:['content'], r:9})}
+  </div>
+</section>
+<section class="reader">
+  <div class="scroll"><div class="article">
+    <div class="kind">Article · proposals · OFSCP Spec</div>
+    <h1>Membership pointers for remote groups</h1>
+    <div class="byline">${face('A', '#2f8a55').replace('class="face"', 'class="face" style="width:24px;height:24px;font-size:11px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;background:#2f8a55"')}
+      <span><b>Ada</b> @ada@ofscp.org · Today 10:05</span><span class="tag">federation</span><span class="tag">v0.2</span></div>
+    <p>A user who joins a group hosted by another provider leaves no trace at home. On a new device, the client can find their follows and their private messages, but not their groups.</p>
+    <blockquote>Mirror §7.4: <code>PUT /api/me/groups/{groupRef}</code> when joining, <code>DELETE</code> when leaving, and a <code>groups.updated</code> event.</blockquote>
+    <p>Clients write the pointer after the join succeeds at the group's provider. Providers never relay; the pointer is only a list.</p>
+    <div class="reacts"><span class="mine">👍 7</span><span>👀 2</span></div>
+    <div class="day">6 replies</div>
+    <div class="stream">
+      ${msg({l:'S', c:'#c2417a', n:'Seth', h:'@seth@lostconnection.dev', t:'10:40', b:'Agreed. Should leaving be best-effort, or must the client retry?'})}
+      ${msg({l:'A', c:'#2f8a55', n:'Ada', h:'', t:'10:52', b:'Retry, the same way the DM pointer does.'})}
+    </div>
+  </div></div>
+  <div class="composer"><div class="box"><span>Reply to Ada's article</span><button class="send">Reply</button></div>
+    <div class="hint"><span>Members may only reply to articles in this channel</span></div></div>
+</section>`;
+
+const feedRow = (o) => `<div class="row ${o.cls || ''}"><div class="top"><span class="avatar" style="background:${o.c};width:16px;height:16px;font-size:9px">${o.g[0]}</span><b>${o.g}</b> › ${o.ch}<time>${o.t}</time></div>
+  <div class="title">${o.title}</div><div class="snip"><b style="color:var(--ink-2)">${o.a}:</b> ${o.s}</div></div>`;
+
+const feed = `${sb('feed')}
+<section class="list">
+  <div class="bar"><h2>Home<span class="sub">8 channels followed</span></h2><input class="filter" placeholder="Filter Home" style="width:130px"></div>
+  <div class="rows">
+    ${feedRow({cls:'chosen unread', c:'#2f8a55', g:'OFSCP Spec', ch:'proposals', t:'10:05', title:'Membership pointers for remote groups', a:'Ada', s:'A fresh device cannot find the groups its user joined on other providers…'})}
+    ${feedRow({cls:'unread', c:'#7a4fc2', g:'Rust Audio', ch:'announcements', t:'08:00', title:'Meetup on 4 December', a:'Mira', s:'We are meeting at the library again. Bring a laptop with your setup.'})}
+    ${feedRow({c:'#c2621a', g:'Synth Makers', ch:'blog', t:'Tue', title:'Building a ladder filter in Rust', a:'Kai', s:'Part three of the series: the nonlinearity, and why oversampling matters.'})}
+    ${feedRow({c:'#2f8a55', g:'OFSCP Spec', ch:'proposals', t:'Tue', title:'Message create over REST', a:'Seth', s:'Today only the WebSocket can post, and only plain chat…'})}
+  </div>
+</section>
+<section class="reader"><div class="empty"><b>Membership pointers for remote groups</b>
+  The selected post opens here, as in the channel (same reader as ▤ proposals).<br><br>
+  Home lists posts from every channel you follow, on any provider, newest first. Chat messages stay in their channel; Home shows articles and memos.</div></section>`;
+
+const dmRow = (o) => `<div class="row ${o.cls || ''}"><div class="top"><b>${o.n}</b>${o.p ? `<span class="presence ${o.p}"></span>` : ''}<span>${o.h}</span><time>${o.t}</time></div><div class="snip">${o.s}</div></div>`;
+
+const dms = `${sb('dms')}
+<section class="list">
+  <div class="bar"><h2>Messages</h2><button class="write" title="New message" aria-label="New message">${icon.pen}</button></div>
+  <div class="rows">
+    ${dmRow({cls:'chosen unread', n:'Mira', p:'on', h:'@mira@forumall.app', t:'09:48', s:'Thanks! Can you also send the config you used?'})}
+    ${dmRow({n:'Ada', p:'away', h:'@ada@ofscp.org', t:'Tue', s:'You: I left a comment on your pointers proposal.'})}
+    ${dmRow({n:'Tomás', h:'@tomas@sonic.example', t:'2 Nov', s:'See you at the meetup.'})}
+  </div>
+</section>
+<section class="reader">
+  <div class="bar"><h2>Mira<span class="sub">@mira@forumall.app · online</span></h2><button class="ghost">Profile</button></div>
+  <div class="banner info">Private messages are not end-to-end encrypted: forumall.app, which hosts you both, can read them.</div>
+  <div class="scroll"><div class="stream">
+    ${msg({l:'J', c:'#2456b8', n:'Joe', h:'', t:'09:44', b:'Here are the numbers from this morning.', x:'<div class="attach"><i></i>bench-results.csv · 14 KB</div>'})}
+    ${msg({l:'M', c:'#c2621a', n:'Mira', h:'', t:'09:48', b:'Thanks! Can you also send the config you used?', x:'<div class="reacts"><span>❤ 1</span></div>'})}
+  </div></div>
+  ${composer('Mira')}
+</section>`;
+
+const call = `${sb('call')}
+<section class="reader"><div class="bar"><h2>◖ standup<span class="sub">Rust Audio · call channel</span></h2></div>
+  <div class="empty"><b>A call is on in standup</b>Mira, Tomás and Ada are in it.<br><br>
+  Postrinch doesn't join calls yet. Calls in OFSCP v0.1 can't be joined from another client: the spec doesn't yet say how the connection details reach the others.<br><br>
+  <button class="ghost">Open forumall.app in the browser</button></div></section>`;
+
+function sb(chosen) {
+  const t = document.getElementById('sidebar').content.cloneNode(true);
+  const wrap = document.createElement('div'); wrap.appendChild(t);
+  wrap.querySelectorAll('[data-s]').forEach(e => e.classList.toggle('chosen', e.dataset.s === chosen));
+  return wrap.innerHTML;
+}
+
+const states = {
+  chat:   { label: 'Chat channel', wide: true, html: () => chat(false),
+            note: 'A text channel whose posts are chat messages reads as one stream, the whole width, with the box at the bottom. Hover a message for react, reply in thread, edit (own, until editUntil) and more. Your own message shows faded until the provider confirms it.' },
+  thread: { label: 'Reply thread', wide: true, thread: true, html: () => chat(true),
+            note: '“4 replies” opens the thread beside the stream. Replies are flat under the message they answer (OFSCP has one level of reply).' },
+  posts:  { label: 'Posts channel', html: () => posts,
+            note: 'A channel of articles and memos reads like mail: the list of posts, then the post and its replies in the reader. ✎ writes a new post (where the channel lets you). Here members may only reply.' },
+  feed:   { label: 'Home feed', html: () => feed,
+            note: 'Home is the feed of channels you follow, from every provider, built by Postrinch (OFSCP providers keep no feed). Follow or unfollow from a channel\'s header.' },
+  dms:    { label: 'Private messages', html: () => dms,
+            note: 'Messages lists your conversations, newest first. The banner says who can read them, as the spec asks clients to. The dot is the other person\'s presence.' },
+  call:   { label: 'Call channel (not in v1)', wide: true, html: () => call,
+            note: 'If calls are out of v1, call channels still show, with who is in a call, and say plainly that Postrinch can\'t join yet.' },
+};
+const strip = document.getElementById('states');
+function show(name) {
+  const st = states[name], w = document.getElementById('window');
+  w.className = 'window' + (st.wide ? ' wide' : '') + (st.thread ? ' thread' : '');
+  w.innerHTML = st.html();
+  document.getElementById('note').textContent = st.note;
+  strip.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.name === name));
+  w.querySelectorAll('[data-s]').forEach(e => e.onclick = () => {
+    const map = { chat: 'chat', posts2: 'posts', posts: 'posts', feed: 'feed', dms: 'dms', call: 'call' };
+    if (map[e.dataset.s]) show(map[e.dataset.s]);
+  });
+  w.querySelectorAll('.replies').forEach(e => e.onclick = () => show('thread'));
+}
+Object.keys(states).forEach(name => {
+  const b = document.createElement('button'); b.textContent = states[name].label; b.dataset.name = name;
+  b.onclick = () => show(name); strip.appendChild(b);
+});
+show('chat');
+</script>
+</body>
+</html>
