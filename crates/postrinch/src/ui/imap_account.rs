@@ -45,9 +45,6 @@ pub fn imap_account_detail(state: State, info: AccountInfo, settings: ImapSettin
     } else {
         "Removing an account deletes its mail from this computer and forgets its password. Nothing is deleted from the server."
     };
-    // Read on each opening, as the store has them now; a pass that ends
-    // while the section is open reads them again (`follow_passes`).
-    state.imap.folders.load(state, address.clone());
     rsx! {
         div { class: "account-detail",
             h2 { {address.to_string()} }

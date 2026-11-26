@@ -102,6 +102,13 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     agents::start((*commands).clone(), state, sync.as_ref().cloned());
     if let Some(sync) = &sync {
         crate::rules_ui::set_sender(sync.send.clone());
+        // An IMAP account's Folders list, read while its page is shown.
+        state.imap.folders.follow(
+            crate::imap_folders::Reader::of(sync),
+            state.notice,
+            move || settings::imap_page(state),
+            state.pass_ended,
+        );
     }
     crate::rules::start(
         (*commands).clone(),
@@ -113,10 +120,6 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
     state.mark_read_when_opened();
     state.look_up_invitations();
     state.save_edits_as_they_come();
-    let folders = state.imap.folders;
-    folders.follow_passes(state.pass_ended, move |account| {
-        folders.load(state, account)
-    });
     state.open_by_setting();
     crate::pictures::fetch_web_pictures();
     appearance::watch_system(state.system_dark);

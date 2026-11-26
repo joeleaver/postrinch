@@ -138,6 +138,19 @@ fn system_line(system_dark: bool) -> &'static str {
     }
 }
 
+/// The IMAP account whose page Settings shows, if one's is: its Folders
+/// list is read while it is (`AccountFolders::follow`).
+pub(crate) fn imap_page(state: State) -> Option<EmailAddress> {
+    if state.view.get() != View::Settings
+        || state.settings_section.get() != SettingsSection::Accounts
+    {
+        return None;
+    }
+    shown(state)
+        .filter(|info| info.account.imap.is_some())
+        .map(|info| info.account.address)
+}
+
 /// The account the detail pane shows: the chosen one, or the first.
 fn shown(state: State) -> Option<AccountInfo> {
     let accounts = state.accounts.get();

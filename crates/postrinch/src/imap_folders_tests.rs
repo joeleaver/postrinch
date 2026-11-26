@@ -1,11 +1,9 @@
-//! The Folders section's list following the store: read when it opens,
-//! and again when a pass of its account ends, over a store synced from
+//! The Folders section's list following the store: read when its page
+//! opens, and again when a pass of its account ends while it is open, over a store synced from
 //! the fake IMAP server of `postrinch-mailtest`. Nothing touches the
 //! keychain or a real server.
 
-use std::cell::Cell;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use postrinch_mailtest::{ImapConfig, ImapServer};
@@ -91,20 +89,32 @@ fn fixture() -> Fixture {
     }
 }
 
-/// What the window does to read the folders, here reading them at once.
-fn reader(
-    f: &Fixture,
-    folders: AccountFolders,
-    notice: Signal<Option<Notice>>,
-    reads: Rc<Cell<usize>>,
-) -> impl Fn(EmailAddress) + 'static {
-    let (handle, mail) = (f.runtime.handle().clone(), f.mail.clone());
-    move |account: EmailAddress| {
-        reads.set(reads.get() + 1);
-        let asked = folders.ask(account.clone());
-        let found = handle.block_on(mail.imap().account_folders(&account));
-        folders.answered(notice, asked, account, found);
+/// The window's thread as the folders' readings see it: each answer
+/// waits in a queue until the test runs it, on the thread the signals
+/// live on, as `rinch::run_on_main_thread` would.
+struct Window {
+    answers: mpsc::Receiver<Answer>,
+}
+
+impl Window {
+    /// Runs the next answer, once its reading is done.
+    fn answer(&self) {
+        let answer = self.answers.recv_timeout(Duration::from_secs(10));
+        answer.expect("the reading answers")();
     }
+}
+
+/// Reads on the fixture's runtime and answers on the test's thread.
+fn reader(f: &Fixture) -> (Reader, Window) {
+    let (send, answers) = mpsc::channel();
+    let post = move |answer| send.send(answer).expect("the test waits for it");
+    let reader = Reader::new(f.runtime.handle().clone(), f.mail.clone(), post);
+    (reader, Window { answers })
+}
+
+/// How many readings have been asked for.
+fn readings(folders: AccountFolders) -> u64 {
+    folders.asked.get().0
 }
 
 /// Sync's report of an event, as the sync thread makes it.
@@ -141,14 +151,20 @@ fn folders_opened_before_the_first_pass_fill_once_it_ends() {
     let folders = AccountFolders::new();
     let notice = Signal::new(None);
     let reports = Reports::new();
-    let reads = Rc::new(Cell::new(0));
-    let read = reader(&f, folders, notice, reads.clone());
-    folders.follow_passes(reports.ended, reader(&f, folders, notice, reads.clone()));
-    assert_eq!(reads.get(), 0, "no pass has ended yet");
+    let page = Signal::new(None);
+    let (reader, window) = reader(&f);
+    folders.follow(reader, notice, move || page.get(), reports.ended);
+    assert_eq!(readings(folders), 0, "no page is open");
 
     // The add-account flow opens the account's settings at once.
-    read(f.ada.clone());
+    page.set(Some(f.ada.clone()));
+    assert_eq!(readings(folders), 1);
+    window.answer();
     assert_eq!(folders.shown.get(), Some((f.ada.clone(), Vec::new())));
+
+    // The page built again (its account's facts changed) is no opening.
+    page.set(Some(f.ada.clone()));
+    assert_eq!(readings(folders), 1);
 
     // The first pass runs; while it does, nothing is read again.
     reports.report(SyncEvent::Started {
@@ -159,13 +175,14 @@ fn folders_opened_before_the_first_pass_fill_once_it_ends() {
         account: f.ada.clone(),
         progress: Progress::Listing { found: 3 },
     });
-    assert_eq!(reads.get(), 1);
+    assert_eq!(readings(folders), 1);
 
     reports.report(SyncEvent::Synced {
         account: f.ada.clone(),
         report: pass.unwrap(),
     });
-    assert_eq!(reads.get(), 2, "read once when the pass ended");
+    assert_eq!(readings(folders), 2, "read once when the pass ended");
+    window.answer();
     assert_eq!(
         shown_names(folders),
         ["Archive", "Drafts", "Junk", "Sent", "Trash"]
@@ -185,14 +202,55 @@ fn folders_opened_before_the_first_pass_fill_once_it_ends() {
         account: EmailAddress::parse("bob@example.org").unwrap(),
         report: SyncReport::default(),
     });
-    assert_eq!(reads.get(), 2);
+    assert_eq!(readings(folders), 2);
 
     // The next pass of the account is read too, even ending as the last.
     reports.report(SyncEvent::Synced {
         account: f.ada.clone(),
         report: SyncReport::default(),
     });
-    assert_eq!(reads.get(), 3);
+    assert_eq!(readings(folders), 3);
+    window.answer();
+}
+
+#[test]
+fn a_closed_page_is_no_longer_followed() {
+    let f = fixture();
+    let folders = AccountFolders::new();
+    let notice = Signal::new(None);
+    let reports = Reports::new();
+    let page = Signal::new(Some(f.ada.clone()));
+    let (reader, window) = reader(&f);
+    folders.follow(reader, notice, move || page.get(), reports.ended);
+    assert_eq!(readings(folders), 1, "the page was open already");
+    window.answer();
+    assert_eq!(folders.shown.get(), Some((f.ada.clone(), Vec::new())));
+
+    // Settings closes while the reading after a pass is under way: its
+    // answer is not shown.
+    let pass = f.runtime.block_on(f.mail.sync(&f.ada, Arc::new(|_| {})));
+    reports.report(SyncEvent::Synced {
+        account: f.ada.clone(),
+        report: pass.unwrap(),
+    });
+    assert_eq!(readings(folders), 2);
+    page.set(None);
+    window.answer();
+    assert_eq!(folders.shown.get(), Some((f.ada.clone(), Vec::new())));
+
+    // Later passes read nothing.
+    reports.report(SyncEvent::Synced {
+        account: f.ada.clone(),
+        report: SyncReport::default(),
+    });
+    assert_eq!(readings(folders), 2);
+
+    // Opening it again reads it again, as the store has it now.
+    page.set(Some(f.ada.clone()));
+    assert_eq!(readings(folders), 3);
+    window.answer();
+    assert_eq!(shown_names(folders).len(), 5);
+    assert!(notice.get().is_none());
 }
 
 #[test]
@@ -248,7 +306,15 @@ fn only_the_last_reading_asked_for_is_shown() {
     // Opening another account follows it instead.
     let other = folders.ask(bob.clone());
     assert!(folders.follows(&bob) && !folders.follows(&ada));
-    let failed = Err(postrinch_sync::SyncError::SignIn("gone".into()));
-    folders.answered(notice, other, bob, failed);
+    let failed = || Err(postrinch_sync::SyncError::SignIn("gone".into()));
+    folders.answered(notice, other, bob.clone(), failed());
     assert!(notice.get().is_some_and(|n| n.trouble));
+
+    // A reading that fails once its page closed tells nobody.
+    notice.set(None);
+    let closed = folders.ask(bob.clone());
+    folders.unfollow();
+    assert!(!folders.follows(&bob));
+    folders.answered(notice, closed, bob, failed());
+    assert!(notice.get().is_none());
 }
