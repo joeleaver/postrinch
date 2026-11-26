@@ -1,0 +1,9 @@
+{
+  "id": "cli_602",
+  "type": "presence.set",
+  "ts": "2026-02-01T10:10:00Z",
+  "data": {
+    "availability": "dnd",
+    "status": "In a meeting"
+  }
+}

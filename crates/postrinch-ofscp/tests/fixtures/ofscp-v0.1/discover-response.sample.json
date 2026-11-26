@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "channel": "https://b.com/api/groups/grp_9/channels/chn_news",
+      "groupId": "https://b.com/api/groups/grp_9",
+      "provider": "b.com",
+      "sample": {
+        "id": "msg_42",
+        "author": "eddie@b.com",
+        "createdAt": "2026-02-03T14:00:00Z",
+        "content": { "text": "Big news today!", "mime": "text/plain" }
+      },
+      "metadata": []
+    },
+    {
+      "channel": "https://c.com/api/groups/grp_2/channels/chn_blog",
+      "provider": "c.com"
+    }
+  ],
+  "page": {
+    "nextCursor": "opaqueNextCursor"
+  }
+}

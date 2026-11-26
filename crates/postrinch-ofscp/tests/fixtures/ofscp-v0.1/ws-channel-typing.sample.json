@@ -1,0 +1,10 @@
+{
+  "id": "evt_301",
+  "type": "channel.typing",
+  "ts": "2026-01-01T12:00:00Z",
+  "data": {
+    "channelId": "chn_general",
+    "user": "jane@a.com",
+    "state": "start"
+  }
+}

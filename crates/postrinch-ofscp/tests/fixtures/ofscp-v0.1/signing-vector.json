@@ -1,0 +1,43 @@
+{
+  "description": "OFSCP v0.1 request-signing conformance vector. Reconstruct the canonical string from the components, sign its UTF-8 bytes with Ed25519, base64-encode, and compare to expected.signature. The private key is a TEST key — never use it in production.",
+  "algorithm": "Ed25519",
+  "key": {
+    "seed_hex": "9d61b19deffe1d5a4c8b9c1e2f3a4b5c6d7e8f90112233445566778899aabbcc",
+    "private_key_pkcs8_base64": "MC4CAQAwBQYDK2VwBCIEIJ1hsZ3v/h1aTIucHi86S1xtfo+QESIzRFVmd4iZqrvM",
+    "public_key_base64": "Mr6nVq8jSzmavf1ZUC8qkLOPCLL+AqxW3kU+9x65EPU="
+  },
+  "request": {
+    "authority": "providera.com",
+    "method": "POST",
+    "path": "/api/groups/grp_1/channels/chn_general/messages",
+    "query": "foo=1",
+    "body": "{\"content\":{\"text\":\"hi\",\"mime\":\"text/plain\"}}"
+  },
+  "headers": {
+    "X-OFSCP-Actor": "alice@providera.com",
+    "X-OFSCP-Key-ID": "dk_abc123xyz",
+    "X-OFSCP-Timestamp": "2026-01-01T12:00:00Z",
+    "X-OFSCP-Nonce": "8wQk2mJ0r5sV1xZ3aB6cDg",
+    "X-OFSCP-Content-Digest": "lM5wV9nNecJWRxD00VQHYaJh306PJYnMLpf7wq7jueg="
+  },
+  "canonical_string": "providera.com\nPOST\n/api/groups/grp_1/channels/chn_general/messages\nfoo=1\n2026-01-01T12:00:00Z\n8wQk2mJ0r5sV1xZ3aB6cDg\nlM5wV9nNecJWRxD00VQHYaJh306PJYnMLpf7wq7jueg=",
+  "canonical_string_lines": [
+    "providera.com",
+    "POST",
+    "/api/groups/grp_1/channels/chn_general/messages",
+    "foo=1",
+    "2026-01-01T12:00:00Z",
+    "8wQk2mJ0r5sV1xZ3aB6cDg",
+    "lM5wV9nNecJWRxD00VQHYaJh306PJYnMLpf7wq7jueg="
+  ],
+  "expected": {
+    "signature": "5lzq7Ji0hNF8VVG9RhzTbyTQ5rNyYRKuVi6VssT0TPqc23EU+DhZRk/dL0snxLkLtibG2hq5ZhKvoiFlEz7yBg==",
+    "header": "X-OFSCP-Signature: 5lzq7Ji0hNF8VVG9RhzTbyTQ5rNyYRKuVi6VssT0TPqc23EU+DhZRk/dL0snxLkLtibG2hq5ZhKvoiFlEz7yBg=="
+  },
+  "notes": [
+    "Lines are joined with a single LF (0x0A); there is no trailing newline.",
+    "X-OFSCP-Content-Digest = base64(SHA-256(raw body bytes)).",
+    "Empty-body digest is 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=.",
+    "Ed25519 signatures are deterministic, so this vector reproduces exactly."
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "tiers": [
+    {
+      "id": "private",
+      "name": "Private",
+      "description": "Only invited members can see this channel."
+    },
+    {
+      "id": "public",
+      "name": "Public",
+      "description": "Visible to anyone with the link."
+    }
+  ]
+}

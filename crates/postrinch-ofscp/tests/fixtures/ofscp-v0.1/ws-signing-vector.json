@@ -1,0 +1,32 @@
+{
+  "description": "OFSCP v0.1 WebSocket authenticate-handshake conformance vector (§7.1). Reconstruct the canonical string from the components, sign its UTF-8 bytes with Ed25519, base64-encode, and compare to expected.signature. The private key is a TEST key — never use it in production.",
+  "algorithm": "Ed25519",
+  "key": {
+    "seed_hex": "9d61b19deffe1d5a4c8b9c1e2f3a4b5c6d7e8f90112233445566778899aabbcc",
+    "private_key_pkcs8_base64": "MC4CAQAwBQYDK2VwBCIEIJ1hsZ3v/h1aTIucHi86S1xtfo+QESIzRFVmd4iZqrvM",
+    "public_key_base64": "Mr6nVq8jSzmavf1ZUC8qkLOPCLL+AqxW3kU+9x65EPU="
+  },
+  "challenge": {
+    "authority": "providera.com",
+    "challengeNonce": "Yz0aF1kP9rT2uV4xZ6bN8cQwE3sH5jL7",
+    "timestamp": "2026-01-01T12:00:01Z"
+  },
+  "canonical_string": "providera.com\nofscp-ws-authenticate\nYz0aF1kP9rT2uV4xZ6bN8cQwE3sH5jL7\n2026-01-01T12:00:01Z",
+  "canonical_string_lines": [
+    "providera.com",
+    "ofscp-ws-authenticate",
+    "Yz0aF1kP9rT2uV4xZ6bN8cQwE3sH5jL7",
+    "2026-01-01T12:00:01Z"
+  ],
+  "expected": {
+    "signature": "5/oyosSNBdeu39klnsv0HwuAGJnEvA3Y/XG1CXJASSuf/ipyYlg8tYSJQzx2MBe9fXlccurvhGxsK4N6LQPZDA=="
+  },
+  "notes": [
+    "The canonical string is four lines: <authority>, the literal domain separator ofscp-ws-authenticate, <challenge-nonce>, and <timestamp>.",
+    "Lines are joined with a single LF (0x0A); there is no trailing newline; all bytes are UTF-8.",
+    "<authority> uses §4.4.2 host canonicalization (lowercased, :port appended only when non-443).",
+    "<challenge-nonce> is the nonce from the server's auth.challenge event; binding it makes each authenticate usable on exactly one connection, once.",
+    "These values match tests/ws-auth-challenge.sample.json (nonce) and tests/ws-authenticate.sample.json (timestamp, signature).",
+    "Ed25519 signatures are deterministic, so this vector reproduces exactly."
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "actor": "ada@a.com",
+  "keyId": "dk_guest_abc",
+  "profile": {
+    "id": "https://a.com/api/users/ada",
+    "handle": "ada",
+    "domain": "a.com",
+    "displayName": "Ada",
+    "updatedAt": "2026-02-01T10:00:00Z",
+    "metadata": []
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "cli_220",
+  "type": "message.delete",
+  "ts": "2026-01-01T12:06:00Z",
+  "data": {
+    "groupId": "grp_1",
+    "channelId": "chn_general",
+    "messageId": "msg_999"
+  }
+}

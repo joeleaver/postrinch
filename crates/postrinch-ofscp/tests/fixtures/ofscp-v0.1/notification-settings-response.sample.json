@@ -1,0 +1,14 @@
+{
+  "prefs": [
+    {
+      "scopeType": "group",
+      "scopeId": "grp_1",
+      "mode": "none"
+    },
+    {
+      "scopeType": "channel",
+      "scopeId": "chn_general",
+      "mode": "all"
+    }
+  ]
+}

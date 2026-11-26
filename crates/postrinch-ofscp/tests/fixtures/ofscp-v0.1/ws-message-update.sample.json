@@ -1,0 +1,11 @@
+{
+  "id": "cli_210",
+  "type": "message.update",
+  "ts": "2026-01-01T12:05:00Z",
+  "data": {
+    "groupId": "grp_1",
+    "channelId": "chn_general",
+    "messageId": "msg_999",
+    "content": { "mime": "text/plain", "text": "hi (edited)" }
+  }
+}

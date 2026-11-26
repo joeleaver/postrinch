@@ -1,0 +1,8 @@
+{
+  "id": "cli_600",
+  "type": "presence.subscribe",
+  "ts": "2026-02-01T10:00:00Z",
+  "data": {
+    "users": ["bob@b.com", "carol@c.com"]
+  }
+}

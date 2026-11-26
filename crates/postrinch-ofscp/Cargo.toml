@@ -1,0 +1,20 @@
+[package]
+name = "postrinch-ofscp"
+description = "The OFSCP protocol for Postrinch: wire types, request signing, the WebSocket authenticate string and dmId. This core does no I/O."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64 = "0.22"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+jiff = { version = "0.2", default-features = false, features = ["std", "serde"] }
+rand_core = "0.6"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+rand_core = { version = "0.6", features = ["getrandom"] }

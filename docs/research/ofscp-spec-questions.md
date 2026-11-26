@@ -204,6 +204,10 @@ shows the spec is thin, not bugs in Forumall.
     readable by anyone holding the URL.
 31. **Reactions in a timeline carry no type tag**, so a client tells them from messages by
     their fields (relates to gap 11).
+32. **How a `public_key` is encoded.** The spec said only "base64"; its samples mixed the raw
+    32-byte key with DER `SubjectPublicKeyInfo`. **Settled** by lost-conn/ofscp#28 (spec
+    main 37b0cc2): the raw 32-byte key in padded standard base64, everywhere a `public_key`
+    appears; a key that is not 32 bytes is rejected or unusable. `postrinch-ofscp` follows it.
 
 ## Oracle answers (2026-11-26, spec main 669edc6)
 

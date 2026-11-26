@@ -1,0 +1,9 @@
+{
+  "id": "evt_100",
+  "type": "subscribed",
+  "ts": "2026-01-01T12:00:00Z",
+  "correlationId": "cli_001",
+  "data": {
+    "channels": ["chn_general"]
+  }
+}

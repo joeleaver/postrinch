@@ -1,0 +1,30 @@
+{
+  "items": [
+    {
+      "id": "ntf_2",
+      "type": "reply",
+      "sourceMessageId": "msg_1000",
+      "channelId": "chn_general",
+      "groupId": "grp_1",
+      "author": "carol@c.com",
+      "createdAt": "2026-02-01T10:05:00Z"
+    },
+    {
+      "id": "ntf_1",
+      "type": "mention",
+      "sourceMessageId": "msg_999",
+      "channelId": "chn_general",
+      "groupId": "grp_1",
+      "author": "alice@a.com",
+      "createdAt": "2026-02-01T10:00:00Z",
+      "seenAt": "2026-02-01T10:01:00Z",
+      "readAt": "2026-02-01T10:02:00Z"
+    }
+  ],
+  "counts": {
+    "mention": 0,
+    "reply": 1,
+    "message": 0
+  },
+  "nextCursor": "opaqueNext"
+}

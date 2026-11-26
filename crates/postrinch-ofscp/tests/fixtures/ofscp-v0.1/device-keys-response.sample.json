@@ -1,0 +1,11 @@
+{
+  "keys": [
+    {
+      "key_id": "dk_abc123xyz",
+      "algorithm": "Ed25519",
+      "public_key": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+      "device_name": "Firefox on Linux",
+      "created_at": "2026-01-09T17:56:54Z"
+    }
+  ]
+}

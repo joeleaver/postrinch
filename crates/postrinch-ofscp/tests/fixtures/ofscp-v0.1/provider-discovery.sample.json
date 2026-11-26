@@ -1,0 +1,44 @@
+{
+  "provider": {
+    "domain": "social.example",
+    "protocolVersion": "0.1.0",
+    "software": {
+      "name": "example-ofscp",
+      "version": "2025.03.0"
+    },
+    "contact": "mailto:admin@social.example",
+    "authentication": {
+      "login_endpoint": "https://social.example/api/auth/login",
+      "registration_endpoint": "https://social.example/api/auth/register",
+      "registration": "open"
+    },
+    "publicKeys": [
+      {
+        "key_id": "psk-2025-01",
+        "algorithm": "Ed25519",
+        "public_key": "Mr6nVq8jSzmavf1ZUC8qkLOPCLL+AqxW3kU+9x65EPU=",
+        "created_at": "2025-01-01T00:00:00Z"
+      }
+    ]
+  },
+  "capabilities": {
+    "messageTypes": ["memo", "article", "message", "reaction"],
+    "tiers": ["private", "group", "public", "discoverable"],
+    "metadataSchemas": [
+      {
+        "id": "com.example.poll",
+        "uri": "https://social.example/meta/poll.json"
+      }
+    ],
+    "limits": {
+      "maxUploadBytes": 26214400
+    },
+    "federation": {
+      "realtimeDelivery": "direct-ws"
+    },
+    "discovery": {
+      "sharesKnownProviders": true,
+      "discoverFeed": true
+    }
+  }
+}

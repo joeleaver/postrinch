@@ -1,0 +1,14 @@
+{
+  "id": "evt_610",
+  "type": "presence.update",
+  "ts": "2026-02-01T10:10:00Z",
+  "data": {
+    "user": "bob@b.com",
+    "presence": {
+      "availability": "online",
+      "status": "Working",
+      "lastSeen": "2026-02-01T10:09:55Z",
+      "metadata": []
+    }
+  }
+}

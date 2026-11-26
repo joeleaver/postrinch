@@ -1,0 +1,9 @@
+{
+  "id": "evt_150",
+  "type": "unsubscribed",
+  "ts": "2026-01-01T12:30:00Z",
+  "data": {
+    "channels": ["chn_general"],
+    "reason": "access_revoked"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "evt_700",
+  "type": "member.updated",
+  "ts": "2026-02-01T10:00:00Z",
+  "data": {
+    "groupId": "grp_1",
+    "member": {
+      "user": "ada@a.com",
+      "role": "member",
+      "joinedAt": "2026-01-01T12:00:00Z",
+      "displayNameOverride": "Ada (mod)"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "id": "msg_1",
+      "author": "jane@a.com",
+      "type": "message",
+      "content": {
+        "text": "Hello",
+        "mime": "text/plain"
+      },
+      "attachments": [],
+      "createdAt": "2025-03-01T12:00:00Z",
+      "metadata": []
+    },
+    {
+      "id": "rct_1",
+      "author": "jane@a.com",
+      "key": "heart",
+      "reference": { "type": "message", "id": "msg_1" },
+      "createdAt": "2025-03-01T12:00:01Z",
+      "metadata": []
+    }
+  ],
+  "page": {
+    "nextCursor": "opaqueNextCursor",
+    "prevCursor": "opaquePrevCursor"
+  }
+}

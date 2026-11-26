@@ -1,0 +1,11 @@
+{
+  "id": "evt_err_1",
+  "type": "error",
+  "ts": "2026-01-01T12:00:00Z",
+  "correlationId": "cli_200",
+  "data": {
+    "code": "forbidden",
+    "message": "Not permitted to post in channel chn_general",
+    "status": 403
+  }
+}

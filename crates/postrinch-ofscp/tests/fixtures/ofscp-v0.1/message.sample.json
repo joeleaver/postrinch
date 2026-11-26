@@ -1,0 +1,27 @@
+{
+  "id": "msg_1",
+  "author": "jane@a.com",
+  "type": "message",
+  "content": {
+    "text": "Hello",
+    "mime": "text/plain"
+  },
+  "attachments": [
+    {
+      "id": "att_1",
+      "mime": "image/png",
+      "url": "https://cdn.a.com/att/att_1.png",
+      "size": 2048
+    }
+  ],
+  "reference": {
+    "type": "reply",
+    "id": "msg_parent"
+  },
+  "tags": ["#intro"],
+  "createdAt": "2025-03-01T12:00:00Z",
+  "permissions": {
+    "editUntil": "2025-03-01T13:00:00Z"
+  },
+  "metadata": []
+}

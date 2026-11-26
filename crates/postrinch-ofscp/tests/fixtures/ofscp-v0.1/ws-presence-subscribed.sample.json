@@ -1,0 +1,9 @@
+{
+  "id": "evt_600",
+  "type": "presence.subscribed",
+  "correlationId": "cli_600",
+  "ts": "2026-02-01T10:00:00Z",
+  "data": {
+    "users": ["bob@b.com", "carol@c.com"]
+  }
+}

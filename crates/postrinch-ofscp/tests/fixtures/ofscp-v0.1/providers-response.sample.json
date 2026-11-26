@@ -1,0 +1,7 @@
+{
+  "providers": [
+    { "domain": "b.com", "name": "Beta Collective", "addedAt": "2026-01-15T12:00:00Z" },
+    { "domain": "c.com" }
+  ],
+  "metadata": []
+}

@@ -1,0 +1,20 @@
+{
+  "id": "evt_900",
+  "type": "dm.message",
+  "ts": "2026-01-05T18:42:00Z",
+  "data": {
+    "dmId": "dm_c2a3a0d4bc7aa54700d2f412c42fc0155df6071e502977e4988933eef7e46868",
+    "cursor": "opaqueCursorValue",
+    "message": {
+      "id": "msg_77",
+      "clientMessageId": "cmsg_dm_001",
+      "author": "alice@a.com",
+      "type": "message",
+      "content": { "text": "hey, are we still on for tomorrow?", "mime": "text/plain" },
+      "attachments": [],
+      "createdAt": "2026-01-05T18:42:00Z",
+      "permissions": { "editUntil": "2026-01-05T19:42:00Z" },
+      "metadata": []
+    }
+  }
+}

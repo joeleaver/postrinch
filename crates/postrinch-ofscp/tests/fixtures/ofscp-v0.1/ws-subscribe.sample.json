@@ -1,0 +1,9 @@
+{
+  "id": "cli_001",
+  "type": "subscribe",
+  "ts": "2026-01-01T12:00:00Z",
+  "data": {
+    "channels": ["chn_general"],
+    "include": ["message.created", "message.updated", "message.deleted", "channel.typing"]
+  }
+}

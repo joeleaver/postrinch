@@ -1,0 +1,8 @@
+{
+  "clientMessageId": "cmsg_dm_001",
+  "to": "bob@b.com",
+  "content": {
+    "text": "hey, are we still on for tomorrow?",
+    "mime": "text/plain"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "cli_401",
+  "type": "reaction.remove",
+  "ts": "2026-01-01T12:11:00Z",
+  "data": {
+    "groupId": "grp_1",
+    "channelId": "chn_general",
+    "messageId": "msg_999",
+    "key": "heart"
+  }
+}

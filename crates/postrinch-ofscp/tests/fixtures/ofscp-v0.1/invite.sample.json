@@ -1,0 +1,13 @@
+{
+  "id": "inv_1",
+  "groupId": "grp_1",
+  "channelId": "chn_general",
+  "token": "kQ8sJ2mZ0rV1xN6bC3dF9wYt",
+  "role": "member",
+  "grantsGuest": true,
+  "maxUses": 25,
+  "uses": 3,
+  "expiresAt": "2025-03-08T12:00:00Z",
+  "createdBy": "jane@a.com",
+  "createdAt": "2025-03-01T12:00:00Z"
+}

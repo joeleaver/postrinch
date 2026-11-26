@@ -1,0 +1,7 @@
+{
+  "id": "evt_p1",
+  "type": "pong",
+  "ts": "2026-01-01T12:00:00Z",
+  "correlationId": "cli_p1",
+  "data": {}
+}

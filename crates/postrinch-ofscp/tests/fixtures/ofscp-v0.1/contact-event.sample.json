@@ -1,0 +1,5 @@
+{
+  "action": "request",
+  "from": "alice@a.com",
+  "to": "bob@b.com"
+}

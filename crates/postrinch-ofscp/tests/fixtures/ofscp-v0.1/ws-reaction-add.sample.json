@@ -1,0 +1,12 @@
+{
+  "id": "cli_400",
+  "type": "reaction.add",
+  "ts": "2026-01-01T12:10:00Z",
+  "data": {
+    "groupId": "grp_1",
+    "channelId": "chn_general",
+    "messageId": "msg_999",
+    "key": "heart",
+    "unicode": "❤️"
+  }
+}

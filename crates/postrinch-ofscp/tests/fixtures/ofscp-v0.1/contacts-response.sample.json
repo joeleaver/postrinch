@@ -1,0 +1,28 @@
+{
+  "contacts": [
+    {
+      "user": "bob@b.com",
+      "state": "accepted",
+      "createdAt": "2026-01-01T12:00:00Z",
+      "updatedAt": "2026-01-02T09:30:00Z",
+      "metadata": []
+    },
+    {
+      "user": "carol@c.com",
+      "state": "pending",
+      "direction": "outgoing",
+      "createdAt": "2026-01-03T08:00:00Z",
+      "updatedAt": "2026-01-03T08:00:00Z",
+      "metadata": []
+    },
+    {
+      "user": "dave@d.com",
+      "state": "pending",
+      "direction": "incoming",
+      "createdAt": "2026-01-04T15:20:00Z",
+      "updatedAt": "2026-01-04T15:20:00Z",
+      "metadata": []
+    }
+  ],
+  "metadata": []
+}

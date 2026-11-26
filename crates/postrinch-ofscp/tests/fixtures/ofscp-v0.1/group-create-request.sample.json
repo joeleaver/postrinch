@@ -1,0 +1,18 @@
+{
+  "name": "Dev Guild",
+  "description": "A group for discussion",
+  "tier": "public",
+  "joinPolicy": "open",
+  "permissions": {
+    "post": ["admin", "member"],
+    "moderate": ["admin"],
+    "manage": ["admin"]
+  },
+  "roles": [
+    { "name": "admin", "color": "#9837be" },
+    { "name": "moderator", "label": "Moderator", "color": "#37be7d" },
+    { "name": "member", "color": "#37a8be" },
+    { "name": "guest", "color": "#8a8f98" }
+  ],
+  "metadata": []
+}

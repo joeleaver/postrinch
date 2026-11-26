@@ -1,0 +1,14 @@
+{
+  "clientMessageId": "cmsg_def456",
+  "type": "message",
+  "content": {
+    "mime": "text/plain",
+    "text": "Welcome aboard!"
+  },
+  "attachments": [],
+  "reference": {
+    "type": "reply",
+    "id": "msg_999"
+  },
+  "metadata": []
+}

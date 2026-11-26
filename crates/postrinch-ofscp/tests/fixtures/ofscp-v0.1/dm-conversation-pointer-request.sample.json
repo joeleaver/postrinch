@@ -1,0 +1,15 @@
+{
+  "with": "bob@b.com",
+  "lastMessage": {
+    "id": "msg_77",
+    "author": "alice@a.com",
+    "type": "message",
+    "content": {
+      "mime": "text/plain",
+      "text": "hey, are we still on for tomorrow?"
+    },
+    "attachments": [],
+    "createdAt": "2026-01-05T18:42:00Z",
+    "metadata": []
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "id": "evt_c1",
+  "type": "auth.challenge",
+  "ts": "2026-01-01T12:00:00Z",
+  "data": {
+    "nonce": "Yz0aF1kP9rT2uV4xZ6bN8cQwE3sH5jL7",
+    "expiresAt": "2026-01-01T12:00:30Z"
+  }
+}

@@ -1705,6 +1705,7 @@ checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
 dependencies = [
  "curve25519-dalek",
  "ed25519",
+ "rand_core 0.6.4",
  "serde",
  "sha2 0.10.9",
  "subtle",
@@ -4762,6 +4763,20 @@ version = "0.1.38"
 dependencies = [
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "postrinch-ofscp"
+version = "0.1.38"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "jiff",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.21",
 ]
 

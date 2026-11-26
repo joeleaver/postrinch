@@ -1,0 +1,18 @@
+{
+  "id": "evt_410",
+  "type": "reaction.added",
+  "ts": "2026-01-01T12:10:00Z",
+  "data": {
+    "groupId": "grp_1",
+    "channelId": "chn_general",
+    "reaction": {
+      "id": "rct_1",
+      "author": "jane@a.com",
+      "key": "heart",
+      "unicode": "❤️",
+      "reference": { "type": "message", "id": "msg_999" },
+      "createdAt": "2026-01-01T12:10:00Z",
+      "metadata": []
+    }
+  }
+}

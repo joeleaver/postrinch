@@ -1,0 +1,7 @@
+{
+  "channelId": "chn_general",
+  "role": "member",
+  "grantsGuest": true,
+  "maxUses": 25,
+  "expiresAt": "2025-03-08T12:00:00Z"
+}

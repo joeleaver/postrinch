@@ -1,0 +1,10 @@
+{
+  "id": "evt_203",
+  "type": "message.deleted",
+  "ts": "2026-01-01T12:00:00Z",
+  "data": {
+    "groupId": "grp_1",
+    "channelId": "chn_general",
+    "messageId": "msg_999"
+  }
+}

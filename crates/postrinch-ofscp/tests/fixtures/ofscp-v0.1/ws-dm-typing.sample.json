@@ -1,0 +1,10 @@
+{
+  "id": "evt_311",
+  "type": "dm.typing",
+  "ts": "2026-01-05T18:41:55Z",
+  "data": {
+    "dmId": "dm_c2a3a0d4bc7aa54700d2f412c42fc0155df6071e502977e4988933eef7e46868",
+    "user": "bob@b.com",
+    "state": "start"
+  }
+}

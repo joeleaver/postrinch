@@ -1,0 +1,9 @@
+{
+  "id": "https://a.com/api/users/jane",
+  "handle": "jane",
+  "domain": "a.com",
+  "displayName": "Jane Doe",
+  "avatar": "https://cdn.a.com/avatars/usr_123.png",
+  "updatedAt": "2025-03-01T12:00:00Z",
+  "metadata": []
+}

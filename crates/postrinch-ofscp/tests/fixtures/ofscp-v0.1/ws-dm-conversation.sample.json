@@ -1,0 +1,28 @@
+{
+  "id": "evt_920",
+  "type": "dm.conversation",
+  "ts": "2026-01-05T18:42:01Z",
+  "data": {
+    "conversation": {
+      "id": "dm_c2a3a0d4bc7aa54700d2f412c42fc0155df6071e502977e4988933eef7e46868",
+      "participants": [
+        "alice@a.com",
+        "bob@b.com"
+      ],
+      "lastMessage": {
+        "id": "msg_77",
+        "author": "alice@a.com",
+        "type": "message",
+        "content": {
+          "mime": "text/plain",
+          "text": "hey, are we still on for tomorrow?"
+        },
+        "attachments": [],
+        "createdAt": "2026-01-05T18:42:00Z",
+        "metadata": []
+      },
+      "updatedAt": "2026-01-05T18:42:01Z",
+      "metadata": []
+    }
+  }
+}

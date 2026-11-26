@@ -1,0 +1,15 @@
+{
+  "id": "dm_c2a3a0d4bc7aa54700d2f412c42fc0155df6071e502977e4988933eef7e46868",
+  "participants": ["alice@a.com", "bob@b.com"],
+  "lastMessage": {
+    "id": "msg_77",
+    "author": "bob@b.com",
+    "type": "message",
+    "content": { "text": "see you then", "mime": "text/plain" },
+    "attachments": [],
+    "createdAt": "2026-01-05T18:42:00Z",
+    "metadata": []
+  },
+  "updatedAt": "2026-01-05T18:42:00Z",
+  "metadata": []
+}

@@ -1,0 +1,19 @@
+{
+  "id": "evt_910",
+  "type": "dm.reaction",
+  "ts": "2026-01-05T18:43:00Z",
+  "data": {
+    "dmId": "dm_c2a3a0d4bc7aa54700d2f412c42fc0155df6071e502977e4988933eef7e46868",
+    "messageId": "msg_77",
+    "state": "added",
+    "reaction": {
+      "id": "rct_5",
+      "author": "bob@b.com",
+      "key": "heart",
+      "unicode": "❤️",
+      "reference": { "type": "message", "id": "msg_77" },
+      "createdAt": "2026-01-05T18:43:00Z",
+      "metadata": []
+    }
+  }
+}

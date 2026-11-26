@@ -1,0 +1,16 @@
+{
+  "follows": [
+    {
+      "channel": "https://a.com/api/groups/grp_1/channels/chn_blog",
+      "groupId": "https://a.com/api/groups/grp_1",
+      "createdAt": "2026-02-01T09:00:00Z",
+      "metadata": []
+    },
+    {
+      "channel": "chn_general",
+      "createdAt": "2026-02-02T11:30:00Z",
+      "metadata": []
+    }
+  ],
+  "metadata": []
+}

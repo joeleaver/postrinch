@@ -1,0 +1,16 @@
+{
+  "id": "evt_710",
+  "type": "notification.created",
+  "ts": "2026-02-01T10:00:00Z",
+  "data": {
+    "notification": {
+      "id": "ntf_1",
+      "type": "mention",
+      "sourceMessageId": "msg_999",
+      "channelId": "chn_general",
+      "groupId": "grp_1",
+      "author": "alice@a.com",
+      "createdAt": "2026-02-01T10:00:00Z"
+    }
+  }
+}
