@@ -1,34 +1,63 @@
 //! Which accounts a caller sees. The window sees every account; an agent
-//! sees those the person gave it, and to it the others do not exist.
+//! sees those the person gave it, and to it the others do not exist. Mail
+//! accounts and social accounts are given apart: an agent given a mail
+//! account sees no social account by the same address.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use postrinch_model::{Account, EmailAddress, Provider, SavedView};
+use postrinch_store::social_account_key;
 
 use crate::{CommandError, CommandResult, Commands};
 
 impl Commands {
-    /// The same commands, seeing only those of `accounts` they already
-    /// see: limiting never widens. Asking about any other account answers
-    /// as for one the store does not have.
+    /// The same commands, seeing only those of the mail `accounts` they
+    /// already see, and no social account: limiting never widens. Asking
+    /// about any other account answers as for one the store does not have.
     pub fn limited_to(&self, accounts: &[EmailAddress]) -> Self {
-        let only = accounts
-            .iter()
-            .filter(|a| self.sees(a))
-            .map(EmailAddress::key)
-            .collect();
+        self.limited(accounts, &[])
+    }
+
+    /// The same commands, seeing only those of the mail `accounts` and the
+    /// social accounts `actors` (in any spelling) they already see.
+    pub fn limited(&self, accounts: &[EmailAddress], actors: &[&str]) -> Self {
+        let reach = Reach {
+            mail: accounts
+                .iter()
+                .filter(|a| self.sees(a))
+                .map(EmailAddress::key)
+                .collect(),
+            social: actors
+                .iter()
+                .filter(|a| self.sees_social(a))
+                .map(|a| social_account_key(a))
+                .collect(),
+        };
         Self {
             store: self.store.clone(),
-            only: Some(Arc::new(only)),
+            only: Some(Arc::new(reach)),
         }
     }
 
-    /// Whether this caller sees `account`.
+    /// Whether this caller sees the mail `account`.
     pub fn sees(&self, account: &EmailAddress) -> bool {
         self.only
             .as_ref()
-            .is_none_or(|only| only.contains(&account.key()))
+            .is_none_or(|only| only.mail.contains(&account.key()))
+    }
+
+    /// Whether this caller sees the social account of `actor`, in any
+    /// spelling.
+    pub fn sees_social(&self, actor: &str) -> bool {
+        self.only
+            .as_ref()
+            .is_none_or(|only| only.social.contains(&social_account_key(actor)))
+    }
+
+    /// Whether this caller sees every account, as the window does.
+    pub(crate) fn sees_all(&self) -> bool {
+        self.only.is_none()
     }
 
     /// An error for an account this caller does not see.
@@ -83,5 +112,12 @@ impl Commands {
     }
 }
 
-/// Account keys a caller is limited to.
-pub(crate) type Only = Option<Arc<HashSet<String>>>;
+/// The accounts a caller is limited to, by key.
+pub(crate) struct Reach {
+    mail: HashSet<String>,
+    /// Social accounts, by [`social_account_key`].
+    social: HashSet<String>,
+}
+
+/// What a caller is limited to; `None` for every account.
+pub(crate) type Only = Option<Arc<Reach>>;

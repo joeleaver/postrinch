@@ -123,27 +123,20 @@ fn garbage_collection_keeps_what_media_and_drafts_refer_to() {
 #[test]
 fn the_outbox_keeps_the_order_changes_were_made_in() {
     let (_dir, store) = store();
-    let change = |n: u32| json!({ "post": { "text": format!("change {n}") } });
+    let change = |n: u32| read_change(&format!("m{n}"));
     let first = store
-        .queue_social_change(ADA, "c1", Some(GENERAL), &change(1), &[], 1)
+        .queue_social_change(ADA, "c1", Some(GENERAL), &change(1), 1)
         .unwrap();
     let second = store
-        .queue_social_change(BOB, "c2", None, &change(2), &[], 2)
+        .queue_social_change(BOB, "c2", None, &change(2), 2)
         .unwrap();
     let third = store
-        .queue_social_change(
-            "ADA@groups.example",
-            "c3",
-            Some(GENERAL),
-            &change(3),
-            &[],
-            3,
-        )
+        .queue_social_change("ADA@groups.example", "c3", Some(GENERAL), &change(3), 3)
         .unwrap();
     assert!(first.seq < second.seq && second.seq < third.seq);
     // A repeat queues nothing twice.
     let again = store
-        .queue_social_change(ADA, "c1", Some(GENERAL), &change(9), &[], 9)
+        .queue_social_change(ADA, "c1", Some(GENERAL), &change(9), 9)
         .unwrap();
     assert_eq!(again, first);
 
@@ -175,7 +168,7 @@ fn the_outbox_keeps_the_order_changes_were_made_in() {
     assert!(store.remove_social_change(BOB, "c2").unwrap());
     assert!(store.remove_social_change(ADA, "c3").unwrap());
     let fourth = store
-        .queue_social_change(BOB, "c4", None, &change(4), &[], 4)
+        .queue_social_change(BOB, "c4", None, &change(4), 4)
         .unwrap();
     assert!(fourth.seq > third.seq);
 }
@@ -185,13 +178,13 @@ fn sequence_numbers_are_never_taken_twice_across_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
     let first = store
-        .queue_social_change(ADA, "c1", None, &json!({}), &[], 1)
+        .queue_social_change(ADA, "c1", None, &read_change("m1"), 1)
         .unwrap();
     store.remove_social_change(ADA, "c1").unwrap();
     drop(store);
     let store = Store::open(dir.path()).unwrap();
     let second = store
-        .queue_social_change(ADA, "c2", None, &json!({}), &[], 2)
+        .queue_social_change(ADA, "c2", None, &read_change("m2"), 2)
         .unwrap();
     assert!(second.seq > first.seq);
 }
@@ -205,8 +198,19 @@ fn garbage_collection_keeps_what_queued_changes_upload() {
             ADA,
             "c1",
             Some(GENERAL),
-            &json!({}),
-            std::slice::from_ref(&pasted),
+            &SocialChange::Post(SocialPost {
+                kind: ContentKind::Chat,
+                reply_to: None,
+                content: SocialContent {
+                    body: "a picture".into(),
+                    attachments: vec![DraftMedia::Kept {
+                        blob: pasted.clone(),
+                        name: "paste.png".into(),
+                        mime: Some("image/png".into()),
+                    }],
+                    ..SocialContent::default()
+                },
+            }),
             1,
         )
         .unwrap();
@@ -229,4 +233,31 @@ fn a_notification_read_here_stays_read() {
         .unwrap();
     assert_eq!(store.social_unread_notifications(ADA).unwrap(), 0);
     assert!(store.social_notifications(ADA, 1).unwrap()[0].read);
+}
+
+#[test]
+fn a_change_reads_back_as_queued_with_the_blobs_it_uploads() {
+    let (_dir, store) = store();
+    let avatar = store.put_social_media_bytes(b"cropped").unwrap();
+    let change = SocialChange::Profile(ProfileChange {
+        display_name: Some("Ada L.".into()),
+        bio: None,
+        avatar: Some(AvatarChange::Set {
+            media: DraftMedia::Kept {
+                blob: avatar.clone(),
+                name: "avatar.png".into(),
+                mime: Some("image/png".into()),
+            },
+        }),
+    });
+    assert_eq!(change.blobs(), std::slice::from_ref(&avatar));
+    store
+        .queue_social_change(ADA, "c1", None, &change, 1)
+        .unwrap();
+    assert_eq!(store.social_outbox(ADA).unwrap()[0].change, change);
+    assert_eq!(store.collect_garbage(Duration::ZERO).unwrap(), 0);
+    let read = SocialChange::Read {
+        message: "m1".into(),
+    };
+    assert!(read.blobs().is_empty());
 }

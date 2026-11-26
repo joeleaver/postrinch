@@ -187,6 +187,40 @@ impl Store {
         Ok(unread)
     }
 
+    /// A place's unread messages, replies among them, newest first.
+    pub fn social_unread_messages(
+        &self,
+        account: &str,
+        place: &str,
+    ) -> StoreResult<Vec<SocialMessage>> {
+        self.social_place_messages_where(account, place, true)
+    }
+
+    /// Every message of a place, replies among them, newest first.
+    pub fn social_place_messages(
+        &self,
+        account: &str,
+        place: &str,
+    ) -> StoreResult<Vec<SocialMessage>> {
+        self.social_place_messages_where(account, place, false)
+    }
+
+    fn social_place_messages_where(
+        &self,
+        account: &str,
+        place: &str,
+        unread_only: bool,
+    ) -> StoreResult<Vec<SocialMessage>> {
+        let mut found = Vec::new();
+        for scalars in self.social_where(MESSAGE, "place", &scoped(account, place))? {
+            if !unread_only || scalars.bool("unread")? {
+                found.push(((scalars.datetime("created")?, scalars.str(KEY)?), scalars));
+            }
+        }
+        found.sort_by(|a, b| b.0.cmp(&a.0));
+        self.decode_social_messages(found.into_iter().map(|(_, s)| s), usize::MAX)
+    }
+
     /// Up to `limit` messages of every account that mention the person,
     /// newest first.
     pub fn social_mentions(&self, limit: usize) -> StoreResult<Vec<SocialMessage>> {

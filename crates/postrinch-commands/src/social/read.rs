@@ -1,0 +1,108 @@
+//! Read state (docs/ofscp.md "Sync engine", Unread): the person's, kept
+//! here and changed at once. A channel the home provider holds has a read
+//! marker there too (§7.7), moved forward through the outbox; other places
+//! have none (§7.7 L1932), so theirs is kept here alone.
+
+use postrinch_store::{PlaceKind, SocialChange, SocialPlace, social_account_key};
+
+use super::{actor_domain, uri_domain};
+use crate::{CommandError, CommandResult, Commands};
+
+impl Commands {
+    /// Mark read a place's messages up to `up_to` (by id), or all of them
+    /// when `None`. Returns how many were unread.
+    pub fn mark_social_read(
+        &self,
+        account: &str,
+        place: &str,
+        up_to: Option<&str>,
+    ) -> CommandResult<usize> {
+        let place = self.check_place(account, place)?;
+        let account = social_account_key(&place.account);
+        let newest = match up_to {
+            Some(id) => match self.store.social_message(&account, &place.id, id)? {
+                Some(message) => message,
+                None => {
+                    return Err(CommandError::Invalid(format!(
+                        "There is no message {id} here."
+                    )));
+                }
+            },
+            None => match self
+                .store
+                .social_unread_messages(&account, &place.id)?
+                .into_iter()
+                .next()
+            {
+                Some(message) => message,
+                None => return Ok(0),
+            },
+        };
+        let marked = self
+            .store
+            .set_social_messages_read(&account, &place.id, newest.created)?;
+        if self.move_marker(&place, &newest.id, newest.created)? && has_marker(&place) {
+            let change = SocialChange::Read {
+                message: newest.id.clone(),
+            };
+            self.queue_change(&account, Some(&place.id), &change)?;
+        }
+        Ok(marked)
+    }
+
+    /// Mark one message unread again. The read marker stays where it is:
+    /// markers move forward only (§7.7).
+    pub fn mark_social_unread(
+        &self,
+        account: &str,
+        place: &str,
+        message: &str,
+    ) -> CommandResult<()> {
+        let place = self.check_place(account, place)?;
+        if !self
+            .store
+            .set_social_message_unread(&place.account, &place.id, message, true)?
+        {
+            return Err(CommandError::Invalid(format!(
+                "There is no message {message} here."
+            )));
+        }
+        Ok(())
+    }
+
+    /// Move the place's read marker to `id`, made at `created`, if that is
+    /// further on than where it is. Returns whether it moved.
+    fn move_marker(&self, place: &SocialPlace, id: &str, created: i64) -> CommandResult<bool> {
+        let account = social_account_key(&place.account);
+        loop {
+            let Some(now) = self.store.social_place(&account, &place.id)? else {
+                return Ok(false);
+            };
+            let marker = now.read_marker.clone();
+            if let Some(at) = &marker {
+                let marked = self.store.social_message(&account, &place.id, at)?;
+                if marked.is_some_and(|m| (m.created, m.id.as_str()) >= (created, id)) {
+                    return Ok(false);
+                }
+            }
+            // Only if sync did not move it meanwhile; else look again.
+            let mut moved = false;
+            self.store.change_social_place(&account, &place.id, |p| {
+                if p.read_marker == marker {
+                    p.read_marker = Some(id.to_owned());
+                    moved = true;
+                }
+            })?;
+            if moved {
+                return Ok(true);
+            }
+        }
+    }
+}
+
+/// Whether the place has a read marker at its provider: a channel the
+/// account's home provider holds (§7.7).
+fn has_marker(place: &SocialPlace) -> bool {
+    place.kind == PlaceKind::Channel
+        && uri_domain(&place.id).is_some_and(|host| host == actor_domain(&place.account))
+}

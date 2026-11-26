@@ -4676,6 +4676,7 @@ dependencies = [
 name = "postrinch-commands"
 version = "0.1.38"
 dependencies = [
+ "base64 0.22.1",
  "jiff",
  "postrinch-model",
  "postrinch-render",
@@ -4687,6 +4688,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

@@ -4,7 +4,7 @@ use rhypedb_engine::database::Database;
 
 use super::{CURRENT, INFO, INFO_KEY};
 use crate::codec::{Fields, FieldsBuilder};
-use crate::{SocialAccount, SocialAccountState, Store};
+use crate::{ProfileChange, SocialAccount, SocialAccountState, SocialChange, Store};
 
 /// The schema the last release (Postrinch 0.1.38, format 3) wrote. Kept as
 /// it was: a store it wrote is what an upgrade starts from.
@@ -93,9 +93,9 @@ fn a_store_of_the_last_release_is_upgraded_and_keeps_its_mail() {
     store.put_social_account(&account).unwrap();
     // The last release's info has no outbox counter: the first change
     // takes the first number.
-    let change = &serde_json::json!({ "profile": {} });
+    let change = &SocialChange::Profile(ProfileChange::default());
     let queued = store
-        .queue_social_change(&account.actor, "c1", None, change, &[], 1)
+        .queue_social_change(&account.actor, "c1", None, change, 1)
         .unwrap();
     assert_eq!(queued.seq, 1);
     drop(store);

@@ -44,4 +44,5 @@ tempfile = "3"
 thiserror = "2"
 tracing = "0.1"
 unicode-segmentation = "1"
+uuid = { version = "1", features = ["v4"] }
 zstd = "0.14"

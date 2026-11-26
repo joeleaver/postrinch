@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::SocialChange;
+
 /// A social account: an actor on its home provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SocialAccount {
@@ -252,8 +254,8 @@ pub struct SocialMessage {
     pub id: String,
     /// Its author's actor.
     pub author: String,
-    /// Its type as the provider gives it (`chat`, `memo`, `article`, or
-    /// one this version does not know).
+    /// Its type as the provider gives it (`message`, `memo`, `article`,
+    /// or one this version does not know).
     pub kind: String,
     pub created: i64,
     /// The id of the message it answers, in the same place.
@@ -352,10 +354,7 @@ pub struct SocialOutboxEntry {
     /// The order changes were made in, across every account.
     pub seq: u64,
     /// The change, as the engine will send it.
-    pub change: Value,
-    /// The blobs of the files it uploads first (a pasted picture), kept
-    /// while it is queued.
-    pub blobs: Vec<String>,
+    pub change: SocialChange,
     pub created: i64,
     pub attempts: u32,
     /// Why the last attempt failed; `None` while none has.

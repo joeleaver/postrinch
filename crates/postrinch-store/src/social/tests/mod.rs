@@ -64,7 +64,7 @@ fn message(account: &str, place: &str, id: &str, created: i64) -> SocialMessage 
         place: place.into(),
         id: id.into(),
         author: "bob@other.example".into(),
-        kind: "chat".into(),
+        kind: "message".into(),
         created,
         parent: None,
         deleted: false,
@@ -130,4 +130,11 @@ fn schema_keeps_social_message_small() {
         content.fields.iter().all(|f| !f.is_indexed()),
         "an @indexed field would copy the content into its index"
     );
+}
+
+/// A change moving the read marker to `message`.
+fn read_change(message: &str) -> SocialChange {
+    SocialChange::Read {
+        message: message.into(),
+    }
 }

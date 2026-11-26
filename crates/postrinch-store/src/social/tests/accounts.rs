@@ -76,7 +76,7 @@ fn removing_an_account_removes_everything_it_holds() {
         .put_social_message(&message(ADA, GENERAL, "m1", 1), "hello")
         .unwrap();
     store
-        .queue_social_change(ADA, "c1", Some(GENERAL), &json!({}), &[], 1)
+        .queue_social_change(ADA, "c1", Some(GENERAL), &read_change("m1"), 1)
         .unwrap();
     store
         .put_social_notification(&notification(ADA, "n1", 1))

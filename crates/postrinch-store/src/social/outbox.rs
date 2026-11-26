@@ -2,9 +2,7 @@
 //! made. Each is kept until its provider has taken it; reads lay the
 //! pending ones over what sync stored, so sync never undoes one.
 
-use serde_json::Value;
-
-use super::{KEY, RECORD, SocialOutboxEntry, scoped, social_account_key};
+use super::{KEY, RECORD, SocialChange, SocialOutboxEntry, scoped, social_account_key};
 use crate::codec::{Fields, FieldsBuilder};
 use crate::format::{INFO, INFO_KEY};
 use crate::{Store, StoreError, StoreResult};
@@ -13,16 +11,15 @@ const OUTBOX: &str = "SocialOutbox";
 
 impl Store {
     /// Queue a change, as made at `created`, to go out after every change
-    /// queued before it, with the blobs of the files it uploads first.
-    /// Queuing a client id that is queued already returns that entry as it
+    /// queued before it. The blobs of the files it uploads first are kept
+    /// until it is gone ([`SocialChange::blobs`]). Queuing a client id that is queued already returns that entry as it
     /// is: a repeat of the call queues nothing twice.
     pub fn queue_social_change(
         &self,
         account: &str,
         client_id: &str,
         place: Option<&str>,
-        change: &Value,
-        blobs: &[String],
+        change: &SocialChange,
         created: i64,
     ) -> StoreResult<SocialOutboxEntry> {
         let key = scoped(account, client_id);
@@ -36,7 +33,6 @@ impl Store {
                 place: place.map(str::to_owned),
                 seq: self.next_social_seq()?,
                 change: change.clone(),
-                blobs: blobs.to_vec(),
                 created,
                 attempts: 0,
                 error: None,
@@ -118,7 +114,7 @@ impl Store {
         let mut blobs = Vec::new();
         for object in self.db.scan_type_projected(OUTBOX, &[RECORD])? {
             let entry: SocialOutboxEntry = Fields::new(OUTBOX, object).json(RECORD)?;
-            blobs.extend(entry.blobs);
+            blobs.extend(entry.change.blobs());
         }
         Ok(blobs)
     }

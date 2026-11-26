@@ -12,6 +12,7 @@
 //! ([`Store::remove_social_account`]).
 
 mod accounts;
+mod changes;
 mod drafts;
 mod groups;
 mod media;
@@ -25,6 +26,7 @@ mod views;
 use rhypedb_engine::CompareOp;
 use serde::de::DeserializeOwned;
 
+pub use changes::*;
 pub use types::*;
 
 use crate::codec::{Fields, FieldsBuilder};

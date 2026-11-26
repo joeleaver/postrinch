@@ -5,7 +5,7 @@
 //! serialize, so the MCP server can expose the same commands the window
 //! calls. Reading, and changing mail in ways that can be undone and stay in
 //! the account ([`ThreadAction`]); sending, and the person's confirmation
-//! it needs, come later.
+//! it needs, come later. Social accounts' commands are in `social/`.
 
 mod accounts;
 mod actions;
@@ -32,6 +32,7 @@ mod scope;
 mod search;
 mod search_find;
 mod search_remote;
+mod social;
 mod system_labels;
 mod threads;
 mod views;
@@ -62,6 +63,7 @@ pub use rules::{AlreadyHere, Matched, RulesPage};
 pub use rules_proposed::RuleProposal;
 pub use rules_run::{AgentAsk, Ran};
 pub use search::{Excerpt, Remote, SearchResults};
+pub use social::*;
 pub use threads::{CATEGORIES, ListOrder, Thread, ThreadPage, ThreadRow};
 pub use views::{EVERYTHING_ELSE, Place, ViewEntry, ViewTally};
 pub use views_accounts::{built_in_holds, followed};
