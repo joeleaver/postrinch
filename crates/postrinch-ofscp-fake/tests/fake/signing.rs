@@ -230,7 +230,8 @@ async fn an_anonymous_viewer_reads_public_groups_only() {
         None,
     )
     .await;
-    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    // A group for members only refuses outsiders, anonymous ones too (§5.5).
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
     let r = alice
         .send(
             &p,

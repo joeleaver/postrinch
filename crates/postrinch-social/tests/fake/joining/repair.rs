@@ -9,7 +9,7 @@ use postrinch_social::JoinAnswer;
 use postrinch_store::GroupFound;
 
 use super::{away_group, bobs_group, drop_pointer, found, invite_link, leave_elsewhere, pointers};
-use crate::common::{group_uri, home};
+use crate::common::{channel_uri, group_uri, home};
 
 #[tokio::test]
 async fn a_group_not_read_after_redeeming_is_kept_and_read_later() {
@@ -111,4 +111,32 @@ async fn a_request_outlives_its_group_closing_to_outsiders() {
     h.provider.remove_group(&other);
     h.social.sync(&h.account()).await.unwrap();
     assert_eq!(found(&h, &other_uri), None);
+}
+
+#[tokio::test]
+async fn a_followed_channel_spared_spares_its_group() {
+    use postrinch_ofscp::ofscp_core::wire::FollowCreateRequest;
+    use postrinch_ofscp::ofscp_core::{ObjectRef, ObjectUri};
+
+    let h = home().await;
+    let (away, _, group, channel) = away_group(&h).await;
+    away.configure_group(&group, |g| g.tier = Tier::Public);
+    away.configure_channel(&channel, |c| c.tier = Tier::Public);
+    let place = channel_uri(&away, &group, &channel);
+    h.phone
+        .follow(&FollowCreateRequest {
+            channel: ObjectRef::Uri(ObjectUri::canonicalize(&place).unwrap()),
+            group_id: None,
+        })
+        .await
+        .expect("the follow");
+    h.add().await;
+    let uri = group_uri(&away, &group);
+    assert_eq!(found(&h, &uri), Some(GroupFound::Followed));
+
+    away.faults().refuse_signatures(true);
+    h.social.sync(&h.account()).await.expect("sync");
+    assert_eq!(found(&h, &uri), Some(GroupFound::Followed), "spared");
+    let kept = h.social.store().social_place(&h.account(), &place).unwrap();
+    assert!(kept.is_some(), "its channel too");
 }

@@ -175,7 +175,8 @@ async fn join(
     if let Some(m) = g.members.get(&actor) {
         return ok(m);
     }
-    // One kept from outsiders by its tier takes members by invite (§11).
+    // Whether the caller may read the group does not matter: a `private`
+    // one takes members by invite, any other as its `joinPolicy` says (§11).
     match g.effective_policy() {
         JoinPolicy::Open => {}
         JoinPolicy::Request => {

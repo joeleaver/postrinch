@@ -108,8 +108,13 @@ impl Run<'_> {
         let me = self.identity.actor().clone();
         let mut page = PageRequest::newest();
         loop {
-            let listed = client.members(id, &page).await;
-            let listed = match self.reachable(client, listed).await? {
+            let listed = match client.members(id, &page).await {
+                // A list closed to the person says they are not in it
+                // (§5.7); nothing is left out of the sync for it.
+                Err(error) if refused::is_out_of_reach(&error) => return Ok(Reach::Gone),
+                listed => self.reachable(client, listed).await?,
+            };
+            let listed = match listed {
                 Reach::Got(listed) => listed,
                 Reach::Gone => return Ok(Reach::Gone),
                 Reach::Refused => return Ok(Reach::Refused),

@@ -24,7 +24,7 @@ use postrinch_store::{GroupFound, SocialAccount, SocialGroup, social_account_key
 use crate::live::{Control, LiveEvent};
 use crate::sync::Pages;
 use crate::uris::{channel_uri, group_uri, parse_group_uri};
-use crate::{Social, SocialError, SocialResult, parse_actor};
+use crate::{Social, SocialError, SocialResult, parse_actor, refused};
 
 pub use link::InviteLink;
 pub use manage::{GroupInvite, MadeInvite, MakeInvite, PendingRequest};
@@ -156,8 +156,9 @@ impl Social {
     /// person knows it, keeping its notices. The person is in the group
     /// (or asked) already, so a failed read of it does not lose that: the
     /// group is kept with what is known of it, which is nothing new, and
-    /// the next sync reads it (`sync/outside.rs`). Only the account's own
-    /// trouble is the person's to hear of now.
+    /// a later sync reads it (`sync/outside.rs`). A group that only its
+    /// members may read (`403`) is read once the person is let in. Only
+    /// the account's own trouble is the person's to hear of now.
     async fn keep_known(
         &self,
         identity: &Arc<Identity>,
@@ -200,8 +201,14 @@ impl Social {
         match read {
             Ok(_) => Ok(()),
             Err(error @ SocialError::Unusable { .. }) => Err(error),
+            Err(SocialError::Transport(error))
+                if found == GroupFound::Asked && refused::is_forbidden(&error) =>
+            {
+                tracing::debug!(group = %uri, "a group for members only: read once let in");
+                Ok(())
+            }
             Err(error) => {
-                tracing::warn!(group = %uri, %error, "group not read after joining; the next sync reads it");
+                tracing::warn!(group = %uri, %error, "group not read after joining; a later sync reads it");
                 Ok(())
             }
         }
