@@ -2,6 +2,7 @@
 //! client id, however many times they are sent.
 
 use crate::common::{channel_uri, home, requests_to};
+use postrinch_social::LiveEvent;
 
 use super::{chat, kept_sent, outbox, queue, send};
 
@@ -77,6 +78,46 @@ async fn a_post_whose_answer_was_lost_is_matched_by_its_client_id() {
     assert_eq!(posts.len(), 2);
     assert_ne!(posts[0].nonce, posts[1].nonce);
     assert_eq!(posts[1].status, 200);
+}
+
+#[tokio::test]
+async fn a_sync_keeping_the_copy_of_a_lost_answer_tells_it_sent() {
+    let h = home().await;
+    let (_bob, group, channel) = h.bob_with_group();
+    let place = channel_uri(&h.provider, &group, &channel);
+    h.add().await;
+    h.provider.faults().drop_answers("POST", "/messages", 1);
+    queue(&h, "c1", &place, &chat("hello", None));
+    assert_eq!(send(&h).await.failed, 1);
+
+    // A place live events cannot resume is read again by a sync, which
+    // keeps the provider's copy: that settles the post and tells it sent.
+    h.social
+        .store()
+        .change_social_place(&h.account(), &place, |p| p.cursors.live = None)
+        .unwrap();
+    let mut told = crate::live::Told::new(&h.social);
+    h.social.sync(&h.account()).await.expect("synced");
+    let event = told
+        .until("the post sent", |e| matches!(e, LiveEvent::Sent { .. }))
+        .await;
+    assert_eq!(
+        event,
+        LiveEvent::Sent {
+            account: h.account(),
+            client_id: "c1".into(),
+            place: Some(place.clone()),
+        }
+    );
+    assert!(outbox(&h).is_empty());
+    // Nothing is left to send, and nothing more is told sent.
+    assert_eq!(send(&h).await, postrinch_social::Sent::default());
+    told.settle(std::time::Duration::from_millis(100)).await;
+    let sent = told
+        .seen
+        .iter()
+        .filter(|e| matches!(e, LiveEvent::Sent { .. }));
+    assert_eq!(sent.count(), 1);
 }
 
 #[tokio::test]
