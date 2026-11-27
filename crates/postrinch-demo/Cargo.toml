@@ -19,6 +19,7 @@ postrinch-store = { workspace = true }
 postrinch-sync = { workspace = true }
 base64 = "0.22"
 jiff = "0.2"
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

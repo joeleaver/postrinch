@@ -74,10 +74,13 @@ pub enum Request {
         from: postrinch_model::Timestamp,
         to: postrinch_model::Timestamp,
     },
+    /// Social mode's views, the open view's places, and what the view
+    /// panel offers.
+    Social(crate::social_load::Ask),
 }
 
 /// How many kinds of request there are: [`Request::kind`] counts them.
-const KINDS: usize = 8;
+const KINDS: usize = 9;
 
 impl Request {
     /// Requests of the same kind replace each other; each is below
@@ -92,6 +95,7 @@ impl Request {
             Request::People(_) => 5,
             Request::Calendar { .. } => 6,
             Request::Notices { .. } => 7,
+            Request::Social(_) => 8,
         }
     }
 }
@@ -326,6 +330,7 @@ fn answer(commands: &Commands, state: State, request: Request) {
                 Err(e) => failed(e.to_string()),
             }
         }
+        Request::Social(ask) => crate::social_load::answer(commands, state, ask),
         Request::Labels(account) => match commands.label_choices(&account) {
             Ok(choices) => state.label_choices.send(choices),
             Err(e) => failed(e.to_string()),
