@@ -1,5 +1,6 @@
 //! Two providers: a foreign actor's signature is checked against its home.
 
+use ofscp_core::wire::TimelineItem;
 use postrinch_ofscp::http::{MediaUpload, PageRequest, Source};
 use postrinch_ofscp::{Endpoint, Error};
 use postrinch_ofscp_fake::{Authentication, FakeProvider};
@@ -27,8 +28,10 @@ async fn a_foreign_member_signs_with_the_key_from_home() {
         .messages(&group, &channel, &PageRequest::newest())
         .await
         .expect("the history");
-    assert_eq!(page.items.len(), 1);
-    let _ = posted;
+    assert!(matches!(
+        &page.items[..],
+        [TimelineItem::Message(m)] if m.id == posted.id
+    ));
 
     let path = format!("/api/groups/{group}");
     let [request] = &requests_to(&away, &path)[..] else {
