@@ -34,16 +34,19 @@ impl Live<'_> {
         match event {
             Event::MessageCreated(m) => {
                 let place = self.channel(&m.group_id, &m.channel_id);
-                apply::message(self.cx, place, *m.message, m.cursor, Arrival::Any).await?;
+                let (arrival, cursor) = self.arrival(&place, Arrival::Any, m.cursor);
+                apply::message(self.cx, place, *m.message, cursor, arrival).await?;
             }
             Event::MessageUpdated(m) => {
                 let place = self.channel(&m.group_id, &m.channel_id);
-                apply::message(self.cx, place, *m.message, m.cursor, Arrival::IfKept).await?;
+                let (arrival, cursor) = self.arrival(&place, Arrival::IfKept, m.cursor);
+                apply::message(self.cx, place, *m.message, cursor, arrival).await?;
             }
             Event::MessageDeleted(d) => {
                 let place = self.channel(&d.group_id, &d.channel_id);
                 let id = d.message_id.to_string();
-                apply::deleted(self.cx, place, id, d.deleted_at, d.cursor).await?;
+                let (_, cursor) = self.arrival(&place, Arrival::IfKept, d.cursor);
+                apply::deleted(self.cx, place, id, d.deleted_at, cursor).await?;
             }
             Event::ReactionAdded(r) => {
                 let message = local_id(r.reaction.reference.id.as_str())?;
@@ -66,7 +69,8 @@ impl Live<'_> {
             Event::DmMessage(d) if home => {
                 let place = d.dm_id.to_string();
                 self.know_conversation(&d.dm_id).await?;
-                apply::message(self.cx, place, *d.message, d.cursor, Arrival::Any).await?;
+                let (arrival, cursor) = self.arrival(&place, Arrival::Any, d.cursor);
+                apply::message(self.cx, place, *d.message, cursor, arrival).await?;
             }
             Event::DmConversation(c) if home => self.keep_conversation(&c.conversation).await?,
             Event::DmReaction(r) if home => self.dm_reactions(&r.dm_id, &r.message_id).await?,
@@ -143,6 +147,23 @@ impl Live<'_> {
             }
         }
         apply::reactions(self.cx, dm.to_string(), message.to_string(), all).await
+    }
+
+    /// How an event in `place` is applied: as it came, or, while the place
+    /// waits for its backfill, to kept messages only and without its
+    /// cursor. A new message is left for the backfill, which reads back to
+    /// what was kept before the gap.
+    fn arrival(
+        &self,
+        place: &str,
+        arrival: Arrival,
+        cursor: Option<String>,
+    ) -> (Arrival, Option<String>) {
+        if self.unfilled.contains(place) {
+            (Arrival::IfKept, None)
+        } else {
+            (arrival, cursor)
+        }
     }
 
     /// Make sure the conversation `dm` is kept, reading it from home if it

@@ -24,6 +24,8 @@ pub(crate) struct FaultState {
     /// Signed requests whose path ends with this (every one, for `""`)
     /// are answered `401` before they are checked.
     pub(crate) refuse_signatures: Option<String>,
+    /// Signed `GET`s whose path ends with this are answered `500`.
+    pub(crate) fail_reads: Option<String>,
     /// `POST /api/media` drops its connection after this many body bytes.
     pub(crate) cut_uploads_after: Option<usize>,
     /// `POST /api/media` bodies are read at this many bytes a second.
@@ -99,6 +101,14 @@ impl Faults {
     /// switch; `refuse_signatures(false)` turns it off.
     pub fn refuse_signatures_ending(&self, suffix: &str) {
         self.inner.faults.lock().unwrap().refuse_signatures = Some(suffix.to_owned());
+    }
+
+    /// Answer every signed `GET` whose path ends with `suffix` `500
+    /// internal_error`, as a provider failing to read one place, until
+    /// `None`. Unlike a `503` it is not retried; unlike a `401` it says
+    /// nothing about the key.
+    pub fn fail_reads_ending(&self, suffix: Option<&str>) {
+        self.inner.faults.lock().unwrap().fail_reads = suffix.map(str::to_owned);
     }
 
     /// Make every WebSocket `authenticate` fail with `error`

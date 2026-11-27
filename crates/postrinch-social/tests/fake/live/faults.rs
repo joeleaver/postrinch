@@ -315,3 +315,55 @@ async fn signing_in_again_while_live_goes_on_with_the_new_key() {
     told.caught_up(1).await;
     assert_eq!(social.sessions(&h.account()).len(), 1);
 }
+
+#[tokio::test]
+async fn a_private_message_waits_for_its_conversations_backfill() {
+    let h = home().await;
+    let (carol, carol_client) = super::user(&h, "carol").await;
+    let dm = dm_id(&carol, &h.ada);
+    let to_ada = |id: &str, text: &str| -> DmMessageCreate {
+        serde_json::from_value(json!({
+            "clientMessageId": id,
+            "to": h.ada.to_string(),
+            "content": { "text": text, "mime": "text/plain" },
+        }))
+        .unwrap()
+    };
+    carol_client
+        .send_dm(&dm, &to_ada("c1", "one"))
+        .await
+        .unwrap();
+    let (_social, mut told) = live(&h, 1).await;
+
+    // Missed while offline, and too much to replay; reading it fails.
+    go_offline(&h, &mut told).await;
+    h.provider.faults().set_replay_limit(Some(0));
+    let two = to_ada("c2", "two");
+    super::elsewhere(|| carol_client.send_dm(&dm, &two)).await;
+    let pages = format!("/api/dms/{dm}/messages");
+    h.provider.faults().fail_reads_ending(Some(&pages));
+    let backfilled = come_back(&h, &mut told).await;
+    assert!(backfilled.is_empty());
+
+    // One comes while the gap is open (unsubscribed, §7.4 delivers it
+    // anyway). Keeping it would hide the gap from the backfill.
+    let three = to_ada("c3", "three");
+    super::elsewhere(|| carol_client.send_dm(&dm, &three)).await;
+    told.settle(std::time::Duration::from_millis(100)).await;
+    assert_eq!(h.messages(dm.as_str()).len(), 1, "left for the backfill");
+
+    h.provider.faults().fail_reads_ending(None);
+    for _ in 0..2 {
+        told.until("a message read by the backfill", |e| {
+            matches!(e, LiveEvent::Message { place, change: postrinch_social::MessageChange::New, .. } if place == dm.as_str())
+        })
+        .await;
+    }
+    let mut texts: Vec<_> = h
+        .messages(dm.as_str())
+        .iter()
+        .map(|m| m.message["content"]["text"].as_str().unwrap().to_owned())
+        .collect();
+    texts.sort();
+    assert_eq!(texts, ["one", "three", "two"]);
+}

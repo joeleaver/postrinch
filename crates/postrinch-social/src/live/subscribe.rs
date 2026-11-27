@@ -102,6 +102,10 @@ impl Live<'_> {
                 };
                 if found.cursor.is_none() || truncated.contains(&id) {
                     to_backfill.push((id.clone(), found.scope.clone()));
+                } else {
+                    // Its cursor is from before any gap, and the replay
+                    // from it is whole.
+                    self.unfilled.remove(found.scope.place());
                 }
                 self.subscribed.insert(id, found.scope.clone());
             }
@@ -109,13 +113,19 @@ impl Live<'_> {
         let mut backfilled = Vec::new();
         for (id, scope) in to_backfill {
             match backfill(self.cx, &scope).await {
-                Ok(_) => backfilled.push(scope.place().to_owned()),
+                Ok(_) => {
+                    self.unfilled.remove(scope.place());
+                    backfilled.push(scope.place().to_owned());
+                }
                 Err(error) if ends_session(&error) => return Err(error),
-                // Left unsubscribed, so live events do not move its cursor
-                // past what is missing; it is tried again from where it was
+                // Left unsubscribed and unfilled, so no event (a private
+                // message comes subscribed or not, §7.4; others may be
+                // queued already) keeps a new message or moves its cursor
+                // past what is missing. It is tried again from where it was
                 // after the longest backoff (or sooner, on a refresh).
                 Err(error) => {
                     tracing::warn!(provider = %self.cx.authority, place = %scope.place(), %error, "not backfilled");
+                    self.unfilled.insert(scope.place().to_owned());
                     self.subscribed.remove(&id);
                     let wait = self.cx.social.live.options.max_backoff;
                     self.retry_at

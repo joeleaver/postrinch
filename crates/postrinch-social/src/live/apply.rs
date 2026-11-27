@@ -5,6 +5,7 @@
 //! changes nothing is a duplicate, and is neither written nor told.
 
 use postrinch_ofscp::ofscp_core::wire::{Message, Reaction, Timestamp};
+use postrinch_ofscp::ofscp_core::{Actor, Authority};
 use postrinch_store::{
     PlaceKind, SocialMessage, SocialPlace, Store, StoreResult, social_account_key,
 };
@@ -49,7 +50,8 @@ pub(crate) async fn message(
                 host: &host,
             };
             let held = Held {
-                holder: holder_in(&kept_place, &message.author).unwrap_or_else(|| host.clone()),
+                holder: holder_in(&kept_place, &message.author, &actor)
+                    .unwrap_or_else(|| host.clone()),
                 message,
                 reactions: Vec::new(),
             };
@@ -255,14 +257,16 @@ fn is_new_unread(
 
 /// Who holds a message `author` wrote in `place`, where that is not the
 /// provider it arrived from: in a conversation, the recipient's home
-/// (§7.4), whichever provider sent the copy. `None` for a channel, whose
-/// host holds it, and for a conversation kept without its participants.
-fn holder_in(
-    place: &SocialPlace,
-    author: &postrinch_ofscp::ofscp_core::Actor,
-) -> Option<postrinch_ofscp::ofscp_core::Authority> {
+/// (§7.4), whichever provider sent the copy. One written to `me` is held
+/// at my home; one I wrote, at the other participant's, read from the
+/// conversation kept. `None` for a channel, whose host holds it, and for a
+/// conversation kept without its participants.
+fn holder_in(place: &SocialPlace, author: &Actor, me: &Actor) -> Option<Authority> {
     if place.kind != PlaceKind::Conversation {
         return None;
+    }
+    if social_account_key(&author.to_string()) != social_account_key(&me.to_string()) {
+        return Some(me.domain().clone());
     }
     let conversation = serde_json::from_value(place.object.clone()).ok()?;
     dm_holder(&conversation, author)

@@ -82,6 +82,10 @@ pub(crate) struct Live<'a> {
     pub revoked: HashSet<LocalId>,
     /// The people whose presence is subscribed on this connection.
     pub watching: BTreeSet<Actor>,
+    /// The places that could not be backfilled, by their id in the store.
+    /// Until one is, events there change only what is kept and never move
+    /// its cursor: the backfill must still find where its gap begins.
+    pub unfilled: BTreeSet<String>,
     /// When to try again the places that could not be backfilled.
     pub retry_at: Option<Instant>,
 }
@@ -193,6 +197,7 @@ impl Context {
             subscribed: BTreeMap::new(),
             revoked: HashSet::new(),
             watching: BTreeSet::new(),
+            unfilled: BTreeSet::new(),
             retry_at: None,
         };
         if let Err(end) = live.catch_up().await {
