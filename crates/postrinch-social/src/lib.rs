@@ -41,8 +41,16 @@
 //! commands queue in the store, sent in order, per place, and kept as their
 //! providers answer. A live account sends by itself, and again with
 //! backoff after a failure; [`Social::outbox_changed`] says there is more.
+//!
+//! Its fifth part (the plan's PR 12) is private messages across providers
+//! ([`Social::start_conversation`]): each message sent to its recipient's
+//! home, a conversation read from both providers and merged by
+//! `createdAt`, and, at the other person's provider, a `dmId`
+//! subscription that brings edits, deletes and reactions on the messages
+//! the person sent there as they happen (§7.4).
 
 mod accounts;
+mod conversations;
 mod error;
 mod keys;
 mod live;

@@ -13,6 +13,7 @@ use tokio::task::JoinHandle;
 
 use super::session::{self, SessionCmd};
 use super::{LiveEvent, Status};
+use crate::conversations::sent_provider;
 use crate::uris::{parse_channel_uri, parse_group_uri};
 use crate::{Social, SocialResult, outbox};
 
@@ -161,8 +162,10 @@ async fn stop(account: &Account, authority: &Authority, session: Session) {
     account.set_status(authority, None);
 }
 
-/// The providers `account` keeps something on: home, and the providers
-/// of its groups and of its channels (followed ones among them).
+/// The providers `account` keeps something on: home, the providers of its
+/// groups and of its channels (followed ones among them), and those of
+/// the people it has private conversations with, which hold what it sent
+/// them (§7.4).
 async fn providers(account: &Account) -> SocialResult<BTreeSet<Authority>> {
     let name = account.identity.actor().to_string();
     let (groups, places) = account
@@ -182,6 +185,8 @@ async fn providers(account: &Account) -> SocialResult<BTreeSet<Authority>> {
             .filter(|p| p.kind == PlaceKind::Channel)
             .filter_map(|p| parse_channel_uri(&p.id).map(|at| at.authority)),
     );
+    let me = account.identity.actor();
+    wanted.extend(places.iter().filter_map(|p| sent_provider(p, me)));
     Ok(wanted)
 }
 

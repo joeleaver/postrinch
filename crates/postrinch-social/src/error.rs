@@ -17,6 +17,13 @@ pub enum SocialError {
         #[source]
         source: IdentError,
     },
+    /// A private conversation was asked for with the account itself.
+    #[error("{0} cannot start a conversation with itself")]
+    WithYourself(String),
+    /// Nobody has this address at its provider (§7.4: a private message
+    /// goes to its recipient's home).
+    #[error("there is no {0}")]
+    NoSuchPerson(String),
     /// The account is already on this computer.
     #[error("{0} is already added")]
     AlreadyAdded(String),

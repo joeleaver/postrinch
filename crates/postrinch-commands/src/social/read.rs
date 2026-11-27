@@ -1,9 +1,10 @@
 //! Read state (docs/ofscp.md "Sync engine", Unread): the person's, kept
-//! here and changed at once. A channel the home provider holds has a read
-//! marker there too (§7.7), moved forward through the outbox; other places
-//! have none (§7.7 L1932), so theirs is kept here alone.
+//! here and changed at once. A channel the home provider holds, and a
+//! private conversation, have a read marker at home too (§7.7), moved
+//! forward through the outbox; other places have none (§7.7 L1932), so
+//! theirs is kept here alone.
 
-use postrinch_store::{PlaceKind, SocialChange, SocialPlace, social_account_key};
+use postrinch_store::{PlaceKind, SocialChange, SocialMessage, SocialPlace, social_account_key};
 
 use super::{actor_domain, uri_domain};
 use crate::{CommandError, CommandResult, Commands};
@@ -42,10 +43,10 @@ impl Commands {
             .store
             .set_social_messages_read(&account, &place.id, newest.created)?;
         let marker = self.move_marker(&place, &newest.id, newest.created)?;
-        if marker != Marker::Behind && has_marker(&place) {
-            let change = SocialChange::Read {
-                message: newest.id.clone(),
-            };
+        if marker != Marker::Behind
+            && let Some(message) = self.provider_marker(&place, &newest)?
+        {
+            let change = SocialChange::Read { message };
             self.queue_change(&account, Some(&place.id), &change)?;
         }
         Ok(marked)
@@ -119,9 +120,42 @@ enum Marker {
     Unknown,
 }
 
-/// Whether the place has a read marker at its provider: a channel the
-/// account's home provider holds (§7.7).
-fn has_marker(place: &SocialPlace) -> bool {
-    place.kind == PlaceKind::Channel
-        && uri_domain(&place.id).is_some_and(|host| host == actor_domain(&place.account))
+impl Commands {
+    /// The message the place's read marker at home is to name, read up to
+    /// `newest`; `None` where home keeps no marker for it (§7.7).
+    ///
+    /// - A channel home holds: `newest` itself.
+    /// - A private conversation: home's marker names a message home holds
+    ///   (§7.4: one the person received), so it is the newest of those up
+    ///   to `newest`. A message the person sent to someone on another
+    ///   provider is held there, kept under its URL, and is never named.
+    /// - Any other channel has no marker at home.
+    fn provider_marker(
+        &self,
+        place: &SocialPlace,
+        newest: &SocialMessage,
+    ) -> CommandResult<Option<String>> {
+        match place.kind {
+            PlaceKind::Channel => Ok(uri_domain(&place.id)
+                .is_some_and(|host| host == actor_domain(&place.account))
+                .then(|| newest.id.clone())),
+            PlaceKind::Conversation if held_at_home(&newest.id) => Ok(Some(newest.id.clone())),
+            PlaceKind::Conversation => {
+                let account = social_account_key(&place.account);
+                // Newest first.
+                let received = self
+                    .store
+                    .social_place_messages(&account, &place.id)?
+                    .into_iter()
+                    .find(|m| held_at_home(&m.id) && m.created <= newest.created);
+                Ok(received.map(|m| m.id))
+            }
+        }
+    }
+}
+
+/// Whether a conversation's message kept as `id` is held at home: kept
+/// under its own id, not under its URL at the other person's provider.
+fn held_at_home(id: &str) -> bool {
+    uri_domain(id).is_none()
 }

@@ -159,13 +159,13 @@ async fn list(
     ok(&paging::page(&all, &page_query(&params, 50), &tag)?)
 }
 
-/// `403` for a caller outside the conversation, `404` for a conversation
-/// this provider knows nothing of.
+/// `404` for a caller outside the conversation, exactly as for one this
+/// provider knows nothing of: anyone can derive a `dmId`, so answering
+/// otherwise would tell who talks to whom (§7.4 *Non-participants answer
+/// as unknown*).
 fn participant(inner: &Inner, state: &Store, dm: &DmId, caller: &Actor) -> Outcome<()> {
     if is_participant(inner, state, dm, caller) {
         Ok(())
-    } else if state.dms.contains_key(dm) {
-        Err(Problem::forbidden("not a participant of this conversation"))
     } else {
         Err(Problem::not_found("no such conversation"))
     }

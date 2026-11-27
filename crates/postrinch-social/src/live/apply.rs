@@ -43,6 +43,19 @@ pub(crate) enum Arrival {
     IfKept,
 }
 
+/// Where an event's cursor is from, so a resume starts from it: the
+/// place's host, or, in a conversation with someone on another provider,
+/// that provider, which holds the messages the person sent (§7.4: a
+/// cursor issued by one participant's provider is never valid on the
+/// other's).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Resume {
+    /// The place's host: a channel's provider, or home.
+    Host(String),
+    /// The other participant's provider, by a `dmId` subscription there.
+    Sent(String),
+}
+
 /// Keep `message`, which arrived in `place` with `cursor`. When it is the
 /// copy of a post of the account's still queued, keeping it settles the
 /// post, which is told as sent ([`sent`]): its copy may arrive on a socket
@@ -51,7 +64,7 @@ pub(crate) async fn message(
     k: &Keeper<'_>,
     place: String,
     message: Message,
-    cursor: Option<String>,
+    cursor: Option<Resume>,
     arrival: Arrival,
 ) -> SocialResult<()> {
     let actor = k.actor.clone();
@@ -121,7 +134,7 @@ pub(crate) async fn deleted(
     place: String,
     id: String,
     deleted_at: Timestamp,
-    cursor: Option<String>,
+    cursor: Option<Resume>,
 ) -> SocialResult<()> {
     let actor = k.actor.clone();
     let host = k.host.clone();
@@ -253,20 +266,22 @@ fn write(
     Ok(told)
 }
 
-/// Move `place`'s live cursor to `cursor` and its latest activity to
-/// `created`, where given.
+/// Move the live cursor of `place` that `cursor` is from to it, and its
+/// latest activity to `created`, where given.
 fn advance(
     store: &Store,
     place: &SocialPlace,
-    cursor: Option<String>,
+    cursor: Option<Resume>,
     created: Option<i64>,
 ) -> StoreResult<()> {
     if cursor.is_none() && created <= place.last_activity {
         return Ok(());
     }
     store.change_social_place(&place.account, &place.id, |p| {
-        if cursor.is_some() {
-            p.cursors.live = cursor;
+        match cursor {
+            Some(Resume::Host(at)) => p.cursors.live = Some(at),
+            Some(Resume::Sent(at)) => p.cursors.sent = Some(at),
+            None => {}
         }
         p.last_activity = p.last_activity.max(created);
     })?;

@@ -18,6 +18,7 @@ impl Run<'_> {
         let Some(Newest {
             mut held,
             live,
+            sent: sent_cursor,
             older,
             complete,
         }) = self.newest(target).await?
@@ -78,6 +79,9 @@ impl Run<'_> {
                     if p.cursors.live.is_none() {
                         p.cursors.live = live;
                     }
+                    if p.cursors.sent.is_none() {
+                        p.cursors.sent = sent_cursor;
+                    }
                     // The first page sets where scrolling back starts; later
                     // syncs leave it to the scrolling.
                     if p.cursors.older.is_none() && !p.cursors.complete {
@@ -134,6 +138,10 @@ struct Newest {
     /// events resume from (§7.1: event cursors and page cursors share one
     /// space, and a page's `prevCursor` marks its first item, §7.2).
     live: Option<String>,
+    /// In a conversation with someone on another provider, the cursor of
+    /// the newest message there: where its `dmId` subscription there
+    /// resumes from (§7.4).
+    sent: Option<String>,
     /// The cursor of the next older page, at the place's host (home, for
     /// a conversation).
     older: Option<String>,
@@ -148,6 +156,7 @@ impl Newest {
             held: held_by(host, page.items),
             complete: page.page.next_cursor.is_none(),
             live: page.page.prev_cursor,
+            sent: None,
             older: page.page.next_cursor,
         }
     }
@@ -158,6 +167,7 @@ impl Newest {
     /// provider's older pages is the backfill's (the plan's PR 9), which
     /// keeps that provider's cursor too.
     fn add_theirs(&mut self, holder: &Authority, theirs: MessagesPage) {
+        self.sent = theirs.page.prev_cursor;
         self.held.extend(held_by(holder, theirs.items));
         self.complete &= theirs.page.next_cursor.is_none();
     }

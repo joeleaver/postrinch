@@ -137,6 +137,13 @@ pub struct PlaceCursors {
     pub older: Option<String>,
     /// Whether every older page is here.
     pub complete: bool,
+    /// A conversation with someone on another provider: the newest
+    /// event's cursor there, where the messages the person sent are held
+    /// (§7.4). Live events from a `dmId` subscription there resume from
+    /// it. `None` for a channel, and for a conversation within one
+    /// provider.
+    #[serde(default)]
+    pub sent: Option<String>,
 }
 
 /// A channel or a private conversation, as one account knows it.

@@ -100,13 +100,53 @@ fn reading_a_home_channel_moves_its_marker_forward_only() {
 }
 
 #[test]
-fn reading_elsewhere_is_kept_here_alone() {
+fn reading_a_channel_elsewhere_is_kept_here_alone() {
     let world = world();
     world.bob(NEWS, "n1", 1, "news");
-    world.bob(DM, "d1", 1, "psst");
     assert_eq!(world.commands.mark_social_read(ADA, NEWS, None).unwrap(), 1);
-    assert_eq!(world.commands.mark_social_read(ADA, DM, None).unwrap(), 1);
     assert_eq!(world.commands.social_place(ADA, NEWS).unwrap().unread, 0);
+    assert!(reads(&world).is_empty());
+}
+
+#[test]
+fn reading_a_conversation_moves_homes_marker_to_a_message_home_holds() {
+    let world = world();
+    world.bob(DM, "d1", 1, "psst");
+    // Ada's answer is held at Bob's provider, and kept under its URL
+    // there: its id there may well be one home uses too (§2.2).
+    let mine = format!("https://far.example/api/dms/{DM}/messages/d1");
+    let mut answer = message(ADA, DM, &mine, 2, ADA, "hi");
+    answer.unread = false;
+    world.put(&answer);
+    world.bob(DM, "d2", 3, "and you?");
+
+    // Read up to Ada's own answer: home's marker can't name it, so it
+    // names the newest message home holds before it (§7.4, §7.7).
+    assert_eq!(
+        world
+            .commands
+            .mark_social_read(ADA, DM, Some(&mine))
+            .unwrap(),
+        1
+    );
+    assert_eq!(reads(&world), ["d1"]);
+    // Read to the end: Bob's newest, which home holds.
+    assert_eq!(world.commands.mark_social_read(ADA, DM, None).unwrap(), 1);
+    assert_eq!(reads(&world).last().map(String::as_str), Some("d2"));
+    assert_eq!(world.commands.social_place(ADA, DM).unwrap().unread, 0);
+}
+
+#[test]
+fn reading_only_what_the_person_sent_names_nothing_at_home() {
+    let world = world();
+    let mine = format!("https://far.example/api/dms/{DM}/messages/m1");
+    let mut answer = message(ADA, DM, &mine, 1, ADA, "hello?");
+    answer.unread = false;
+    world.put(&answer);
+    world
+        .commands
+        .mark_social_read(ADA, DM, Some(&mine))
+        .unwrap();
     assert!(reads(&world).is_empty());
 }
 
