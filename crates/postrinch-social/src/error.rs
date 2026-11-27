@@ -69,7 +69,7 @@ pub enum SocialError {
     /// Not the URI of a group (§2.2 `https://{provider}/api/groups/{id}`).
     #[error("{0:?} is not a group")]
     NotAGroup(String),
-    /// Not the URI of a channel (§2.2).
+    /// Not the URI of a channel (§2.2), or not of one in the group meant.
     #[error("{0:?} is not a channel")]
     NotAChannel(String),
     /// An invite or request id that is not one (§2.2 local ids).

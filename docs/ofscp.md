@@ -380,12 +380,16 @@ when an account is deleted.
 - **Joining (PR 24):** an invite link is `https://{provider}/invite/{token}` (§5.6), so it
   names the provider holding the group and redeeming needs nothing else; the window shows that
   provider before anything is sent. A group joined, by link or by asking an open group, is
-  kept at once as the person's (`GroupFound::Member`) and the account synced. The sync writes
-  the pointer at home for a group elsewhere, and writes it again whenever a group kept as
-  joined is missing from home's list but its own provider still says the person is a member:
-  a pointer that fails to go is never lost, and redeeming again isn't needed (a single-use
-  invite answers 409 even to a member). A group asked to join is kept as `Asked`; the sync
-  asks its provider each time, and keeps it as joined once the person is let in. A group of a
+  kept at once as the person's (`GroupFound::Member`) and the account synced; it is kept even
+  when reading the group fails, with nothing more known of it until the next sync reads it.
+  The sync writes the pointer at home for a group elsewhere, and writes it again whenever a
+  group kept as joined is missing from home's list but its own provider still says the person
+  is a member: a pointer that fails to go is never lost, and redeeming again isn't needed (a
+  single-use invite answers 409 even to a member). The provider says so by the group's
+  `membership`, or, when it leaves that out (it need not send it, §5.5), by listing the person
+  among the members. A group asked to join is kept as `Asked`; the sync asks its provider each
+  time and keeps it as joined once the person is let in. A 403 leaves it asked (a group closed
+  to outsiders keeps its pending requests, §5.7); only a 404 drops it. A group of a
   channel followed without joining is kept as `Followed`, so All channels can name it and
   offer Join. Neither has a session of its own. Making, listing and revoking invites and
   answering requests ask the group's provider and keep nothing. The invite and request lists

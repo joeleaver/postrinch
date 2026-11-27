@@ -7,11 +7,12 @@ use std::sync::Arc;
 
 use jiff::Timestamp;
 use postrinch_ofscp::Identity;
-use postrinch_ofscp::http::{Client, Direction, PageRequest};
-use postrinch_ofscp::ofscp_core::wire::{Invite, InviteCreateRequest, Paged};
+use postrinch_ofscp::http::{Client, PageRequest};
+use postrinch_ofscp::ofscp_core::wire::{Invite, InviteCreateRequest};
 use postrinch_ofscp::ofscp_core::{Authority, LocalId};
 
 use super::InviteLink;
+use crate::paging::next_page;
 use crate::uris::{channel_uri, parse_channel_uri, parse_group_uri};
 use crate::{Social, SocialError, SocialResult, parse_actor};
 
@@ -90,7 +91,7 @@ impl Social {
             let found = at.client.invites(&at.id, &page).await;
             let found = self.checked(&at.identity, &at.client, found).await?;
             invites.extend(found.items.iter().map(|i| group_invite(&at.authority, i)));
-            match next(&found, &page) {
+            match next_page(&found, &page) {
                 Some(after) => page = after,
                 None => return Ok(invites),
             }
@@ -107,9 +108,12 @@ impl Social {
         invite: MakeInvite,
     ) -> SocialResult<MadeInvite> {
         let at = self.at_group(actor, group).await?;
+        // The channel must be one of this group's, not one of the same
+        // local id in another group or on another provider.
         let channel_id = match &invite.channel {
             Some(place) => Some(
                 parse_channel_uri(place)
+                    .filter(|c| c.authority == at.authority && c.group == at.id)
                     .ok_or_else(|| SocialError::NotAChannel(place.clone()))?
                     .channel,
             ),
@@ -176,7 +180,7 @@ impl Social {
                 message: r.message.clone(),
                 requested_at: r.requested_at.as_millisecond(),
             }));
-            match next(&found, &page) {
+            match next_page(&found, &page) {
                 Some(after) => page = after,
                 None => return Ok(requests),
             }
@@ -228,16 +232,6 @@ impl Social {
             id,
         })
     }
-}
-
-/// The page after `page`, if `found` says there is one. A provider that
-/// gives back the cursor it was asked with has no more.
-fn next<T>(found: &Paged<T>, page: &PageRequest) -> Option<PageRequest> {
-    let cursor = found.page.next_cursor.as_ref()?;
-    if page.cursor.as_ref() == Some(cursor) {
-        return None;
-    }
-    Some(PageRequest::after(cursor.clone(), Direction::Backward))
 }
 
 /// An invite as its managers see it.

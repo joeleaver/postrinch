@@ -192,6 +192,17 @@ impl FakeProvider {
         g.group.permissions = effective_permissions(Some(given));
     }
 
+    /// Delete a seeded group and its channels, as its owner deleting it
+    /// would: afterwards it answers `404`.
+    ///
+    /// # Panics
+    /// If there is no such group.
+    pub fn remove_group(&self, group: &LocalId) {
+        let mut state = self.inner.state.lock().unwrap();
+        state.groups.remove(group).expect("no such group");
+        state.channels.retain(|_, c| &c.channel.group_id != group);
+    }
+
     /// Create a text channel, tier `group`, in `group`.
     ///
     /// # Panics

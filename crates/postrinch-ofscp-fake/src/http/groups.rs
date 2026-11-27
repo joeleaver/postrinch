@@ -9,6 +9,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Extension, Router};
+use bytes::Bytes;
 use ofscp_core::wire::{
     Channel, ChannelsResponse, GroupPointer, JoinPolicy, JoinRequest, JoinRequestState, Member,
     Membership,
@@ -17,7 +18,7 @@ use ofscp_core::ws::{Event, Unsubscribed};
 use ofscp_core::{Actor, LocalId};
 
 use super::me::{group_uri, groups_updated};
-use super::respond::{Caller, Reply, json, no_content, ok, page_query};
+use super::respond::{Caller, Reply, body, json, no_content, ok, page_query};
 use crate::inner::Inner;
 use crate::ops::paging;
 use crate::problem::{Outcome, Problem};
@@ -38,16 +39,21 @@ pub(crate) fn id(raw: &str) -> Outcome<LocalId> {
     LocalId::new(raw).map_err(|_| Problem::not_found("no such object"))
 }
 
+/// Group `group`, if `viewer` may read it: `404` when there is none, and
+/// `403` when its tier keeps the viewer out (§5.5, §11.3 condition 1).
 fn viewable<'s>(
     state: &'s Store,
     group: &LocalId,
     viewer: Option<&Actor>,
 ) -> Outcome<&'s GroupRec> {
-    state
+    let g = state
         .groups
         .get(group)
-        .filter(|g| g.can_view(viewer))
-        .ok_or_else(|| Problem::not_found("no such group"))
+        .ok_or_else(|| Problem::not_found("no such group"))?;
+    if !g.can_view(viewer) {
+        return Err(Problem::forbidden("this group is for its members"));
+    }
+    Ok(g)
 }
 
 async fn group(
@@ -56,11 +62,13 @@ async fn group(
     Path(raw): Path<String>,
 ) -> Reply {
     let gid = id(&raw)?;
+    let omit = inner.faults.lock().unwrap().omit_membership;
     let state = inner.state.lock().unwrap();
     let g = viewable(&state, &gid, caller.viewer())?;
     let mut group = g.group.clone();
     group.membership = caller
         .viewer()
+        .filter(|_| !omit)
         .and_then(|a| g.members.get(a))
         .map(|m| Membership {
             role: m.role.clone(),
@@ -131,24 +139,43 @@ async fn members(
     )?)
 }
 
+/// A join's body (§5.7, as re-ofscp#43 settled it): none, or an object
+/// whose `message`, if it has one, is a string. A `null` message is not
+/// one.
+fn join_message(bytes: &Bytes) -> Outcome<Option<String>> {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
+    let serde_json::Value::Object(fields) = body(bytes)? else {
+        return Err(Problem::bad_request("the body is an object"));
+    };
+    match fields.get("message") {
+        None => Ok(None),
+        Some(serde_json::Value::String(message)) => Ok(Some(message.clone())),
+        Some(_) => Err(Problem::bad_request("`message` is a string")),
+    }
+}
+
 async fn join(
     State(inner): State<Arc<Inner>>,
     Extension(caller): Extension<Caller>,
     Path(raw): Path<String>,
+    bytes: Bytes,
 ) -> Reply {
     let actor = caller.signed()?.clone();
     let gid = id(&raw)?;
+    let message = join_message(&bytes)?;
     let now = inner.now();
     let mut state = inner.state.lock().unwrap();
     let request_id = state.ids.next("jrq_");
     let g = state
         .groups
         .get_mut(&gid)
-        .filter(|g| g.can_view(Some(&actor)))
         .ok_or_else(|| Problem::not_found("no such group"))?;
     if let Some(m) = g.members.get(&actor) {
         return ok(m);
     }
+    // One kept from outsiders by its tier takes members by invite (§11).
     match g.effective_policy() {
         JoinPolicy::Open => {}
         JoinPolicy::Request => {
@@ -166,7 +193,7 @@ async fn join(
                 group_id: gid.clone(),
                 user: actor.clone(),
                 state: JoinRequestState::Pending,
-                message: None,
+                message,
                 requested_at: now,
             };
             g.requests.push(request.clone());

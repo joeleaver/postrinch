@@ -274,6 +274,49 @@ async fn a_request_is_not_approved_once_the_group_is_invite_only() {
     assert_eq!(r.status, StatusCode::FORBIDDEN);
 }
 
+#[tokio::test]
+async fn a_join_takes_no_body_or_a_string_message_but_not_null() {
+    let p = FakeProvider::start().await.unwrap();
+    let (_, _, group, _) = team(&p);
+    p.configure_group(&group, |g| {
+        g.tier = ofscp_core::wire::Tier::Public;
+        g.join_policy = JoinPolicy::Request;
+    });
+    let join = format!("/api/groups/{}/join", group.as_str());
+    let carol = user(&p, "carol");
+    let refused = [json!({"message": null}), json!({"message": 3}), json!([])];
+    for body in &refused {
+        let r = carol.send(&p, Method::POST, &join, Some(body)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{body}: {}", r.json);
+    }
+    assert!(p.join_requests(&group).is_empty(), "nothing asked");
+
+    let asked = [
+        ("dave", None),
+        ("erin", Some(json!({}))),
+        ("frank", Some(json!({"message": "Hello there"}))),
+    ];
+    for (handle, body) in &asked {
+        let r = user(&p, handle)
+            .send(&p, Method::POST, &join, body.as_ref())
+            .await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "{handle}: {}", r.json);
+    }
+    let messages: Vec<(String, Option<String>)> = p
+        .join_requests(&group)
+        .into_iter()
+        .map(|r| (r.user.handle().to_owned(), r.message))
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            ("dave".to_owned(), None),
+            ("erin".to_owned(), None),
+            ("frank".to_owned(), Some("Hello there".to_owned())),
+        ]
+    );
+}
+
 /// The ids of a listing walked backward `limit` at a time, page by page.
 async fn walk(p: &FakeProvider, by: &User, path: &str, limit: u32) -> Vec<Vec<String>> {
     let mut pages = Vec::new();

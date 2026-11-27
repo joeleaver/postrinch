@@ -38,6 +38,18 @@ async fn a_manager_makes_lists_and_revokes_invites() {
     assert_eq!(made.invite.expires_at, Some(expires));
     assert_eq!(made.invite.created_by, h.account());
 
+    // A channel of the same id in another group is not this group's.
+    let elsewhere = place.replace(group.as_str(), "grp_other");
+    let wrong = MakeInvite {
+        channel: Some(elsewhere),
+        ..MakeInvite::default()
+    };
+    let refused = h.social.make_invite(&h.account(), &uri, wrong).await;
+    assert!(
+        matches!(refused, Err(SocialError::NotAChannel(_))),
+        "{refused:?}"
+    );
+
     let listed = h.social.group_invites(&h.account(), &uri).await.unwrap();
     assert_eq!(listed, std::slice::from_ref(&made.invite));
 

@@ -93,7 +93,9 @@ impl Run<'_> {
                     targets.push(self.channel(client, &group, &channel, true).await?);
                 }
                 Reach::Refused => {
+                    // Kept as it is, and so is the group it is kept under.
                     self.spared.insert(uri);
+                    self.spared.insert(group_uri(&at.authority, &at.group));
                 }
                 Reach::Gone => {}
             }

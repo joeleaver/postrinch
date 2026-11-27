@@ -2,6 +2,7 @@
 //! providers, asking to join, and what a sync makes of both.
 
 mod manage;
+mod repair;
 
 use std::sync::Arc;
 
@@ -168,10 +169,7 @@ async fn a_group_elsewhere_whose_pointer_home_lost_is_listed_again() {
     let link = invite_link(&dan, &away, &group, InviteCreateRequest::default()).await;
     h.social.redeem_invite(&h.account(), &link).await.unwrap();
     let uri = group_uri(&away, &group);
-    h.phone
-        .delete_group_pointer(&ObjectUri::canonicalize(&uri).unwrap())
-        .await
-        .unwrap();
+    drop_pointer(&h, &uri).await;
     assert!(pointers(&h).await.is_empty());
 
     h.social.sync(&h.account()).await.expect("sync");
@@ -190,8 +188,17 @@ async fn a_group_elsewhere_whose_pointer_home_lost_is_listed_again() {
             .is_some()
     );
 
-    // Once the group's provider says Ada is out, it is forgotten. She
-    // leaves from another device, whose pointer delete never reached home.
+    // Once the group's provider says Ada is out, it is forgotten.
+    leave_elsewhere(&h, &away, &group).await;
+    h.social.sync(&h.account()).await.expect("sync");
+    assert_eq!(found(&h, &uri), None);
+    assert!(pointers(&h).await.is_empty());
+}
+
+/// Ada leaves `group` at `away` from another device, whose pointer
+/// delete never reached home: home does not list it, and only the group's
+/// provider says she is out.
+async fn leave_elsewhere(h: &Home, away: &FakeProvider, group: &LocalId) {
     let tablet = h
         .transport
         .provider(Endpoint::new(h.provider.authority()))
@@ -201,14 +208,16 @@ async fn a_group_elsewhere_whose_pointer_home_lost_is_listed_again() {
     let tablet = h
         .transport
         .client(Arc::new(tablet), Endpoint::new(away.authority()));
-    tablet.leave(&group).await.expect("left");
+    tablet.leave(group).await.expect("left");
+    drop_pointer(h, &group_uri(away, group)).await;
+}
+
+/// Delete home's pointer to the group at `uri`.
+async fn drop_pointer(h: &Home, uri: &str) {
     h.phone
-        .delete_group_pointer(&ObjectUri::canonicalize(&uri).unwrap())
+        .delete_group_pointer(&ObjectUri::canonicalize(uri).unwrap())
         .await
         .unwrap();
-    h.social.sync(&h.account()).await.expect("sync");
-    assert_eq!(found(&h, &uri), None);
-    assert!(pointers(&h).await.is_empty());
 }
 
 /// Bob's group here, public, taking members as `policy` says.

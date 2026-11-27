@@ -114,8 +114,8 @@ impl Social {
                 })
             }
             JoinOutcome::Requested(_) => {
-                let kept = self.keep_known(&identity, &client, &group_id, GroupFound::Asked, None);
-                kept.await?;
+                self.keep_known(&identity, &client, &group_id, GroupFound::Asked, None)
+                    .await?;
                 JoinAnswer::Asked {
                     account: account.actor.clone(),
                     group: uri,
@@ -152,8 +152,12 @@ impl Social {
         }
     }
 
-    /// Read group `group_id` from `client`'s provider and keep it as
-    /// `found` says the person knows it, keeping its notices.
+    /// Keep group `group_id` at `client`'s provider as `found` says the
+    /// person knows it, keeping its notices. The person is in the group
+    /// (or asked) already, so a failed read of it does not lose that: the
+    /// group is kept with what is known of it, which is nothing new, and
+    /// the next sync reads it (`sync/outside.rs`). Only the account's own
+    /// trouble is the person's to hear of now.
     async fn keep_known(
         &self,
         identity: &Arc<Identity>,
@@ -162,26 +166,45 @@ impl Social {
         found: GroupFound,
         role: Option<&str>,
     ) -> SocialResult<()> {
-        let group = self
+        let read = self
             .checked(identity, client, client.group(group_id).await)
-            .await?;
+            .await;
         let authority = client.provider().endpoint().authority().clone();
+        let uri = group_uri(&authority, group_id);
+        let read_group = read
+            .as_ref()
+            .ok()
+            .map(|g| serde_json::to_value(g).expect("a wire object always serializes"));
         let record = SocialGroup {
             account: identity.actor().to_string(),
-            uri: group_uri(&authority, group_id),
+            uri: uri.clone(),
             provider: authority.to_string(),
-            group: serde_json::to_value(&group).expect("a wire object always serializes"),
+            group: serde_json::Value::Null,
             role: role.map(str::to_owned),
             found,
             notices: None,
         };
         self.blocking(move |store| {
-            let notices = store
-                .social_group(&record.account, &record.uri)?
-                .and_then(|g| g.notices);
-            store.put_social_group(&SocialGroup { notices, ..record })
+            let kept = store.social_group(&record.account, &record.uri)?;
+            let notices = kept.as_ref().and_then(|g| g.notices);
+            let group = read_group
+                .or_else(|| kept.map(|g| g.group))
+                .unwrap_or_else(|| serde_json::json!({}));
+            store.put_social_group(&SocialGroup {
+                notices,
+                group,
+                ..record
+            })
         })
-        .await
+        .await?;
+        match read {
+            Ok(_) => Ok(()),
+            Err(error @ SocialError::Unusable { .. }) => Err(error),
+            Err(error) => {
+                tracing::warn!(group = %uri, %error, "group not read after joining; the next sync reads it");
+                Ok(())
+            }
+        }
     }
 
     /// Tell the window the account's groups changed, and have a live

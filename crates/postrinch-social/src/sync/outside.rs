@@ -4,19 +4,22 @@
 //! of channels followed without joining.
 //!
 //! The group's own provider is the authority on membership (§5.7), so a
-//! group kept here and missing from home's list is asked there: a member
-//! still gets the pointer written again and is synced as listed; anyone
-//! else is left to be forgotten (a group joined) or kept as asked.
+//! group kept here and missing from home's list is asked there, by its
+//! `membership` or else its member list (§5.5): a member still gets the
+//! pointer written again and is synced as listed; anyone else is left to
+//! be forgotten (a group joined) or kept as asked. An asked group is
+//! dropped only when it is gone (`404`).
 
 use std::collections::HashSet;
 
-use postrinch_ofscp::http::Client;
-use postrinch_ofscp::ofscp_core::wire::{Group, GroupPointer, GroupPointerRequest};
+use postrinch_ofscp::http::{Client, PageRequest};
+use postrinch_ofscp::ofscp_core::wire::{Group, GroupPointer, GroupPointerRequest, Membership};
 use postrinch_ofscp::ofscp_core::{Authority, LocalId, ObjectUri};
 use postrinch_store::{GroupFound, SocialGroup};
 
 use super::places::to_json;
 use super::{Reach, Run};
+use crate::paging::next_page;
 use crate::uris::{group_uri, parse_group_uri};
 use crate::{SocialResult, refused};
 
@@ -47,19 +50,33 @@ impl Run<'_> {
             let Some((authority, id)) = parse_group_uri(&group.uri) else {
                 continue;
             };
+            let asked = group.found == GroupFound::Asked;
             let client = self.client_for(&authority);
             let found = client.group(&id).await;
+            if asked && found.as_ref().is_err_and(refused::is_forbidden) {
+                // A group gone closed to outsiders while the request waits
+                // still keeps it (§5.7): it stays asked.
+                continue;
+            }
             match self.reachable(&client, found).await? {
-                Reach::Got(found) => {
-                    if let Some(pointer) = self.member_after_all(&group, &found).await? {
+                Reach::Got(found) => match self.membership(&client, &id, &found).await? {
+                    Reach::Got(Some(membership)) => {
+                        let pointer = self.member_after_all(&group, &membership).await?;
                         outside.pointers.push(pointer);
-                    } else if group.found == GroupFound::Asked {
+                    }
+                    Reach::Got(None) | Reach::Gone if asked => {
                         self.keep_outside(&group.uri, &authority, &found, GroupFound::Asked)
                             .await?;
                     }
-                }
-                Reach::Gone if group.found == GroupFound::Asked => {
-                    // Nobody asked can read it: it is gone.
+                    // Not a member: forgotten with the groups home leaves out.
+                    Reach::Got(None) | Reach::Gone => {}
+                    Reach::Refused => {
+                        self.spared.insert(group.uri.clone());
+                        outside.spared.insert(group.uri.clone());
+                    }
+                },
+                Reach::Gone if asked => {
+                    // Not there for anyone: the group is gone.
                     let (account, uri) = (self.actor(), group.uri.clone());
                     self.social
                         .blocking(move |store| store.remove_social_group(&account, &uri))
@@ -75,18 +92,51 @@ impl Run<'_> {
         Ok(outside)
     }
 
-    /// The pointer to sync `group` by, if its provider says the person is
-    /// a member (§5.5 `membership`). A group elsewhere gets its pointer at
-    /// home written again; if home will not take it now, a later sync
-    /// tries again.
+    /// The person's membership of `found` (group `id` at `client`'s
+    /// provider): its `membership` (§5.5) or, as a provider need not send
+    /// that and its absence proves nothing, their entry in the member list
+    /// (§5.7). `Got(None)` when the list does not have them.
+    async fn membership(
+        &mut self,
+        client: &Client,
+        id: &LocalId,
+        found: &Group,
+    ) -> SocialResult<Reach<Option<Membership>>> {
+        if let Some(membership) = &found.membership {
+            return Ok(Reach::Got(Some(membership.clone())));
+        }
+        let me = self.identity.actor().clone();
+        let mut page = PageRequest::newest();
+        loop {
+            let listed = client.members(id, &page).await;
+            let listed = match self.reachable(client, listed).await? {
+                Reach::Got(listed) => listed,
+                Reach::Gone => return Ok(Reach::Gone),
+                Reach::Refused => return Ok(Reach::Refused),
+            };
+            if let Some(member) = listed.items.iter().find(|m| m.user == me) {
+                return Ok(Reach::Got(Some(Membership {
+                    role: member.role.clone(),
+                    joined_at: member.joined_at,
+                    display_name_override: member.display_name_override.clone(),
+                })));
+            }
+            match next_page(&listed, &page) {
+                Some(after) => page = after,
+                None => return Ok(Reach::Got(None)),
+            }
+        }
+    }
+
+    /// The pointer to sync `group` by, the person being a member as
+    /// `membership` says. A group elsewhere gets its pointer at home
+    /// written again; if home will not take it now, a later sync tries
+    /// again.
     async fn member_after_all(
         &mut self,
         group: &SocialGroup,
-        found: &Group,
-    ) -> SocialResult<Option<GroupPointer>> {
-        let Some(membership) = &found.membership else {
-            return Ok(None);
-        };
+        membership: &Membership,
+    ) -> SocialResult<GroupPointer> {
         let uri = ObjectUri::parse(&group.uri).expect("a kept group's URI parses");
         let pointer = GroupPointer {
             group: uri.clone(),
@@ -94,7 +144,7 @@ impl Run<'_> {
             updated_at: membership.joined_at,
         };
         if uri.authority() == self.identity.actor().domain() {
-            return Ok(Some(pointer));
+            return Ok(pointer);
         }
         let home = self.home.clone();
         let request = GroupPointerRequest {
@@ -107,7 +157,7 @@ impl Run<'_> {
             }
             Err(error) => return self.checked(&home, Err(error)).await,
         }
-        Ok(Some(pointer))
+        Ok(pointer)
     }
 
     /// Keep the group of a channel followed without joining, unless the

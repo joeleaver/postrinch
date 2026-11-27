@@ -62,6 +62,11 @@ pub(crate) fn account_state(client: &Client, error: &Error) -> Option<SocialAcco
     })
 }
 
+/// Whether `error` is a `403`: the caller may not see it.
+pub(crate) fn is_forbidden(error: &Error) -> bool {
+    error.problem().is_some_and(|p| p.is(&ErrorCode::Forbidden))
+}
+
 /// Whether `error` says the thing asked for is not there for this
 /// account: a `404`, or a `403` (§11: what the caller may not read).
 /// Such a group or channel is left out of a sync, not a reason to stop it.

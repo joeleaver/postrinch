@@ -32,6 +32,8 @@ pub(crate) struct FaultState {
     pub(crate) upload_bytes_per_sec: Option<u64>,
     /// Signed requests to answer and then drop unanswered.
     pub(crate) drop_answers: Option<DropAnswers>,
+    /// `GET /api/groups/{groupId}` leaves out the caller's `membership`.
+    pub(crate) omit_membership: bool,
 }
 
 /// Which signed requests are carried out and then left unanswered.
@@ -138,6 +140,13 @@ impl Faults {
     /// nothing about the key.
     pub fn fail_reads_ending(&self, suffix: Option<&str>) {
         self.inner.faults.lock().unwrap().fail_reads = suffix.map(str::to_owned);
+    }
+
+    /// Leave the caller's `membership` out of every group read, as a
+    /// provider may, since the spec only asks for it (§5.5 SHOULD): a
+    /// client then has to find itself in the member list.
+    pub fn omit_membership(&self, on: bool) {
+        self.inner.faults.lock().unwrap().omit_membership = on;
     }
 
     /// Make every WebSocket `authenticate` fail with `error`

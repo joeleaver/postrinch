@@ -66,6 +66,7 @@ mod live;
 mod locks;
 mod media;
 mod outbox;
+mod paging;
 mod refused;
 mod sync;
 mod uris;

@@ -18,7 +18,9 @@
 //! [`FakeProvider::create_channel`]), not created or changed over REST.
 //! Invites (§5.6) and join requests (§5.7) are served, and their lists
 //! are paged per §7.2: by `createdAt` and `requestedAt`, newest first,
-//! ties broken by id, and pending requests only (re-ofscp#43).
+//! ties broken by id, and pending requests only. A join takes no body or
+//! an object whose optional `message` is a string, and keeps it on the
+//! request (re-ofscp#43).
 //! Contacts, privacy and notification settings, push, webhooks, calls, discovery, guests,
 //! account recovery and pre-signed uploads are not served (`404`).
 

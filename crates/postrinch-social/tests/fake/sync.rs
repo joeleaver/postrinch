@@ -138,7 +138,13 @@ async fn followed_channels_and_conversations_are_kept() {
         .expect("the followed channel");
     assert!(followed.followed);
     assert_eq!(followed.group, Some(group_uri(&h.provider, &group)));
-    assert!(store.social_groups(&h.account()).unwrap().is_empty());
+    // Its group is kept as followed, for All channels to offer joining.
+    let groups = store.social_groups(&h.account()).unwrap();
+    let found: Vec<_> = groups.iter().map(|g| (g.uri.clone(), g.found)).collect();
+    assert_eq!(
+        found,
+        [(group_uri(&h.provider, &group), GroupFound::Followed)]
+    );
 
     let conversation = store
         .social_place(&h.account(), dm.as_str())
@@ -290,7 +296,12 @@ async fn a_channel_still_followed_outlives_leaving_its_group() {
     let synced = h.social.sync(&h.account()).await.unwrap();
     assert_eq!((synced.groups, synced.places), (0, 1));
     let store = h.social.store();
-    assert!(store.social_groups(&h.account()).unwrap().is_empty());
+    let groups = store.social_groups(&h.account()).unwrap();
+    let found: Vec<_> = groups.iter().map(|g| (g.uri.clone(), g.found)).collect();
+    assert_eq!(
+        found,
+        [(group_uri(&h.provider, &group), GroupFound::Followed)]
+    );
     let place_id = channel_uri(&h.provider, &group, &channel);
     let place = store
         .social_place(&h.account(), &place_id)
