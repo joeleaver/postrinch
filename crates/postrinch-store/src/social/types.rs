@@ -160,6 +160,12 @@ pub struct SocialPlace {
     /// A channel's notification setting; `None` for its group's (and
     /// always for a conversation, which always notifies unless muted).
     pub notices: Option<Notices>,
+    /// A private conversation muted on this computer: it tells of no new
+    /// message. Local, never sent to a provider (§10.2 covers channels
+    /// and groups only). Always `false` for a channel, which has
+    /// [`Self::notices`].
+    #[serde(default)]
+    pub muted: bool,
 }
 
 /// A place named across accounts.

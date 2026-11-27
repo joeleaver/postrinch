@@ -322,6 +322,7 @@ fn channel(spec: &ChannelSpec) -> SocialPlace {
         cursors: PlaceCursors::default(),
         read_marker: None,
         notices: None,
+        muted: false,
     }
 }
 
@@ -338,6 +339,7 @@ fn conversation(with: &str) -> SocialPlace {
         cursors: PlaceCursors::default(),
         read_marker: None,
         notices: None,
+        muted: false,
     }
 }
 

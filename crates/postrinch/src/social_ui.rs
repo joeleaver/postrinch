@@ -42,6 +42,10 @@ pub struct SocialUi {
     pub choices: Signal<Choices>,
     /// Bumped by each change made here, so what is shown loads again.
     pub changed: Signal<u64>,
+    /// Unread messages that get through their places' notices, for the
+    /// rail's badge: loaded with the notices (notify.rs), Social shown or
+    /// not.
+    pub noticed: Signal<usize>,
 }
 
 /// What the panel offers to put in a view.
@@ -63,6 +67,7 @@ impl SocialUi {
             edit: Signal::new(None),
             choices: Signal::new(Choices::default()),
             changed: Signal::new(0),
+            noticed: Signal::new(0),
         }
     }
 
@@ -158,6 +163,7 @@ mod tests {
                 cursors: PlaceCursors::default(),
                 read_marker: None,
                 notices: None,
+                muted: false,
             },
             name: id.into(),
             group_name: None,

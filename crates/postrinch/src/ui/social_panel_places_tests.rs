@@ -39,6 +39,7 @@ fn channel(name: &str) -> SocialPlaceInfo {
             cursors: PlaceCursors::default(),
             read_marker: None,
             notices: None,
+            muted: false,
         },
         name: name.into(),
         group_name: Some("Rust Audio".into()),
@@ -80,18 +81,29 @@ fn chips_name_what_is_known_and_say_where() {
     assert_eq!(shown.len(), 2);
     assert_eq!(shown[0].name, "Rust Audio");
     assert_eq!(shown[0].detail, "every channel, now and later");
-    assert_eq!(shown[0].notices, Some(Some(Notices::MentionsAndReplies)));
+    assert_eq!(
+        shown[0].bell,
+        Some(Bell::Notices(Some(Notices::MentionsAndReplies)))
+    );
     assert_eq!(shown[1].chosen, Chosen::Place(general));
     assert_eq!(shown[1].before, "Rust Audio \u{203a} ");
     assert_eq!(shown[1].name, "# general");
     assert_eq!(shown[1].detail, "forumall.example");
-    assert_eq!(shown[1].notices, Some(None));
+    assert_eq!(shown[1].bell, Some(Bell::Notices(None)));
 }
 
 #[test]
-fn a_conversations_chip_has_no_notices_menu() {
+fn a_conversations_chip_offers_to_mute_it() {
     let shown = chips(&[], &[place_ref(&conversation())], &choices());
-    assert_eq!(shown[0].notices, None);
+    assert_eq!(shown[0].bell, Some(Bell::Muted(false)));
+    let mut muted = conversation();
+    muted.place.muted = true;
+    let choices = Choices {
+        groups: vec![],
+        places: vec![muted.clone()],
+    };
+    let shown_muted = chips(&[], &[place_ref(&muted)], &choices);
+    assert_eq!(shown_muted[0].bell, Some(Bell::Muted(true)));
     assert_eq!(shown[0].before, "");
     assert_eq!(shown[0].name, "\u{2709} Mira");
 }
@@ -105,7 +117,7 @@ fn a_place_not_known_yet_shows_by_what_the_view_saved() {
     let shown = chips(&[], std::slice::from_ref(&unknown), &Choices::default());
     assert_eq!(shown[0].name, unknown.id);
     assert_eq!(shown[0].detail, "sonic.example");
-    assert_eq!(shown[0].notices, None);
+    assert_eq!(shown[0].bell, None);
 }
 
 #[test]

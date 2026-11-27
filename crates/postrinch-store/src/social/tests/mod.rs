@@ -56,6 +56,7 @@ fn channel(account: &str, id: &str, last_activity: Option<i64>) -> SocialPlace {
         cursors: PlaceCursors::default(),
         read_marker: None,
         notices: Some(Notices::MentionsAndReplies),
+        muted: false,
     }
 }
 

@@ -47,6 +47,7 @@ mod rules_ui;
 mod social_actions;
 mod social_edit;
 mod social_load;
+mod social_notify;
 mod social_shown;
 mod social_ui;
 mod spelling;

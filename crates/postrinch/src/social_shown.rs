@@ -103,17 +103,16 @@ pub fn groups_of(places: &[SocialPlaceInfo]) -> Vec<GroupMark> {
 }
 
 /// The number beside a view in the sidebar, as its count asks, and whether
-/// it stands out as a badge: when unread messages mention the person, or
-/// in Messages, where every message is to them. `None` for nothing to
-/// count.
+/// it stands out as a badge: when unread messages call for the person (a
+/// private message, a mention, a reply to them) and their places' notices
+/// let them through. `None` for nothing to count.
 pub fn row_count(
     entry: &SocialViewEntry,
     tally: Option<&SocialViewTally>,
 ) -> Option<(usize, bool)> {
     let tally = tally?;
     let n = tally.shown(entry.view.count).filter(|&n| n > 0)?;
-    let loud = tally.mentions > 0 || entry.built_in == Some(BuiltInView::Messages);
-    Some((n, loud))
+    Some((n, tally.called > 0))
 }
 
 /// The line after a view's name in its header: Home's followed channels;
@@ -265,6 +264,18 @@ pub fn notices_choices(of_group: bool) -> [(Option<Notices>, &'static str); 4] {
             },
         ),
     ]
+}
+
+/// How a private conversation tells the person of new messages, as its
+/// chip says it: always, unless muted on this computer.
+pub fn muted_name(muted: bool) -> &'static str {
+    if muted { "muted" } else { "every message" }
+}
+
+/// The choices a conversation's notices menu offers, in order: whether
+/// each mutes it, and its name.
+pub fn muted_choices() -> [(bool, &'static str); 2] {
+    [(false, "Every message"), (true, "Muted")]
 }
 
 /// What a built-in view shows, said in its panel in place of its places.

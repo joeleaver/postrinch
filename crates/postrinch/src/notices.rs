@@ -31,6 +31,19 @@ pub enum Several {
     OneForAll,
 }
 
+/// The most messages told one notice each, before they become one.
+const MOST: usize = 3;
+
+impl Several {
+    /// Whether `n` new messages go in one notice.
+    pub fn together(self, n: usize) -> bool {
+        match self {
+            Self::EachUpToThree => n > MOST,
+            Self::OneForAll => n > 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NoticePrefs {

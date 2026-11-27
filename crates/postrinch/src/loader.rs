@@ -58,7 +58,9 @@ pub enum Request {
     /// recipients.
     People(String),
     /// What to tell the person about: unread mail the `watched` views show
-    /// that arrived since `since`, and reminders due in a stretch.
+    /// that arrived since `since`, new social messages that get through
+    /// their places' notices, and reminders due in a stretch; and Social's
+    /// count for the rail.
     Notices {
         watched: Vec<postrinch_commands::Watched>,
         since: postrinch_model::Timestamp,
@@ -312,12 +314,28 @@ fn answer(commands: &Commands, state: State, request: Request) {
                     }),
                 None => Vec::new(),
             };
-            tracing::debug!("notices: {} arrived, {} due", arrived.len(), due.len());
-            if !arrived.is_empty() || !due.is_empty() {
-                state
-                    .notices
-                    .found
-                    .send(crate::notify::Found { arrived, due });
+            match commands.social_noticed() {
+                Ok(n) => state.social.noticed.send(n),
+                Err(e) => tracing::warn!("counting what Social has to tell: {e}"),
+            }
+            let social = commands
+                .social_arrived(since.as_millis(), 20)
+                .unwrap_or_else(|e| {
+                    tracing::warn!("looking for new social messages to tell: {e}");
+                    Vec::new()
+                });
+            tracing::debug!(
+                "notices: {} arrived, {} social, {} due",
+                arrived.len(),
+                social.len(),
+                due.len()
+            );
+            if !arrived.is_empty() || !social.is_empty() || !due.is_empty() {
+                state.notices.found.send(crate::notify::Found {
+                    arrived,
+                    social,
+                    due,
+                });
             }
         }
         Request::Calendar { from, to } => {

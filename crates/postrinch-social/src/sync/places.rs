@@ -210,6 +210,7 @@ impl Run<'_> {
             cursors: Default::default(),
             read_marker: None,
             notices: None,
+            muted: false,
         };
         self.keep_place(fresh).await?;
         Ok(Target {
@@ -241,6 +242,7 @@ impl Run<'_> {
             cursors: Default::default(),
             read_marker: None,
             notices: None,
+            muted: false,
         };
         self.keep_place(fresh).await?;
         let home = self.identity.actor().domain().clone();
@@ -271,7 +273,7 @@ impl Run<'_> {
     }
 
     /// Keep `fresh`, keeping what a place already here holds of its own:
-    /// its cursors, read marker, notices and latest activity.
+    /// its cursors, read marker, notices, muting and latest activity.
     async fn keep_place(&mut self, fresh: SocialPlace) -> SocialResult<()> {
         self.social
             .blocking(move |store| {
@@ -282,6 +284,7 @@ impl Run<'_> {
                         cursors: kept.cursors,
                         read_marker: kept.read_marker,
                         notices: kept.notices,
+                        muted: kept.muted,
                         ..fresh
                     },
                     None => fresh,

@@ -4789,6 +4789,7 @@ dependencies = [
  "postrinch-render",
  "postrinch-rules",
  "postrinch-store",
+ "rinch-html",
  "rrule",
  "serde",
  "serde_json",

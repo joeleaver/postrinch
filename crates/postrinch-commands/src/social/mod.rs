@@ -18,6 +18,7 @@ mod accounts;
 mod drafts;
 mod filters;
 mod media;
+mod notices;
 mod overlay;
 mod pages;
 mod permissions;
@@ -27,6 +28,7 @@ mod read;
 mod render;
 mod search;
 mod threads;
+mod told;
 mod views;
 mod views_built_in;
 
@@ -34,6 +36,7 @@ use postrinch_store::ContentKind;
 use serde_json::Value;
 
 pub use accounts::{SocialAccountInfo, SocialAvatar};
+pub use notices::{Heard, Notice, PROVIDER_DEFAULT, heard, notice};
 pub use overlay::{SocialItem, SocialPending};
 pub use pages::{SocialCursor, SocialPage};
 pub use places::{SocialGroupInfo, SocialPlaceInfo};
@@ -42,6 +45,7 @@ pub use postrinch_store::{
     AvatarChange, ProfileChange, SocialContent, SocialCount, SocialDraft, SocialFilters, SocialView,
 };
 pub use threads::SocialThread;
+pub use told::SocialArrived;
 pub use views::{SocialViewEntry, SocialViewTally};
 pub use views_built_in::{ALL_CHANNELS, BuiltInView, DRAFTS, HOME, MENTIONS, MESSAGES};
 
