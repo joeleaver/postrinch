@@ -41,12 +41,20 @@
 //! commands queue in the store, sent in order, per place, and kept as their
 //! providers answer. A live account sends by itself, and again with
 //! backoff after a failure; [`Social::outbox_changed`] says there is more.
+//!
+//! Its fourth part (the plan's PR 11) is media, both ways: the outbox
+//! uploads a change's files before the change, with progress told live
+//! ([`LiveEvent::Uploading`], [`Social::uploads`]) and a retry uploading
+//! only what is not up yet; and the media messages carry, and avatars,
+//! are fetched into a bounded cache on disk and served from it again
+//! ([`Social::fetch_media`], [`Social::fetch_avatar`], [`MediaOptions`]).
 
 mod accounts;
 mod error;
 mod keys;
 mod live;
 mod locks;
+mod media;
 mod outbox;
 mod refused;
 mod sync;
@@ -64,6 +72,7 @@ pub use accounts::{Added, Found, Removed, Revocation};
 pub use error::{SocialError, SocialResult};
 pub use keys::DeviceKeys;
 pub use live::{LiveEvent, LiveOptions, MessageChange, SessionStatus};
+pub use media::{CachedMedia, MediaOptions, MediaRef, UploadProgress};
 pub use outbox::Sent;
 pub use postrinch_sync_core::Keychain;
 pub use sync::Synced;
@@ -84,6 +93,8 @@ pub struct Social {
     passes: locks::Locks,
     /// The accounts kept live, and where what changed is told.
     live: Arc<live::Registry>,
+    /// Uploads running now, fetches running now, and how media is cached.
+    media: Arc<media::Media>,
 }
 
 impl Social {
@@ -106,6 +117,7 @@ impl Social {
             locks: locks::Locks::default(),
             passes: locks::Locks::default(),
             live: Arc::new(live::Registry::new(LiveOptions::default())),
+            media: Arc::default(),
         }
     }
 

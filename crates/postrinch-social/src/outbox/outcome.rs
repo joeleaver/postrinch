@@ -26,6 +26,13 @@ pub(crate) enum Outcome {
     /// It cannot go yet, and is not tried: it carries files still to be
     /// uploaded. The changes after it in its place wait for it.
     Waiting,
+    /// A file it carries could not be uploaded for now: tried again
+    /// later, as [`Self::Again`] is, but it was not sent, so it is not
+    /// counted as an attempt and can still be taken back.
+    NotUploaded {
+        error: String,
+        retry_after: Option<Duration>,
+    },
     /// Not a change this engine sends yet (notices settings, the profile):
     /// it stays queued and untried, holding back nothing.
     NotSentHere,
@@ -34,7 +41,10 @@ pub(crate) enum Outcome {
 impl Outcome {
     /// Whether the changes after this one in its place must wait.
     pub(crate) fn holds_back(&self) -> bool {
-        matches!(self, Self::Again { .. } | Self::Waiting)
+        matches!(
+            self,
+            Self::Again { .. } | Self::NotUploaded { .. } | Self::Waiting
+        )
     }
 }
 
@@ -62,14 +72,18 @@ pub(crate) fn outcome_of(error: SocialError) -> SocialResult<Outcome> {
 /// a `4xx` answer, but for `401` (a signature another provider could not
 /// check yet: home is the key's judge, and a `401` there marks the
 /// account before this is asked), `408` and `429`, which pass. A request
-/// that could not even be made (a body that does not encode) would fail
-/// the same way every time.
+/// that could not even be made (a body that does not encode, a file to
+/// upload that cannot be read) would fail the same way every time.
 pub(crate) fn is_refusal(error: &Error) -> bool {
     match error {
         Error::Problem(problem) => {
             (400..500).contains(&problem.status) && ![401, 408, 429].contains(&problem.status)
         }
-        Error::Encode(_) | Error::Sign(_) | Error::Endpoint(_) | Error::InvalidUpload(_) => true,
+        Error::Encode(_)
+        | Error::Sign(_)
+        | Error::Endpoint(_)
+        | Error::InvalidUpload(_)
+        | Error::Read { .. } => true,
         _ => false,
     }
 }

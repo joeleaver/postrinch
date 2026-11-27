@@ -2,7 +2,7 @@
 //! made. Each is kept until its provider has taken it; reads lay the
 //! pending ones over what sync stored, so sync never undoes one.
 
-use super::{KEY, RECORD, SocialChange, SocialOutboxEntry, scoped, social_account_key};
+use super::{DraftMedia, KEY, RECORD, SocialChange, SocialOutboxEntry, scoped, social_account_key};
 use crate::codec::{Fields, FieldsBuilder};
 use crate::format::{INFO, INFO_KEY};
 use crate::{Store, StoreError, StoreResult};
@@ -158,6 +158,54 @@ impl Store {
                 return Ok(None);
             };
             entry.attempts += 1;
+            entry.error = Some(error.to_owned());
+            self.write_social_change(&key, &entry)?;
+            Ok(Some(entry))
+        })
+    }
+
+    /// Record that `media`, a file a queued change carries, is uploaded
+    /// as `attachment` (the Attachment its provider gave back, whole): the
+    /// change carries that from now on, and a retry does not upload it
+    /// again. Returns the entry as it is now, or `None` when it is not
+    /// queued (it was taken back while the file went).
+    pub fn social_change_uploaded(
+        &self,
+        account: &str,
+        client_id: &str,
+        media: &DraftMedia,
+        attachment: serde_json::Value,
+    ) -> StoreResult<Option<SocialOutboxEntry>> {
+        let key = scoped(account, client_id);
+        self.social_locked(|| {
+            let Some(mut entry) = self.social_record::<SocialOutboxEntry>(OUTBOX, KEY, &key)?
+            else {
+                return Ok(None);
+            };
+            let uploaded = DraftMedia::Uploaded { attachment };
+            if entry.change.replace_media(media, &uploaded) {
+                self.write_social_change(&key, &entry)?;
+            }
+            Ok(Some(entry))
+        })
+    }
+
+    /// Record that uploading a queued change's files failed for now, and
+    /// why. The change was not sent, so this is not an attempt
+    /// ([`SocialOutboxEntry::attempts`]): it can still be taken back.
+    /// Returns the entry as it is now, or `None` when it is not queued.
+    pub fn social_change_not_uploaded(
+        &self,
+        account: &str,
+        client_id: &str,
+        error: &str,
+    ) -> StoreResult<Option<SocialOutboxEntry>> {
+        let key = scoped(account, client_id);
+        self.social_locked(|| {
+            let Some(mut entry) = self.social_record::<SocialOutboxEntry>(OUTBOX, KEY, &key)?
+            else {
+                return Ok(None);
+            };
             entry.error = Some(error.to_owned());
             self.write_social_change(&key, &entry)?;
             Ok(Some(entry))

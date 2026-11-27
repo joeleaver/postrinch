@@ -1,6 +1,7 @@
 //! Tests of the social store, with the records they share.
 
 mod accounts;
+mod media;
 mod messages;
 mod outbox;
 mod places;

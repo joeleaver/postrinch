@@ -1,4 +1,4 @@
-//! The outbox (docs/ofscp.md, "Outbox"; the plan's PR 10): the changes
+//! The outbox (docs/ofscp.md, "Outbox"; the plan's PRs 10 and 11): the changes
 //! the commands queue in the store ([`postrinch_store::SocialChange`]),
 //! sent to their providers.
 //!
@@ -7,8 +7,12 @@
 //!
 //! - **In order, per place.** A change that fails for now (the provider
 //!   cannot be reached, or fails) is tried again later, and the changes
-//!   after it in its place wait for it; other places go on. A change
-//!   carrying a file not yet uploaded waits too, untried.
+//!   after it in its place wait for it; other places go on.
+//! - **Files first.** A post or edit's files are uploaded before it
+//!   ([`upload`]), each kept in the queued change as it goes up, so a
+//!   retry uploads only what is not up yet. A change whose files are not
+//!   all up is not sent, and holds back its place; a failed upload is not
+//!   an attempt, and the change can still be taken back.
 //! - **Refused for good** (a `403`, a `400`, a `404` for an edit of what
 //!   is gone): the change is kept, with why, for the person to give up,
 //!   and holds back nothing; it is not tried again.
@@ -37,6 +41,7 @@ mod outcome;
 pub(crate) mod run;
 mod send;
 mod target;
+mod upload;
 
 use std::collections::HashSet;
 use std::time::Duration;
@@ -52,13 +57,15 @@ use content::NotReady;
 use outcome::Outcome;
 use send::{Going, Sender, settled};
 use target::Target;
+use upload::Uploaded;
 
 /// What a pass over an account's outbox did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Sent {
     /// Changes their providers took: gone from the outbox.
     pub sent: usize,
-    /// Changes that failed for now, to be tried again.
+    /// Changes that failed for now, to be tried again: their requests,
+    /// or the uploads of their files.
     pub failed: usize,
     /// Changes their providers refused for good, kept for the person.
     pub refused: usize,
@@ -139,7 +146,8 @@ impl Social {
         })
     }
 
-    /// Send one queued change; `None` when it was taken back meanwhile.
+    /// Send one queued change, its files uploaded first; `None` when it
+    /// was taken back meanwhile.
     async fn send_entry(
         &self,
         sender: &Sender<'_>,
@@ -148,22 +156,26 @@ impl Social {
         if unsent_here(&entry.change) {
             return Ok(Some(Outcome::NotSentHere));
         }
-        let Some(place_id) = entry.place.clone() else {
-            return Ok(Some(Outcome::Refused("the change names no place".into())));
+        let (place, target) = match self.place_of(sender, entry).await? {
+            Ok(found) => found,
+            Err(outcome) => return Ok(Some(outcome)),
+        };
+        // Uploaded before the account is held: an upload can take long,
+        // and signing out or in again need not wait for it.
+        let entry = match self
+            .upload_files(sender, entry.clone(), &place, &target)
+            .await?
+        {
+            Uploaded::Ready(entry) => *entry,
+            Uploaded::TakenBack => return Ok(None),
+            Uploaded::Not(outcome) => return Ok(Some(outcome)),
         };
         // Held for each change, so signing out or in again waits for the
         // one being sent, but never for the whole pass.
         let _account = self.hold(sender.actor()).await;
-        let account = entry.account.clone();
-        let place = self
-            .blocking(move |store| store.social_place(&account, &place_id))
-            .await?;
-        let Some(place) = place else {
-            return Ok(Some(Outcome::Refused("its place is no longer kept".into())));
-        };
-        let Some(target) = Target::of(&place, sender.actor()) else {
-            let why = format!("{} cannot be sent to", place.id);
-            return Ok(Some(Outcome::Refused(why)));
+        let (place, target) = match self.place_of(sender, &entry).await? {
+            Ok(found) => found,
+            Err(outcome) => return Ok(Some(outcome)),
         };
         // Checked before it is marked tried: one that waits for its files
         // may still be taken back.
@@ -196,6 +208,30 @@ impl Social {
             | SocialChange::Profile(_) => Ok(Outcome::NotSentHere),
         };
         settled(sent).map(Some)
+    }
+
+    /// The place `entry` goes to, and where that is; what comes of it
+    /// when it cannot go there.
+    async fn place_of(
+        &self,
+        sender: &Sender<'_>,
+        entry: &SocialOutboxEntry,
+    ) -> SocialResult<Result<(SocialPlace, Target), Outcome>> {
+        let Some(place_id) = entry.place.clone() else {
+            return Ok(Err(Outcome::Refused("the change names no place".into())));
+        };
+        let account = entry.account.clone();
+        let place = self
+            .blocking(move |store| store.social_place(&account, &place_id))
+            .await?;
+        let Some(place) = place else {
+            return Ok(Err(Outcome::Refused("its place is no longer kept".into())));
+        };
+        let Some(target) = Target::of(&place, sender.actor()) else {
+            let why = format!("{} cannot be sent to", place.id);
+            return Ok(Err(Outcome::Refused(why)));
+        };
+        Ok(Ok((place, target)))
     }
 
     /// Keep what came of `entry`, count it, and say so.
@@ -236,6 +272,24 @@ impl Social {
                 } else {
                     sent.retry_after = sent.retry_after.max(retry_after);
                     tracing::info!(%account, client_id = %entry.client_id, %error, "a change failed; it is tried again");
+                    Recorded::NotSent {
+                        error,
+                        refused: false,
+                    }
+                }
+            }
+            Outcome::NotUploaded { error, retry_after } => {
+                let why = error.clone();
+                let kept = self
+                    .blocking(move |store| {
+                        store.social_change_not_uploaded(&name, &client_id, &why)
+                    })
+                    .await?;
+                if kept.is_none() {
+                    Recorded::Nothing
+                } else {
+                    sent.retry_after = sent.retry_after.max(retry_after);
+                    tracing::info!(%account, client_id = %entry.client_id, %error, "a file could not be uploaded; it is tried again");
                     Recorded::NotSent {
                         error,
                         refused: false,

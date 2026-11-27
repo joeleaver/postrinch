@@ -1,4 +1,5 @@
-//! A content-addressed directory of raw messages.
+//! A content-addressed directory of blobs: raw messages, kept attachments
+//! and pictures, and (in a directory of its own) the social media cache.
 //!
 //! A blob is named by the SHA-256 of its bytes and kept compressed with zstd
 //! (`ab/cdef….zst`): raw mail is text, and attachments in it are base64, so
@@ -90,6 +91,23 @@ impl Blobs {
             return Err(damaged(format!("blob {hash} is damaged: its hash differs")));
         }
         Ok(Some(bytes))
+    }
+
+    /// Delete the blob `hash`, returning whether it was there. For a
+    /// directory whose blobs only one kind of record refers to (the social
+    /// media cache), once none does.
+    pub(crate) fn remove(&self, hash: &str) -> io::Result<bool> {
+        if !is_hash(hash) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("not a blob hash: {hash:?}"),
+            ));
+        }
+        match fs::remove_file(self.path_of(hash)) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     /// Delete every blob whose hash `keep` rejects, except blobs modified

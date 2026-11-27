@@ -141,3 +141,61 @@ fn the_persons_own_message_is_never_kept_unread() {
             .unread
     );
 }
+
+#[test]
+fn an_uploaded_file_is_kept_in_the_change_and_it_can_still_be_taken_back() {
+    let (_dir, store) = ada_with_general();
+    let picture = DraftMedia::File {
+        path: "/home/ada/cat.png".into(),
+        mime: None,
+    };
+    let change = SocialChange::Post(SocialPost {
+        kind: ContentKind::Article,
+        reply_to: None,
+        content: SocialContent {
+            body: "a cat".into(),
+            cover: Some(picture.clone()),
+            attachments: vec![picture.clone()],
+            ..SocialContent::default()
+        },
+    });
+    store
+        .queue_social_change(ADA, "c1", Some(GENERAL), &change, 1)
+        .unwrap();
+    assert_eq!(picture.file_name().as_deref(), Some("cat.png"));
+    assert_eq!(picture.mime(), "image/png");
+
+    // A failed upload says why, but is no attempt: nothing was sent.
+    let failed = store
+        .social_change_not_uploaded(ADA, "c1", "the connection broke")
+        .unwrap()
+        .unwrap();
+    assert_eq!(failed.error.as_deref(), Some("the connection broke"));
+    assert_eq!((failed.tried, failed.attempts), (false, 0));
+
+    let attachment = serde_json::json!({
+        "id": "att_1", "mime": "image/png", "url": "https://groups.example/m/1", "size": 3
+    });
+    let entry = store
+        .social_change_uploaded(ADA, "c1", &picture, attachment.clone())
+        .unwrap()
+        .unwrap();
+    let SocialChange::Post(post) = &entry.change else {
+        panic!("a post");
+    };
+    let uploaded = DraftMedia::Uploaded { attachment };
+    assert_eq!(post.content.cover.as_ref(), Some(&uploaded));
+    assert_eq!(post.content.attachments, [uploaded]);
+    assert_eq!(store.social_outbox(ADA).unwrap(), [entry]);
+
+    assert_eq!(
+        store.take_back_social_change(ADA, "c1").unwrap(),
+        TakeBack::Taken
+    );
+    assert_eq!(
+        store
+            .social_change_uploaded(ADA, "c1", &picture, serde_json::json!({}))
+            .unwrap(),
+        None
+    );
+}

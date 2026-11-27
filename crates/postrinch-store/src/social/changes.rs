@@ -124,9 +124,67 @@ impl SocialChange {
     }
 }
 
+impl SocialChange {
+    /// Put `uploaded` wherever `media` is among the files the change
+    /// carries (a post's or an edit's cover and attachments, a profile's
+    /// avatar), once `media` is uploaded. Returns whether it was there.
+    pub fn replace_media(&mut self, media: &DraftMedia, uploaded: &DraftMedia) -> bool {
+        let slots: Vec<&mut DraftMedia> = match self {
+            Self::Post(post) => post.content.media_mut().collect(),
+            Self::Edit { content, .. } => content.media_mut().collect(),
+            Self::Profile(ProfileChange {
+                avatar: Some(AvatarChange::Set { media }),
+                ..
+            }) => vec![media],
+            _ => Vec::new(),
+        };
+        let mut found = false;
+        for slot in slots {
+            if slot == media {
+                *slot = uploaded.clone();
+                found = true;
+            }
+        }
+        found
+    }
+}
+
 impl SocialContent {
     /// Its cover, then its attachments.
     pub fn media(&self) -> impl Iterator<Item = &DraftMedia> {
         self.cover.iter().chain(&self.attachments)
+    }
+
+    fn media_mut(&mut self) -> impl Iterator<Item = &mut DraftMedia> {
+        self.cover.iter_mut().chain(&mut self.attachments)
+    }
+}
+
+impl DraftMedia {
+    /// The name it is uploaded under: the file's, or the kept picture's;
+    /// an uploaded one's, if it has one.
+    pub fn file_name(&self) -> Option<String> {
+        match self {
+            Self::File { path, .. } => path.file_name().map(|n| n.to_string_lossy().into_owned()),
+            Self::Kept { name, .. } => Some(name.clone()),
+            Self::Uploaded { attachment } => attachment
+                .get("filename")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+        }
+    }
+
+    /// Its media type: as given, else as its name suggests.
+    pub fn mime(&self) -> String {
+        let given = match self {
+            Self::File { mime, .. } | Self::Kept { mime, .. } => mime.clone(),
+            Self::Uploaded { attachment } => attachment
+                .get("mime")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+        };
+        given.unwrap_or_else(|| {
+            postrinch_model::mime_for(&self.file_name().unwrap_or_default()).to_owned()
+        })
     }
 }

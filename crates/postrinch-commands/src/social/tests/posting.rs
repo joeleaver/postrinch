@@ -173,10 +173,7 @@ fn what_a_post_carries_is_checked() {
             vec![gone.clone()]))
         .contains("no longer kept")
     );
-    let doc = world
-        .store
-        .put_social_media_bytes(b"not a picture")
-        .unwrap();
+    let doc = world.store.put_social_kept_bytes(b"not a picture").unwrap();
     let cover = DraftMedia::Kept {
         blob: doc.clone(),
         name: "notes.txt".into(),
@@ -208,7 +205,7 @@ fn what_a_post_carries_is_checked() {
             vec![big.clone()]))
         .contains("more than groups.example takes")
     );
-    let small = world.store.put_social_media_bytes(b"ok").unwrap();
+    let small = world.store.put_social_kept_bytes(b"ok").unwrap();
     let fits = DraftMedia::Kept {
         blob: small,
         name: "ok.txt".into(),
