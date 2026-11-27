@@ -4,6 +4,7 @@
 mod auth;
 mod common;
 mod federation;
+mod invites;
 mod media;
 mod rest;
 mod signing;

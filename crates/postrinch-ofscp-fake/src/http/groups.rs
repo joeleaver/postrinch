@@ -9,15 +9,16 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Extension, Router};
+use bytes::Bytes;
 use ofscp_core::wire::{
     Channel, ChannelsResponse, GroupPointer, JoinPolicy, JoinRequest, JoinRequestState, Member,
-    Membership, Tier,
+    Membership,
 };
 use ofscp_core::ws::{Event, Unsubscribed};
 use ofscp_core::{Actor, LocalId};
 
 use super::me::{group_uri, groups_updated};
-use super::respond::{Caller, Reply, json, no_content, ok, page_query};
+use super::respond::{Caller, Reply, body, json, no_content, ok, page_query};
 use crate::inner::Inner;
 use crate::ops::paging;
 use crate::problem::{Outcome, Problem};
@@ -38,16 +39,21 @@ pub(crate) fn id(raw: &str) -> Outcome<LocalId> {
     LocalId::new(raw).map_err(|_| Problem::not_found("no such object"))
 }
 
+/// Group `group`, if `viewer` may read it: `404` when there is none, and
+/// `403` when its tier keeps the viewer out (§5.5, §11.3 condition 1).
 fn viewable<'s>(
     state: &'s Store,
     group: &LocalId,
     viewer: Option<&Actor>,
 ) -> Outcome<&'s GroupRec> {
-    state
+    let g = state
         .groups
         .get(group)
-        .filter(|g| g.can_view(viewer))
-        .ok_or_else(|| Problem::not_found("no such group"))
+        .ok_or_else(|| Problem::not_found("no such group"))?;
+    if !g.can_view(viewer) {
+        return Err(Problem::forbidden("this group is for its members"));
+    }
+    Ok(g)
 }
 
 async fn group(
@@ -56,11 +62,13 @@ async fn group(
     Path(raw): Path<String>,
 ) -> Reply {
     let gid = id(&raw)?;
+    let omit = inner.faults.lock().unwrap().omit_membership;
     let state = inner.state.lock().unwrap();
     let g = viewable(&state, &gid, caller.viewer())?;
     let mut group = g.group.clone();
     group.membership = caller
         .viewer()
+        .filter(|_| !omit)
         .and_then(|a| g.members.get(a))
         .map(|m| Membership {
             role: m.role.clone(),
@@ -131,38 +139,62 @@ async fn members(
     )?)
 }
 
+/// A join's body (§5.7, as re-ofscp#43 settled it): none, or an object
+/// whose `message`, if it has one, is a string. A `null` message is not
+/// one.
+fn join_message(bytes: &Bytes) -> Outcome<Option<String>> {
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
+    let serde_json::Value::Object(fields) = body(bytes)? else {
+        return Err(Problem::bad_request("the body is an object"));
+    };
+    match fields.get("message") {
+        None => Ok(None),
+        Some(serde_json::Value::String(message)) => Ok(Some(message.clone())),
+        Some(_) => Err(Problem::bad_request("`message` is a string")),
+    }
+}
+
 async fn join(
     State(inner): State<Arc<Inner>>,
     Extension(caller): Extension<Caller>,
     Path(raw): Path<String>,
+    bytes: Bytes,
 ) -> Reply {
     let actor = caller.signed()?.clone();
     let gid = id(&raw)?;
+    let message = join_message(&bytes)?;
     let now = inner.now();
     let mut state = inner.state.lock().unwrap();
-    let ids_next = state.ids.next("jrq_");
+    let request_id = state.ids.next("jrq_");
     let g = state
         .groups
         .get_mut(&gid)
-        .filter(|g| g.can_view(Some(&actor)))
         .ok_or_else(|| Problem::not_found("no such group"))?;
     if let Some(m) = g.members.get(&actor) {
         return ok(m);
     }
-    let policy = if g.group.tier == Tier::Private {
-        JoinPolicy::Invite
-    } else {
-        g.group.join_policy.clone()
-    };
-    match policy {
+    // Whether the caller may read the group does not matter: a `private`
+    // one takes members by invite, any other as its `joinPolicy` says (§11).
+    match g.effective_policy() {
         JoinPolicy::Open => {}
         JoinPolicy::Request => {
+            // One pending request per person: asking again answers it,
+            // unchanged (§5.7).
+            let pending = g
+                .requests
+                .iter()
+                .find(|r| r.user == actor && r.state == JoinRequestState::Pending);
+            if let Some(request) = pending {
+                return Ok(json(StatusCode::ACCEPTED, request));
+            }
             let request = JoinRequest {
-                id: ids_next,
+                id: request_id,
                 group_id: gid.clone(),
                 user: actor.clone(),
                 state: JoinRequestState::Pending,
-                message: None,
+                message,
                 requested_at: now,
             };
             g.requests.push(request.clone());
@@ -170,23 +202,44 @@ async fn join(
         }
         _ => return Err(Problem::forbidden("joining this group needs an invite")),
     }
+    let member = admit(&inner, &mut state, &gid, &actor, "member");
+    drop(state);
+    announce_member(&inner, &gid, &member);
+    Ok(json(StatusCode::CREATED, &member))
+}
+
+/// Make `actor` a member of `group` with `role`. The group exists. Once
+/// the state's lock is let go, [`announce_member`] tells the actor's
+/// devices.
+pub(crate) fn admit(
+    inner: &Inner,
+    state: &mut Store,
+    group: &LocalId,
+    actor: &Actor,
+    role: &str,
+) -> Member {
+    let g = state.groups.get_mut(group).expect("the group exists");
     let member = Member {
         user: actor.clone(),
-        role: "member".to_owned(),
+        role: role.to_owned(),
         display_name_override: None,
-        joined_at: now,
+        joined_at: inner.now(),
     };
     g.members.insert(actor.clone(), member.clone());
-    drop(state);
-    if actor.is_local_to(&inner.authority) {
+    member
+}
+
+/// Tell a local member's devices their group list changed (§5.7 *My
+/// groups*); a remote member's home learns of it from their client.
+pub(crate) fn announce_member(inner: &Inner, group: &LocalId, member: &Member) {
+    if member.user.is_local_to(&inner.authority) {
         let entry = GroupPointer {
-            group: group_uri(&inner, &gid),
+            group: group_uri(inner, group),
             role: Some(member.role.clone()),
-            updated_at: now,
+            updated_at: member.joined_at,
         };
-        groups_updated(&inner, &actor, vec![entry], Vec::new());
+        groups_updated(inner, &member.user, vec![entry], Vec::new());
     }
-    Ok(json(StatusCode::CREATED, &member))
 }
 
 async fn leave(

@@ -3,7 +3,8 @@
 //! messages (§10.2).
 
 use postrinch_store::{
-    ContentKind, Notices, PlaceKind, SocialChange, SocialGroup, SocialPlace, social_account_key,
+    ContentKind, GroupFound, Notices, PlaceKind, SocialChange, SocialGroup, SocialPlace,
+    social_account_key,
 };
 use serde::{Deserialize, Serialize};
 
@@ -71,7 +72,8 @@ impl Commands {
     }
 
     /// The groups of every account this caller sees, by account, then by
-    /// name.
+    /// name: those the account is in, not those it asked to join or knows
+    /// only for a channel it follows (All channels lists every one).
     pub fn social_groups(&self) -> CommandResult<Vec<SocialGroupInfo>> {
         let mut out = Vec::new();
         for account in self.store.social_accounts()? {
@@ -83,6 +85,7 @@ impl Commands {
                 .store
                 .social_groups(&account.actor)?
                 .into_iter()
+                .filter(|group| group.found == GroupFound::Member)
                 .map(|group| group_info(group, &outbox))
                 .collect();
             groups.sort_by_cached_key(|p| p.name.to_lowercase());
@@ -237,7 +240,7 @@ impl Commands {
 }
 
 /// A group as shown, from its account's changes still on their way.
-fn group_info(
+pub(crate) fn group_info(
     mut group: SocialGroup,
     outbox: &[postrinch_store::SocialOutboxEntry],
 ) -> SocialGroupInfo {
@@ -250,7 +253,7 @@ fn group_info(
 }
 
 /// A group's name, or its URI when it gives none.
-fn group_name(group: &SocialGroup) -> String {
+pub(crate) fn group_name(group: &SocialGroup) -> String {
     str_at(&group.group, "name")
         .unwrap_or(&group.uri)
         .to_owned()

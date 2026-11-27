@@ -54,6 +54,30 @@ pub enum SocialError {
     /// not kept.
     #[error("{url} does not match its hash")]
     MediaDamaged { url: String },
+    /// What the person gave is not an invite link (§5.6).
+    #[error("{0:?} is not an invite link (https://provider/invite/…)")]
+    NotAnInviteLink(String),
+    /// The provider knows no such invite, or it has expired (§5.6 `404`).
+    #[error("this invite is not valid: it may have expired or been revoked")]
+    InviteNotValid,
+    /// Every use of the invite is spent (§5.6 `409`).
+    #[error("this invite has been used up")]
+    InviteUsedUp,
+    /// The group takes members only by invite (§5.7 `403`).
+    #[error("{group} takes members by invite only")]
+    InviteOnly { group: String },
+    /// Not the URI of a group (§2.2 `https://{provider}/api/groups/{id}`).
+    #[error("{0:?} is not a group")]
+    NotAGroup(String),
+    /// Not the URI of a channel (§2.2), or not of one in the group meant.
+    #[error("{0:?} is not a channel")]
+    NotAChannel(String),
+    /// An invite or request id that is not one (§2.2 local ids).
+    #[error("{0:?} is not an id")]
+    NotAnId(String),
+    /// A time, in milliseconds since the epoch, out of range.
+    #[error("{0} is not a time")]
+    NotATime(i64),
     /// A blocking task (the keychain, the store) did not finish.
     #[error("a background task failed: {0}")]
     Task(String),

@@ -1,0 +1,364 @@
+//! Invites and join requests (§5.6, §5.7): made, listed, revoked and
+//! redeemed, and requests listed and answered, with the statuses and
+//! rules the spec gives.
+
+use crate::common::{User, user};
+use ofscp_core::wire::{JoinPolicy, JoinRequestState};
+use ofscp_core::{Actor, LocalId};
+use postrinch_ofscp_fake::FakeProvider;
+use reqwest::{Method, StatusCode};
+use serde_json::{Value, json};
+
+/// A group Alice owns, invite only, with a channel, and Bob, a member.
+fn team(p: &FakeProvider) -> (User, User, LocalId, LocalId) {
+    let alice = user(p, "alice");
+    let bob = user(p, "bob");
+    let group = p.create_group(&alice.actor, "Team");
+    p.configure_group(&group, |g| g.join_policy = JoinPolicy::Invite);
+    let channel = p.create_channel(&group, "general");
+    p.add_member(&group, &bob.actor, "member");
+    (alice, bob, group, channel)
+}
+
+async fn invite(p: &FakeProvider, by: &User, group: &LocalId, body: Value) -> (StatusCode, Value) {
+    let path = format!("/api/groups/{}/invites", group.as_str());
+    let r = by.send(p, Method::POST, &path, Some(&body)).await;
+    (r.status, r.json)
+}
+
+async fn redeem(p: &FakeProvider, by: &User, token: &str) -> (StatusCode, Value) {
+    let r = by
+        .send(
+            p,
+            Method::POST,
+            &format!("/api/invites/{token}/redeem"),
+            None,
+        )
+        .await;
+    (r.status, r.json)
+}
+
+fn role_of(p: &FakeProvider, group: &LocalId, actor: &Actor) -> Option<String> {
+    p.roles(group).get(actor).cloned()
+}
+
+#[tokio::test]
+async fn an_invite_is_made_listed_without_its_token_and_revoked() {
+    let p = FakeProvider::start().await.unwrap();
+    let (alice, bob, group, channel) = team(&p);
+    let (status, made) = invite(
+        &p,
+        &alice,
+        &group,
+        json!({"channelId": channel.as_str(), "maxUses": 3}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{made}");
+    let token = made["token"].as_str().unwrap();
+    assert!(token.len() >= 22, "at least 128 bits: {token}");
+    assert_eq!(made["uses"], 0);
+
+    let list = format!("/api/groups/{}/invites", group.as_str());
+    let r = alice.send(&p, Method::GET, &list, None).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    let [listed] = &r.json["items"].as_array().unwrap()[..] else {
+        panic!("one invite: {}", r.json);
+    };
+    assert_eq!(listed["id"], made["id"]);
+    assert!(listed.get("token").is_none(), "the token is never listed");
+    // A member who may not manage the group may not see them.
+    let r = bob.send(&p, Method::GET, &list, None).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    let one = format!("{list}/{}", made["id"].as_str().unwrap());
+    let r = bob.send(&p, Method::DELETE, &one, None).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = alice.send(&p, Method::DELETE, &one, None).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert!(p.invites(&group).is_empty());
+    let r = alice.send(&p, Method::DELETE, &one, None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    // A revoked invite's token finds nothing.
+    let carol = user(&p, "carol");
+    assert_eq!(redeem(&p, &carol, token).await.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn an_invite_keeps_to_the_groups_roles_channels_and_its_makers_rights() {
+    let p = FakeProvider::start().await.unwrap();
+    let (alice, bob, group, _) = team(&p);
+    let dan = user(&p, "dan");
+    p.add_member(&group, &dan.actor, "admin");
+    let other = p.create_group(&alice.actor, "Other");
+    let elsewhere = p.create_channel(&other, "elsewhere");
+
+    let cases = [
+        (&alice, json!({"role": "owner"}), StatusCode::BAD_REQUEST),
+        (&alice, json!({"role": "wizard"}), StatusCode::BAD_REQUEST),
+        (
+            &alice,
+            json!({"channelId": elsewhere.as_str()}),
+            StatusCode::BAD_REQUEST,
+        ),
+        // Bob may not manage the group at all.
+        (&bob, json!({}), StatusCode::FORBIDDEN),
+        // An admin may hand out admin, as the owner may.
+        (&dan, json!({"role": "admin"}), StatusCode::CREATED),
+        (&alice, json!({"role": "moderator"}), StatusCode::CREATED),
+    ];
+    for (by, body, expected) in cases {
+        let (status, json) = invite(&p, by, &group, body.clone()).await;
+        assert_eq!(status, expected, "{body} → {json}");
+    }
+
+    // The subset rule (§5.7): a manager without `moderate` cannot grant it.
+    p.configure_group(&group, |g| {
+        g.permissions.manage = Some(vec!["admin".into(), "member".into()]);
+    });
+    let (status, json) = invite(&p, &bob, &group, json!({"role": "admin"})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{json}");
+    let (status, json) = invite(&p, &bob, &group, json!({"role": "member"})).await;
+    assert_eq!(status, StatusCode::CREATED, "{json}");
+}
+
+#[tokio::test]
+async fn redeeming_admits_once_per_use_and_refuses_what_is_spent_or_gone() {
+    let p = FakeProvider::start().await.unwrap();
+    let (alice, _, group, channel) = team(&p);
+    let carol = user(&p, "carol");
+    let erin = user(&p, "erin");
+    let (_, made) = invite(
+        &p,
+        &alice,
+        &group,
+        json!({"channelId": channel.as_str(), "maxUses": 1, "role": "moderator"}),
+    )
+    .await;
+    let token = made["token"].as_str().unwrap();
+
+    let (status, joined) = redeem(&p, &carol, token).await;
+    assert_eq!(status, StatusCode::OK, "{joined}");
+    assert_eq!(joined["groupId"], group.as_str());
+    assert_eq!(joined["channelId"], channel.as_str());
+    assert_eq!(joined["role"], "moderator");
+    assert_eq!(
+        role_of(&p, &group, &carol.actor).as_deref(),
+        Some("moderator")
+    );
+    assert_eq!(p.invites(&group)[0].uses, 1);
+
+    // Spent: 409 for anyone, a member too, before membership is looked at.
+    assert_eq!(redeem(&p, &erin, token).await.0, StatusCode::CONFLICT);
+    assert_eq!(redeem(&p, &carol, token).await.0, StatusCode::CONFLICT);
+    assert_eq!(role_of(&p, &group, &erin.actor), None);
+
+    // An unknown token, and an expired invite, are not found.
+    assert_eq!(redeem(&p, &erin, "nope").await.0, StatusCode::NOT_FOUND);
+    let past = p
+        .now()
+        .checked_sub(jiff::SignedDuration::from_secs(60))
+        .unwrap();
+    let (_, expired) = invite(&p, &alice, &group, json!({"expiresAt": past.to_string()})).await;
+    let expired = expired["token"].as_str().unwrap();
+    assert_eq!(redeem(&p, &erin, expired).await.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_member_redeeming_keeps_their_role_and_spends_no_use() {
+    let p = FakeProvider::start().await.unwrap();
+    let (alice, bob, group, channel) = team(&p);
+    let (_, made) = invite(
+        &p,
+        &alice,
+        &group,
+        json!({"channelId": channel.as_str(), "role": "admin"}),
+    )
+    .await;
+    let (status, joined) = redeem(&p, &bob, made["token"].as_str().unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "{joined}");
+    assert_eq!(
+        joined["role"], "member",
+        "the role Bob holds, not the invite's"
+    );
+    assert_eq!(p.invites(&group)[0].uses, 0);
+}
+
+#[tokio::test]
+async fn someone_on_another_provider_redeems_an_invite() {
+    let p = FakeProvider::start().await.unwrap();
+    let away = FakeProvider::start().await.unwrap();
+    let (alice, _, group, _) = team(&p);
+    let zoe = user(&away, "zoe");
+    let (_, made) = invite(&p, &alice, &group, json!({})).await;
+    let (status, joined) = redeem(&p, &zoe, made["token"].as_str().unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "{joined}");
+    assert_eq!(joined["role"], "member");
+    assert_eq!(role_of(&p, &group, &zoe.actor).as_deref(), Some("member"));
+}
+
+#[tokio::test]
+async fn join_requests_are_listed_approved_and_denied() {
+    let p = FakeProvider::start().await.unwrap();
+    let (alice, bob, group, _) = team(&p);
+    p.configure_group(&group, |g| {
+        g.tier = ofscp_core::wire::Tier::Public;
+        g.join_policy = JoinPolicy::Request;
+    });
+    let carol = user(&p, "carol");
+    let erin = user(&p, "erin");
+    let join = format!("/api/groups/{}/join", group.as_str());
+    let first = carol.send(&p, Method::POST, &join, None).await;
+    assert_eq!(first.status, StatusCode::ACCEPTED, "{}", first.json);
+    // Asking again is the same request.
+    let again = carol.send(&p, Method::POST, &join, None).await;
+    assert_eq!(again.status, StatusCode::ACCEPTED);
+    assert_eq!(again.json["id"], first.json["id"]);
+    erin.send(&p, Method::POST, &join, None).await;
+
+    let list = format!("/api/groups/{}/requests", group.as_str());
+    assert_eq!(
+        bob.send(&p, Method::GET, &list, None).await.status,
+        StatusCode::FORBIDDEN,
+        "a plain member does not oversee requests"
+    );
+    let r = alice.send(&p, Method::GET, &list, None).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["items"].as_array().unwrap().len(), 2);
+
+    let carols = first.json["id"].as_str().unwrap();
+    let approve = format!("{list}/{carols}/approve");
+    let r = alice.send(&p, Method::POST, &approve, None).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["role"], "member");
+    assert_eq!(role_of(&p, &group, &carol.actor).as_deref(), Some("member"));
+    // Answered: no longer pending.
+    let r = alice.send(&p, Method::POST, &approve, None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+
+    let pending = |p: &FakeProvider| -> Vec<_> {
+        p.join_requests(&group)
+            .into_iter()
+            .filter(|r| r.state == JoinRequestState::Pending)
+            .collect()
+    };
+    let erins = pending(&p)[0].id.clone();
+    let deny = format!("{list}/{}/deny", erins.as_str());
+    let r = alice.send(&p, Method::POST, &deny, None).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert!(pending(&p).is_empty());
+    assert_eq!(role_of(&p, &group, &erin.actor), None);
+}
+
+#[tokio::test]
+async fn a_request_is_not_approved_once_the_group_is_invite_only() {
+    let p = FakeProvider::start().await.unwrap();
+    let (alice, _, group, _) = team(&p);
+    p.configure_group(&group, |g| {
+        g.tier = ofscp_core::wire::Tier::Public;
+        g.join_policy = JoinPolicy::Request;
+    });
+    let carol = user(&p, "carol");
+    let join = format!("/api/groups/{}/join", group.as_str());
+    let asked = carol.send(&p, Method::POST, &join, None).await;
+    p.configure_group(&group, |g| g.join_policy = JoinPolicy::Invite);
+    let approve = format!(
+        "/api/groups/{}/requests/{}/approve",
+        group.as_str(),
+        asked.json["id"].as_str().unwrap()
+    );
+    let r = alice.send(&p, Method::POST, &approve, None).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.json);
+    // Nor may anyone ask now.
+    let erin = user(&p, "erin");
+    let r = erin.send(&p, Method::POST, &join, None).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_join_takes_no_body_or_a_string_message_but_not_null() {
+    let p = FakeProvider::start().await.unwrap();
+    let (_, _, group, _) = team(&p);
+    p.configure_group(&group, |g| {
+        g.tier = ofscp_core::wire::Tier::Public;
+        g.join_policy = JoinPolicy::Request;
+    });
+    let join = format!("/api/groups/{}/join", group.as_str());
+    let carol = user(&p, "carol");
+    let refused = [json!({"message": null}), json!({"message": 3}), json!([])];
+    for body in &refused {
+        let r = carol.send(&p, Method::POST, &join, Some(body)).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{body}: {}", r.json);
+    }
+    assert!(p.join_requests(&group).is_empty(), "nothing asked");
+
+    let asked = [
+        ("dave", None),
+        ("erin", Some(json!({}))),
+        ("frank", Some(json!({"message": "Hello there"}))),
+    ];
+    for (handle, body) in &asked {
+        let r = user(&p, handle)
+            .send(&p, Method::POST, &join, body.as_ref())
+            .await;
+        assert_eq!(r.status, StatusCode::ACCEPTED, "{handle}: {}", r.json);
+    }
+    let messages: Vec<(String, Option<String>)> = p
+        .join_requests(&group)
+        .into_iter()
+        .map(|r| (r.user.handle().to_owned(), r.message))
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            ("dave".to_owned(), None),
+            ("erin".to_owned(), None),
+            ("frank".to_owned(), Some("Hello there".to_owned())),
+        ]
+    );
+}
+
+/// The ids of a listing walked backward `limit` at a time, page by page.
+async fn walk(p: &FakeProvider, by: &User, path: &str, limit: u32) -> Vec<Vec<String>> {
+    let mut pages = Vec::new();
+    let mut target = format!("{path}?limit={limit}");
+    loop {
+        let r = by.send(p, Method::GET, &target, None).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+        let ids = r.json["items"].as_array().unwrap().iter();
+        pages.push(ids.map(|i| i["id"].as_str().unwrap().to_owned()).collect());
+        match r.json["page"]["nextCursor"].as_str() {
+            Some(next) => target = format!("{path}?limit={limit}&cursor={next}"),
+            None => return pages,
+        }
+    }
+}
+
+#[tokio::test]
+async fn invites_and_requests_list_newest_first_across_pages() {
+    let p = FakeProvider::start().await.unwrap();
+    let (alice, _, group, _) = team(&p);
+    for _ in 0..3 {
+        invite(&p, &alice, &group, json!({})).await;
+    }
+    let mut made = p.invites(&group);
+    made.sort_by(|a, b| (b.created_at, &b.id).cmp(&(a.created_at, &a.id)));
+    let newest_first: Vec<String> = made.iter().map(|i| i.id.as_str().to_owned()).collect();
+    let path = format!("/api/groups/{}/invites", group.as_str());
+    let pages = walk(&p, &alice, &path, 2).await;
+    assert_eq!(pages.len(), 2);
+    assert_eq!(pages.concat(), newest_first);
+
+    p.configure_group(&group, |g| {
+        g.tier = ofscp_core::wire::Tier::Public;
+        g.join_policy = JoinPolicy::Request;
+    });
+    let join = format!("/api/groups/{}/join", group.as_str());
+    for handle in ["carol", "dan", "erin"] {
+        user(&p, handle).send(&p, Method::POST, &join, None).await;
+    }
+    let mut asked = p.join_requests(&group);
+    asked.sort_by(|a, b| (b.requested_at, &b.id).cmp(&(a.requested_at, &a.id)));
+    let newest_first: Vec<String> = asked.iter().map(|r| r.id.as_str().to_owned()).collect();
+    let path = format!("/api/groups/{}/requests", group.as_str());
+    assert_eq!(walk(&p, &alice, &path, 2).await.concat(), newest_first);
+}

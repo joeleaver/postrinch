@@ -8,8 +8,8 @@ use std::time::Duration;
 use jiff::{SignedDuration, Timestamp};
 use ofscp_core::signing::{VerifyingKey, encode_public_key};
 use ofscp_core::wire::{
-    Availability, Channel, ChannelType, Content, Group, JoinPolicy, Member, Message, MessageCreate,
-    NotificationSetting, Tier,
+    Availability, Channel, ChannelType, Content, Group, Invite, JoinPolicy, JoinRequest,
+    JoinRequestState, Member, Message, MessageCreate, NotificationSetting, Tier,
 };
 use ofscp_core::{Actor, Authority, LocalId};
 use tokio::net::TcpListener;
@@ -192,6 +192,17 @@ impl FakeProvider {
         g.group.permissions = effective_permissions(Some(given));
     }
 
+    /// Delete a seeded group and its channels, as its owner deleting it
+    /// would: afterwards it answers `404`.
+    ///
+    /// # Panics
+    /// If there is no such group.
+    pub fn remove_group(&self, group: &LocalId) {
+        let mut state = self.inner.state.lock().unwrap();
+        state.groups.remove(group).expect("no such group");
+        state.channels.retain(|_, c| &c.channel.group_id != group);
+    }
+
     /// Create a text channel, tier `group`, in `group`.
     ///
     /// # Panics
@@ -238,6 +249,7 @@ impl FakeProvider {
     }
 
     /// Make `actor` (local or foreign) a member of `group` with `role`.
+    /// Their pending join requests count as approved.
     ///
     /// # Panics
     /// If there is no such group.
@@ -246,7 +258,51 @@ impl FakeProvider {
         let mut state = self.inner.state.lock().unwrap();
         let g = state.groups.get_mut(group).expect("no such group");
         g.members.insert(actor.clone(), member(actor, role, now));
-        g.requests.retain(|r| r.user != *actor);
+        for request in g.requests.iter_mut().filter(|r| r.user == *actor) {
+            if request.state == JoinRequestState::Pending {
+                request.state = JoinRequestState::Approved;
+            }
+        }
+    }
+
+    /// `group`'s members' roles, by actor: what the provider holds.
+    ///
+    /// # Panics
+    /// If there is no such group.
+    pub fn roles(&self, group: &LocalId) -> BTreeMap<Actor, String> {
+        let state = self.inner.state.lock().unwrap();
+        let g = state.groups.get(group).expect("no such group");
+        g.members
+            .iter()
+            .map(|(actor, m)| (actor.clone(), m.role.clone()))
+            .collect()
+    }
+
+    /// Every join request `group` has had, in the order made, with its
+    /// state.
+    ///
+    /// # Panics
+    /// If there is no such group.
+    pub fn join_requests(&self, group: &LocalId) -> Vec<JoinRequest> {
+        let state = self.inner.state.lock().unwrap();
+        state
+            .groups
+            .get(group)
+            .expect("no such group")
+            .requests
+            .clone()
+    }
+
+    /// The invites the provider holds for `group`, as it lists them (no
+    /// tokens), with their uses.
+    pub fn invites(&self, group: &LocalId) -> Vec<Invite> {
+        let state = self.inner.state.lock().unwrap();
+        state
+            .invites
+            .values()
+            .filter(|r| r.invite.group_id == *group)
+            .map(|r| r.invite.clone())
+            .collect()
     }
 
     /// Post a chat message as `author`, under every rule a

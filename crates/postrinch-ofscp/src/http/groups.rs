@@ -1,14 +1,10 @@
-//! Groups and channels (§5.5) and invites (§5.6), on the group's host
-//! provider: the caller picks the [`Client`] for that provider.
-//!
-//! Not here: `GET /api/groups/{groupId}/invites`, whose answer the spec
-//! leaves unspecified.
+//! Groups and channels (§5.5), on the group's host provider: the caller
+//! picks the [`Client`] for that provider. Invites are in `invites`.
 
 use ofscp_core::LocalId;
 use ofscp_core::wire::{
     Channel, ChannelCreateRequest, ChannelUpdateRequest, ChannelsResponse, Group,
-    GroupCreateRequest, GroupUpdateRequest, InviteCreateRequest, InviteCreateResponse,
-    InviteRedeemResponse,
+    GroupCreateRequest, GroupUpdateRequest,
 };
 use reqwest::Method;
 
@@ -107,35 +103,6 @@ impl Client {
             Query::new(),
         )
         .await
-    }
-
-    /// Make an invite to a group (§5.6). Needs `manage`; answered `201`
-    /// with an [`InviteCreateResponse`], the only answer that carries the
-    /// invite's token: listings and reads of an invite leave it out.
-    pub async fn create_invite(
-        &self,
-        group_id: &LocalId,
-        request: &InviteCreateRequest,
-    ) -> Result<InviteCreateResponse> {
-        let path = path("/api/groups/{}/invites", &[group_id.as_str()]);
-        self.send_json(Method::POST, path, request).await
-    }
-
-    /// Revoke an invite (§5.6). Needs `manage`.
-    pub async fn revoke_invite(&self, group_id: &LocalId, invite_id: &LocalId) -> Result<()> {
-        let path = path(
-            "/api/groups/{}/invites/{}",
-            &[group_id.as_str(), invite_id.as_str()],
-        );
-        self.send_no_content(Method::DELETE, path, Query::new())
-            .await
-    }
-
-    /// Redeem an invite as this account (§5.6), at the group's provider.
-    /// An unknown or expired token is a `404`, a used-up one a `409`.
-    pub async fn redeem_invite(&self, token: &str) -> Result<InviteRedeemResponse> {
-        self.send_empty(Method::POST, path("/api/invites/{}/redeem", &[token]))
-            .await
     }
 }
 

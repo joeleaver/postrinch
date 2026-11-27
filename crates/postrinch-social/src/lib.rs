@@ -48,14 +48,25 @@
 //! only what is not up yet; and the media messages carry, and avatars,
 //! are fetched into a bounded cache on disk and served from it again
 //! ([`Social::fetch_media`], [`Social::fetch_avatar`], [`MediaOptions`]).
+//!
+//! Its fifth part (the plan's PR 24) is joining: by an invite link to a
+//! group on any provider ([`Social::redeem_invite`]), or by asking a group
+//! that takes members openly or by request ([`Social::join_group`]); and,
+//! for a group's managers, invites made, listed and revoked
+//! ([`Social::make_invite`]) and join requests answered
+//! ([`Social::approve_join_request`]). A sync writes again the pointer at
+//! home that a group joined elsewhere is missing, and keeps a group asked
+//! to join as the person's once they are let in.
 
 mod accounts;
 mod error;
+mod joining;
 mod keys;
 mod live;
 mod locks;
 mod media;
 mod outbox;
+mod paging;
 mod refused;
 mod sync;
 mod uris;
@@ -70,6 +81,9 @@ use tokio::sync::OwnedMutexGuard;
 
 pub use accounts::{Added, Found, Removed, Revocation};
 pub use error::{SocialError, SocialResult};
+pub use joining::{
+    GroupInvite, InviteLink, JoinAnswer, Joined, MadeInvite, MakeInvite, PendingRequest,
+};
 pub use keys::DeviceKeys;
 pub use live::{LiveEvent, LiveOptions, MessageChange, SessionStatus};
 pub use media::{CachedMedia, MediaOptions, MediaRef, UploadProgress};

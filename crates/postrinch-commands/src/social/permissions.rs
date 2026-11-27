@@ -4,7 +4,7 @@
 //! provider decides in the end; these say beforehand what it will refuse,
 //! so the window offers only what can be done.
 
-use postrinch_store::{ContentKind, PlaceKind, SocialMessage, SocialPlace};
+use postrinch_store::{ContentKind, PlaceKind, SocialGroup, SocialMessage, SocialPlace};
 use serde_json::Value;
 
 use super::{kind_of, same_actor, str_at, type_name};
@@ -14,6 +14,8 @@ use crate::{CommandError, CommandResult, Commands};
 const DEFAULT_POST: [&str; 2] = ["admin", "member"];
 /// The group's `moderate` roles when it names none (§5.2).
 const DEFAULT_MODERATE: [&str; 1] = ["admin"];
+/// The group's `manage` roles when it names none (§5.2).
+const DEFAULT_MANAGE: [&str; 1] = ["admin"];
 
 /// Where an account stands in a place.
 pub(crate) struct Standing {
@@ -42,16 +44,33 @@ impl Commands {
         if let Some(uri) = &place.group
             && let Some(group) = self.store.social_group(&place.account, uri)?
         {
-            standing.owner =
-                str_at(&group.group, "owner").is_some_and(|o| same_actor(o, &place.account));
-            standing.role = group.role;
-            standing.group = group.group.get("permissions").cloned().unwrap_or_default();
+            let Standing {
+                owner, role, group, ..
+            } = Standing::in_group(&group);
+            (standing.owner, standing.role, standing.group) = (owner, role, group);
         }
         Ok(standing)
     }
 }
 
 impl Standing {
+    /// Where the account of `group` stands in the group itself.
+    pub(crate) fn in_group(group: &SocialGroup) -> Self {
+        Standing {
+            conversation: false,
+            owner: str_at(&group.group, "owner").is_some_and(|o| same_actor(o, &group.account)),
+            role: group.role.clone(),
+            group: group.group.get("permissions").cloned().unwrap_or_default(),
+            channel: Value::Null,
+        }
+    }
+
+    /// Whether the account may manage the group (§5.2 `manage`): its
+    /// invites among the rest.
+    pub fn may_manage(&self) -> bool {
+        !self.conversation && (self.owner || self.granted(&self.group, "manage", &DEFAULT_MANAGE))
+    }
+
     /// The kinds the account may post here as messages that answer none.
     pub fn kinds(&self) -> Vec<ContentKind> {
         if self.reply_only().is_some() {

@@ -4,8 +4,9 @@
 //! Group calls go to the group's host provider, local or remote (§8.2);
 //! the pointer calls go to the signer's home. Not here, for want of a type
 //! in ofscp-core: the role change and display-name `PATCH`es (no request
-//! body type), the join request's optional `{ message }` body, and
-//! `GET /api/groups/{groupId}/requests` (response shape unspecified).
+//! body type), and the join request's optional `{ message }` body
+//! (re-ofscp#43). The pending join requests are listed paged per §7.2,
+//! newest first (re-ofscp#43).
 
 use ofscp_core::wire::{
     GroupPointer, GroupPointerRequest, GroupPointersResponse, JoinRequest, Member, Paged,
@@ -84,6 +85,20 @@ impl Client {
         let path = path("/api/groups/{}/members/{}", &[group_id.as_str(), &user]);
         self.send_no_content(Method::DELETE, path, Query::new())
             .await
+    }
+
+    /// One page of a group's pending join requests (§5.7). Needs `manage`
+    /// or `moderate`.
+    pub async fn join_requests(
+        &self,
+        group_id: &LocalId,
+        page: &PageRequest,
+    ) -> Result<Paged<JoinRequest>> {
+        self.get(
+            path("/api/groups/{}/requests", &[group_id.as_str()]),
+            page.query(),
+        )
+        .await
     }
 
     /// Let a pending join request in (§5.7); answers the new member.

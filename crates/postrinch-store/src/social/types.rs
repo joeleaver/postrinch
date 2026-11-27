@@ -86,6 +86,12 @@ pub enum GroupFound {
     Invite,
     /// From a provider's list of groups, to browse in All channels.
     Directory,
+    /// The person asked to join (§5.7, `request` policy) and no manager
+    /// has let them in yet. It becomes `Member` once one does.
+    Asked,
+    /// A channel of it is followed without joining (§7.6): it is kept to
+    /// name the channel's group, and to join from All channels.
+    Followed,
 }
 
 /// A group, as one account knows it.

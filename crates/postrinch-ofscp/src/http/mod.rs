@@ -21,6 +21,7 @@ mod directory;
 mod dms;
 pub(crate) mod fetch;
 mod groups;
+mod invites;
 mod me;
 mod media;
 mod membership;

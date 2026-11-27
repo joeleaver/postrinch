@@ -15,6 +15,7 @@
 //! few fields the commands read are named after the spec's section.
 
 mod accounts;
+mod directory;
 mod drafts;
 mod filters;
 mod media;
@@ -36,6 +37,7 @@ use postrinch_store::ContentKind;
 use serde_json::Value;
 
 pub use accounts::{SocialAccountInfo, SocialAvatar};
+pub use directory::{SocialDirectoryGroup, SocialGroupStanding};
 pub use notices::{Heard, Notice, PROVIDER_DEFAULT, heard, notice};
 pub use overlay::{SocialItem, SocialPending};
 pub use pages::{SocialCursor, SocialPage};
