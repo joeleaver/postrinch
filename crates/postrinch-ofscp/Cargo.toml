@@ -36,6 +36,7 @@ tracing = { workspace = true }
 url = "2"
 
 [dev-dependencies]
+postrinch-ofscp-fake = { path = "../postrinch-ofscp-fake" }
 http-body-util = "0.1"
 rcgen = "0.14"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
