@@ -1,8 +1,15 @@
 //! Sockets failing: reconnecting and resuming, truncated replays read
 //! over REST, closes that retry and closes that end, a clock that is off.
 
+use std::sync::Arc;
+
+use postrinch_ofscp::Endpoint;
+use postrinch_ofscp::ofscp_core::wire::DmMessageCreate;
+use postrinch_ofscp::ofscp_core::{Actor, dm_id};
+use postrinch_ofscp_fake::FakeProvider;
 use postrinch_social::LiveEvent;
 use postrinch_store::SocialAccountState;
+use serde_json::json;
 
 use super::{Told, live, post_each};
 use crate::common::{Home, PASSWORD, channel_uri, home, requests_to};
@@ -194,4 +201,68 @@ async fn a_clock_far_off_still_connects_and_syncs() {
         .unwrap()
         .unwrap();
     assert_eq!(account.state, SocialAccountState::Active);
+}
+
+#[tokio::test]
+async fn a_backfilled_conversation_keeps_each_providers_messages_apart() {
+    let h = home().await;
+    let away = FakeProvider::start().await.unwrap();
+    let erin = away.add_user("erin", PASSWORD);
+    let endpoint = Endpoint::new(away.authority());
+    let identity = h
+        .transport
+        .provider(endpoint)
+        .sign_in("erin", PASSWORD, "erin's")
+        .await
+        .unwrap();
+    // Erin writes to Ada's provider; Ada answers at Erin's.
+    let erin_at_home = h
+        .transport
+        .client(Arc::new(identity), Endpoint::new(h.provider.authority()));
+    let phone_away = h
+        .transport
+        .client(h.phone.identity().clone(), Endpoint::new(away.authority()));
+    let dm = dm_id(&erin, &h.ada);
+    let to = |who: &Actor, id: &str, text: &str| -> DmMessageCreate {
+        serde_json::from_value(json!({
+            "clientMessageId": id,
+            "to": who.to_string(),
+            "content": { "text": text, "mime": "text/plain" },
+        }))
+        .unwrap()
+    };
+    erin_at_home
+        .send_dm(&dm, &to(&h.ada, "e1", "hi Ada"))
+        .await
+        .unwrap();
+    phone_away
+        .send_dm(&dm, &to(&erin, "a1", "hi Erin"))
+        .await
+        .unwrap();
+    let (_social, mut told) = live(&h, 1).await;
+    assert_eq!(h.messages(dm.as_str()).len(), 2);
+
+    go_offline(&h, &mut told).await;
+    h.provider.faults().set_replay_limit(Some(0));
+    erin_at_home
+        .send_dm(&dm, &to(&h.ada, "e2", "still there?"))
+        .await
+        .unwrap();
+    let backfilled = come_back(&h, &mut told).await;
+    assert_eq!(backfilled, [dm.to_string()]);
+
+    let kept = h.messages(dm.as_str());
+    let mut texts: Vec<_> = kept
+        .iter()
+        .map(|m| m.message["content"]["text"].as_str().unwrap().to_owned())
+        .collect();
+    texts.sort();
+    assert_eq!(texts, ["hi Ada", "hi Erin", "still there?"]);
+    // The answer held at Erin's is still kept once, under its URL there.
+    let mine: Vec<_> = kept
+        .iter()
+        .filter(|m| m.id.starts_with("https://"))
+        .collect();
+    assert_eq!(mine.len(), 1);
+    assert!(mine[0].id.contains(&away.authority().to_string()));
 }

@@ -162,8 +162,7 @@ async fn list(
 /// `403` for a caller outside the conversation, `404` for a conversation
 /// this provider knows nothing of.
 fn participant(inner: &Inner, state: &Store, dm: &DmId, caller: &Actor) -> Outcome<()> {
-    if is_participant(inner, state, dm, caller) || state.dms.get(dm).is_some_and(|r| r.has(caller))
-    {
+    if is_participant(inner, state, dm, caller) {
         Ok(())
     } else if state.dms.contains_key(dm) {
         Err(Problem::forbidden("not a participant of this conversation"))

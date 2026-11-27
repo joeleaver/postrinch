@@ -61,7 +61,6 @@ pub(crate) async fn backfill(cx: &Context, scope: &Scope) -> SocialResult<usize>
             first_older = next.clone();
         }
         let held = held_by(&cx.authority, page.items);
-        let known = held.iter().any(|h| had.contains(h.message.id.as_str()));
         let unread = walk.unread(&held, &me);
         let reader = Reader {
             account: cx.identity.actor(),
@@ -73,6 +72,11 @@ pub(crate) async fn backfill(cx: &Context, scope: &Scope) -> SocialResult<usize>
             .zip(unread)
             .map(|(h, unread)| keep(&reader, h, unread))
             .collect();
+        // Compared by the key each is kept under, which names the
+        // provider holding it: a private conversation keeps the other
+        // side's messages under their URL there, and this provider's
+        // pages are never matched against them.
+        let known = kept_page.iter().any(|k| had.contains(&k.message.id));
         new += keep_page(cx, &had, kept_page).await?;
         first = false;
         let Some(next) = next else {

@@ -41,12 +41,6 @@ pub(crate) async fn message(
             let Some(kept_place) = store.social_place(&account, &place)? else {
                 return Ok(None);
             };
-            let existing = store.social_message(&account, &place, message.id.as_str())?;
-            if existing.is_none() && arrival == Arrival::IfKept {
-                advance(store, &kept_place, cursor, None)?;
-                return Ok(None);
-            }
-            let unread = existing.is_none() && is_new_unread(store, &kept_place, &message, &actor)?;
             let reader = Reader {
                 account: &actor,
                 place: &place,
@@ -57,7 +51,17 @@ pub(crate) async fn message(
                 message,
                 reactions: Vec::new(),
             };
-            let mut kept = keep(&reader, &held, unread);
+            // Looked up by the key it is kept under, which names the
+            // provider holding it (docs/ofscp.md, "Private messages").
+            let mut kept = keep(&reader, &held, false);
+            let existing = store.social_message(&account, &place, &kept.message.id)?;
+            if existing.is_none() && arrival == Arrival::IfKept {
+                advance(store, &kept_place, cursor, None)?;
+                return Ok(None);
+            }
+            if existing.is_none() && is_new_unread(store, &kept_place, &held.message, &actor)? {
+                kept.message.unread = true;
+            }
             // Events carry no reactions: those kept stay.
             if let Some(existing) = &existing {
                 kept.message.reactions = existing.reactions.clone();

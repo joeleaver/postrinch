@@ -2,7 +2,7 @@
 
 use crate::common::{Ws, user};
 use ofscp_core::DmId;
-use ofscp_core::ws::Event;
+use ofscp_core::ws::{Command, Event, Subscribe};
 use postrinch_ofscp_fake::{Authentication, FakeProvider};
 use reqwest::{Method, StatusCode};
 use serde_json::json;
@@ -99,6 +99,21 @@ async fn a_dm_is_stored_at_the_recipients_home_and_delivered_live() {
     match alice_ws.event().await.body {
         Event::DmMessage(m) => assert_eq!(m.message.content.unwrap().text, "hi alice"),
         other => panic!("expected dm.message, got {other:?}"),
+    }
+
+    // Written to from another provider, alice may subscribe the dmId to
+    // resume it (§7.1), as she may read it.
+    let dm_scope = ofscp_core::LocalId::new(dm.as_str()).unwrap();
+    alice_ws
+        .send(Command::Subscribe(Subscribe {
+            channels: vec![dm_scope.clone()],
+            include: None,
+            since: None,
+        }))
+        .await;
+    match alice_ws.event().await.body {
+        Event::Subscribed(s) => assert_eq!(s.channels, [dm_scope]),
+        other => panic!("expected subscribed, got {other:?}"),
     }
 
     // Both participants read it at alice's home; a third party cannot.
