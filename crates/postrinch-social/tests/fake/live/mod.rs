@@ -1,6 +1,8 @@
 //! Live sessions (the plan's PR 9): sockets to each provider, reconnects,
 //! resumes and backfills, and what arrives on them.
 
+mod dms;
+mod dms_resume;
 mod faults;
 mod state;
 mod timeline;

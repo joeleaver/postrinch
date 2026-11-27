@@ -242,7 +242,8 @@ fn typing(conn: &Conn, actor: &Actor, t: Typing, start: bool) -> Result<Option<E
             let dm = DmId::parse(t.channel_id.as_str())
                 .map_err(|_| Problem::not_found("no such conversation"))?;
             if !crate::ops::dms::is_participant(inner, &state, &dm, actor) {
-                return Err(Problem::forbidden("not a participant of the conversation"));
+                // As for a conversation that does not exist (§7.4).
+                return Err(Problem::not_found("no such conversation"));
             }
             let other = state.local_participant(&inner.authority, &dm, actor);
             let mut to: Vec<Actor> = other.into_iter().collect();

@@ -38,6 +38,7 @@ mod events;
 pub(crate) mod markers;
 mod notices;
 mod presence;
+mod sent;
 mod session;
 mod subscribe;
 

@@ -60,8 +60,12 @@ impl Store {
         search_text: &str,
     ) -> StoreResult<MessagePut> {
         self.social_locked(|| {
-            let settled = self.settle_own_post(message)?;
+            // The message first: readers do not take the lock, so in
+            // between one sees the post both queued and kept rather than
+            // neither. Interrupted there, the post is sent again, and the
+            // provider answers with this copy (§7.1, `clientMessageId`).
             let changed = self.write_social_message(message, search_text)?;
+            let settled = self.settle_own_post(message)?;
             Ok(MessagePut { changed, settled })
         })
     }

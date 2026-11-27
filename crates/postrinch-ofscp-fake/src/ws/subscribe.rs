@@ -37,14 +37,17 @@ pub(super) fn subscribe(conn: &Conn, corr: String, cmd: Subscribe) {
     let checked = {
         let state = inner.state.lock().unwrap();
         let mut ok: Vec<(LocalId, Target)> = Vec::new();
-        let (mut missing, mut forbidden) = (Vec::new(), Vec::new());
+        // A conversation the caller is not in answers as one that does not
+        // exist (§7.4 *Non-participants answer as unknown*): every refused
+        // id goes in one `not_found` (§7.1).
+        let mut missing = Vec::new();
         for id in distinct {
             if id.as_str().starts_with("dm_") {
                 match ofscp_core::DmId::parse(id.as_str()) {
                     Ok(dm) if is_participant(&inner, &state, &dm, &actor) => {
                         ok.push((id.clone(), Target::Dm))
                     }
-                    _ => forbidden.push(id.clone()),
+                    _ => missing.push(id.clone()),
                 }
                 continue;
             }
@@ -94,11 +97,11 @@ pub(super) fn subscribe(conn: &Conn, corr: String, cmd: Subscribe) {
                 // replay and live delivery (§7.1 *Ordering*).
                 inner.hub.subscribe_with(conn.id, &scopes, frames);
             }
-            Ok((missing, forbidden))
+            Ok(missing)
         }
     };
-    let (missing, forbidden) = match checked {
-        Ok(lists) => lists,
+    let missing = match checked {
+        Ok(missing) => missing,
         Err(p) => {
             conn.error(p, Some(corr));
             return;
@@ -107,11 +110,6 @@ pub(super) fn subscribe(conn: &Conn, corr: String, cmd: Subscribe) {
     if !missing.is_empty() {
         let p = Problem::not_found("No such channel")
             .with_details(serde_json::json!({ "channels": missing }));
-        conn.error(p, Some(corr.clone()));
-    }
-    if !forbidden.is_empty() {
-        let p = Problem::forbidden("not a participant of the conversation")
-            .with_details(serde_json::json!({ "channels": forbidden }));
         conn.error(p, Some(corr));
     }
 }

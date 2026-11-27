@@ -112,11 +112,12 @@ async fn a_dm_is_stored_at_the_recipients_home_and_delivered_live() {
         }))
         .await;
     match alice_ws.event().await.body {
-        Event::Subscribed(s) => assert_eq!(s.channels, [dm_scope]),
+        Event::Subscribed(s) => assert_eq!(s.channels, std::slice::from_ref(&dm_scope)),
         other => panic!("expected subscribed, got {other:?}"),
     }
 
-    // Both participants read it at alice's home; a third party cannot.
+    // Both participants read it at alice's home; to a third party it is
+    // a conversation that does not exist (§7.4).
     let history = format!("/api/dms/{}/messages", dm.as_str());
     let r = alice.send(&a, Method::GET, &history, None).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.json);
@@ -125,7 +126,34 @@ async fn a_dm_is_stored_at_the_recipients_home_and_delivered_live() {
     assert_eq!(r.status, StatusCode::OK);
     let carol = user(&b, "carol");
     let r = carol.send(&a, Method::GET, &history, None).await;
-    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+
+    // Bob, the sender, follows what he sent by subscribing the dmId at
+    // alice's provider (§7.4); carol is refused as for an unknown one.
+    let mut bob_ws = Ws::signed_in(&a, &bob).await;
+    bob_ws
+        .send(Command::Subscribe(Subscribe {
+            channels: vec![dm_scope.clone()],
+            include: None,
+            since: None,
+        }))
+        .await;
+    match bob_ws.event().await.body {
+        Event::Subscribed(s) => assert_eq!(s.channels, std::slice::from_ref(&dm_scope)),
+        other => panic!("expected subscribed, got {other:?}"),
+    }
+    let mut carol_ws = Ws::signed_in(&a, &carol).await;
+    carol_ws
+        .send(Command::Subscribe(Subscribe {
+            channels: vec![dm_scope.clone()],
+            include: None,
+            since: None,
+        }))
+        .await;
+    match carol_ws.event().await.body {
+        Event::Error(e) => assert_eq!(e.code.as_str(), "not_found"),
+        other => panic!("expected not_found, got {other:?}"),
+    }
 
     // A wrong `to` is refused.
     let r = bob

@@ -1,11 +1,11 @@
 //! What a session does with each event its provider sends (§7.1 "Events").
 
 use postrinch_ofscp::http::PageRequest;
-use postrinch_ofscp::ofscp_core::wire::{DmConversation, Member};
+use postrinch_ofscp::ofscp_core::wire::{DmConversation, Member, Reaction};
 use postrinch_ofscp::ofscp_core::ws::{Event, TypingState, Unsubscribed};
 use postrinch_ofscp::ofscp_core::{Actor, DmId, LocalId};
 
-use super::apply::{self, Arrival, collect};
+use super::apply::{self, Arrival, Resume, collect};
 use super::session::{End, Live, ends_session};
 use super::{LiveEvent, markers, notices};
 use crate::sync::Run;
@@ -34,18 +34,18 @@ impl Live<'_> {
         match event {
             Event::MessageCreated(m) => {
                 let place = self.channel(&m.group_id, &m.channel_id);
-                let (arrival, cursor) = self.arrival(&place, Arrival::Any, m.cursor);
+                let (arrival, cursor) = self.arrival(&place, Arrival::Any, host(m.cursor));
                 apply::message(&self.cx.keeper(), place, *m.message, cursor, arrival).await?;
             }
             Event::MessageUpdated(m) => {
                 let place = self.channel(&m.group_id, &m.channel_id);
-                let (arrival, cursor) = self.arrival(&place, Arrival::IfKept, m.cursor);
+                let (arrival, cursor) = self.arrival(&place, Arrival::IfKept, host(m.cursor));
                 apply::message(&self.cx.keeper(), place, *m.message, cursor, arrival).await?;
             }
             Event::MessageDeleted(d) => {
                 let place = self.channel(&d.group_id, &d.channel_id);
                 let id = d.message_id.to_string();
-                let (_, cursor) = self.arrival(&place, Arrival::IfKept, d.cursor);
+                let (_, cursor) = self.arrival(&place, Arrival::IfKept, host(d.cursor));
                 let at = d
                     .deleted_at
                     .unwrap_or_else(|| self.cx.client().provider().clock().now());
@@ -72,11 +72,15 @@ impl Live<'_> {
             Event::DmMessage(d) if home => {
                 let place = d.dm_id.to_string();
                 self.know_conversation(&d.dm_id).await?;
-                let (arrival, cursor) = self.arrival(&place, Arrival::Any, d.cursor);
+                let (arrival, cursor) = self.arrival(&place, Arrival::Any, host(d.cursor));
                 apply::message(&self.cx.keeper(), place, *d.message, cursor, arrival).await?;
             }
             Event::DmConversation(c) if home => self.keep_conversation(&c.conversation).await?,
             Event::DmReaction(r) if home => self.dm_reactions(&r.dm_id, &r.message_id).await?,
+            // Elsewhere, only a `dmId` subscribed there brings these: the
+            // messages the person sent, which that provider holds.
+            Event::DmMessage(d) => self.sent_message(d).await?,
+            Event::DmReaction(r) => self.sent_reactions(&r.dm_id, &r.message_id).await?,
             Event::DmTyping(t) => self.typing(t.dm_id.to_string(), &t.user, &t.state),
             Event::PresenceUpdate(p) => self.presence_changed(p.user, p.presence),
             Event::GroupsUpdated(_) if home => {
@@ -138,6 +142,17 @@ impl Live<'_> {
 
     /// Read a private message's reactions again, at home, all of them.
     async fn dm_reactions(&self, dm: &DmId, message: &LocalId) -> SocialResult<()> {
+        let all = self.all_dm_reactions(dm, message).await?;
+        apply::reactions(&self.cx.keeper(), dm.to_string(), message.to_string(), all).await
+    }
+
+    /// Every reaction on a private message this session's provider holds,
+    /// read page by page.
+    pub(super) async fn all_dm_reactions(
+        &self,
+        dm: &DmId,
+        message: &LocalId,
+    ) -> SocialResult<Vec<Reaction>> {
         let client = self.cx.client();
         let mut all = Vec::new();
         let mut request = PageRequest::newest();
@@ -146,22 +161,21 @@ impl Live<'_> {
             let page = self.cx.checked(&client, found).await?;
             match collect(&mut all, page) {
                 Some(next) => request = next,
-                None => break,
+                None => return Ok(all),
             }
         }
-        apply::reactions(&self.cx.keeper(), dm.to_string(), message.to_string(), all).await
     }
 
     /// How an event in `place` is applied: as it came, or, while the place
     /// waits for its backfill, to kept messages only and without its
     /// cursor. A new message is left for the backfill, which reads back to
     /// what was kept before the gap.
-    fn arrival(
+    pub(super) fn arrival(
         &self,
         place: &str,
         arrival: Arrival,
-        cursor: Option<String>,
-    ) -> (Arrival, Option<String>) {
+        cursor: Option<Resume>,
+    ) -> (Arrival, Option<Resume>) {
         if self.unfilled.contains(place) {
             (Arrival::IfKept, None)
         } else {
@@ -240,6 +254,11 @@ impl Live<'_> {
             typing: *state == TypingState::Start,
         });
     }
+}
+
+/// An event cursor of the place's host.
+fn host(cursor: Option<String>) -> Option<Resume> {
+    cursor.map(Resume::Host)
 }
 
 /// A message's id as a reaction names it.

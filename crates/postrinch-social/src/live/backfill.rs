@@ -11,6 +11,7 @@
 use std::collections::HashSet;
 
 use postrinch_ofscp::http::{Client, Direction, PageRequest};
+use postrinch_ofscp::ofscp_core::Authority;
 use postrinch_ofscp::ofscp_core::wire::MessagesPage;
 use postrinch_store::social_account_key;
 
@@ -21,6 +22,7 @@ use super::{LiveEvent, MessageChange};
 use crate::SocialResult;
 use crate::refused;
 use crate::sync::message::{Held, Kept, Reader, held_by, keep};
+use crate::uris::parse_dm_message_url;
 
 /// Backfill `scope`; how many messages were new.
 pub(crate) async fn backfill(cx: &Context, scope: &Scope) -> SocialResult<usize> {
@@ -39,9 +41,14 @@ pub(crate) async fn backfill(cx: &Context, scope: &Scope) -> SocialResult<usize>
             Ok(Some((kept, ids)))
         })
         .await?;
-    let Some((kept, had)) = found else {
+    let Some((kept, mut had)) = found else {
         return Ok(0);
     };
+    // Only this provider's messages tell where its pages reach: in a
+    // conversation the other provider's are another set (§7.4), and
+    // walking back to one of those would never end.
+    let host = reader_host(cx, scope);
+    had.retain(|id| held_at(&host, id) == cx.authority);
     let client = cx.client();
     let me = social_account_key(&cx.actor());
     let mut walk = Walk {
@@ -66,7 +73,7 @@ pub(crate) async fn backfill(cx: &Context, scope: &Scope) -> SocialResult<usize>
         let reader = Reader {
             account: cx.identity.actor(),
             place: scope.place(),
-            host: &cx.authority,
+            host: &host,
         };
         let kept_page: Vec<Kept> = held
             .iter()
@@ -90,18 +97,27 @@ pub(crate) async fn backfill(cx: &Context, scope: &Scope) -> SocialResult<usize>
         request = PageRequest::after(next, Direction::Backward);
     }
     let (account, place, first_seen) = (cx.actor(), scope.place().to_owned(), had.is_empty());
+    let sent = matches!(scope, Scope::Sent { .. });
     cx.social
         .blocking(move |store| {
             store.change_social_place(&account, &place, |p| {
+                // Each provider's cursors are its own: in a conversation, the
+                // messages the person sent are another provider's pages.
+                let c = &mut p.cursors;
+                let (cursor, older, complete) = if sent {
+                    (&mut c.sent, &mut c.older_sent, &mut c.sent_complete)
+                } else {
+                    (&mut c.live, &mut c.older, &mut c.complete)
+                };
                 if live.is_some() {
-                    p.cursors.live = live;
+                    *cursor = live;
                 }
-                if first_seen && p.cursors.older.is_none() && !p.cursors.complete {
-                    p.cursors.complete = first_older.is_none();
-                    p.cursors.older = first_older;
+                if first_seen && older.is_none() && !*complete {
+                    *complete = first_older.is_none();
+                    *older = first_older;
                 } else if reached_start {
-                    p.cursors.complete = true;
-                    p.cursors.older = None;
+                    *complete = true;
+                    *older = None;
                 }
             })
         })
@@ -120,7 +136,9 @@ async fn fetch(
 ) -> SocialResult<Option<MessagesPage>> {
     let result = match scope {
         Scope::Channel { group, channel, .. } => client.messages(group, channel, request).await,
-        Scope::Conversation { dm, .. } => client.dm_messages(dm, request).await,
+        Scope::Conversation { dm, .. } | Scope::Sent { dm, .. } => {
+            client.dm_messages(dm, request).await
+        }
     };
     match result {
         Err(error) if refused::is_out_of_reach(&error) => {
@@ -129,6 +147,23 @@ async fn fetch(
         }
         result => cx.checked(client, result).await.map(Some),
     }
+}
+
+/// The provider `scope`'s messages are kept against ([`Reader::host`]):
+/// the session's, except for the messages the person sent in a
+/// conversation, which is home's place.
+fn reader_host(cx: &Context, scope: &Scope) -> Authority {
+    match scope {
+        Scope::Sent { .. } => cx.identity.actor().domain().clone(),
+        Scope::Channel { .. } | Scope::Conversation { .. } => cx.authority.clone(),
+    }
+}
+
+/// The provider holding the message kept as `id` in a place kept against
+/// `host`: the one its URL names for a message of a conversation held at
+/// the other person's provider, else `host`.
+fn held_at(host: &Authority, id: &str) -> Authority {
+    parse_dm_message_url(id).map_or_else(|| host.clone(), |(holder, _)| holder)
 }
 
 /// Keep a page; how many of its messages were new. Each new one is told.

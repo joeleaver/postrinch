@@ -48,8 +48,16 @@
 //! only what is not up yet; and the media messages carry, and avatars,
 //! are fetched into a bounded cache on disk and served from it again
 //! ([`Social::fetch_media`], [`Social::fetch_avatar`], [`MediaOptions`]).
+//!
+//! Its fifth part (the plan's PR 12) is private messages across providers
+//! ([`Social::start_conversation`]): each message sent to its recipient's
+//! home, a conversation read from both providers and merged by
+//! `createdAt`, and, at the other person's provider, a `dmId`
+//! subscription that brings edits, deletes and reactions on the messages
+//! the person sent there as they happen (§7.4).
 
 mod accounts;
+mod conversations;
 mod error;
 mod keys;
 mod live;

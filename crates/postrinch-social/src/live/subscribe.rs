@@ -11,6 +11,7 @@ use postrinch_store::PlaceKind;
 use super::backfill::backfill;
 use super::session::{Live, ends_session};
 use crate::SocialResult;
+use crate::conversations::sent_provider;
 use crate::uris::parse_channel_uri;
 
 /// A place as a session subscribes it.
@@ -25,13 +26,20 @@ pub(crate) enum Scope {
     /// A private conversation, at home (§7.4: a `dmId` may be subscribed,
     /// and resumed, as a channel is).
     Conversation { place: String, dm: DmId },
+    /// A private conversation, at the other person's provider, which holds
+    /// the messages the person sent: subscribed by `dmId` there for their
+    /// edits, deletes and reactions (§7.4 *Following your sent messages
+    /// on the counterparty's provider*). It resumes from its own cursor.
+    Sent { place: String, dm: DmId },
 }
 
 impl Scope {
     /// The place's id in the store.
     pub(crate) fn place(&self) -> &str {
         match self {
-            Scope::Channel { place, .. } | Scope::Conversation { place, .. } => place,
+            Scope::Channel { place, .. }
+            | Scope::Conversation { place, .. }
+            | Scope::Sent { place, .. } => place,
         }
     }
 }
@@ -155,10 +163,12 @@ impl Live<'_> {
     }
 
     /// The places the account keeps that this provider hosts, by the id
-    /// the provider knows them by: the channels on it, and at home the
-    /// private conversations.
+    /// the provider knows them by: the channels on it, at home the private
+    /// conversations, and elsewhere the conversations with its users,
+    /// which hold what the person sent them.
     async fn hosted(&self) -> SocialResult<BTreeMap<LocalId, Hosted>> {
         let account = self.cx.actor();
+        let me = self.cx.identity.actor().clone();
         let places = self
             .cx
             .social
@@ -192,7 +202,20 @@ impl Live<'_> {
                     };
                     hosted.insert(id, Hosted { scope, cursor });
                 }
-                _ => {}
+                PlaceKind::Conversation
+                    if sent_provider(&place, &me).as_ref() == Some(&self.cx.authority) =>
+                {
+                    let (Ok(dm), Ok(id)) = (DmId::parse(&place.id), LocalId::new(&place.id)) else {
+                        continue;
+                    };
+                    let cursor = place.cursors.sent.clone();
+                    let scope = Scope::Sent {
+                        place: place.id,
+                        dm,
+                    };
+                    hosted.insert(id, Hosted { scope, cursor });
+                }
+                PlaceKind::Conversation => {}
             }
         }
         Ok(hosted)
