@@ -8,12 +8,11 @@
 //! (docs/ofscp.md, "Private messages"), and its event cursor is that
 //! provider's, kept apart from home's ([`Resume::Sent`]).
 
-use postrinch_ofscp::http::PageRequest;
 use postrinch_ofscp::ofscp_core::ws::DmMessage;
 use postrinch_ofscp::ofscp_core::{DmId, LocalId};
 use postrinch_store::social_account_key;
 
-use super::apply::{self, Arrival, Keeper, Resume, collect};
+use super::apply::{self, Arrival, Keeper, Resume};
 use super::session::Live;
 use super::subscribe::Scope;
 use crate::SocialResult;
@@ -52,17 +51,7 @@ impl Live<'_> {
         let Some(place) = self.sent_place(dm) else {
             return Ok(());
         };
-        let client = self.cx.client();
-        let mut all = Vec::new();
-        let mut request = PageRequest::newest();
-        loop {
-            let found = client.dm_reactions(dm, message, &request).await;
-            let page = self.cx.checked(&client, found).await?;
-            match collect(&mut all, page) {
-                Some(next) => request = next,
-                None => break,
-            }
-        }
+        let all = self.all_dm_reactions(dm, message).await?;
         let kept = dm_message_url(&self.cx.authority, &place, message.as_str());
         apply::reactions(&self.keeper_at_home(), place, kept, all).await
     }

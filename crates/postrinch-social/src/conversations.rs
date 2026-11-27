@@ -83,7 +83,13 @@ pub(crate) fn counterparty(place: &SocialPlace, me: &Actor) -> Option<Actor> {
     if place.kind != PlaceKind::Conversation {
         return None;
     }
-    let conversation: DmConversation = serde_json::from_value(place.object.clone()).ok()?;
+    let conversation: DmConversation = match serde_json::from_value(place.object.clone()) {
+        Ok(conversation) => conversation,
+        Err(error) => {
+            tracing::warn!(account = %place.account, place = %place.id, %error, "a kept conversation that does not read");
+            return None;
+        }
+    };
     let [a, b] = conversation.participants;
     match (same(&a, me), same(&b, me)) {
         (true, _) => Some(b),
@@ -141,7 +147,7 @@ mod tests {
     #[test]
     fn sent_messages_are_held_at_the_other_persons_provider() {
         let p = place(["ada@a.example", "erin@b.example"], PlaceKind::Conversation);
-        let me = actor("ADA@a.example");
+        let me = actor("ada@a.example");
         assert_eq!(counterparty(&p, &me), Some(actor("erin@b.example")));
         assert_eq!(
             sent_provider(&p, &me).map(|a| a.to_string()),

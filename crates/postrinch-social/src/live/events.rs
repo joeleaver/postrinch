@@ -1,7 +1,7 @@
 //! What a session does with each event its provider sends (§7.1 "Events").
 
 use postrinch_ofscp::http::PageRequest;
-use postrinch_ofscp::ofscp_core::wire::{DmConversation, Member};
+use postrinch_ofscp::ofscp_core::wire::{DmConversation, Member, Reaction};
 use postrinch_ofscp::ofscp_core::ws::{Event, TypingState, Unsubscribed};
 use postrinch_ofscp::ofscp_core::{Actor, DmId, LocalId};
 
@@ -142,6 +142,17 @@ impl Live<'_> {
 
     /// Read a private message's reactions again, at home, all of them.
     async fn dm_reactions(&self, dm: &DmId, message: &LocalId) -> SocialResult<()> {
+        let all = self.all_dm_reactions(dm, message).await?;
+        apply::reactions(&self.cx.keeper(), dm.to_string(), message.to_string(), all).await
+    }
+
+    /// Every reaction on a private message this session's provider holds,
+    /// read page by page.
+    pub(super) async fn all_dm_reactions(
+        &self,
+        dm: &DmId,
+        message: &LocalId,
+    ) -> SocialResult<Vec<Reaction>> {
         let client = self.cx.client();
         let mut all = Vec::new();
         let mut request = PageRequest::newest();
@@ -150,10 +161,9 @@ impl Live<'_> {
             let page = self.cx.checked(&client, found).await?;
             match collect(&mut all, page) {
                 Some(next) => request = next,
-                None => break,
+                None => return Ok(all),
             }
         }
-        apply::reactions(&self.cx.keeper(), dm.to_string(), message.to_string(), all).await
     }
 
     /// How an event in `place` is applied: as it came, or, while the place

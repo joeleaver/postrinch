@@ -21,6 +21,7 @@ impl Run<'_> {
             sent: sent_cursor,
             older,
             complete,
+            sent_older,
         }) = self.newest(target).await?
         else {
             return Ok(());
@@ -88,6 +89,16 @@ impl Run<'_> {
                         p.cursors.complete = complete;
                         p.cursors.older = older;
                     }
+                    // Each provider holds its own half of a conversation's
+                    // history (§7.4), so each has its own place to go back
+                    // from.
+                    if let Some(sent_older) = sent_older
+                        && p.cursors.older_sent.is_none()
+                        && !p.cursors.sent_complete
+                    {
+                        p.cursors.sent_complete = sent_older.is_none();
+                        p.cursors.older_sent = sent_older;
+                    }
                 })?;
                 Ok(sent)
             })
@@ -145,8 +156,11 @@ struct Newest {
     /// The cursor of the next older page, at the place's host (home, for
     /// a conversation).
     older: Option<String>,
-    /// Whether nothing is older.
+    /// Whether nothing is older at the place's host.
     complete: bool,
+    /// When the other provider's page was read: the cursor of its next
+    /// older page there, `None` inside when nothing is older.
+    sent_older: Option<Option<String>>,
 }
 
 impl Newest {
@@ -158,18 +172,17 @@ impl Newest {
             live: page.page.prev_cursor,
             sent: None,
             older: page.page.next_cursor,
+            sent_older: None,
         }
     }
 
     /// Add the other provider's newest page of a conversation (§7.4: it
-    /// holds the messages the person sent). The conversation is complete
-    /// only when both pages are the last; going back through the other
-    /// provider's older pages is the backfill's (the plan's PR 9), which
-    /// keeps that provider's cursor too.
+    /// holds the messages the person sent). Each provider's older pages
+    /// have their own cursor, as each holds its own half of the history.
     fn add_theirs(&mut self, holder: &Authority, theirs: MessagesPage) {
         self.sent = theirs.page.prev_cursor;
+        self.sent_older = Some(theirs.page.next_cursor);
         self.held.extend(held_by(holder, theirs.items));
-        self.complete &= theirs.page.next_cursor.is_none();
     }
 }
 

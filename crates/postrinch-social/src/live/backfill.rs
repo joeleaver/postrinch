@@ -101,23 +101,23 @@ pub(crate) async fn backfill(cx: &Context, scope: &Scope) -> SocialResult<usize>
     cx.social
         .blocking(move |store| {
             store.change_social_place(&account, &place, |p| {
-                // Its cursor is for its own provider; scrolling back starts
-                // at the place's host (home, for a conversation).
-                if sent {
-                    if live.is_some() {
-                        p.cursors.sent = live;
-                    }
-                    return;
-                }
+                // Each provider's cursors are its own: in a conversation, the
+                // messages the person sent are another provider's pages.
+                let c = &mut p.cursors;
+                let (cursor, older, complete) = if sent {
+                    (&mut c.sent, &mut c.older_sent, &mut c.sent_complete)
+                } else {
+                    (&mut c.live, &mut c.older, &mut c.complete)
+                };
                 if live.is_some() {
-                    p.cursors.live = live;
+                    *cursor = live;
                 }
-                if first_seen && p.cursors.older.is_none() && !p.cursors.complete {
-                    p.cursors.complete = first_older.is_none();
-                    p.cursors.older = first_older;
+                if first_seen && older.is_none() && !*complete {
+                    *complete = first_older.is_none();
+                    *older = first_older;
                 } else if reached_start {
-                    p.cursors.complete = true;
-                    p.cursors.older = None;
+                    *complete = true;
+                    *older = None;
                 }
             })
         })

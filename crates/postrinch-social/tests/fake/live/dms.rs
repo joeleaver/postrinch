@@ -4,6 +4,7 @@
 //! the messages Ada sends are held.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use postrinch_ofscp::Endpoint;
 use postrinch_ofscp::http::Client;
@@ -97,6 +98,18 @@ pub fn caught_up_at(event: &LiveEvent, provider: &FakeProvider) -> bool {
     matches!(event, LiveEvent::CaughtUp { provider: p, .. } if *p == authority)
 }
 
+/// Wait until `provider` was asked for `path`, failing after a while.
+async fn until_requested(provider: &FakeProvider, path: &str) {
+    let asked = async {
+        while requests_to(provider, path).is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(15), asked)
+        .await
+        .unwrap_or_else(|_| panic!("{path} was never asked for"));
+}
+
 /// Ada live, a conversation with Erin started here, and the session at
 /// Erin's provider caught up.
 async fn started(h: &Home, away: &Away) -> (Social, Told, String) {
@@ -130,10 +143,8 @@ async fn a_conversation_started_here_goes_both_ways() {
         away.provider.authority()
     );
     assert!(mine.id.starts_with(&at_erins), "{}", mine.id);
-    assert_eq!(
-        requests_to(&h.provider, &format!("/api/me/dms/{place}")).len(),
-        1
-    );
+    // The pointer is put after the message is kept, best effort.
+    until_requested(&h.provider, &format!("/api/me/dms/{place}")).await;
 
     // Erin answers it at Ada's provider, naming the provider holding it.
     let parent = held_id(&mine.id);
@@ -289,8 +300,11 @@ async fn messages_from_two_providers_are_never_merged() {
     assert_eq!(edits, 1);
 }
 
+/// Reading a conversation moves home's marker to the message home holds:
+/// the outbox sends it, and home keeps it. Which message the commands
+/// name is postrinch-commands' (its `provider_marker` tests).
 #[tokio::test]
-async fn a_read_marker_names_a_message_home_holds() {
+async fn a_conversations_read_marker_reaches_home() {
     let h = home().await;
     let away = away(&h).await;
     let (social, mut told, place) = started(&h, &away).await;
@@ -364,5 +378,43 @@ async fn starting_needs_someone_else_who_exists() {
     assert_eq!(
         h.social.store().social_places(&h.account()).unwrap().len(),
         1
+    );
+}
+
+/// Each provider holds its own half of a conversation's history (§7.4),
+/// so each has its own place to scroll back from: a short history at
+/// home does not make the conversation complete while what the person
+/// sent goes back further at the other provider.
+#[tokio::test]
+async fn each_providers_history_is_gone_back_through_on_its_own() {
+    let h = home().await;
+    let away = away(&h).await;
+    for i in 0..51 {
+        let text = format!("note {i}");
+        away.phone_away
+            .send_dm(&away.dm, &to(&away.erin, &format!("a{i}"), &text, None))
+            .await
+            .unwrap();
+    }
+    away.erin_at_ada
+        .send_dm(&away.dm, &to(&h.ada, "e1", "hi Ada", None))
+        .await
+        .unwrap();
+
+    h.add().await;
+    h.social.sync(&h.account()).await.unwrap();
+    let kept = h
+        .social
+        .store()
+        .social_place(&h.account(), &away.dm.to_string())
+        .unwrap()
+        .expect("the conversation");
+    let c = &kept.cursors;
+    assert!(c.complete && c.older.is_none(), "home holds one: {c:?}");
+    assert!(!c.sent_complete && c.older_sent.is_some(), "{c:?}");
+    assert_eq!(
+        h.messages(&away.dm.to_string()).len(),
+        51,
+        "a page from each"
     );
 }

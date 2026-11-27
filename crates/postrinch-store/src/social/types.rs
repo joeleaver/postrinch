@@ -133,9 +133,12 @@ impl PlaceKind {
 pub struct PlaceCursors {
     /// The newest event's cursor: live events resume from it.
     pub live: Option<String>,
-    /// Where the next older page starts, for scrolling back.
+    /// Where the next older page at the place's host starts, for
+    /// scrolling back (home, for a conversation).
     pub older: Option<String>,
-    /// Whether every older page is here.
+    /// Whether every older page at the place's host is here. A
+    /// conversation with someone on another provider has all its history
+    /// only when [`sent_complete`](Self::sent_complete) is true as well.
     pub complete: bool,
     /// A conversation with someone on another provider: the newest
     /// event's cursor there, where the messages the person sent are held
@@ -144,6 +147,15 @@ pub struct PlaceCursors {
     /// provider.
     #[serde(default)]
     pub sent: Option<String>,
+    /// The same conversation: where the next older page of the messages
+    /// the person sent starts, at the other person's provider.
+    #[serde(default)]
+    pub older_sent: Option<String>,
+    /// The same conversation: whether every older page of the messages
+    /// the person sent is here. Always `false` where there is no other
+    /// provider.
+    #[serde(default)]
+    pub sent_complete: bool,
 }
 
 /// A channel or a private conversation, as one account knows it.
