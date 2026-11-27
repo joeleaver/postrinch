@@ -10,8 +10,8 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Extension, Router};
 use ofscp_core::wire::{
-    Channel, GroupPointer, JoinPolicy, JoinRequest, JoinRequestState, Member, Membership, Page,
-    Paged, Tier,
+    Channel, ChannelsResponse, GroupPointer, JoinPolicy, JoinRequest, JoinRequestState, Member,
+    Membership, Tier,
 };
 use ofscp_core::ws::{Event, Unsubscribed};
 use ofscp_core::{Actor, LocalId};
@@ -95,9 +95,8 @@ async fn channels(
     let gid = id(&raw)?;
     let state = inner.state.lock().unwrap();
     viewable(&state, &gid, caller.viewer())?;
-    ok(&Paged {
+    ok(&ChannelsResponse {
         items: readable_channels(&state, &gid, caller.viewer()),
-        page: Page::default(),
     })
 }
 

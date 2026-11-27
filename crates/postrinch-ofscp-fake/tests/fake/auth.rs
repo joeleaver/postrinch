@@ -11,7 +11,7 @@ use serde_json::json;
 async fn discovery_advertises_the_upload_limit() {
     let p = FakeProvider::start().await.unwrap();
     p.set_max_upload_bytes(1234);
-    let r = anonymous(&p, Method::GET, "/.well-known/ofscp", None).await;
+    let r = anonymous(&p, Method::GET, "/.well-known/ofscp-provider", None).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.json);
     assert_eq!(r.json["capabilities"]["limits"]["maxUploadBytes"], 1234);
 }

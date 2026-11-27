@@ -302,8 +302,12 @@ when an account is deleted.
   - Matches a sent message to the provider's copy by `clientMessageId`.
   - Media is uploaded before the message that carries it.
 - **Private messages:** sending goes to the recipient's provider, then the pointer is written
-  at home. Reading merges both providers by `createdAt`, deduplicated by id. Reactions and
-  edits on messages sent to another provider come from subscribing to the `dmId` there.
+  at home. Reading merges both providers by `createdAt`. Each message lives only with its
+  recipient (§7.4), and ids are unique only per provider (§2.2), so one held at the other
+  person's provider is stored under its URL there (`https://{provider}/api/dms/{dmId}/messages/{id}`,
+  its reply parent likewise); one held at home keeps its id, which home's read marker names.
+  Reactions and edits on messages sent to another provider come from subscribing to the `dmId`
+  there.
 - **Mentions:** the home provider's notifications cover home channels. For every place,
   Postrinch also marks `mentions_me` from the messages it syncs, using the spec's mention
   syntax (§10.1). That is the design, not a stopgap: it is local and needs nothing from the

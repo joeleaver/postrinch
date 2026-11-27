@@ -9,7 +9,9 @@ use std::collections::{BTreeMap, HashMap};
 use bytes::Bytes;
 use jiff::Timestamp;
 use ofscp_core::signing::VerifyingKey;
-use ofscp_core::wire::{Attachment, Availability, Follow, GroupPointer, Message, Notification};
+use ofscp_core::wire::{
+    Attachment, Availability, Follow, GroupPointer, Message, Notification, NotificationSetting,
+};
 use ofscp_core::{Actor, Authority, DmId, LocalId};
 
 use crate::random::Ids;
@@ -37,6 +39,8 @@ pub(crate) struct User {
     /// Read markers (§7.7): scope id → last read message.
     pub(crate) read_markers: BTreeMap<LocalId, LocalId>,
     pub(crate) notifications: Vec<Notification>,
+    /// Notification settings (§10.1), as seeded.
+    pub(crate) notification_settings: Vec<NotificationSetting>,
 }
 
 /// A conversation pointer (§7.4).

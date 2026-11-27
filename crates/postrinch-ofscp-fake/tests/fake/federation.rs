@@ -49,7 +49,9 @@ async fn a_foreign_key_that_is_gone_does_not_verify() {
     let b = FakeProvider::start().await.unwrap();
     let bob = user(&b, "bob");
     b.faults().revoke_key(&bob.key_id);
-    let r = bob.send(&a, Method::GET, "/.well-known/ofscp", None).await;
+    let r = bob
+        .send(&a, Method::GET, "/.well-known/ofscp-provider", None)
+        .await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 }
 
@@ -60,7 +62,9 @@ async fn a_failed_key_fetch_is_503_not_401() {
     let bob = user(&b, "bob");
     // Bob's home goes away: a cannot fetch his keys.
     drop(b);
-    let r = bob.send(&a, Method::GET, "/.well-known/ofscp", None).await;
+    let r = bob
+        .send(&a, Method::GET, "/.well-known/ofscp-provider", None)
+        .await;
     assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE, "{}", r.json);
 }
 

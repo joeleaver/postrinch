@@ -10,8 +10,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, put};
 use axum::{Extension, Router};
 use ofscp_core::LocalId;
-use ofscp_core::wire::{MessageUpdate, ReferenceKind, TimelineItem};
-use serde::Deserialize;
+use ofscp_core::wire::{MessageUpdate, ReactionPut, ReferenceKind, TimelineItem};
 
 use super::RequestBody;
 use super::groups::id;
@@ -37,14 +36,6 @@ pub(super) fn routes() -> Router<Arc<Inner>> {
             &format!("{MESSAGE}/reactions/{{key}}"),
             put(react).delete(unreact),
         )
-}
-
-/// The body of `PUT .../reactions/{key}` (§7.1): what the key looks like.
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub(crate) struct ReactionBody {
-    pub(crate) unicode: Option<String>,
-    pub(crate) image: Option<String>,
 }
 
 type Ids3 = (String, String, String);
@@ -170,7 +161,7 @@ async fn react(
     Path((g, c, m, key)): Path<Ids4>,
 ) -> Reply {
     let actor = caller.signed()?.clone();
-    let looks: ReactionBody = optional_body(&bytes)?;
+    let looks: ReactionPut = optional_body(&bytes)?;
     let (gid, cid, mid): (LocalId, LocalId, LocalId) = (id(&g)?, id(&c)?, id(&m)?);
     match messages::react(
         &inner,

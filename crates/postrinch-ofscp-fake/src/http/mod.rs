@@ -39,7 +39,7 @@ const MULTIPART_SLACK: u64 = 64 * 1024;
 
 pub(crate) fn router(inner: Arc<Inner>) -> Router {
     Router::new()
-        .route("/.well-known/ofscp", get(auth::discovery))
+        .route("/.well-known/ofscp-provider", get(auth::discovery))
         .route(
             "/.well-known/ofscp/users/{handle}/keys",
             get(auth::user_keys),
@@ -67,7 +67,7 @@ pub(crate) fn router(inner: Arc<Inner>) -> Router {
 }
 
 /// Every request: read the body (under the upload faults), answer the
-/// `fail_next` fault, check a signature, then route; record the outcome
+/// signed-request faults, check a signature, then route; record the outcome
 /// and stamp `Date` from the provider's clock.
 async fn gate(State(inner): State<Arc<Inner>>, request: Request, next: Next) -> Response {
     let (mut parts, body) = request.into_parts();
@@ -143,7 +143,7 @@ async fn authenticate(
             None => (Authentication::Unsigned, Ok(Caller::Anonymous)),
         };
     }
-    if let Some(problem) = take_fault(inner) {
+    if let Some(problem) = take_fault(inner, parts.uri.path()) {
         let status = problem.status();
         return (
             Authentication::Faulted { status },
@@ -175,9 +175,20 @@ async fn authenticate(
     }
 }
 
-/// The `fail_next` fault: one 503 per signed request while it lasts.
-fn take_fault(inner: &Inner) -> Option<Problem> {
+/// The faults that answer a signed request before it is checked:
+/// `refuse_signatures` (a 401 while on, for the paths it names), then
+/// `fail_next` (one 503 per signed request while it lasts).
+fn take_fault(inner: &Inner, path: &str) -> Option<Problem> {
     let mut faults = inner.faults.lock().unwrap();
+    if faults
+        .refuse_signatures
+        .as_deref()
+        .is_some_and(|suffix| path.ends_with(suffix))
+    {
+        return Some(Problem::unauthorized(
+            "fault: signatures are refused (refuse_signatures)",
+        ));
+    }
     if faults.fail_next == 0 {
         return None;
     }

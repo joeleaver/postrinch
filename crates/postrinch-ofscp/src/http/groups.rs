@@ -1,14 +1,13 @@
 //! Groups and channels (§5.5) and invites (§5.6), on the group's host
 //! provider: the caller picks the [`Client`] for that provider.
 //!
-//! Not here, for want of a response type in ofscp-core:
-//! `GET /api/groups/{groupId}/channels` (an unpaged `{ items }`) and
-//! `GET /api/groups/{groupId}/invites` (shape unspecified).
+//! Not here: `GET /api/groups/{groupId}/invites`, whose answer the spec
+//! leaves unspecified.
 
 use ofscp_core::LocalId;
 use ofscp_core::wire::{
-    Channel, ChannelCreateRequest, ChannelUpdateRequest, Group, GroupCreateRequest,
-    GroupUpdateRequest, Invite, InviteCreateRequest, InviteRedeemResponse,
+    Channel, ChannelCreateRequest, ChannelUpdateRequest, ChannelsResponse, Group,
+    GroupCreateRequest, GroupUpdateRequest, Invite, InviteCreateRequest, InviteRedeemResponse,
 };
 use reqwest::Method;
 
@@ -71,6 +70,14 @@ impl Client {
     ) -> Result<Channel> {
         let path = path("/api/groups/{}/channels", &[group_id.as_str()]);
         self.send_json(Method::POST, path, request).await
+    }
+
+    /// The group's channels the signer can read (§5.5, §11.3): those it
+    /// cannot are left out. The answer is one unpaged `{ items }`.
+    pub async fn channels(&self, group_id: &LocalId) -> Result<Vec<Channel>> {
+        let path = path("/api/groups/{}/channels", &[group_id.as_str()]);
+        let list: ChannelsResponse = self.get(path, Query::new()).await?;
+        Ok(list.items)
     }
 
     /// A channel (§5.5), under effective read access (§11.3): one the

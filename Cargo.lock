@@ -4200,7 +4200,7 @@ dependencies = [
 [[package]]
 name = "ofscp-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/re-ofscp?rev=1ede95513191a6233415609a5987c46cdaeba449#1ede95513191a6233415609a5987c46cdaeba449"
+source = "git+https://github.com/joeleaver/re-ofscp?rev=2e35293766b8155bb45330b5c1cc04323549a7fa#2e35293766b8155bb45330b5c1cc04323549a7fa"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -4767,6 +4767,9 @@ dependencies = [
  "postrinch-log",
  "postrinch-mailtest",
  "postrinch-model",
+ "postrinch-ofscp",
+ "postrinch-ofscp-fake",
+ "postrinch-social",
  "postrinch-store",
  "postrinch-sync",
  "postrinch-sync-core",
@@ -4977,6 +4980,26 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "postrinch-social"
+version = "0.1.38"
+dependencies = [
+ "base64 0.22.1",
+ "gethostname",
+ "postrinch-ofscp",
+ "postrinch-ofscp-fake",
+ "postrinch-render",
+ "postrinch-store",
+ "postrinch-sync-core",
+ "rinch-html",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -6808,8 +6831,8 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d204abcbdf8e88729306a8d0ca01a79d8a49969fe1f84696909d6dbc4321c1a"
 dependencies = [
- "foldhash 0.2.0",
- "hashbrown 0.17.1",
+ "foldhash 0.1.5",
+ "hashbrown 0.15.5",
 ]
 
 [[package]]

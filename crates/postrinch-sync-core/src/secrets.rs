@@ -44,12 +44,46 @@ impl Keychain {
         service: "postrinch.imap",
     };
 
+    /// OFSCP accounts' device keys, keyed by the actor lower-cased
+    /// (docs/ofscp.md, "Accounts and sign-in").
+    pub const OFSCP: Keychain = Keychain {
+        service: "postrinch.ofscp",
+    };
+
     /// The service name the entries are kept under.
     pub fn service(&self) -> &'static str {
         self.service
     }
 
-    fn entry(&self, account: &EmailAddress) -> KeychainResult<keyring_core::Entry> {
+    /// The secret kept under `key`, an account's key in this service (an
+    /// address's [`EmailAddress::key`], an OFSCP actor lower-cased).
+    pub fn get_key(&self, key: &str) -> KeychainResult<Option<String>> {
+        match self.entry(key)?.get_password() {
+            Ok(secret) => Ok(Some(secret)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(KeychainError::new(e.to_string())),
+        }
+    }
+
+    /// Keep `secret` under `key`, replacing what was there.
+    pub fn set_key(&self, key: &str, secret: &str) -> KeychainResult<()> {
+        #[cfg(all(unix, not(target_os = "macos")))]
+        crate::secret_service::ensure_default_collection()?;
+        self.entry(key)?
+            .set_password(secret)
+            .map_err(|e| KeychainError::new(e.to_string()))
+    }
+
+    /// Remove the secret under `key`; one that is not there is not an
+    /// error.
+    pub fn delete_key(&self, key: &str) -> KeychainResult<()> {
+        match self.entry(key)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(KeychainError::new(e.to_string())),
+        }
+    }
+
+    fn entry(&self, key: &str) -> KeychainResult<keyring_core::Entry> {
         // `keyring` chooses and installs the platform's store on first use.
         if let Err(e) = keyring::Entry::store_status() {
             return Err(KeychainError::new(e.to_string()));
@@ -59,33 +93,22 @@ impl Keychain {
         } else {
             HashMap::new()
         };
-        keyring_core::Entry::new_with_modifiers(self.service, &account.key(), &modifiers)
+        keyring_core::Entry::new_with_modifiers(self.service, key, &modifiers)
             .map_err(|e| KeychainError::new(e.to_string()))
     }
 }
 
 impl SecretStore for Keychain {
     fn get(&self, account: &EmailAddress) -> KeychainResult<Option<String>> {
-        match self.entry(account)?.get_password() {
-            Ok(secret) => Ok(Some(secret)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(KeychainError::new(e.to_string())),
-        }
+        self.get_key(&account.key())
     }
 
     fn set(&self, account: &EmailAddress, secret: &str) -> KeychainResult<()> {
-        #[cfg(all(unix, not(target_os = "macos")))]
-        crate::secret_service::ensure_default_collection()?;
-        self.entry(account)?
-            .set_password(secret)
-            .map_err(|e| KeychainError::new(e.to_string()))
+        self.set_key(&account.key(), secret)
     }
 
     fn delete(&self, account: &EmailAddress) -> KeychainResult<()> {
-        match self.entry(account)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(KeychainError::new(e.to_string())),
-        }
+        self.delete_key(&account.key())
     }
 }
 
@@ -93,21 +116,66 @@ impl SecretStore for Keychain {
 #[derive(Default)]
 pub struct MemorySecrets(Mutex<HashMap<String, String>>);
 
+impl MemorySecrets {
+    /// The secret kept under `key`, as [`Keychain::get_key`].
+    pub fn get_key(&self, key: &str) -> KeychainResult<Option<String>> {
+        Ok(self.lock().get(key).cloned())
+    }
+
+    /// Keep `secret` under `key`, as [`Keychain::set_key`].
+    pub fn set_key(&self, key: &str, secret: &str) -> KeychainResult<()> {
+        self.lock().insert(key.to_owned(), secret.to_owned());
+        Ok(())
+    }
+
+    /// Remove the secret under `key`, as [`Keychain::delete_key`].
+    pub fn delete_key(&self, key: &str) -> KeychainResult<()> {
+        self.lock().remove(key);
+        Ok(())
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 impl SecretStore for MemorySecrets {
     fn get(&self, account: &EmailAddress) -> KeychainResult<Option<String>> {
-        Ok(self.0.lock().unwrap().get(&account.key()).cloned())
+        self.get_key(&account.key())
     }
 
     fn set(&self, account: &EmailAddress, secret: &str) -> KeychainResult<()> {
-        self.0
-            .lock()
-            .unwrap()
-            .insert(account.key(), secret.to_owned());
-        Ok(())
+        self.set_key(&account.key(), secret)
     }
 
     fn delete(&self, account: &EmailAddress) -> KeychainResult<()> {
-        self.0.lock().unwrap().remove(&account.key());
-        Ok(())
+        self.delete_key(&account.key())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn memory_secrets_by_key_and_by_address_are_one_entry() {
+        let secrets = MemorySecrets::default();
+        let address = EmailAddress::parse("Ada@Example.com").unwrap();
+        secrets.set(&address, "token").unwrap();
+        assert_eq!(
+            secrets.get_key(&address.key()).unwrap().as_deref(),
+            Some("token")
+        );
+        secrets.set_key("alice@a.example", "seed").unwrap();
+        assert_eq!(
+            secrets.get_key("alice@a.example").unwrap().as_deref(),
+            Some("seed")
+        );
+        secrets.delete_key("alice@a.example").unwrap();
+        secrets.delete_key("alice@a.example").unwrap();
+        assert_eq!(secrets.get_key("alice@a.example").unwrap(), None);
+        assert_eq!(secrets.get(&address).unwrap().as_deref(), Some("token"));
     }
 }

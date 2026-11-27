@@ -20,6 +20,7 @@ postrinch-store = { path = "crates/postrinch-store" }
 postrinch-sync = { path = "crates/postrinch-sync" }
 postrinch-sync-core = { path = "crates/postrinch-sync-core" }
 postrinch-thunderbird = { path = "crates/postrinch-thunderbird" }
+postrinch-social = { path = "crates/postrinch-social" }
 postrinch-update = { path = "crates/postrinch-update" }
 
 # rinch: rinch-html (HtmlView, the cleaner) and rinch-visual-test's
@@ -32,7 +33,7 @@ rinch-visual-test = { git = "https://github.com/joeleaver/rinch.git", branch = "
 
 # The OFSCP protocol core, shared with Joe's provider (docs/ofscp.md,
 # "Shared with re-ofscp"): re-ofscp #28, with the WebSocket frames.
-ofscp-core = { git = "https://github.com/joeleaver/re-ofscp", rev = "1ede95513191a6233415609a5987c46cdaeba449" }
+ofscp-core = { git = "https://github.com/joeleaver/re-ofscp", rev = "2e35293766b8155bb45330b5c1cc04323549a7fa" }
 
 # rhypedb v0.2.1: link-peer ordering (rhypedb#52, #55) and the
 # generation-race fix for relation copies (rhypedb#54, #56). The

@@ -1,5 +1,5 @@
-//! `postrinch`: add Google and IMAP accounts, sync them, and search the
-//! mail, from a terminal. The window will do all of this; until it exists
+//! `postrinch`: add Google, IMAP and OFSCP accounts, sync them, and search
+//! the mail, from a terminal. The window will do all of this; until it exists
 //! this is how a person or a script drives Postrinch.
 
 mod accounts;
@@ -7,6 +7,7 @@ mod add_imap;
 mod agent;
 mod commands;
 mod context;
+mod ofscp;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -45,6 +46,20 @@ enum Command {
     AddImap(add_imap::AddImapArgs),
     /// Add a Google account: sign in in the browser.
     AddGoogle,
+    /// Add an OFSCP account (groups and messages) by its address,
+    /// handle@domain: shows the provider discovery found, then signs in
+    /// with the password from standard input or a prompt (never an
+    /// argument, and never kept), registers this computer's key, and runs
+    /// the first sync. Nothing is kept if a step fails.
+    AddOfscp {
+        actor: String,
+        /// Read the password from standard input, not a prompt.
+        #[arg(long)]
+        password_stdin: bool,
+    },
+    /// OFSCP accounts: list, sign in again, sync, remove.
+    #[command(subcommand)]
+    Ofscp(ofscp::OfscpCommand),
     /// Sign an account in again.
     SignIn { address: String },
     /// Sign an account out and remove it and its mail from this machine.

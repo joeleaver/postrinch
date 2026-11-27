@@ -1,0 +1,28 @@
+[package]
+name = "postrinch-social"
+description = "Postrinch's OFSCP sync engine: social accounts, their device keys and sign-in, and syncing their groups, channels and messages into the store."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+postrinch-ofscp = { path = "../postrinch-ofscp" }
+postrinch-render = { workspace = true }
+postrinch-store = { workspace = true }
+postrinch-sync-core = { workspace = true }
+# Reading a rendered body back as text, for full-text search.
+rinch-html = { workspace = true }
+base64 = "0.22"
+# "Postrinch on {hostname}", the name a device key is registered under.
+gethostname = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt", "sync"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+postrinch-ofscp-fake = { path = "../postrinch-ofscp-fake" }
+tempfile = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

@@ -9,13 +9,13 @@ use axum::http::StatusCode;
 use axum::routing::{get, post, put};
 use axum::{Extension, Router};
 use ofscp_core::wire::{
-    ConversationPointer, DmMessageCreate, MessageUpdate, Paged, ReferenceKind, TimelineItem,
+    ConversationPointer, DmMessageCreate, MessageUpdate, Paged, ReactionPut, ReferenceKind,
+    TimelineItem,
 };
 use ofscp_core::{Actor, DmId};
 
 use super::RequestBody;
 use super::groups::id;
-use super::messages::ReactionBody;
 use super::respond::{Caller, Reply, body, json, no_content, ok, optional_body, page_query};
 use crate::inner::Inner;
 use crate::ops::dms::{self, conversations, is_participant, parse_dm};
@@ -93,7 +93,7 @@ async fn react(
     Path((d, m, key)): Path<(String, String, String)>,
 ) -> Reply {
     let actor = caller.signed()?.clone();
-    let looks: ReactionBody = optional_body(&bytes)?;
+    let looks: ReactionPut = optional_body(&bytes)?;
     let (dm, mid) = (parse_dm(&d)?, id(&m)?);
     let had = {
         let state = inner.state.lock().unwrap();

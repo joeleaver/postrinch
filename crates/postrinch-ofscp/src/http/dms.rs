@@ -9,7 +9,6 @@
 //! conversation*). The caller picks the [`Client`].
 //!
 //! Not here: `PUT /api/dms/{dmId}/messages/{messageId}/reactions/{key}`,
-//! whose optional `{ unicode, image }` body has no type in ofscp-core and
 //! whose answer the spec leaves unspecified.
 
 use ofscp_core::wire::{
