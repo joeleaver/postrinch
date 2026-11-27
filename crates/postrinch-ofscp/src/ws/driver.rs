@@ -139,6 +139,25 @@ where
     async fn run(mut self) {
         let reason = self.serve().await;
         tracing::debug!(authority = %self.authority, %reason, "socket closed");
+        // Callers first: nothing below should keep a request waiting.
+        self.closed.send_replace(Some(reason.clone()));
+        let closed = || Err(RequestError::Closed(reason.clone()));
+        for (_, pending) in self.pending.drain() {
+            let _ = pending.reply.send(closed());
+        }
+        // Commands sent from now on fail at once; those already queued
+        // are answered here. `recv` (not `try_recv`) also waits out a
+        // sender that took its slot just before the close, so none is
+        // missed; `Connection` sends as soon as it has a slot.
+        self.ops.close();
+        while let Some(op) = self.ops.recv().await {
+            if let Op::Send {
+                reply: Some(reply), ..
+            } = op
+            {
+                let _ = reply.send(closed());
+            }
+        }
         if reason == CloseReason::Overrun {
             // The provider is fine; say why this side is leaving.
             let frame = CloseFrame {
@@ -149,22 +168,6 @@ where
         }
         // Let the connection go now, not after the reader catches up.
         drop(self.socket);
-        self.closed.send_replace(Some(reason.clone()));
-        let closed = || Err(RequestError::Closed(reason.clone()));
-        for (_, pending) in self.pending.drain() {
-            let _ = pending.reply.send(closed());
-        }
-        // Commands sent from now on fail at once; those already queued
-        // are answered here, not left waiting on the reader below.
-        self.ops.close();
-        while let Ok(op) = self.ops.try_recv() {
-            if let Op::Send {
-                reply: Some(reply), ..
-            } = op
-            {
-                let _ = reply.send(closed());
-            }
-        }
         // What is left is the reader's, in order.
         if self.reader_gone {
             return;
