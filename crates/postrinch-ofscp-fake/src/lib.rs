@@ -15,10 +15,10 @@
 //! # What it does not serve
 //!
 //! Groups and channels are seeded ([`FakeProvider::create_group`],
-//! [`FakeProvider::create_channel`]), not created or changed over REST;
-//! join requests are recorded and approved with
-//! [`FakeProvider::add_member`]. Invites, contacts, privacy and
-//! notification settings, push, webhooks, calls, discovery, guests,
+//! [`FakeProvider::create_channel`]), not created or changed over REST.
+//! Invites (§5.6) and join requests (§5.7) are served, and their lists
+//! are paged per §7.2 (the spec gives them no shape: re-ofscp#43).
+//! Contacts, privacy and notification settings, push, webhooks, calls, discovery, guests,
 //! account recovery and pre-signed uploads are not served (`404`).
 
 mod clock;

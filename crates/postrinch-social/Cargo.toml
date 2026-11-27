@@ -16,6 +16,8 @@ rinch-html = { workspace = true }
 base64 = "0.22"
 # "Postrinch on {hostname}", the name a device key is registered under.
 gethostname = "1"
+# Invite expiry times, given in milliseconds by the commands.
+jiff = { version = "0.2", features = ["std"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

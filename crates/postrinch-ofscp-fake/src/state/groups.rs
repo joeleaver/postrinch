@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 
 use ofscp_core::Actor;
 use ofscp_core::wire::{
-    Channel, ChannelPermissions, Group, GroupPermissions, JoinRequest, Member, MessageType, Role,
-    Tier,
+    Channel, ChannelPermissions, Group, GroupPermissions, JoinPolicy, JoinRequest, Member,
+    MessageType, Role, Tier,
 };
 
 use super::timeline::Timeline;
@@ -18,8 +18,8 @@ pub(crate) struct GroupRec {
     /// The group as served, without the caller's `membership`.
     pub(crate) group: Group,
     pub(crate) members: BTreeMap<Actor, Member>,
-    /// Pending requests to join (§5.7, `request` policy); approving one
-    /// is a seeding call, `FakeProvider::add_member`.
+    /// Requests to join (§5.7, `request` policy), pending, approved or
+    /// denied; only the pending ones are listed.
     pub(crate) requests: Vec<JoinRequest>,
 }
 
@@ -108,6 +108,24 @@ impl GroupRec {
         match channel.permissions.as_ref().and_then(|p| p.react.as_ref()) {
             Some(list) => role_in(self.role_of(Some(actor)), Some(list)),
             None => self.is_member(Some(actor)),
+        }
+    }
+
+    /// May `actor` manage the group: make invites, see join requests?
+    pub(crate) fn can_manage(&self, actor: &Actor) -> bool {
+        role_in(
+            self.role_of(Some(actor)),
+            self.group.permissions.manage.as_ref(),
+        )
+    }
+
+    /// The join policy in force (§5.7, §11): a `private` group takes
+    /// members by invite only, whatever its `joinPolicy` says.
+    pub(crate) fn effective_policy(&self) -> JoinPolicy {
+        if self.group.tier == Tier::Private {
+            JoinPolicy::Invite
+        } else {
+            self.group.join_policy.clone()
         }
     }
 

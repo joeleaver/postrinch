@@ -11,7 +11,7 @@ use axum::routing::{get, post};
 use axum::{Extension, Router};
 use ofscp_core::wire::{
     Channel, ChannelsResponse, GroupPointer, JoinPolicy, JoinRequest, JoinRequestState, Member,
-    Membership, Tier,
+    Membership,
 };
 use ofscp_core::ws::{Event, Unsubscribed};
 use ofscp_core::{Actor, LocalId};
@@ -140,7 +140,7 @@ async fn join(
     let gid = id(&raw)?;
     let now = inner.now();
     let mut state = inner.state.lock().unwrap();
-    let ids_next = state.ids.next("jrq_");
+    let request_id = state.ids.next("jrq_");
     let g = state
         .groups
         .get_mut(&gid)
@@ -149,16 +149,20 @@ async fn join(
     if let Some(m) = g.members.get(&actor) {
         return ok(m);
     }
-    let policy = if g.group.tier == Tier::Private {
-        JoinPolicy::Invite
-    } else {
-        g.group.join_policy.clone()
-    };
-    match policy {
+    match g.effective_policy() {
         JoinPolicy::Open => {}
         JoinPolicy::Request => {
+            // One pending request per person: asking again answers it,
+            // unchanged (§5.7).
+            let pending = g
+                .requests
+                .iter()
+                .find(|r| r.user == actor && r.state == JoinRequestState::Pending);
+            if let Some(request) = pending {
+                return Ok(json(StatusCode::ACCEPTED, request));
+            }
             let request = JoinRequest {
-                id: ids_next,
+                id: request_id,
                 group_id: gid.clone(),
                 user: actor.clone(),
                 state: JoinRequestState::Pending,
@@ -170,23 +174,44 @@ async fn join(
         }
         _ => return Err(Problem::forbidden("joining this group needs an invite")),
     }
+    let member = admit(&inner, &mut state, &gid, &actor, "member");
+    drop(state);
+    announce_member(&inner, &gid, &member);
+    Ok(json(StatusCode::CREATED, &member))
+}
+
+/// Make `actor` a member of `group` with `role`. The group exists. Once
+/// the state's lock is let go, [`announce_member`] tells the actor's
+/// devices.
+pub(crate) fn admit(
+    inner: &Inner,
+    state: &mut Store,
+    group: &LocalId,
+    actor: &Actor,
+    role: &str,
+) -> Member {
+    let g = state.groups.get_mut(group).expect("the group exists");
     let member = Member {
         user: actor.clone(),
-        role: "member".to_owned(),
+        role: role.to_owned(),
         display_name_override: None,
-        joined_at: now,
+        joined_at: inner.now(),
     };
     g.members.insert(actor.clone(), member.clone());
-    drop(state);
-    if actor.is_local_to(&inner.authority) {
+    member
+}
+
+/// Tell a local member's devices their group list changed (§5.7 *My
+/// groups*); a remote member's home learns of it from their client.
+pub(crate) fn announce_member(inner: &Inner, group: &LocalId, member: &Member) {
+    if member.user.is_local_to(&inner.authority) {
         let entry = GroupPointer {
-            group: group_uri(&inner, &gid),
+            group: group_uri(inner, group),
             role: Some(member.role.clone()),
-            updated_at: now,
+            updated_at: member.joined_at,
         };
-        groups_updated(&inner, &actor, vec![entry], Vec::new());
+        groups_updated(inner, &member.user, vec![entry], Vec::new());
     }
-    Ok(json(StatusCode::CREATED, &member))
 }
 
 async fn leave(

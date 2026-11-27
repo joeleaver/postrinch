@@ -21,6 +21,7 @@
 //! leaves out, and leaves alone, what that provider holds.
 
 mod gone;
+mod outside;
 mod pages;
 mod places;
 

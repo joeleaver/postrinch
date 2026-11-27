@@ -4,9 +4,11 @@ mod auth;
 mod dms;
 mod feeds;
 mod groups;
+mod invites;
 mod me;
 mod media;
 mod messages;
+mod requests;
 pub(crate) mod respond;
 
 use std::sync::Arc;
@@ -58,6 +60,8 @@ pub(crate) fn router(inner: Arc<Inner>) -> Router {
         .merge(me::routes())
         .merge(feeds::routes())
         .merge(groups::routes())
+        .merge(invites::routes())
+        .merge(requests::routes())
         .merge(messages::routes())
         .merge(media::routes())
         .merge(dms::routes())

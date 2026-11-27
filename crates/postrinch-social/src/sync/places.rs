@@ -70,15 +70,26 @@ impl Run<'_> {
                 groups.insert(uri);
             }
         }
+        // Groups kept here that home leaves out: joined elsewhere, or asked.
+        let outside = self.outside(&groups).await?;
+        groups.extend(outside.spared);
+        for pointer in &outside.pointers {
+            if let Some(uri) = self.group(pointer, &followed_uris, &mut targets).await? {
+                groups.insert(uri);
+            }
+        }
         self.forget_groups(&groups, &followed_uris).await?;
-        // Channels followed in groups the person is not in.
+        // Channels followed in groups the person is not in, and their groups.
         followed.retain(|(uri, _)| !targets.iter().any(|t: &Target| &t.place == uri));
+        let mut followed_groups = HashSet::new();
         for (uri, at) in followed {
             let client = self.client_for(&at.authority);
             let found = client.channel(&at.group, &at.channel).await;
             match self.reachable(&client, found).await? {
                 Reach::Got(channel) => {
                     let group = group_uri(&at.authority, &at.group);
+                    self.followed_group(&client, &at.group, &mut followed_groups)
+                        .await?;
                     targets.push(self.channel(client, &group, &channel, true).await?);
                 }
                 Reach::Refused => {
@@ -87,6 +98,7 @@ impl Run<'_> {
                 Reach::Gone => {}
             }
         }
+        self.forget_followed_groups(&followed_groups).await?;
         let channels = targets.iter().map(|t| t.place.clone()).collect();
         self.forget_places(&channels).await?;
         let conversations = self
@@ -101,7 +113,7 @@ impl Run<'_> {
     /// Keep a group the home provider lists the person in, with its
     /// channels; its URI, or `None` when it is gone or not a group. A
     /// group whose provider refused the signature is left as it is kept.
-    async fn group(
+    pub(super) async fn group(
         &mut self,
         pointer: &GroupPointer,
         followed: &HashSet<String>,
@@ -295,6 +307,6 @@ impl Run<'_> {
 }
 
 /// A wire object whole, as the store keeps it.
-fn to_json<T: serde::Serialize>(object: &T) -> Value {
+pub(super) fn to_json<T: serde::Serialize>(object: &T) -> Value {
     serde_json::to_value(object).expect("a wire object always serializes")
 }

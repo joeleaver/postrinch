@@ -41,9 +41,19 @@
 //! commands queue in the store, sent in order, per place, and kept as their
 //! providers answer. A live account sends by itself, and again with
 //! backoff after a failure; [`Social::outbox_changed`] says there is more.
+//!
+//! Its fourth part (the plan's PR 24) is joining: by an invite link to a
+//! group on any provider ([`Social::redeem_invite`]), or by asking a group
+//! that takes members openly or by request ([`Social::join_group`]); and,
+//! for a group's managers, invites made, listed and revoked
+//! ([`Social::make_invite`]) and join requests answered
+//! ([`Social::approve_join_request`]). A sync writes again the pointer at
+//! home that a group joined elsewhere is missing, and keeps a group asked
+//! to join as the person's once they are let in.
 
 mod accounts;
 mod error;
+mod joining;
 mod keys;
 mod live;
 mod locks;
@@ -62,6 +72,9 @@ use tokio::sync::OwnedMutexGuard;
 
 pub use accounts::{Added, Found, Removed, Revocation};
 pub use error::{SocialError, SocialResult};
+pub use joining::{
+    GroupInvite, InviteLink, JoinAnswer, Joined, MadeInvite, MakeInvite, PendingRequest,
+};
 pub use keys::DeviceKeys;
 pub use live::{LiveEvent, LiveOptions, MessageChange, SessionStatus};
 pub use outbox::Sent;

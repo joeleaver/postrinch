@@ -2,6 +2,7 @@
 //! it is never held across an `.await`.
 
 pub(crate) mod groups;
+pub(crate) mod invites;
 pub(crate) mod timeline;
 
 use std::collections::{BTreeMap, HashMap};
@@ -16,6 +17,7 @@ use ofscp_core::{Actor, Authority, DmId, LocalId};
 
 use crate::random::Ids;
 use groups::{ChannelRec, GroupRec};
+use invites::InviteRec;
 use timeline::Timeline;
 
 /// One of the provider's own users.
@@ -96,6 +98,7 @@ pub(crate) struct State {
     pub(crate) bootstrap: HashMap<String, (String, Timestamp)>,
     pub(crate) groups: BTreeMap<LocalId, GroupRec>,
     pub(crate) channels: BTreeMap<LocalId, ChannelRec>,
+    pub(crate) invites: BTreeMap<LocalId, InviteRec>,
     pub(crate) dms: BTreeMap<DmId, DmRec>,
     pub(crate) uploads: HashMap<LocalId, Upload>,
     /// Capability URL token → upload id (§5.8 *Serving attachments*).

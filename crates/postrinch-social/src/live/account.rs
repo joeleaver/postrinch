@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use postrinch_ofscp::Identity;
 use postrinch_ofscp::ofscp_core::Authority;
-use postrinch_store::{PlaceKind, SocialAccountState};
+use postrinch_store::{GroupFound, PlaceKind, SocialAccountState};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -162,7 +162,9 @@ async fn stop(account: &Account, authority: &Authority, session: Session) {
 }
 
 /// The providers `account` keeps something on: home, and the providers
-/// of its groups and of its channels (followed ones among them).
+/// of its groups and of its channels (followed ones among them). A group
+/// only asked to join, or known for a followed channel, has nothing to
+/// subscribe to.
 async fn providers(account: &Account) -> SocialResult<BTreeSet<Authority>> {
     let name = account.identity.actor().to_string();
     let (groups, places) = account
@@ -174,6 +176,7 @@ async fn providers(account: &Account) -> SocialResult<BTreeSet<Authority>> {
     wanted.extend(
         groups
             .iter()
+            .filter(|g| g.found == GroupFound::Member)
             .filter_map(|g| parse_group_uri(&g.uri).map(|(authority, _)| authority)),
     );
     wanted.extend(

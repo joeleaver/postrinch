@@ -18,6 +18,7 @@ mod auth;
 mod directory;
 mod dms;
 mod groups;
+mod invites;
 mod me;
 mod media;
 mod membership;
