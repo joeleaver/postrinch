@@ -3,6 +3,7 @@
 //! with a private conversation; and Carl's account on other.example, for
 //! what an agent limited to one account sees.
 
+mod directory;
 mod notices;
 mod pages;
 mod places;
