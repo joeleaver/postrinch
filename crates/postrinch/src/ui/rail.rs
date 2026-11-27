@@ -37,15 +37,16 @@ fn badge_text(unread: usize) -> Option<String> {
     }
 }
 
-/// The unread threads a mode has, from the views' counts: Mail's are the
-/// inbox's (none until the inbox is counted). Calendar has none to
-/// count, and Settings is not a mode with mail. Social's badge comes with
-/// its notices (docs/ofscp.md, build order 22), which say what is worth
-/// counting there.
-fn unread(counts: &HashMap<String, ViewTally>, mode: View) -> usize {
+/// What a mode's badge counts. Mail's are the inbox's unread threads, from
+/// the views' counts (none until the inbox is counted). Social's are the
+/// unread messages that get through their places' notices (`social`):
+/// what the person asked to be told of, as Mail's inbox is. Calendar has
+/// none to count, and Settings is not a mode with mail.
+fn unread(counts: &HashMap<String, ViewTally>, social: usize, mode: View) -> usize {
     match mode {
         View::Mail => counts.get(INBOX).map_or(0, |t| t.unread),
-        View::Calendar | View::Social | View::Settings => 0,
+        View::Social => social,
+        View::Calendar | View::Settings => 0,
     }
 }
 
@@ -72,7 +73,10 @@ pub fn rail(state: State) -> NodeHandle {
 
 #[component]
 fn mode_button(state: State, mode: View) -> NodeHandle {
-    let count = Memo::new(move || state.view_counts.with(|c| unread(c, mode)));
+    let count = Memo::new(move || {
+        let social = state.social.noticed.get();
+        state.view_counts.with(|c| unread(c, social, mode))
+    });
     rsx! {
         button {
             class: {move || if state.view.get() == mode { "rail-mode on" } else { "rail-mode" }},
@@ -176,17 +180,31 @@ mod tests {
     fn mail_counts_the_inboxs_unread_threads_and_nothing_else() {
         let counts: HashMap<_, _> =
             [tally("inbox", 40, 7), tally("everything-else", 90, 30)].into();
-        assert_eq!(unread(&counts, View::Mail), 7);
-        assert_eq!(unread(&counts, View::Calendar), 0);
-        assert_eq!(unread(&counts, View::Social), 0);
-        assert_eq!(unread(&counts, View::Settings), 0);
+        assert_eq!(unread(&counts, 0, View::Mail), 7);
+        assert_eq!(unread(&counts, 0, View::Calendar), 0);
+        assert_eq!(unread(&counts, 0, View::Social), 0);
+        assert_eq!(unread(&counts, 0, View::Settings), 0);
     }
 
     #[test]
     fn mail_has_no_badge_until_the_inbox_is_counted() {
         let counts: HashMap<_, _> = [tally("sent", 12, 3)].into();
-        assert_eq!(unread(&counts, View::Mail), 0);
-        assert_eq!(unread(&HashMap::new(), View::Mail), 0);
+        assert_eq!(unread(&counts, 0, View::Mail), 0);
+        assert_eq!(unread(&HashMap::new(), 0, View::Mail), 0);
+    }
+
+    #[test]
+    fn socials_badge_counts_what_its_notices_let_through_apart_from_mail() {
+        let counts: HashMap<_, _> = [tally("inbox", 40, 7)].into();
+        assert_eq!(unread(&counts, 3, View::Social), 3);
+        assert_eq!(unread(&counts, 3, View::Mail), 7);
+        assert_eq!(unread(&HashMap::new(), 3, View::Calendar), 0);
+        assert_eq!(badge_text(unread(&counts, 0, View::Social)), None);
+        assert_eq!(
+            badge_text(unread(&counts, 3, View::Social)).as_deref(),
+            Some("3")
+        );
+        assert_eq!(spoken(View::Social, 3), "Social, 3 unread");
     }
 
     #[test]

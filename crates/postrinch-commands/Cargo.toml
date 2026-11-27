@@ -11,6 +11,7 @@ postrinch-model = { workspace = true }
 postrinch-render = { workspace = true }
 postrinch-rules = { workspace = true }
 postrinch-store = { workspace = true }
+rinch-html = { workspace = true }
 base64 = "0.22"
 jiff = "0.2"
 rrule = "0.14"

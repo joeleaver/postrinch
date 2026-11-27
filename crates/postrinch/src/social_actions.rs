@@ -1,6 +1,7 @@
 //! What the person does in Social mode, through the `social/` commands:
 //! opening a view and choosing its tab, the view panel (open, change,
-//! Save, Delete), following a channel, and a place's or group's notices.
+//! Save, Delete), following a channel, a place's or group's notices, and
+//! muting a private conversation.
 //! Each change is written at once, then what is shown loads again.
 
 use postrinch_commands::{HOME, SocialPlaceInfo};
@@ -169,6 +170,17 @@ impl State {
             return;
         };
         match commands.set_social_group_notices(&group.account, &group.uri, notices) {
+            Ok(_) => self.bump_social(),
+            Err(e) => self.change_error(e.to_string()),
+        }
+    }
+
+    /// Mute a private conversation on this computer, or hear it again.
+    pub fn mute_conversation(self, place: &PlaceRef, muted: bool) {
+        let Some(commands) = crate::actions::commands() else {
+            return;
+        };
+        match commands.mute_social_conversation(&place.account, &place.id, muted) {
             Ok(_) => self.bump_social(),
             Err(e) => self.change_error(e.to_string()),
         }

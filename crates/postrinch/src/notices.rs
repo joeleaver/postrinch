@@ -31,6 +31,19 @@ pub enum Several {
     OneForAll,
 }
 
+/// The most messages told one notice each, before they become one.
+const MOST: usize = 3;
+
+impl Several {
+    /// Whether `n` new messages go in one notice.
+    pub fn together(self, n: usize) -> bool {
+        match self {
+            Self::EachUpToThree => n > MOST,
+            Self::OneForAll => n > 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NoticePrefs {
@@ -47,6 +60,10 @@ pub struct NoticePrefs {
     /// is Google Calendar's to say.
     pub calendars: BTreeMap<String, bool>,
     pub invitations: bool,
+    /// New social messages that their places' notices let through. What
+    /// a notice shows, several at once, quiet hours and not in front are
+    /// Mail's.
+    pub social: bool,
     pub agents: bool,
     pub refused: bool,
     pub quiet: bool,
@@ -72,6 +89,7 @@ impl Default for NoticePrefs {
             reminders: true,
             calendars: BTreeMap::new(),
             invitations: true,
+            social: true,
             agents: true,
             refused: true,
             quiet: false,

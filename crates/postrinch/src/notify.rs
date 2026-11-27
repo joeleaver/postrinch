@@ -1,5 +1,6 @@
 //! Desktop notices (DESIGN.md "Notifications"): new mail in the views the
-//! person chose, reminders before events, and agents' proposals and
+//! person chose, new social messages their places' notices let through
+//! (social_notify.rs), reminders before events, and agents' proposals and
 //! refused mail waiting. Every half minute, and whenever sync changes the
 //! store, the loader looks for mail that arrived since the window opened
 //! and reminders that fell due; each is told once. A click on a notice
@@ -9,27 +10,26 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use jiff::tz::TimeZone;
-use postrinch_commands::{Arrived, Due, Watched};
+use postrinch_commands::{Arrived, Due, SocialArrived, Watched};
 use postrinch_model::{Answer, EventWhen, Timestamp};
 use rinch::notification::Notification;
 use rinch::prelude::*;
 use rinch::{Effect, untracked};
 
 use crate::loader::Request;
-use crate::notices::{NoticePrefs, Several, Shows};
+use crate::notices::{NoticePrefs, Shows};
 use crate::state::{State, View};
 
 /// How often the loader is asked, for reminders between syncs.
 const EVERY: std::time::Duration = std::time::Duration::from_secs(30);
 /// How far back a reminder still shows, after the window was asleep.
 const LATE_MS: i64 = 15 * 60_000;
-/// The most mail told at once before it becomes one notice.
-const MOST: usize = 3;
 
 /// What the loader found to tell.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Found {
     pub arrived: Vec<Arrived>,
+    pub social: Vec<SocialArrived>,
     pub due: Vec<Due>,
 }
 
@@ -48,7 +48,7 @@ thread_local! {
     static TOLD: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
 }
 
-fn told(key: String) -> bool {
+pub(crate) fn told(key: String) -> bool {
     TOLD.with(|t| !t.borrow_mut().insert(key))
 }
 
@@ -82,6 +82,8 @@ impl State {
         Effect::new(move || {
             self.notices.tick.get();
             self.revision.get();
+            // A place's notices changed here change what is counted.
+            self.social.changed.get();
             let prefs = self.notices.prefs.get();
             let views = untracked(|| self.views.get());
             let calendars = untracked(|| self.calendar.calendars.get());
@@ -120,6 +122,7 @@ impl State {
                 watched,
                 since: Timestamp::from_millis(opened),
                 known: prefs.known_only,
+                social: prefs.social,
                 reminders,
             });
         });
@@ -138,8 +141,9 @@ impl State {
         let quiet = prefs.quiet_at(weekday, now.time());
         let mail_quiet = quiet || (prefs.not_in_front && window_focused());
         tracing::debug!(
-            "notices: {} new messages, {} reminders; quiet {quiet}, in front {}",
+            "notices: {} new messages, {} social, {} reminders; quiet {quiet}, in front {}",
             found.arrived.len(),
+            found.social.len(),
             found.due.len(),
             window_focused()
         );
@@ -151,6 +155,12 @@ impl State {
             .collect();
         if !mail_quiet && !fresh.is_empty() {
             self.tell_mail(&prefs, fresh);
+        }
+        // As with mail, what comes in quiet hours or with the window in
+        // front counts as told: the counts say it, and it is not told late.
+        let social = crate::social_notify::fresh(found.social);
+        if !mail_quiet && !social.is_empty() {
+            self.tell_social(&prefs, social);
         }
         for due in found.due {
             let key = format!(
@@ -167,11 +177,7 @@ impl State {
     }
 
     fn tell_mail(self, prefs: &NoticePrefs, mail: Vec<Arrived>) {
-        let together = match prefs.several {
-            Several::EachUpToThree => mail.len() > MOST,
-            Several::OneForAll => mail.len() > 1,
-        };
-        if together {
+        if prefs.several.together(mail.len()) {
             let mut views: Vec<&str> = mail
                 .iter()
                 .map(|a| {

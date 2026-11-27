@@ -210,6 +210,7 @@ impl Run<'_> {
             cursors: Default::default(),
             read_marker: None,
             notices: None,
+            muted: false,
         };
         self.keep_place(fresh).await?;
         Ok(Target {
@@ -241,6 +242,7 @@ impl Run<'_> {
             cursors: Default::default(),
             read_marker: None,
             notices: None,
+            muted: false,
         };
         self.keep_place(fresh).await?;
         let home = self.identity.actor().domain().clone();
@@ -271,22 +273,20 @@ impl Run<'_> {
     }
 
     /// Keep `fresh`, keeping what a place already here holds of its own:
-    /// its cursors, read marker, notices and latest activity.
+    /// its cursors, read marker, notices, muting and latest activity. The
+    /// store merges under its lock, so a change the window makes meanwhile
+    /// is kept.
     async fn keep_place(&mut self, fresh: SocialPlace) -> SocialResult<()> {
         self.social
             .blocking(move |store| {
-                let kept = store.social_place(&fresh.account, &fresh.id)?;
-                let place = match kept {
-                    Some(kept) => SocialPlace {
-                        last_activity: kept.last_activity.max(fresh.last_activity),
-                        cursors: kept.cursors,
-                        read_marker: kept.read_marker,
-                        notices: kept.notices,
-                        ..fresh
-                    },
-                    None => fresh,
-                };
-                store.put_social_place(&place)
+                store.keep_social_place(fresh, |kept, fresh| SocialPlace {
+                    last_activity: kept.last_activity.max(fresh.last_activity),
+                    cursors: kept.cursors,
+                    read_marker: kept.read_marker,
+                    notices: kept.notices,
+                    muted: kept.muted,
+                    ..fresh
+                })
             })
             .await?;
         self.synced.places += 1;
