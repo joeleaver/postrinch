@@ -80,11 +80,7 @@ impl Commands {
                 if place.kind != PlaceKind::Channel {
                     continue;
                 }
-                let Some(uri) = place
-                    .group
-                    .clone()
-                    .or_else(|| group_of_channel(&place.id))
-                else {
+                let Some(uri) = place.group.clone().or_else(|| group_of_channel(&place.id)) else {
                     continue;
                 };
                 let info = self.place_info(place)?;

@@ -3,7 +3,8 @@
 //! messages (§10.2).
 
 use postrinch_store::{
-    ContentKind, GroupFound, Notices, PlaceKind, SocialChange, SocialGroup, SocialPlace, social_account_key,
+    ContentKind, GroupFound, Notices, PlaceKind, SocialChange, SocialGroup, SocialPlace,
+    social_account_key,
 };
 use serde::{Deserialize, Serialize};
 

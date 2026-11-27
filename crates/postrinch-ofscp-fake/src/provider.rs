@@ -274,7 +274,12 @@ impl FakeProvider {
     /// If there is no such group.
     pub fn join_requests(&self, group: &LocalId) -> Vec<JoinRequest> {
         let state = self.inner.state.lock().unwrap();
-        state.groups.get(group).expect("no such group").requests.clone()
+        state
+            .groups
+            .get(group)
+            .expect("no such group")
+            .requests
+            .clone()
     }
 
     /// The invites the provider holds for `group`, as it lists them (no
@@ -329,6 +334,13 @@ impl FakeProvider {
             .channel(group, channel)
             .map(|(_, c)| c.timeline.messages().map(|s| s.message.clone()).collect())
             .unwrap_or_default()
+    }
+
+    /// The provider an upload was made for (its `target`, §5.8), by the
+    /// attachment id it was given; `None` for an id never uploaded here.
+    pub fn upload_target(&self, attachment: &LocalId) -> Option<Authority> {
+        let state = self.inner.state.lock().unwrap();
+        state.uploads.get(attachment).map(|u| u.target.clone())
     }
 
     /// The notification settings `GET /api/me/notification-settings`

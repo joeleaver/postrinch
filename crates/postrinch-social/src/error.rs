@@ -47,6 +47,13 @@ pub enum SocialError {
     /// key.
     #[error("the device key kept for {actor} is damaged: {reason}")]
     DamagedKey { actor: String, reason: String },
+    /// Media larger than the whole media cache: it is not fetched.
+    #[error("{url} is {size} bytes, more than the media cache's {limit}")]
+    MediaTooLarge { url: String, size: u64, limit: u64 },
+    /// Fetched media whose bytes do not match the hash it claims: it is
+    /// not kept.
+    #[error("{url} does not match its hash")]
+    MediaDamaged { url: String },
     /// What the person gave is not an invite link (§5.6).
     #[error("{0:?} is not an invite link (https://provider/invite/…)")]
     NotAnInviteLink(String),

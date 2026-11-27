@@ -4,6 +4,8 @@
 mod accounts;
 mod common;
 mod errors;
+mod joining;
 mod live;
+mod media;
 mod outbox;
 mod sync;

@@ -161,6 +161,10 @@ pub enum LiveEvent {
         client_id: String,
         place: Option<String>,
     },
+    /// A file of a queued change is on its way up: told as each whole
+    /// percent of it goes ([`crate::Social::uploads`] says the same of
+    /// every upload running now).
+    Uploading(crate::UploadProgress),
     /// A queued change was not sent: it is tried again later, or, when
     /// `refused`, its provider refused it for good and it waits for the
     /// person to give it up.

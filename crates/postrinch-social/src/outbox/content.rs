@@ -1,11 +1,11 @@
 //! What a queued post or edit says, as the wire carries it (§5.3, §7.1,
 //! §7.4).
 //!
-//! Its files go as the Attachments their uploads gave back. A file not
-//! yet uploaded holds the change back ([`NotReady::Waiting`]): uploading
-//! it, to the home provider, is the media engine's (the plan's PR 11),
-//! which turns each [`DraftMedia::File`] and [`DraftMedia::Kept`] into
-//! [`DraftMedia::Uploaded`] before the change is sent.
+//! Its files go as the Attachments their uploads gave back. The outbox
+//! uploads them first ([`super::upload`]), turning each
+//! [`DraftMedia::File`] and [`DraftMedia::Kept`] into
+//! [`DraftMedia::Uploaded`]; a file still not uploaded when the change is
+//! to go holds it back ([`NotReady::Waiting`]).
 
 use postrinch_ofscp::ofscp_core::wire::{
     Attachment, Content, DmMessageCreate, MessageCreate, MessageReference, MessageType,

@@ -19,6 +19,8 @@ gethostname = "1"
 # Invite expiry times, given in milliseconds by the commands.
 jiff = { version = "0.2", features = ["std"] }
 serde = { workspace = true }
+# Checking fetched media against its `sha-256` hash, and naming its blob.
+sha2 = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }

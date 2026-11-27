@@ -70,8 +70,8 @@ impl Store {
     /// Remove a social account and everything it holds: its outbox, drafts,
     /// notifications, media, messages, places and groups, and its places
     /// and groups from every view. Providers stay: other accounts may use
-    /// them. Fetched media bytes stay in the blob store until
-    /// [`Store::collect_garbage`]. Removing an account that is not here
+    /// them. Cached media bytes no other account's record names go from
+    /// the media cache with it. Removing an account that is not here
     /// does nothing, and an interrupted removal is finished by a repeat.
     /// Stop the account's sync first: what it writes meanwhile is left
     /// until a repeat.

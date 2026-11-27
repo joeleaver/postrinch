@@ -3,7 +3,7 @@
 //! rules the spec gives.
 
 use crate::common::{User, user};
-use ofscp_core::wire::JoinPolicy;
+use ofscp_core::wire::{JoinPolicy, JoinRequestState};
 use ofscp_core::{Actor, LocalId};
 use postrinch_ofscp_fake::FakeProvider;
 use reqwest::{Method, StatusCode};
@@ -28,7 +28,12 @@ async fn invite(p: &FakeProvider, by: &User, group: &LocalId, body: Value) -> (S
 
 async fn redeem(p: &FakeProvider, by: &User, token: &str) -> (StatusCode, Value) {
     let r = by
-        .send(p, Method::POST, &format!("/api/invites/{token}/redeem"), None)
+        .send(
+            p,
+            Method::POST,
+            &format!("/api/invites/{token}/redeem"),
+            None,
+        )
         .await;
     (r.status, r.json)
 }
@@ -136,7 +141,10 @@ async fn redeeming_admits_once_per_use_and_refuses_what_is_spent_or_gone() {
     assert_eq!(joined["groupId"], group.as_str());
     assert_eq!(joined["channelId"], channel.as_str());
     assert_eq!(joined["role"], "moderator");
-    assert_eq!(role_of(&p, &group, &carol.actor).as_deref(), Some("moderator"));
+    assert_eq!(
+        role_of(&p, &group, &carol.actor).as_deref(),
+        Some("moderator")
+    );
     assert_eq!(p.invites(&group)[0].uses, 1);
 
     // Spent: 409 for anyone, a member too, before membership is looked at.
@@ -146,7 +154,10 @@ async fn redeeming_admits_once_per_use_and_refuses_what_is_spent_or_gone() {
 
     // An unknown token, and an expired invite, are not found.
     assert_eq!(redeem(&p, &erin, "nope").await.0, StatusCode::NOT_FOUND);
-    let past = p.now().checked_sub(jiff::SignedDuration::from_secs(60)).unwrap();
+    let past = p
+        .now()
+        .checked_sub(jiff::SignedDuration::from_secs(60))
+        .unwrap();
     let (_, expired) = invite(&p, &alice, &group, json!({"expiresAt": past.to_string()})).await;
     let expired = expired["token"].as_str().unwrap();
     assert_eq!(redeem(&p, &erin, expired).await.0, StatusCode::NOT_FOUND);
@@ -165,7 +176,10 @@ async fn a_member_redeeming_keeps_their_role_and_spends_no_use() {
     .await;
     let (status, joined) = redeem(&p, &bob, made["token"].as_str().unwrap()).await;
     assert_eq!(status, StatusCode::OK, "{joined}");
-    assert_eq!(joined["role"], "member", "the role Bob holds, not the invite's");
+    assert_eq!(
+        joined["role"], "member",
+        "the role Bob holds, not the invite's"
+    );
     assert_eq!(p.invites(&group)[0].uses, 0);
 }
 
@@ -221,11 +235,17 @@ async fn join_requests_are_listed_approved_and_denied() {
     let r = alice.send(&p, Method::POST, &approve, None).await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
 
-    let erins = p.join_requests(&group)[0].id.clone();
+    let pending = |p: &FakeProvider| -> Vec<_> {
+        p.join_requests(&group)
+            .into_iter()
+            .filter(|r| r.state == JoinRequestState::Pending)
+            .collect()
+    };
+    let erins = pending(&p)[0].id.clone();
     let deny = format!("{list}/{}/deny", erins.as_str());
     let r = alice.send(&p, Method::POST, &deny, None).await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
-    assert!(p.join_requests(&group).is_empty());
+    assert!(pending(&p).is_empty());
     assert_eq!(role_of(&p, &group, &erin.actor), None);
 }
 

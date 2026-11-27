@@ -93,6 +93,9 @@ struct Inner {
     /// of the request until the answer, so a long upload would trip it.
     /// The upload watches its own progress instead (`http::watch`).
     upload_http: reqwest::Client,
+    /// For fetching media by URL (`http::fetch`): the read timeout, but
+    /// no limit on the whole fetch, and a few redirects followed.
+    media_http: reqwest::Client,
     tls: Tls,
     options: Options,
     clocks: Mutex<HashMap<ofscp_core::Authority, ProviderClock>>,
@@ -108,10 +111,18 @@ impl Transport {
         let upload_http = http_client(&tls, &options)?
             .build()
             .map_err(|e| Error::Tls(crate::TlsError::new(e)))?;
+        let media_http = http_client(&tls, &options)?
+            .read_timeout(options.read_timeout)
+            .redirect(reqwest::redirect::Policy::limited(
+                crate::http::fetch::MAX_REDIRECTS,
+            ))
+            .build()
+            .map_err(|e| Error::Tls(crate::TlsError::new(e)))?;
         Ok(Self {
             inner: Arc::new(Inner {
                 http,
                 upload_http,
+                media_http,
                 tls,
                 options,
                 clocks: Mutex::new(HashMap::new()),
@@ -153,6 +164,11 @@ impl Transport {
         &self.inner.upload_http
     }
 
+    /// The client for fetching media by URL.
+    pub(crate) fn media_http(&self) -> &reqwest::Client {
+        &self.inner.media_http
+    }
+
     pub(crate) fn tls(&self) -> &Tls {
         &self.inner.tls
     }
@@ -163,7 +179,8 @@ impl Transport {
     }
 }
 
-/// What both clients share: https only, no redirects, the trust roots.
+/// What every client shares: https only, no redirects (the media client
+/// allows a few), the trust roots.
 fn http_client(tls: &Tls, options: &Options) -> Result<reqwest::ClientBuilder> {
     let roots = tls
         .extra_roots()

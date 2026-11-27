@@ -57,7 +57,11 @@ pub(crate) fn grantable(group: &Group, role: &str) -> bool {
 /// it, and every action at all for the owner.
 fn permissions(group: &Group, role: &str) -> Vec<String> {
     let p = &group.permissions;
-    let named = [("post", &p.post), ("moderate", &p.moderate), ("manage", &p.manage)];
+    let named = [
+        ("post", &p.post),
+        ("moderate", &p.moderate),
+        ("manage", &p.manage),
+    ];
     let mut actions: Vec<(String, Option<&Vec<Role>>)> = named
         .into_iter()
         .map(|(action, list)| (action.to_owned(), list.as_ref()))

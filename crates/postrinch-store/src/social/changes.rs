@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ContentKind, DraftMedia, Notices};
+use super::{ContentKind, DraftMedia, Notices, SocialOutboxEntry, UploadedFile};
 
 /// A change on its way to a provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -124,9 +124,89 @@ impl SocialChange {
     }
 }
 
+impl SocialChange {
+    /// Put `uploaded` wherever `media` is among the files the change
+    /// carries (a post's or an edit's cover and attachments, a profile's
+    /// avatar), once `media` is uploaded. Returns whether it was there.
+    pub fn replace_media(&mut self, media: &DraftMedia, uploaded: &DraftMedia) -> bool {
+        let slots: Vec<&mut DraftMedia> = match self {
+            Self::Post(post) => post.content.media_mut().collect(),
+            Self::Edit { content, .. } => content.media_mut().collect(),
+            Self::Profile(ProfileChange {
+                avatar: Some(AvatarChange::Set { media }),
+                ..
+            }) => vec![media],
+            _ => Vec::new(),
+        };
+        let mut found = false;
+        for slot in slots {
+            if slot == media {
+                *slot = uploaded.clone();
+                found = true;
+            }
+        }
+        found
+    }
+}
+
+impl SocialOutboxEntry {
+    /// The upload of `media` made at or after `since`, if there is one.
+    pub fn uploaded_since(&self, media: &DraftMedia, since: i64) -> Option<&UploadedFile> {
+        self.uploads
+            .iter()
+            .find(|u| u.media == *media && u.at >= since)
+    }
+
+    /// Its change as it is sent: each file uploaded at or after `since`
+    /// replaced by its Attachment ([`DraftMedia::Uploaded`]).
+    pub fn change_uploaded_since(&self, since: i64) -> SocialChange {
+        let mut change = self.change.clone();
+        for upload in self.uploads.iter().filter(|u| u.at >= since) {
+            let uploaded = DraftMedia::Uploaded {
+                attachment: upload.attachment.clone(),
+            };
+            change.replace_media(&upload.media, &uploaded);
+        }
+        change
+    }
+}
+
 impl SocialContent {
     /// Its cover, then its attachments.
     pub fn media(&self) -> impl Iterator<Item = &DraftMedia> {
         self.cover.iter().chain(&self.attachments)
+    }
+
+    fn media_mut(&mut self) -> impl Iterator<Item = &mut DraftMedia> {
+        self.cover.iter_mut().chain(&mut self.attachments)
+    }
+}
+
+impl DraftMedia {
+    /// The name it is uploaded under: the file's, or the kept picture's;
+    /// an uploaded one's, if it has one.
+    pub fn file_name(&self) -> Option<String> {
+        match self {
+            Self::File { path, .. } => path.file_name().map(|n| n.to_string_lossy().into_owned()),
+            Self::Kept { name, .. } => Some(name.clone()),
+            Self::Uploaded { attachment } => attachment
+                .get("filename")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+        }
+    }
+
+    /// Its media type: as given, else as its name suggests.
+    pub fn mime(&self) -> String {
+        let given = match self {
+            Self::File { mime, .. } | Self::Kept { mime, .. } => mime.clone(),
+            Self::Uploaded { attachment } => attachment
+                .get("mime")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+        };
+        given.unwrap_or_else(|| {
+            postrinch_model::mime_for(&self.file_name().unwrap_or_default()).to_owned()
+        })
     }
 }

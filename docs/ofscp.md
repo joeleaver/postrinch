@@ -330,8 +330,28 @@ when an account is deleted.
   - A read marker is sent only for a place home keeps markers for: a home channel, or a
     conversation up to a message home holds. A follow names a home channel by local id and
     any other by URI; an unfollow names the ref exactly as home lists it.
-  - Media is uploaded before the message that carries it (PR 11). Until then a change
-    carrying a file not yet uploaded waits, untried.
+  - Media is uploaded before the message that carries it (PR 11), to the home provider,
+    with `target` naming the provider that will hold the message when that isn't home (a
+    remote channel's host, a DM recipient's provider). Each file's Attachment is kept with
+    the queued change as it comes back (the change keeps the files as picked), so a retry
+    uploads only what isn't up yet; the
+    spec's upload is one request, so a file cut off part-way starts again. A failed upload
+    holds back its place but isn't an attempt: the change stays untried and can be taken
+    back. A file that is gone or may not be read is refused; another read failure is
+    tried again. Progress is told as `LiveEvent::Uploading` (each whole percent) and kept
+    while it runs (`Social::uploads`). A provider keeps an upload nothing posted for at
+    least 24 hours (§5.8), so an upload older than `MediaOptions::upload_fresh` (20 h) is
+    made again before the change goes.
+- **Media cache:** attachments, thumbnails and avatars are fetched unsigned by their URL,
+  checked against a `sha-256` hash when they carry one, and kept in `social-media/`, a blob
+  directory of their own beside the main `blobs/` (picked and pasted files to upload stay
+  there). The cache is kept to `MediaOptions::cache_bytes` (1 GiB by default), evicting
+  what was used longest ago; bytes no record names go at once. A record is keyed by its
+  issuer (the author's home, which took the upload) and id; a hit by record or by hash is
+  served without fetching, and concurrent asks fetch once. An avatar is kept as the user's
+  `@handle` at their home and served for `MediaOptions::avatar_ttl` (24 h) before the
+  profile is read again; the picture is fetched again only when the profile names
+  another. `postrinch-cli ofscp send` and `ofscp avatar` drive both from the command line.
   - Notices settings and the profile are queued but not sent yet (rows 14 and 22).
 - **Private messages:** sending goes to the recipient's provider, then the pointer is written
   at home (best effort). A reply whose parent is held by the other side names that provider

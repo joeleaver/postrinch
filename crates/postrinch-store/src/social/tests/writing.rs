@@ -1,10 +1,10 @@
-//! Drafts, notifications, media and the outbox.
+//! Drafts, notifications and the outbox.
 
 use std::time::Duration;
 
 use serde_json::json;
 
-use super::accounts::{draft, media, notification};
+use super::accounts::{draft, notification};
 use super::*;
 
 #[test]
@@ -64,60 +64,6 @@ fn notifications_list_newest_first_and_are_read() {
     let read = store.social_notifications(ADA, 10).unwrap();
     assert!(read.iter().find(|n| n.id == "n1").unwrap().read);
     assert_eq!(store.social_unread_notifications(BOB).unwrap(), 1);
-}
-
-#[test]
-fn media_is_found_by_attachment_and_url() {
-    let (_dir, store) = store();
-    let mut picture = media(ADA, "a1");
-    store.put_social_media(&picture).unwrap();
-    store.put_social_media(&media(BOB, "a1")).unwrap();
-    assert_eq!(
-        store.social_media(ADA, "Groups.Example", "a1").unwrap(),
-        Some(picture.clone())
-    );
-    assert_eq!(store.social_media_at(&picture.url).unwrap().len(), 2);
-
-    let blob = store.put_social_media_bytes(b"png bytes").unwrap();
-    picture.blob = Some(blob.clone());
-    picture.fetched = Some(5);
-    store.put_social_media(&picture).unwrap();
-    let read = store.social_media(ADA, "groups.example", "a1").unwrap();
-    assert_eq!(read.unwrap().blob, Some(blob.clone()));
-    assert_eq!(
-        store.social_media_bytes(&blob).unwrap().as_deref(),
-        Some(&b"png bytes"[..])
-    );
-    store
-        .remove_social_media(ADA, "groups.example", "a1")
-        .unwrap();
-    assert_eq!(
-        store.social_media(ADA, "groups.example", "a1").unwrap(),
-        None
-    );
-}
-
-#[test]
-fn garbage_collection_keeps_what_media_and_drafts_refer_to() {
-    let (_dir, store) = store();
-    let fetched = store.put_social_media_bytes(b"fetched").unwrap();
-    let pasted = store.put_social_media_bytes(b"pasted").unwrap();
-    let dropped = store.put_social_media_bytes(b"no one's").unwrap();
-    let mut picture = media(ADA, "a1");
-    picture.blob = Some(fetched.clone());
-    store.put_social_media(&picture).unwrap();
-    let mut writing = draft(ADA, "d1", None);
-    writing.attachments.push(DraftMedia::Kept {
-        blob: pasted.clone(),
-        name: "paste.png".into(),
-        mime: Some("image/png".into()),
-    });
-    store.put_social_draft(&writing).unwrap();
-
-    assert_eq!(store.collect_garbage(Duration::ZERO).unwrap(), 1);
-    assert!(store.social_media_bytes(&fetched).unwrap().is_some());
-    assert!(store.social_media_bytes(&pasted).unwrap().is_some());
-    assert!(store.social_media_bytes(&dropped).unwrap().is_none());
 }
 
 #[test]
@@ -192,7 +138,7 @@ fn sequence_numbers_are_never_taken_twice_across_a_restart() {
 #[test]
 fn garbage_collection_keeps_what_queued_changes_upload() {
     let (_dir, store) = store();
-    let pasted = store.put_social_media_bytes(b"pasted, then sent").unwrap();
+    let pasted = store.put_social_kept_bytes(b"pasted, then sent").unwrap();
     store
         .queue_social_change(
             ADA,
@@ -215,7 +161,7 @@ fn garbage_collection_keeps_what_queued_changes_upload() {
         )
         .unwrap();
     assert_eq!(store.collect_garbage(Duration::ZERO).unwrap(), 0);
-    assert!(store.social_media_bytes(&pasted).unwrap().is_some());
+    assert!(store.social_kept_bytes(&pasted).unwrap().is_some());
     store.remove_social_change(ADA, "c1").unwrap();
     assert_eq!(store.collect_garbage(Duration::ZERO).unwrap(), 1);
 }
@@ -238,7 +184,7 @@ fn a_notification_read_here_stays_read() {
 #[test]
 fn a_change_reads_back_as_queued_with_the_blobs_it_uploads() {
     let (_dir, store) = store();
-    let avatar = store.put_social_media_bytes(b"cropped").unwrap();
+    let avatar = store.put_social_kept_bytes(b"cropped").unwrap();
     let change = SocialChange::Profile(ProfileChange {
         display_name: Some("Ada L.".into()),
         bio: None,

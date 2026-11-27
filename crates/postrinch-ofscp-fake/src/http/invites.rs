@@ -70,7 +70,9 @@ async fn create_invite(
     if let Some(channel) = &request.channel_id
         && state.channel(&gid, channel).is_none()
     {
-        return Err(Problem::bad_request("that channel is not one of the group's"));
+        return Err(Problem::bad_request(
+            "that channel is not one of the group's",
+        ));
     }
     let creator_role = g.role_of(Some(&actor)).cloned().unwrap_or_default();
     if !holds_all_of(&g.group, &creator_role, &role) {

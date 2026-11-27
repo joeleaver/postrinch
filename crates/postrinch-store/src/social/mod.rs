@@ -16,6 +16,7 @@ mod changes;
 mod drafts;
 mod groups;
 mod media;
+mod media_cache;
 mod messages;
 mod notifications;
 mod outbox;
@@ -27,6 +28,7 @@ use rhypedb_engine::CompareOp;
 use serde::de::DeserializeOwned;
 
 pub use changes::*;
+pub use media_cache::Trimmed;
 pub use messages::MessagePut;
 pub use outbox::TakeBack;
 pub use types::*;
