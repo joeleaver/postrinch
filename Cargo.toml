@@ -30,6 +30,10 @@ rinch = { git = "https://github.com/joeleaver/rinch.git", branch = "postrinch/ht
 rinch-html = { git = "https://github.com/joeleaver/rinch.git", branch = "postrinch/html-allow-list" }
 rinch-visual-test = { git = "https://github.com/joeleaver/rinch.git", branch = "postrinch/html-allow-list" }
 
+# The OFSCP protocol core, shared with Joe's provider (docs/ofscp.md,
+# "Shared with re-ofscp"): re-ofscp #28, with the WebSocket frames.
+ofscp-core = { git = "https://github.com/joeleaver/re-ofscp", rev = "1ede95513191a6233415609a5987c46cdaeba449" }
+
 # rhypedb v0.2.1: link-peer ordering (rhypedb#52, #55) and the
 # generation-race fix for relation copies (rhypedb#54, #56). The
 # ONNX/fastembed stack stays off until semantic search turns it on

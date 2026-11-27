@@ -1,0 +1,37 @@
+[package]
+name = "postrinch-ofscp-fake"
+description = "A fake OFSCP provider, in memory on loopback ports, for tests of Postrinch's OFSCP client: several providers at once, signatures checked as the spec says, switchable faults."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "http2", "json", "query", "ws", "multipart", "tokio"] }
+base64 = "0.22"
+bytes = "1"
+futures-util = "0.3"
+getrandom = "0.3"
+httpdate = "1"
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
+jiff = "0.2"
+ofscp-core = { workspace = true }
+percent-encoding = "2"
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
+reqwest = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { version = "1.54", features = ["net", "io-util", "rt", "sync", "macros", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
+tower = { version = "0.5", features = ["util"] }
+
+[dev-dependencies]
+rand_core = { version = "0.6", features = ["getrandom"] }
+reqwest = { version = "0.13", features = ["json"] }
+tokio = { version = "1.54", features = ["net", "io-util", "rt", "rt-multi-thread", "sync", "macros", "time"] }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
