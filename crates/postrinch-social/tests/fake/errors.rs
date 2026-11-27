@@ -145,3 +145,40 @@ async fn another_provider_refusing_the_key_leaves_the_account_and_its_group_alon
     let account = store.social_account(&h.account()).unwrap().unwrap();
     assert_eq!(account.state, SocialAccountState::Active);
 }
+
+#[tokio::test]
+async fn a_refused_channel_list_keeps_the_channels_and_where_they_were_read() {
+    let h = home().await;
+    let away = FakeProvider::start().await.unwrap();
+    let dan = away.add_user("dan", PASSWORD);
+    let group = away.create_group(&dan, "Away");
+    let channel = away.create_channel(&group, "general");
+    away.add_member(&group, &h.ada, "member");
+    away.post_as(&dan, &group, &channel, "first");
+    let uri = ObjectUri::canonicalize(&group_uri(&away, &group)).unwrap();
+    h.phone
+        .put_group_pointer(&uri, &GroupPointerRequest { role: None })
+        .await
+        .unwrap();
+    h.add().await;
+    let store = h.social.store();
+    let place = channel_uri(&away, &group, &channel);
+    let kept = store.social_place(&h.account(), &place).unwrap().unwrap();
+    assert!(
+        kept.read_marker.is_some(),
+        "a remote place reads by its own marker"
+    );
+
+    // The group answers; its channel list is refused.
+    away.faults().refuse_signatures_ending("/channels");
+    let synced = h.social.sync(&h.account()).await.expect("still syncs");
+    assert_eq!(synced.skipped, 1);
+    assert_eq!(store.social_groups(&h.account()).unwrap().len(), 1);
+    let still = store
+        .social_place(&h.account(), &place)
+        .unwrap()
+        .expect("the channel is kept");
+    assert_eq!(still.read_marker, kept.read_marker);
+    assert_eq!(still.cursors, kept.cursors);
+    assert_eq!(h.messages(&place).len(), 1);
+}

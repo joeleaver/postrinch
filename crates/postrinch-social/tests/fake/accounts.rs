@@ -165,6 +165,22 @@ async fn removing_with_a_key_already_revoked_still_forgets_it() {
 }
 
 #[tokio::test]
+async fn a_refusal_put_down_to_the_clock_does_not_count_the_key_as_revoked() {
+    let h = home().await;
+    // Further off than signatures allow: refusals are the clock's.
+    h.provider.faults().set_clock_offset(400);
+    let key_id = h.add().await.account.key_id.unwrap();
+    h.provider.faults().revoke_key(&key_id);
+    let removed = h.social.remove(&h.account()).await.expect("removed");
+    assert!(
+        matches!(removed.revocation, Revocation::Failed(_)),
+        "{:?}",
+        removed.revocation
+    );
+    assert!(h.social.store().social_accounts().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn an_unknown_account_is_refused() {
     let h = home().await;
     let error = h.social.sync(&h.account()).await.unwrap_err();

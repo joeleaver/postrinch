@@ -167,6 +167,25 @@ async fn refuse_signatures_answers_signed_requests_only_with_401() {
 }
 
 #[tokio::test]
+async fn refusing_signatures_on_some_paths_answers_the_rest() {
+    let p = FakeProvider::start().await.unwrap();
+    let alice = user(&p, "alice");
+    p.faults()
+        .refuse_signatures_ending("/notification-settings");
+    let r = alice
+        .send(&p, Method::GET, "/api/me/notification-settings", None)
+        .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let r = alice.send(&p, Method::GET, "/api/me", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    p.faults().refuse_signatures(false);
+    let r = alice
+        .send(&p, Method::GET, "/api/me/notification-settings", None)
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn a_restarted_replay_store_answers_503_while_it_warms_up() {
     let p = FakeProvider::start().await.unwrap();
     let alice = user(&p, "alice");

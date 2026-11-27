@@ -143,7 +143,7 @@ async fn authenticate(
             None => (Authentication::Unsigned, Ok(Caller::Anonymous)),
         };
     }
-    if let Some(problem) = take_fault(inner) {
+    if let Some(problem) = take_fault(inner, parts.uri.path()) {
         let status = problem.status();
         return (
             Authentication::Faulted { status },
@@ -176,11 +176,15 @@ async fn authenticate(
 }
 
 /// The faults that answer a signed request before it is checked:
-/// `refuse_signatures` (a 401 while on), then `fail_next` (one 503 per
-/// signed request while it lasts).
-fn take_fault(inner: &Inner) -> Option<Problem> {
+/// `refuse_signatures` (a 401 while on, for the paths it names), then
+/// `fail_next` (one 503 per signed request while it lasts).
+fn take_fault(inner: &Inner, path: &str) -> Option<Problem> {
     let mut faults = inner.faults.lock().unwrap();
-    if faults.refuse_signatures {
+    if faults
+        .refuse_signatures
+        .as_deref()
+        .is_some_and(|suffix| path.ends_with(suffix))
+    {
         return Some(Problem::unauthorized(
             "fault: signatures are refused (refuse_signatures)",
         ));

@@ -21,8 +21,9 @@ pub(crate) struct FaultState {
     pub(crate) duplicate_events: bool,
     /// Every WebSocket `authenticate` fails (`error`, then close 4001).
     pub(crate) refuse_ws_auth: bool,
-    /// Every signed request is answered `401` before it is checked.
-    pub(crate) refuse_signatures: bool,
+    /// Signed requests whose path ends with this (every one, for `""`)
+    /// are answered `401` before they are checked.
+    pub(crate) refuse_signatures: Option<String>,
     /// `POST /api/media` drops its connection after this many body bytes.
     pub(crate) cut_uploads_after: Option<usize>,
     /// `POST /api/media` bodies are read at this many bytes a second.
@@ -89,7 +90,15 @@ impl Faults {
     /// it, as a provider does that cannot get the signer's keys from their
     /// home provider (§4.6). Unsigned requests are answered as usual.
     pub fn refuse_signatures(&self, on: bool) {
-        self.inner.faults.lock().unwrap().refuse_signatures = on;
+        self.inner.faults.lock().unwrap().refuse_signatures = on.then(String::new);
+    }
+
+    /// As [`Faults::refuse_signatures`], for only the signed requests
+    /// whose path ends with `suffix` (such as `/channels`), as when one
+    /// part of a provider cannot check the signer yet. It replaces the
+    /// switch; `refuse_signatures(false)` turns it off.
+    pub fn refuse_signatures_ending(&self, suffix: &str) {
+        self.inner.faults.lock().unwrap().refuse_signatures = Some(suffix.to_owned());
     }
 
     /// Make every WebSocket `authenticate` fail with `error`

@@ -128,14 +128,18 @@ impl Run<'_> {
         };
         self.keep_group(&uri, &authority, &group, pointer).await?;
         // Only the group's own answer says it is gone (docs/ofscp.md,
-        // "Groups on other providers"): a refused channel list leaves the
-        // group, with no channel readable.
+        // "Groups on other providers"): a channel list out of reach leaves
+        // the group with no channel readable, and a refused one leaves its
+        // channels as they are kept.
         let found = client.channels(&id).await;
-        let channels = self
-            .reachable(&client, found)
-            .await?
-            .got()
-            .unwrap_or_default();
+        let channels = match self.reachable(&client, found).await? {
+            Reach::Got(channels) => channels,
+            Reach::Gone => Vec::new(),
+            Reach::Refused => {
+                self.spared.insert(uri.clone());
+                Vec::new()
+            }
+        };
         for channel in &channels {
             let place = channel_uri(&authority, &channel.group_id, &channel.id);
             let is_followed = followed.contains(&place);
