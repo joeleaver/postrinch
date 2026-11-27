@@ -87,9 +87,17 @@ impl Live<'_> {
             let ack = match self.conn.subscribe(subscribe).await {
                 Ok(ack) => ack,
                 // None of the batch could be subscribed: gone, not readable,
-                // or over the provider's limit. The next refresh tries again.
+                // or over the provider's limit. The next refresh tries again;
+                // one waiting for its backfill is tried again sooner, as its
+                // new messages wait with it.
                 Err(RequestError::Rejected(error)) => {
                     tracing::warn!(provider = %self.cx.authority, code = %error.code, %error.message, "subscribe refused");
+                    if chunk
+                        .iter()
+                        .any(|(_, h)| self.unfilled.contains(h.scope.place()))
+                    {
+                        self.retry_later();
+                    }
                     continue;
                 }
                 Err(error) => return Err(error.into()),
@@ -127,9 +135,7 @@ impl Live<'_> {
                     tracing::warn!(provider = %self.cx.authority, place = %scope.place(), %error, "not backfilled");
                     self.unfilled.insert(scope.place().to_owned());
                     self.subscribed.remove(&id);
-                    let wait = self.cx.social.live.options.max_backoff;
-                    self.retry_at
-                        .get_or_insert(tokio::time::Instant::now() + wait);
+                    self.retry_later();
                     match self.conn.unsubscribe(vec![id]).await {
                         Ok(_) | Err(RequestError::Rejected(_)) => {}
                         Err(error) => return Err(error.into()),
@@ -138,6 +144,14 @@ impl Live<'_> {
             }
         }
         Ok(backfilled)
+    }
+
+    /// Try the places that wait for a backfill again after the longest
+    /// backoff, unless a try is due sooner.
+    fn retry_later(&mut self) {
+        let wait = self.cx.social.live.options.max_backoff;
+        self.retry_at
+            .get_or_insert(tokio::time::Instant::now() + wait);
     }
 
     /// The places the account keeps that this provider hosts, by the id

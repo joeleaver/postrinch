@@ -319,6 +319,7 @@ async fn signing_in_again_while_live_goes_on_with_the_new_key() {
 #[tokio::test]
 async fn a_private_message_waits_for_its_conversations_backfill() {
     let h = home().await;
+    let (bob, group, general) = h.bob_with_group();
     let (carol, carol_client) = super::user(&h, "carol").await;
     let dm = dm_id(&carol, &h.ada);
     let to_ada = |id: &str, text: &str| -> DmMessageCreate {
@@ -343,13 +344,21 @@ async fn a_private_message_waits_for_its_conversations_backfill() {
     let pages = format!("/api/dms/{dm}/messages");
     h.provider.faults().fail_reads_ending(Some(&pages));
     let backfilled = come_back(&h, &mut told).await;
-    assert!(backfilled.is_empty());
+    assert!(!backfilled.contains(&dm.to_string()), "{backfilled:?}");
 
     // One comes while the gap is open (unsubscribed, §7.4 delivers it
     // anyway). Keeping it would hide the gap from the backfill.
     let three = to_ada("c3", "three");
     super::elsewhere(|| carol_client.send_dm(&dm, &three)).await;
-    told.settle(std::time::Duration::from_millis(100)).await;
+    // The socket's events are handled in order: once this one is, the
+    // private message before it has been.
+    let after = h
+        .provider
+        .post_as(&bob, &group, &general, "after")
+        .id
+        .to_string();
+    told.until("a later event", |e| super::is_new(e, &after))
+        .await;
     assert_eq!(h.messages(dm.as_str()).len(), 1, "left for the backfill");
 
     h.provider.faults().fail_reads_ending(None);
