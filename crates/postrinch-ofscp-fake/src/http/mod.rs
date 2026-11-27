@@ -143,7 +143,7 @@ async fn authenticate(
             None => (Authentication::Unsigned, Ok(Caller::Anonymous)),
         };
     }
-    if let Some(problem) = take_fault(inner, parts.uri.path()) {
+    if let Some(problem) = take_fault(inner, &parts.method, parts.uri.path()) {
         let status = problem.status();
         return (
             Authentication::Faulted { status },
@@ -176,9 +176,10 @@ async fn authenticate(
 }
 
 /// The faults that answer a signed request before it is checked:
-/// `refuse_signatures` (a 401 while on, for the paths it names), then
-/// `fail_next` (one 503 per signed request while it lasts).
-fn take_fault(inner: &Inner, path: &str) -> Option<Problem> {
+/// `refuse_signatures` (a 401 while on, for the paths it names),
+/// `fail_reads` (a 500 for the reads it names), then `fail_next` (one 503
+/// per signed request while it lasts).
+fn take_fault(inner: &Inner, method: &axum::http::Method, path: &str) -> Option<Problem> {
     let mut faults = inner.faults.lock().unwrap();
     if faults
         .refuse_signatures
@@ -188,6 +189,14 @@ fn take_fault(inner: &Inner, path: &str) -> Option<Problem> {
         return Some(Problem::unauthorized(
             "fault: signatures are refused (refuse_signatures)",
         ));
+    }
+    if method == axum::http::Method::GET
+        && faults
+            .fail_reads
+            .as_deref()
+            .is_some_and(|suffix| path.ends_with(suffix))
+    {
+        return Some(Problem::internal("fault: reading this fails (fail_reads)"));
     }
     if faults.fail_next == 0 {
         return None;

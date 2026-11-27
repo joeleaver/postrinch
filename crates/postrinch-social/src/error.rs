@@ -36,6 +36,9 @@ pub enum SocialError {
     /// A provider refused or failed a request.
     #[error(transparent)]
     Transport(#[from] postrinch_ofscp::Error),
+    /// A command on a provider's socket got no answer, or was refused.
+    #[error("on the socket: {0}")]
+    Socket(#[from] postrinch_ofscp::ws::RequestError),
     #[error(transparent)]
     Store(#[from] StoreError),
     #[error(transparent)]

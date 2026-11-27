@@ -34,6 +34,10 @@ impl Problem {
         *self.0
     }
 
+    pub(crate) fn internal(detail: impl Into<String>) -> Self {
+        Self::new(ErrorCode::InternalError, detail)
+    }
+
     pub(crate) fn bad_request(detail: impl Into<String>) -> Self {
         Self::new(ErrorCode::BadRequest, detail)
     }

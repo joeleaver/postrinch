@@ -34,7 +34,7 @@ use postrinch_ofscp::ofscp_core::Authority;
 use postrinch_ofscp::{Endpoint, Identity};
 use postrinch_store::{SocialAccount, SocialAccountState, SocialProvider};
 
-use crate::{Social, SocialError, SocialResult, parse_actor, refused};
+use crate::{Social, SocialResult, parse_actor, refused};
 
 /// What a sync kept.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -58,33 +58,41 @@ impl Social {
         let _held = self.hold(&actor).await;
         let account = self.account(&actor).await?;
         let identity = self.identity(&account).await?;
-        self.sync_as(&account, &identity).await
+        self.sync_as(&account, &identity, Pages::All).await
     }
 
-    /// Sync `account`, signing as `identity`.
+    /// Sync `account`, signing as `identity`, fetching the newest page of
+    /// the places `pages` says.
     pub(crate) async fn sync_as(
         &self,
         account: &SocialAccount,
         identity: &Arc<Identity>,
+        pages: Pages,
     ) -> SocialResult<Synced> {
-        let mut run = Run {
-            social: self,
-            identity: Arc::clone(identity),
-            home: self.client(identity, identity.actor().domain()),
-            providers: BTreeSet::new(),
-            markers: HashMap::new(),
-            spared: HashSet::new(),
-            synced: Synced::default(),
-        };
-        run.providers.insert(identity.actor().domain().clone());
+        let mut run = Run::new(self, identity);
         run.home(account).await?;
         let targets = run.places().await?;
         for target in &targets {
+            if pages == Pages::Unresumable && run.resumable(target).await? {
+                run.mark_read(target).await?;
+                continue;
+            }
             run.page(target).await?;
         }
         run.record_providers().await?;
         Ok(run.synced)
     }
+}
+
+/// Which places a sync fetches the newest page of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Pages {
+    /// Every place: the first sync, or one the person asks for.
+    All,
+    /// Only places live events cannot resume (§7.1): those with no cursor
+    /// yet. The rest catch up by subscribing from their cursors, which
+    /// replays what was missed or says to backfill it (`live`).
+    Unresumable,
 }
 
 /// One sync under way.
@@ -122,7 +130,46 @@ impl<T> Reach<T> {
     }
 }
 
-impl Run<'_> {
+impl<'a> Run<'a> {
+    /// A sync of `identity`'s account.
+    pub(crate) fn new(social: &'a Social, identity: &Arc<Identity>) -> Self {
+        let mut providers = BTreeSet::new();
+        providers.insert(identity.actor().domain().clone());
+        Run {
+            social,
+            identity: Arc::clone(identity),
+            home: social.client(identity, identity.actor().domain()),
+            providers,
+            markers: HashMap::new(),
+            spared: HashSet::new(),
+            synced: Synced::default(),
+        }
+    }
+
+    /// Whether `target` has a cursor live events resume from.
+    async fn resumable(&self, target: &places::Target) -> SocialResult<bool> {
+        let (account, place) = (self.actor(), target.place.clone());
+        let kept = self
+            .social
+            .blocking(move |store| store.social_place(&account, &place))
+            .await?;
+        Ok(kept.is_some_and(|p| p.cursors.live.is_some()))
+    }
+
+    /// Move a resumed place's read marker to where the home provider's
+    /// is now (it may have moved on another device while this one was
+    /// offline): messages up to it become read.
+    async fn mark_read(&self, target: &places::Target) -> SocialResult<()> {
+        let places::Marker::Provider(Some(id)) = &target.marker else {
+            return Ok(());
+        };
+        let (account, place, id) = (self.actor(), target.place.clone(), id.clone());
+        self.social
+            .blocking(move |store| crate::live::markers::move_to(store, &account, &place, &id))
+            .await?;
+        Ok(())
+    }
+
     /// The account's actor, as stored.
     fn actor(&self) -> String {
         self.identity.actor().to_string()
@@ -140,28 +187,14 @@ impl Run<'_> {
         client.provider().endpoint().authority() == self.identity.actor().domain()
     }
 
-    /// A signed request's answer. A signature the home provider refuses
-    /// marks the account; it is the key's only judge (§4.6).
+    /// A signed request's answer; a signature the home provider refuses
+    /// marks the account ([`Social::checked`]).
     async fn checked<T>(
         &self,
         client: &Client,
         result: postrinch_ofscp::Result<T>,
     ) -> SocialResult<T> {
-        match result {
-            Ok(value) => Ok(value),
-            Err(error) => match refused::account_state(client, &error) {
-                Some(state) if self.is_home(client) => {
-                    tracing::warn!(actor = %self.actor(), ?state, %error, "signature refused");
-                    let key_id = Some(self.identity.key_id().to_owned());
-                    let otherwise = SocialError::Transport(error);
-                    Err(self
-                        .social
-                        .mark(self.identity.actor(), key_id, state, otherwise)
-                        .await?)
-                }
-                _ => Err(SocialError::Transport(error)),
-            },
-        }
+        self.social.checked(&self.identity, client, result).await
     }
 
     /// A signed request's answer, unless it is out of reach (`403`, `404`)

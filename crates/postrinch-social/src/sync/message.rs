@@ -4,7 +4,9 @@
 
 use std::collections::HashMap;
 
-use postrinch_ofscp::ofscp_core::wire::{Message, Reaction, ReferenceKind, TimelineItem};
+use postrinch_ofscp::ofscp_core::wire::{
+    DmConversation, Message, Reaction, ReferenceKind, TimelineItem,
+};
 use postrinch_ofscp::ofscp_core::{Actor, Authority};
 use postrinch_render::social::{Attachment, Body, Options, render};
 use postrinch_store::{ReactionSum, SocialMessage, social_account_key};
@@ -87,6 +89,22 @@ pub(crate) fn kept_id(reader: &Reader, holder: &Authority, id: &str) -> String {
     } else {
         dm_message_url(holder, reader.place, id)
     }
+}
+
+/// The provider holding a private message of `conversation` written by
+/// `author`: its recipient's home, the participant who is not its author
+/// (§7.4). It is derived, not taken from whichever provider served the
+/// copy. `None` when `author` is not a participant.
+pub(crate) fn dm_holder(conversation: &DmConversation, author: &Actor) -> Option<Authority> {
+    let [a, b] = &conversation.participants;
+    let recipient = if a == author {
+        b
+    } else if b == author {
+        a
+    } else {
+        return None;
+    };
+    Some(recipient.domain().clone())
 }
 
 /// `held` as `reader` keeps it, `unread` if it is new here.
@@ -352,5 +370,22 @@ mod tests {
         let there = "https://b.example/api/dms/dm_1/messages/";
         assert_eq!(kept[1].id, format!("{there}msg_1"));
         assert_eq!(kept[1].parent, Some(format!("{there}msg_0")));
+    }
+
+    #[test]
+    fn a_private_message_is_held_by_its_recipients_home() {
+        let actor = |a: &str| Actor::parse_canonical(a).unwrap();
+        let (ada, erin) = (actor("ada@a.example"), actor("erin@b.example"));
+        let conversation = DmConversation {
+            id: postrinch_ofscp::ofscp_core::dm_id(&ada, &erin),
+            participants: [ada, erin],
+            last_message: None,
+            updated_at: "2026-01-01T12:00:00Z".parse().unwrap(),
+            metadata: Vec::new(),
+        };
+        let held = |author: &str| dm_holder(&conversation, &actor(author)).map(|h| h.to_string());
+        assert_eq!(held("ada@a.example").as_deref(), Some("b.example"));
+        assert_eq!(held("erin@b.example").as_deref(), Some("a.example"));
+        assert_eq!(held("bob@a.example"), None);
     }
 }

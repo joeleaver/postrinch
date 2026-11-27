@@ -193,6 +193,10 @@ async fn close_and_drop_faults() {
     let mut ws = Ws::signed_in(&p, &alice).await;
     p.faults().drop_sockets();
     assert_eq!(ws.ended().await, Ended::Dropped);
+    // The network failed for a moment only: sockets connect again.
+    let mut ws = Ws::signed_in(&p, &alice).await;
+    p.faults().drop_sockets();
+    assert_eq!(ws.ended().await, Ended::Dropped);
 }
 
 #[tokio::test]

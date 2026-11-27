@@ -16,6 +16,7 @@ impl Run<'_> {
     pub(super) async fn page(&mut self, target: &Target) -> SocialResult<()> {
         let Some(Newest {
             mut held,
+            live,
             older,
             complete,
         }) = self.newest(target).await?
@@ -68,6 +69,11 @@ impl Run<'_> {
                             }
                         }
                     }
+                    // Live events resume from the newest message here, until
+                    // one of them says where they are.
+                    if p.cursors.live.is_none() {
+                        p.cursors.live = live;
+                    }
                     // The first page sets where scrolling back starts; later
                     // syncs leave it to the scrolling.
                     if p.cursors.older.is_none() && !p.cursors.complete {
@@ -117,6 +123,10 @@ impl Run<'_> {
 /// A place's newest messages, and where scrolling back starts.
 struct Newest {
     held: Vec<Held>,
+    /// The cursor of the newest message at the place's host: where live
+    /// events resume from (§7.1: event cursors and page cursors share one
+    /// space, and a page's `prevCursor` marks its first item, §7.2).
+    live: Option<String>,
     /// The cursor of the next older page, at the place's host (home, for
     /// a conversation).
     older: Option<String>,
@@ -130,6 +140,7 @@ impl Newest {
         Self {
             held: held_by(host, page.items),
             complete: page.page.next_cursor.is_none(),
+            live: page.page.prev_cursor,
             older: page.page.next_cursor,
         }
     }
@@ -150,7 +161,7 @@ impl Newest {
 /// not on the page is older than all of it, as markers only move forward
 /// and this is the newest page. The messages of a conversation held
 /// elsewhere are the person's own, sent from here.
-fn unread(held: &[Held], host: &Authority, marker: &Marker) -> Vec<bool> {
+pub(crate) fn unread(held: &[Held], host: &Authority, marker: &Marker) -> Vec<bool> {
     let here = |h: &Held| h.holder == *host;
     match marker {
         Marker::Local => vec![false; held.len()],

@@ -4,4 +4,5 @@
 mod accounts;
 mod common;
 mod errors;
+mod live;
 mod sync;

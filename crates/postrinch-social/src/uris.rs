@@ -75,6 +75,17 @@ pub(crate) fn parse_channel(
     }
 }
 
+/// The provider and id of a group's URI as the store keeps it.
+pub(crate) fn parse_group_uri(uri: &str) -> Option<(Authority, LocalId)> {
+    parse_group(&ObjectUri::parse(uri).ok()?)
+}
+
+/// The channel a channel's URI, as the store keeps it, names.
+pub(crate) fn parse_channel_uri(uri: &str) -> Option<ChannelAt> {
+    let uri = ObjectUri::parse(uri).ok()?;
+    parse_channel(&ObjectRef::Uri(uri.clone()), None, uri.authority())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,6 +110,12 @@ mod tests {
         let parsed = parse_channel(&ObjectRef::parse(&channel).unwrap(), None, &a).unwrap();
         assert_eq!(parsed.channel, id("chn_2"));
         assert_eq!(parsed.group, id("grp_1"));
+
+        assert_eq!(parse_group_uri(&group), Some((a.clone(), id("grp_1"))));
+        let at = parse_channel_uri(&channel).unwrap();
+        assert_eq!((at.authority, at.channel), (a, id("chn_2")));
+        assert_eq!(parse_channel_uri(&group), None);
+        assert_eq!(parse_channel_uri("not a uri"), None);
     }
 
     #[test]

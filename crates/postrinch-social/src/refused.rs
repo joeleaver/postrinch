@@ -2,8 +2,39 @@
 
 use postrinch_ofscp::http::Client;
 use postrinch_ofscp::ofscp_core::wire::ErrorCode;
-use postrinch_ofscp::{Error, SKEW_WINDOW_SECS};
+use postrinch_ofscp::{Error, Identity, SKEW_WINDOW_SECS};
 use postrinch_store::SocialAccountState;
+
+use crate::{Social, SocialError, SocialResult};
+
+impl Social {
+    /// A signed request's answer, made by `identity` through `client`. A
+    /// signature the home provider refuses marks the account with the
+    /// state [`account_state`] gives: home is the key's only judge (§4.6).
+    /// Another provider's refusal is only an error.
+    pub(crate) async fn checked<T>(
+        &self,
+        identity: &Identity,
+        client: &Client,
+        result: postrinch_ofscp::Result<T>,
+    ) -> SocialResult<T> {
+        let error = match result {
+            Ok(value) => return Ok(value),
+            Err(error) => error,
+        };
+        let is_home = client.provider().endpoint().authority() == identity.actor().domain();
+        match account_state(client, &error) {
+            Some(state) if is_home => {
+                let actor = identity.actor();
+                tracing::warn!(%actor, ?state, %error, "signature refused");
+                let key_id = Some(identity.key_id().to_owned());
+                let otherwise = SocialError::Transport(error);
+                Err(self.mark(actor, key_id, state, otherwise).await?)
+            }
+            _ => Err(SocialError::Transport(error)),
+        }
+    }
+}
 
 /// The state a signed request's failure puts its account in, if any.
 ///

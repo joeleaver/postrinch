@@ -36,7 +36,7 @@ impl Drop for FakeProvider {
         self.task.abort();
         self.inner.conns.abort_all();
         // Upgraded WebSockets have left the HTTP registry; end them too.
-        self.inner.hub.drop_all();
+        self.inner.hub.shut_down();
     }
 }
 

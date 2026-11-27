@@ -22,12 +22,15 @@ pub(crate) fn parse_dm(s: &str) -> Outcome<DmId> {
 }
 
 /// Is `caller` a participant of `dm` as this provider can tell: the id
-/// derives from the caller and one of its users, or it is the caller's own
-/// conversation pointer?
+/// derives from the caller and one of its users, it is the caller's own
+/// conversation pointer, or the provider holds messages of it with the
+/// caller as one of the two (a user of this provider written to from
+/// another)?
 pub(crate) fn is_participant(inner: &Inner, state: &State, dm: &DmId, caller: &Actor) -> bool {
-    state
-        .local_participant(&inner.authority, dm, caller)
-        .is_some()
+    state.dms.get(dm).is_some_and(|r| r.has(caller))
+        || state
+            .local_participant(&inner.authority, dm, caller)
+            .is_some()
         || state
             .local_user(&inner.authority, caller)
             .is_some_and(|u| u.dm_pointers.contains_key(dm))
