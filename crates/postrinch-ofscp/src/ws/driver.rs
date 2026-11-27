@@ -139,13 +139,33 @@ where
     async fn run(mut self) {
         let reason = self.serve().await;
         tracing::debug!(authority = %self.authority, %reason, "socket closed");
-        for (_, pending) in self.pending.drain() {
-            let _ = pending
-                .reply
-                .send(Err(RequestError::Closed(reason.clone())));
+        if reason == CloseReason::Overrun {
+            // The provider is fine; say why this side is leaving.
+            let frame = CloseFrame {
+                code: CloseCode::Policy,
+                reason: "the client fell behind".into(),
+            };
+            let _ = self.bounded(|s| s.socket.close(Some(frame))).await;
         }
+        // Let the connection go now, not after the reader catches up.
+        drop(self.socket);
         self.closed.send_replace(Some(reason.clone()));
-        // The socket is done with; what is left is the reader's, in order.
+        let closed = || Err(RequestError::Closed(reason.clone()));
+        for (_, pending) in self.pending.drain() {
+            let _ = pending.reply.send(closed());
+        }
+        // Commands sent from now on fail at once; those already queued
+        // are answered here, not left waiting on the reader below.
+        self.ops.close();
+        while let Ok(op) = self.ops.try_recv() {
+            if let Op::Send {
+                reply: Some(reply), ..
+            } = op
+            {
+                let _ = reply.send(closed());
+            }
+        }
+        // What is left is the reader's, in order.
         if self.reader_gone {
             return;
         }
@@ -186,8 +206,9 @@ where
                         }
                     }
                 },
-                // An owned permit, so the branch holds no borrow of `self`.
-                permit = self.events.clone().reserve_owned(), if backlog => match permit {
+                // An owned permit, so the branch holds no borrow of `self`;
+                // the sender is cloned only when the arm is polled.
+                permit = async { self.events.clone().reserve_owned().await }, if backlog => match permit {
                     Ok(permit) => {
                         if let Some(incoming) = self.queue.pop_front() {
                             permit.send(incoming);

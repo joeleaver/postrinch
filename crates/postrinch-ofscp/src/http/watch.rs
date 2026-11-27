@@ -28,17 +28,26 @@ pub(crate) struct Watch {
     total: u64,
     stall: Duration,
     answer: Duration,
+    /// Extra time before the first byte: connecting comes first.
+    connect: Duration,
     seen: u64,
     moved_at: Instant,
     done_at: Option<Instant>,
 }
 
 impl Watch {
-    pub fn new(total: u64, stall: Duration, answer: Duration, now: Instant) -> Self {
+    pub fn new(
+        total: u64,
+        stall: Duration,
+        answer: Duration,
+        connect: Duration,
+        now: Instant,
+    ) -> Self {
         Self {
             total,
             stall,
             answer,
+            connect,
             seen: 0,
             moved_at: now,
             done_at: None,
@@ -55,7 +64,12 @@ impl Watch {
             let done_at = *self.done_at.get_or_insert(now);
             return (now.duration_since(done_at) >= self.answer).then_some(Stall::Answer);
         }
-        (now.duration_since(self.moved_at) >= self.stall).then_some(Stall::Body)
+        let limit = if self.seen == 0 {
+            self.connect + self.stall
+        } else {
+            self.stall
+        };
+        (now.duration_since(self.moved_at) >= limit).then_some(Stall::Body)
     }
 }
 
@@ -83,6 +97,9 @@ pub(crate) async fn send_upload(
                 let stall = watch.check(sent.load(Ordering::Relaxed), Instant::now());
                 if let Some(stall) = stall {
                     let (waiting_for, after) = match stall {
+                        Stall::Body if watch.seen == 0 => {
+                            ("the upload to start", watch.connect + watch.stall)
+                        }
                         Stall::Body => ("the upload to move", watch.stall),
                         Stall::Answer => ("the answer to the upload", watch.answer),
                     };
@@ -106,7 +123,7 @@ mod tests {
     #[test]
     fn a_slow_but_moving_upload_is_not_a_stall() {
         let start = Instant::now();
-        let mut watch = Watch::new(100, 30 * S, 30 * S, start);
+        let mut watch = Watch::new(100, 30 * S, 30 * S, 10 * S, start);
         for i in 1..100 {
             assert_eq!(watch.check(i, start + i as u32 * 20 * S), None);
         }
@@ -115,16 +132,24 @@ mod tests {
     #[test]
     fn an_upload_that_stops_moving_stalls() {
         let start = Instant::now();
-        let mut watch = Watch::new(100, 30 * S, 60 * S, start);
+        let mut watch = Watch::new(100, 30 * S, 60 * S, 10 * S, start);
         assert_eq!(watch.check(10, start + 5 * S), None);
         assert_eq!(watch.check(10, start + 34 * S), None);
         assert_eq!(watch.check(10, start + 35 * S), Some(Stall::Body));
     }
 
     #[test]
+    fn connecting_gets_its_own_time_before_the_first_byte() {
+        let start = Instant::now();
+        let mut watch = Watch::new(100, 30 * S, 60 * S, 10 * S, start);
+        assert_eq!(watch.check(0, start + 39 * S), None);
+        assert_eq!(watch.check(0, start + 40 * S), Some(Stall::Body));
+    }
+
+    #[test]
     fn a_sent_upload_waits_for_its_answer() {
         let start = Instant::now();
-        let mut watch = Watch::new(100, 30 * S, 60 * S, start);
+        let mut watch = Watch::new(100, 30 * S, 60 * S, 10 * S, start);
         assert_eq!(watch.check(100, start + 10 * S), None);
         assert_eq!(watch.check(100, start + 69 * S), None);
         assert_eq!(watch.check(100, start + 70 * S), Some(Stall::Answer));

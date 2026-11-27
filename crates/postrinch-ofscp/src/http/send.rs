@@ -104,6 +104,7 @@ impl super::Provider {
                         upload.len(),
                         options.read_timeout,
                         options.request_timeout,
+                        options.connect_timeout,
                         tokio::time::Instant::now(),
                     );
                     watch::send_upload(request.body(body), sent, watch, &authority).await?

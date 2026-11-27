@@ -54,6 +54,25 @@ async fn say(peer: &mut Peer, id: &str, correlation_id: Option<&str>, body: Even
         .unwrap();
 }
 
+/// Send `n` custom events, stopping when the client has gone.
+async fn flood(peer: &mut Peer, n: usize) {
+    for n in 0..n {
+        let frame = Envelope {
+            id: format!("r{n}"),
+            ts: Some(Timestamp::now()),
+            correlation_id: None,
+            body: custom(),
+        };
+        if peer
+            .send(Message::Text(frame.encode().unwrap().into()))
+            .await
+            .is_err()
+        {
+            return;
+        }
+    }
+}
+
 fn custom() -> Event {
     Event::Other {
         kind: "x.custom".into(),
@@ -219,9 +238,7 @@ async fn a_reader_too_far_behind_ends_the_connection() {
         ..WsOptions::default()
     };
     let (_connection, mut events, mut peer) = open(options).await;
-    for n in 0..200 {
-        say(&mut peer, &format!("r{n}"), None, custom()).await;
-    }
+    flood(&mut peer, 200).await;
     let mut seen = 0;
     loop {
         match events.recv().await.unwrap() {
@@ -299,4 +316,51 @@ async fn closing_sends_a_normal_close() {
         events.recv().await,
         Some(Incoming::Closed(CloseReason::Client))
     );
+}
+
+#[tokio::test]
+async fn a_request_after_the_end_fails_at_once_though_the_reader_is_behind() {
+    let (connection, _events, mut peer) = open(WsOptions::default()).await;
+    // More than the channel holds, unread, then a 4001.
+    for n in 0..200 {
+        say(&mut peer, &format!("r{n}"), None, custom()).await;
+    }
+    peer.close(Some(CloseFrame {
+        code: CloseCode::from(4001),
+        reason: "".into(),
+    }))
+    .await
+    .unwrap();
+    for _ in 0..3 {
+        let result = tokio::time::timeout(Duration::from_secs(5), connection.request(subscribe()))
+            .await
+            .expect("no hang");
+        assert!(matches!(
+            result,
+            Err(RequestError::Closed(CloseReason::AuthFailed))
+        ));
+    }
+}
+
+#[tokio::test]
+async fn an_overrun_tells_the_provider_and_lets_the_socket_go() {
+    let options = WsOptions {
+        event_buffer: 10,
+        ..WsOptions::default()
+    };
+    let (_connection, _events, mut peer) = open(options).await;
+    flood(&mut peer, 200).await;
+    // The reader has read nothing, and the close still comes.
+    let frame = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match peer.next().await {
+                Some(Ok(Message::Close(frame))) => return frame,
+                Some(Ok(_)) => {}
+                other => panic!("no close frame: {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("a close frame");
+    assert_eq!(frame.unwrap().code, CloseCode::Policy);
 }
