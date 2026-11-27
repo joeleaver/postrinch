@@ -122,6 +122,7 @@ impl State {
                 watched,
                 since: Timestamp::from_millis(opened),
                 known: prefs.known_only,
+                social: prefs.social,
                 reminders,
             });
         });
@@ -155,6 +156,8 @@ impl State {
         if !mail_quiet && !fresh.is_empty() {
             self.tell_mail(&prefs, fresh);
         }
+        // As with mail, what comes in quiet hours or with the window in
+        // front counts as told: the counts say it, and it is not told late.
         let social = crate::social_notify::fresh(found.social);
         if !mail_quiet && !social.is_empty() {
             self.tell_social(&prefs, social);

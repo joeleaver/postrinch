@@ -6,7 +6,7 @@
 use postrinch_store::{PlaceKind, PlaceRef, SocialMessage, social_account_key};
 use serde::{Deserialize, Serialize};
 
-use super::notices::{Heard, Hearing, Notice};
+use super::notices::{Heard, Hearer, Hearing, Notice};
 use super::places::place_name;
 use super::str_at;
 use super::views_built_in::{ALL_CHANNELS, HOME, MENTIONS, MESSAGES};
@@ -42,32 +42,46 @@ pub struct SocialArrived {
     pub view: String,
 }
 
+/// What Social has to tell, from one pass over every place.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct SocialNotices {
+    /// How many unread messages get through their places' notices: the
+    /// rail's badge for Social.
+    pub noticed: usize,
+    /// Those made at or after the moment asked about, newest first.
+    pub arrived: Vec<SocialArrived>,
+}
+
 impl Commands {
-    /// Unread messages made at or after `since` (milliseconds since the
-    /// epoch) that get through their places' notices, newest first, at
-    /// most `limit`.
-    pub fn social_arrived(&self, since: i64, limit: usize) -> CommandResult<Vec<SocialArrived>> {
+    /// What Social has to tell, in every account this caller sees: how
+    /// many unread messages get through their places' notices, and those
+    /// of them made at or after `since` (milliseconds since the epoch),
+    /// newest first, at most `limit`. Arrival is judged by when a message
+    /// was made, not when it reached this computer: catching up after a
+    /// day away tells nothing of the day, as Mail does not.
+    pub fn social_notices(&self, since: i64, limit: usize) -> CommandResult<SocialNotices> {
+        let mut noticed = 0;
         let mut found: Vec<(Hearing, SocialMessage, Notice)> = Vec::new();
+        let mut hearer = Hearer::new(self);
         for account in self.store.social_accounts()? {
             if !self.sees_social(&account.actor) {
                 continue;
             }
             for place in self.store.social_places(&account.actor)? {
-                let hearing = self.hearing(place)?;
+                let hearing = hearer.hear(place)?;
                 if hearing.heard == Heard::Nothing {
                     continue;
                 }
                 let unread = self
                     .store
                     .social_unread_messages(&hearing.place.account, &hearing.place.id)?;
-                // Newest first: those made before `since` end the place.
-                let fresh: Vec<SocialMessage> = unread
-                    .into_iter()
-                    .take_while(|m| m.created >= since)
-                    .collect();
-                for message in fresh {
+                for message in unread {
                     let notice = self.notice_of(&hearing, &message)?;
-                    if notice.told() {
+                    if !notice.told() {
+                        continue;
+                    }
+                    noticed += 1;
+                    if limit > 0 && message.created >= since {
                         found.push((hearing.clone(), message, notice));
                     }
                 }
@@ -75,11 +89,16 @@ impl Commands {
         }
         found.sort_by(|a, b| (b.1.created, &b.1.id).cmp(&(a.1.created, &a.1.id)));
         found.truncate(limit);
-        let views = self.own_view_places()?;
-        found
+        let views = if found.is_empty() {
+            Vec::new()
+        } else {
+            self.own_view_places()?
+        };
+        let arrived = found
             .into_iter()
             .map(|(hearing, message, notice)| self.told_of(&hearing, message, notice, &views))
-            .collect()
+            .collect::<CommandResult<_>>()?;
+        Ok(SocialNotices { noticed, arrived })
     }
 
     /// What a notice says of `message`, and where it opens.

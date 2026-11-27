@@ -59,12 +59,13 @@ pub enum Request {
     People(String),
     /// What to tell the person about: unread mail the `watched` views show
     /// that arrived since `since`, new social messages that get through
-    /// their places' notices, and reminders due in a stretch; and Social's
-    /// count for the rail.
+    /// their places' notices (when `social`), and reminders due in a
+    /// stretch; and Social's count for the rail.
     Notices {
         watched: Vec<postrinch_commands::Watched>,
         since: postrinch_model::Timestamp,
         known: bool,
+        social: bool,
         reminders: Option<(
             postrinch_model::Timestamp,
             postrinch_model::Timestamp,
@@ -297,6 +298,7 @@ fn answer(commands: &Commands, state: State, request: Request) {
             watched,
             since,
             known,
+            social,
             reminders,
         } => {
             let arrived = commands
@@ -314,16 +316,18 @@ fn answer(commands: &Commands, state: State, request: Request) {
                     }),
                 None => Vec::new(),
             };
-            match commands.social_noticed() {
-                Ok(n) => state.social.noticed.send(n),
-                Err(e) => tracing::warn!("counting what Social has to tell: {e}"),
-            }
-            let social = commands
-                .social_arrived(since.as_millis(), 20)
-                .unwrap_or_else(|e| {
-                    tracing::warn!("looking for new social messages to tell: {e}");
-                    Vec::new()
-                });
+            // The rail's count always; new messages only to be told.
+            let social =
+                match commands.social_notices(since.as_millis(), if social { 20 } else { 0 }) {
+                    Ok(found) => {
+                        state.social.noticed.send(found.noticed);
+                        found.arrived
+                    }
+                    Err(e) => {
+                        tracing::warn!("looking for what Social has to tell: {e}");
+                        Vec::new()
+                    }
+                };
             tracing::debug!(
                 "notices: {} arrived, {} social, {} due",
                 arrived.len(),

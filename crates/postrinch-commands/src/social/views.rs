@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::filters::Filter;
 use super::new_id;
-use super::notices::Notice;
+use super::notices::{Hearer, Notice};
 use super::places::SocialPlaceInfo;
 use super::views_built_in::BuiltInView;
 use crate::{CommandError, CommandResult, Commands};
@@ -202,8 +202,9 @@ impl Commands {
         }
         let filter = Filter::of_view(&entry.view.filters)?;
         let only_mentions = entry.built_in == Some(BuiltInView::Mentions);
+        let mut hearer = Hearer::new(self);
         for place in self.view_places(&entry)? {
-            let hearing = self.hearing(place)?;
+            let hearing = hearer.hear(place)?;
             for message in self
                 .store
                 .social_unread_messages(&hearing.place.account, &hearing.place.id)?

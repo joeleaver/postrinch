@@ -91,31 +91,31 @@ fn the_rail_counts_what_gets_through_each_places_notices() {
     world.bob(GENERAL, "g1", 1, "hello all");
     mention(&world, GENERAL, "g2", 2);
     world.bob(DM, "d1", 3, "psst");
-    assert_eq!(world.commands.social_noticed().unwrap(), 2);
+    assert_eq!(world.commands.social_notices(0, 0).unwrap().noticed, 2);
 
     // Everything, as the person sets it: shown at once, before sync.
     world
         .commands
         .set_social_place_notices(ADA, GENERAL, Some(Notices::Everything))
         .unwrap();
-    assert_eq!(world.commands.social_noticed().unwrap(), 3);
+    assert_eq!(world.commands.social_notices(0, 0).unwrap().noticed, 3);
 
     world
         .commands
         .set_social_place_notices(ADA, GENERAL, Some(Notices::Nothing))
         .unwrap();
-    assert_eq!(world.commands.social_noticed().unwrap(), 1);
+    assert_eq!(world.commands.social_notices(0, 0).unwrap().noticed, 1);
 
     world
         .commands
         .mute_social_conversation(ADA, DM, true)
         .unwrap();
-    assert_eq!(world.commands.social_noticed().unwrap(), 0);
+    assert_eq!(world.commands.social_notices(0, 0).unwrap().noticed, 0);
     world
         .commands
         .mute_social_conversation(ADA, DM, false)
         .unwrap();
-    assert_eq!(world.commands.social_noticed().unwrap(), 1);
+    assert_eq!(world.commands.social_notices(0, 0).unwrap().noticed, 1);
 }
 
 #[test]
@@ -124,12 +124,21 @@ fn a_channel_without_a_setting_is_heard_as_its_group() {
     kept_notices(&world, NEWS, None);
     world.bob(NEWS, "n1", 1, "news");
     // The provider's default: mentions and replies.
-    assert_eq!(world.commands.social_noticed().unwrap(), 0);
+    assert_eq!(world.commands.social_notices(0, 0).unwrap().noticed, 0);
     world
         .commands
         .set_social_group_notices(ADA, FAR, Some(Notices::Everything))
         .unwrap();
-    assert_eq!(world.commands.social_noticed().unwrap(), 1);
+    assert_eq!(world.commands.social_notices(0, 0).unwrap().noticed, 1);
+
+    // A group not kept here sets nothing: the provider's default again.
+    world
+        .store
+        .change_social_place(ADA, NEWS, |p| p.group = Some("https://nowhere/g".into()))
+        .unwrap();
+    assert_eq!(world.commands.social_notices(0, 0).unwrap().noticed, 0);
+    mention(&world, NEWS, "n2", 2);
+    assert_eq!(world.commands.social_notices(0, 0).unwrap().noticed, 1);
 }
 
 #[test]
@@ -144,7 +153,7 @@ fn a_reply_to_the_person_gets_through_mentions_and_replies() {
     let mut other = message(ADA, GENERAL, "r2", 3, BOB, "an aside");
     other.parent = Some("g0".into());
     world.put(&other);
-    assert_eq!(world.commands.social_noticed().unwrap(), 1);
+    assert_eq!(world.commands.social_notices(0, 0).unwrap().noticed, 1);
 }
 
 #[test]
@@ -157,7 +166,7 @@ fn read_deleted_and_own_messages_are_never_counted() {
     gone.deleted = true;
     world.put(&gone);
     world.put(&message(ADA, DM, "d3", 3, ADA, "mine"));
-    assert_eq!(world.commands.social_noticed().unwrap(), 0);
+    assert_eq!(world.commands.social_notices(0, 0).unwrap().noticed, 0);
 }
 
 #[test]
@@ -224,7 +233,7 @@ fn new_messages_are_told_newest_first_with_where_they_open() {
     kept_notices(&world, NEWS, Some(Notices::Everything));
     world.bob(NEWS, "n1", 8_000, "news for everyone");
 
-    let told = world.commands.social_arrived(2_000, 20).unwrap();
+    let told = world.commands.social_notices(2_000, 20).unwrap().arrived;
     let ids: Vec<&str> = told.iter().map(|t| t.message.as_str()).collect();
     assert_eq!(ids, ["n1", "d1", "g2"]);
     let (news, dm, at_me) = (&told[0], &told[1], &told[2]);
@@ -238,7 +247,16 @@ fn new_messages_are_told_newest_first_with_where_they_open() {
     assert_eq!(at_me.view, MENTIONS);
     assert_eq!(at_me.place_name, "general");
 
-    assert_eq!(world.commands.social_arrived(2_000, 1).unwrap().len(), 1);
+    // A limit keeps the newest, across places; the count is of all that
+    // get through, whenever made.
+    let few = world.commands.social_notices(2_000, 1).unwrap();
+    let ids: Vec<&str> = few.arrived.iter().map(|t| t.message.as_str()).collect();
+    assert_eq!(ids, ["n1"]);
+    assert_eq!(few.noticed, 3);
+    // Asking for none tells none, and still counts.
+    let none = world.commands.social_notices(2_000, 0).unwrap();
+    assert!(none.arrived.is_empty());
+    assert_eq!(none.noticed, 3);
 }
 
 #[test]
@@ -250,7 +268,7 @@ fn a_new_message_opens_in_the_persons_own_view_that_shows_it() {
         .unwrap();
     kept_notices(&world, NEWS, Some(Notices::Everything));
     world.bob(NEWS, "n1", 5, "news");
-    let told = world.commands.social_arrived(0, 20).unwrap();
+    let told = world.commands.social_notices(0, 20).unwrap().arrived;
     assert_eq!(told[0].view, saved.id);
     assert_eq!(told[0].place.id, NEWS);
 }
@@ -260,6 +278,6 @@ fn an_agent_is_told_only_of_the_accounts_it_sees() {
     let world = world();
     world.bob(DM, "d1", 3, "psst");
     let carl = world.commands.limited(&[], &[CARL]);
-    assert_eq!(carl.social_noticed().unwrap(), 0);
-    assert!(carl.social_arrived(0, 20).unwrap().is_empty());
+    assert_eq!(carl.social_notices(0, 0).unwrap().noticed, 0);
+    assert!(carl.social_notices(0, 20).unwrap().arrived.is_empty());
 }

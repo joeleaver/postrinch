@@ -45,7 +45,7 @@ pub use postrinch_store::{
     AvatarChange, ProfileChange, SocialContent, SocialCount, SocialDraft, SocialFilters, SocialView,
 };
 pub use threads::SocialThread;
-pub use told::SocialArrived;
+pub use told::{SocialArrived, SocialNotices};
 pub use views::{SocialViewEntry, SocialViewTally};
 pub use views_built_in::{ALL_CHANNELS, BuiltInView, DRAFTS, HOME, MENTIONS, MESSAGES};
 

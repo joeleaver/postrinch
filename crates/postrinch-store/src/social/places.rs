@@ -14,6 +14,26 @@ impl Store {
         self.social_locked(|| self.write_social_place(place))
     }
 
+    /// Keep `fresh`, merged by `keep` with the place already here, if
+    /// any, with no other change to a social object in between: a read
+    /// marker moved or a conversation muted while sync fetched `fresh`
+    /// is not written over. `keep` must not call the store: the social
+    /// lock is held while it runs.
+    pub fn keep_social_place(
+        &self,
+        fresh: SocialPlace,
+        keep: impl FnOnce(SocialPlace, SocialPlace) -> SocialPlace,
+    ) -> StoreResult<SocialPlace> {
+        self.social_locked(|| {
+            let place = match self.social_place(&fresh.account, &fresh.id)? {
+                Some(kept) => keep(kept, fresh),
+                None => fresh,
+            };
+            self.write_social_place(&place)?;
+            Ok(place)
+        })
+    }
+
     fn write_social_place(&self, place: &SocialPlace) -> StoreResult<()> {
         let fields = FieldsBuilder::new()
             .str("account", social_account_key(&place.account))

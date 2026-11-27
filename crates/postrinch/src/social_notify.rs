@@ -1,6 +1,6 @@
 //! Desktop notices for new social messages (docs/ofscp.md, "Organizing:
 //! views, not providers"): those their places' notices let through
-//! (`postrinch_commands::social_arrived`), told as new mail is (notify.rs),
+//! (`postrinch_commands::Commands::social_notices`), told as new mail is (notify.rs),
 //! under the same Settings › Notifications: what a notice shows, several
 //! at once, quiet hours and not while the window is in front. A click
 //! opens the view the message shows in, on its place's tab.
@@ -57,6 +57,8 @@ pub fn one(a: &SocialArrived, shows: Shows) -> (String, String) {
             };
             (who, body)
         }
+        // Only an article or a memo has a subject; for a chat message the
+        // title's who and where are the whole notice, its words kept back.
         Shows::WhoAndSubject => (who, a.title.clone().unwrap_or_default()),
         Shows::Nothing if a.conversation => ("New private message".to_owned(), String::new()),
         Shows::Nothing => (format!("New message in {}", where_from(a)), String::new()),
