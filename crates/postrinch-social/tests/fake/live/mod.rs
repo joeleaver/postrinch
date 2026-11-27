@@ -33,6 +33,14 @@ pub struct Told {
 }
 
 impl Told {
+    /// Read what `social` tells from now on.
+    pub fn new(social: &Social) -> Self {
+        Self {
+            events: social.live_events(),
+            seen: Vec::new(),
+        }
+    }
+
     /// Wait for the first event `wanted` matches, failing after a while.
     pub async fn until(&mut self, what: &str, wanted: impl Fn(&LiveEvent) -> bool) -> LiveEvent {
         let waiting = async {
@@ -82,10 +90,7 @@ impl Told {
 pub async fn live(h: &Home, sessions: usize) -> (Social, Told) {
     h.add().await;
     let social = h.social.clone().with_live_options(options());
-    let mut told = Told {
-        events: social.live_events(),
-        seen: Vec::new(),
-    };
+    let mut told = Told::new(&social);
     social.go_live(&h.account()).await.expect("live");
     told.caught_up(sessions).await;
     (social, told)
@@ -133,4 +138,22 @@ pub async fn post_each(
         ids.push(posted.id.to_string());
     }
     ids
+}
+
+/// Run a request made from another of the person's devices (or another
+/// person's). `Faults::drop_sockets` drops every connection, so one still
+/// pooled on that device may be dead: it tries again, as a device would.
+pub async fn elsewhere<T, F, Fut>(mut request: F) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = postrinch_ofscp::Result<T>>,
+{
+    for attempt in 1.. {
+        match request().await {
+            Ok(done) => return done,
+            Err(postrinch_ofscp::Error::Network { .. }) if attempt < 3 => {}
+            Err(error) => panic!("a request elsewhere failed: {error}"),
+        }
+    }
+    unreachable!()
 }

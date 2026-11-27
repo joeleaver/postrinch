@@ -17,12 +17,10 @@ async fn phone_reads(h: &Home, channel: &postrinch_ofscp::ofscp_core::LocalId, i
         scope_id: channel.clone(),
         last_read_message_id: postrinch_ofscp::ofscp_core::LocalId::new(id).unwrap(),
     };
-    h.phone
-        .update_read_markers(&ReadMarkersUpdateRequest {
-            markers: vec![marker],
-        })
-        .await
-        .expect("the marker");
+    let request = ReadMarkersUpdateRequest {
+        markers: vec![marker],
+    };
+    super::elsewhere(|| h.phone.update_read_markers(&request)).await;
 }
 
 #[tokio::test]
@@ -84,7 +82,8 @@ async fn two_providers_each_get_a_session_and_keep_their_own_markers() {
     let group = away.create_group(&dan, "Away");
     let channel = away.create_channel(&group, "general");
     away.add_member(&group, &h.ada, "member");
-    away.post_as(&dan, &group, &channel, "first");
+    // In a second of its own: the marker is by time, in whole seconds.
+    post_each(&away, &dan, &group, &channel, &["first"]).await;
     let uri = ObjectUri::canonicalize(&group_uri(&away, &group)).unwrap();
     h.phone
         .put_group_pointer(&uri, &GroupPointerRequest { role: None })
@@ -162,4 +161,74 @@ async fn presence_is_watched_where_the_user_is_hosted() {
     // Offline, nothing is known any more.
     social.go_offline(&h.account()).await.expect("offline");
     assert_eq!(social.presence(&h.account(), &bob.to_string()), None);
+}
+
+#[tokio::test]
+async fn a_place_that_cannot_be_backfilled_is_tried_again_without_ending_the_session() {
+    let h = home().await;
+    let away = FakeProvider::start().await.unwrap();
+    let dan = away.add_user("dan", PASSWORD);
+    let group = away.create_group(&dan, "Away");
+    let channel = away.create_channel(&group, "general");
+    away.add_member(&group, &h.ada, "member");
+    away.post_as(&dan, &group, &channel, "first");
+    let uri = ObjectUri::canonicalize(&group_uri(&away, &group)).unwrap();
+    h.phone
+        .put_group_pointer(&uri, &GroupPointerRequest { role: None })
+        .await
+        .expect("the pointer");
+    h.add().await;
+    let place = channel_uri(&away, &group, &channel);
+    // No cursor, and its pages refused: it cannot be backfilled for now.
+    h.social
+        .store()
+        .change_social_place(&h.account(), &place, |p| p.cursors.live = None)
+        .unwrap();
+    away.faults().refuse_signatures_ending("/messages");
+    let social = h.social.clone().with_live_options(super::options());
+    let mut told = super::Told::new(&social);
+    social.go_live(&h.account()).await.expect("live");
+    // Both sessions catch up (home's own sync could not page it either),
+    // and the place is left for the retry.
+    told.caught_up(2).await;
+    let away_caught_up = told.seen.iter().find(|e| {
+        matches!(e, LiveEvent::CaughtUp { provider, .. } if *provider == away.authority().to_string())
+    });
+    assert!(
+        matches!(away_caught_up, Some(LiveEvent::CaughtUp { backfilled, .. }) if backfilled.is_empty()),
+        "{:#?}",
+        told.seen
+    );
+    let cursor = |h: &Home| {
+        h.social
+            .store()
+            .social_place(&h.account(), &place)
+            .unwrap()
+            .unwrap()
+            .cursors
+            .live
+    };
+    assert_eq!(cursor(&h), None);
+
+    away.faults().refuse_signatures(false);
+    let later = away.post_as(&dan, &group, &channel, "later").id.to_string();
+    told.until("the message, once it is read", |e| is_new(e, &later))
+        .await;
+    assert_eq!(h.messages(&place).len(), 2);
+    // The cursor is written once the backfill has kept its pages.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while cursor(&h).is_none() {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("it resumes from there");
+    assert!(
+        !told
+            .seen
+            .iter()
+            .any(|e| matches!(e, LiveEvent::Disconnected { .. })),
+        "the session stayed up: {:#?}",
+        told.seen
+    );
 }

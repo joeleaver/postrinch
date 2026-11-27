@@ -317,7 +317,11 @@ when an account is deleted.
   recipient (§7.4), and ids are unique only per provider (§2.2), so one held at the other
   person's provider is stored under its URL there (`https://{provider}/api/dms/{dmId}/messages/{id}`,
   its reply parent likewise); one held at home keeps its id, which home's read marker names.
-  Reactions and edits on messages sent to another provider come from subscribing to the `dmId`
+  The holder is always the recipient's home, the participant who isn't `author`. A page's
+  messages are held by the provider that served it. A copy served by another provider (a
+  live `dm.message`, a `DmConversation.lastMessage` preview) is keyed by the holder derived
+  from its author. A Web Push DM's `messageId` is in the pushing provider's id space, which is
+  the holder's. Reactions and edits on messages sent to another provider come from subscribing to the `dmId`
   there.
 - **Mentions:** the home provider's notifications cover home channels. For every place,
   Postrinch also marks `mentions_me` from the messages it syncs, using the spec's mention

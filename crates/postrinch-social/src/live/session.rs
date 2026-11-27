@@ -61,6 +61,15 @@ impl From<SocialError> for End {
     }
 }
 
+/// Whether `error` ends a session: the account can no longer sign, is
+/// gone, or the socket failed. Anything else fails only what it was for.
+pub(crate) fn ends_session(error: &SocialError) -> bool {
+    matches!(
+        error,
+        SocialError::Unusable { .. } | SocialError::NoAccount(_) | SocialError::Socket(_)
+    )
+}
+
 /// A signed-in connection and what is subscribed on it.
 pub(crate) struct Live<'a> {
     pub cx: &'a Context,
@@ -73,6 +82,8 @@ pub(crate) struct Live<'a> {
     pub revoked: HashSet<LocalId>,
     /// The people whose presence is subscribed on this connection.
     pub watching: BTreeSet<Actor>,
+    /// When to try again the places that could not be backfilled.
+    pub retry_at: Option<Instant>,
 }
 
 /// Run a session until it is stopped or the account can no longer sign.
@@ -182,6 +193,7 @@ impl Context {
             subscribed: BTreeMap::new(),
             revoked: HashSet::new(),
             watching: BTreeSet::new(),
+            retry_at: None,
         };
         if let Err(end) = live.catch_up().await {
             conn.close().await;
@@ -200,6 +212,13 @@ impl Context {
                     Some(Incoming::Closed(reason)) => return self.closed(reason).await,
                     None => return self.closed(conn.close_reason().unwrap_or(CloseReason::Client)).await,
                 },
+                () = sleep_until_some(live.retry_at) => {
+                    live.retry_at = None;
+                    if let Err(error) = live.resubscribe().await {
+                        conn.close().await;
+                        return error.into();
+                    }
+                }
                 cmd = cmds.recv() => {
                     let done = match cmd {
                         Some(SessionCmd::Resubscribe) => live.resubscribe().await.map(drop),
@@ -236,12 +255,12 @@ impl Context {
         if self.is_home() {
             let key_id = Some(self.identity.key_id().to_owned());
             let state = SocialAccountState::NeedsSignIn;
-            let otherwise = SocialError::Unusable {
-                actor: actor.to_string(),
-                state,
-            };
+            let otherwise = SocialError::NoAccount(actor.to_string());
             return match self.social.mark(actor, key_id, state, otherwise).await {
-                Ok(_) => End::Unusable(state),
+                Ok(SocialError::Unusable { state, .. }) => End::Unusable(state),
+                // The account no longer names this key (it signed in
+                // again): this run is over, and the new key's runs on.
+                Ok(_) => End::Stop,
                 Err(error) => End::Retry(error.to_string()),
             };
         }
@@ -260,7 +279,14 @@ impl Live<'_> {
     async fn catch_up(&mut self) -> Result<(), End> {
         if self.cx.is_home() {
             self.refresh().await?;
-            notices::catch_up(self.cx).await?;
+            // The feed is read again on the next connect if this fails.
+            match notices::catch_up(self.cx).await {
+                Err(error) if ends_session(&error) => return Err(error.into()),
+                Err(error) => {
+                    tracing::warn!(provider = %self.cx.authority, %error, "the notification feed was not read");
+                }
+                Ok(()) => {}
+            }
         }
         let backfilled = self.resubscribe().await?;
         self.watch().await?;
@@ -291,5 +317,13 @@ impl Live<'_> {
         });
         let _ = self.cx.control.send(Control::Refreshed);
         Ok(())
+    }
+}
+
+/// Sleep until `at`; forever when it is `None`.
+async fn sleep_until_some(at: Option<Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
     }
 }

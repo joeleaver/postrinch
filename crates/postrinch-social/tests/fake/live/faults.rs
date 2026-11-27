@@ -244,10 +244,8 @@ async fn a_backfilled_conversation_keeps_each_providers_messages_apart() {
 
     go_offline(&h, &mut told).await;
     h.provider.faults().set_replay_limit(Some(0));
-    erin_at_home
-        .send_dm(&dm, &to(&h.ada, "e2", "still there?"))
-        .await
-        .unwrap();
+    let still = to(&h.ada, "e2", "still there?");
+    super::elsewhere(|| erin_at_home.send_dm(&dm, &still)).await;
     let backfilled = come_back(&h, &mut told).await;
     assert_eq!(backfilled, [dm.to_string()]);
 
@@ -265,4 +263,55 @@ async fn a_backfilled_conversation_keeps_each_providers_messages_apart() {
         .collect();
     assert_eq!(mine.len(), 1);
     assert!(mine[0].id.contains(&away.authority().to_string()));
+}
+
+#[tokio::test]
+async fn signing_in_again_while_live_goes_on_with_the_new_key() {
+    let h = home().await;
+    let (bob, group, general) = h.bob_with_group();
+    let (social, mut told) = live(&h, 1).await;
+    let old = social
+        .store()
+        .social_account(&h.account())
+        .unwrap()
+        .unwrap()
+        .key_id
+        .unwrap();
+
+    let account = social.sign_in_again(&h.account(), PASSWORD).await.unwrap();
+    assert_ne!(account.key_id.as_deref(), Some(old.as_str()));
+    told.caught_up(1).await;
+    let posted = h
+        .provider
+        .post_as(&bob, &group, &general, "hi")
+        .id
+        .to_string();
+    told.until("the message", |e| super::is_new(e, &posted))
+        .await;
+    told.settle(std::time::Duration::from_millis(200)).await;
+    assert!(
+        !told
+            .seen
+            .iter()
+            .any(|e| matches!(e, LiveEvent::AccountState { .. })),
+        "the old key's end is not the account's: {:#?}",
+        told.seen
+    );
+    let account = social
+        .store()
+        .social_account(&h.account())
+        .unwrap()
+        .unwrap();
+    assert_eq!(account.state, SocialAccountState::Active);
+    assert_eq!(social.sessions(&h.account()).len(), 1);
+
+    // A wrong password leaves it live with the key it has.
+    assert!(
+        social
+            .sign_in_again(&h.account(), "wrong-password-000")
+            .await
+            .is_err()
+    );
+    told.caught_up(1).await;
+    assert_eq!(social.sessions(&h.account()).len(), 1);
 }

@@ -9,7 +9,7 @@ use postrinch_ofscp::ws::RequestError;
 use postrinch_store::PlaceKind;
 
 use super::backfill::backfill;
-use super::session::Live;
+use super::session::{Live, ends_session};
 use crate::SocialResult;
 use crate::uris::parse_channel_uri;
 
@@ -101,15 +101,31 @@ impl Live<'_> {
                     continue;
                 };
                 if found.cursor.is_none() || truncated.contains(&id) {
-                    to_backfill.push(found.scope.clone());
+                    to_backfill.push((id.clone(), found.scope.clone()));
                 }
                 self.subscribed.insert(id, found.scope.clone());
             }
         }
         let mut backfilled = Vec::new();
-        for scope in to_backfill {
-            backfill(self.cx, &scope).await?;
-            backfilled.push(scope.place().to_owned());
+        for (id, scope) in to_backfill {
+            match backfill(self.cx, &scope).await {
+                Ok(_) => backfilled.push(scope.place().to_owned()),
+                Err(error) if ends_session(&error) => return Err(error),
+                // Left unsubscribed, so live events do not move its cursor
+                // past what is missing; it is tried again from where it was
+                // after the longest backoff (or sooner, on a refresh).
+                Err(error) => {
+                    tracing::warn!(provider = %self.cx.authority, place = %scope.place(), %error, "not backfilled");
+                    self.subscribed.remove(&id);
+                    let wait = self.cx.social.live.options.max_backoff;
+                    self.retry_at
+                        .get_or_insert(tokio::time::Instant::now() + wait);
+                    match self.conn.unsubscribe(vec![id]).await {
+                        Ok(_) | Err(RequestError::Rejected(_)) => {}
+                        Err(error) => return Err(error.into()),
+                    }
+                }
+            }
         }
         Ok(backfilled)
     }

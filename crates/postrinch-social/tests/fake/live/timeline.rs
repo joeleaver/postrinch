@@ -138,6 +138,7 @@ async fn edits_deletes_and_reactions_change_what_is_kept() {
     })
     .await;
     assert_eq!(h.messages(&place)[0].message["content"]["text"], "first");
+    assert!(h.messages(&place)[0].unread, "an edit leaves it unread");
 
     let (conn, _events) = ws::connect(&bob_client, WsOptions::default())
         .await

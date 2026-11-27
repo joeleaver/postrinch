@@ -45,6 +45,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use postrinch_ofscp::ofscp_core::Actor;
 use postrinch_ofscp::ofscp_core::wire::Presence;
 use postrinch_ofscp::ws::WsOptions;
 use postrinch_store::{SocialAccountState, social_account_key};
@@ -250,6 +251,10 @@ impl Social {
     /// Keep `actor`'s account connected until [`Social::go_offline`], or
     /// until it must sign in again. Nothing happens if it is live already.
     /// An account that must sign in again is refused with the reason.
+    ///
+    /// The sessions run on the Tokio runtime and hold the engine: they end
+    /// on [`Social::go_offline`] (or with the runtime), not when the
+    /// caller's `Social` is dropped.
     pub async fn go_live(&self, actor: &str) -> SocialResult<()> {
         let actor = parse_actor(actor)?;
         let key = social_account_key(&actor.to_string());
@@ -288,18 +293,24 @@ impl Social {
 
     /// Close `actor`'s sessions, and wait until they are closed.
     pub async fn go_offline(&self, actor: &str) -> SocialResult<()> {
-        let actor = parse_actor(actor)?;
+        self.stop_live(&parse_actor(actor)?).await;
+        Ok(())
+    }
+
+    /// Stop `actor`'s run and wait for it; whether it was live.
+    pub(crate) async fn stop_live(&self, actor: &Actor) -> bool {
         let running = self
             .live
             .accounts()
             .remove(&social_account_key(&actor.to_string()));
-        if let Some(running) = running {
-            let _ = running.control.send(Control::Stop);
-            if let Err(error) = running.task.await {
-                tracing::warn!(%actor, %error, "a live account's task failed");
-            }
+        let Some(running) = running else {
+            return false;
+        };
+        let _ = running.control.send(Control::Stop);
+        if let Err(error) = running.task.await {
+            tracing::warn!(%actor, %error, "a live account's task failed");
         }
-        Ok(())
+        true
     }
 
     /// Keep every account connected that can be, and from now on each

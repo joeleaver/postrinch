@@ -6,7 +6,7 @@ use postrinch_ofscp::ofscp_core::ws::{Event, TypingState, Unsubscribed};
 use postrinch_ofscp::ofscp_core::{Actor, DmId, LocalId};
 
 use super::apply::{self, Arrival};
-use super::session::{End, Live};
+use super::session::{End, Live, ends_session};
 use super::{LiveEvent, markers, notices};
 use crate::sync::Run;
 use crate::uris::{channel_uri, group_uri};
@@ -21,9 +21,7 @@ impl Live<'_> {
         let kind = event.kind().to_owned();
         match self.dispatch(event).await {
             Ok(()) => Ok(()),
-            Err(SocialError::Unusable { state, .. }) => Err(End::Unusable(state)),
-            Err(SocialError::NoAccount(_)) => Err(End::Stop),
-            Err(SocialError::Socket(error)) => Err(End::Retry(error.to_string())),
+            Err(error) if ends_session(&error) => Err(error.into()),
             Err(error) => {
                 tracing::warn!(provider = %self.cx.authority, event = %kind, %error, "an event was not kept");
                 Ok(())

@@ -117,9 +117,23 @@ impl Social {
     /// it. The account is active again; sync it next. While
     /// [`Social::keep_connected`] is on, it goes live again.
     pub async fn sign_in_again(&self, actor: &str, password: &str) -> SocialResult<SocialAccount> {
-        let account = self.sign_in_again_held(actor, password).await?;
-        self.live_if_kept(&account.actor).await;
-        Ok(account)
+        // A run still live signs with the key about to be replaced: stop
+        // it first (before the account's lock, which its refreshes take),
+        // and start it again with the new key.
+        // If signing in fails, the old key is still the account's, and
+        // the run starts again with it.
+        let parsed = parse_actor(actor)?;
+        let was_live = self.stop_live(&parsed).await;
+        let signed_in = self.sign_in_again_held(actor, password).await;
+        let name = parsed.to_string();
+        if was_live {
+            if let Err(error) = self.go_live(&name).await {
+                tracing::warn!(actor = %name, %error, "not connected again");
+            }
+        } else if signed_in.is_ok() {
+            self.live_if_kept(&name).await;
+        }
+        signed_in
     }
 
     async fn sign_in_again_held(&self, actor: &str, password: &str) -> SocialResult<SocialAccount> {

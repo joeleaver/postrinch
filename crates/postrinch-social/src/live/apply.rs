@@ -5,12 +5,14 @@
 //! changes nothing is a duplicate, and is neither written nor told.
 
 use postrinch_ofscp::ofscp_core::wire::{Message, Reaction, Timestamp};
-use postrinch_store::{SocialMessage, SocialPlace, Store, StoreResult, social_account_key};
+use postrinch_store::{
+    PlaceKind, SocialMessage, SocialPlace, Store, StoreResult, social_account_key,
+};
 
 use super::session::Context;
 use super::{LiveEvent, MessageChange};
 use crate::SocialResult;
-use crate::sync::message::{Held, Kept, Reader, keep};
+use crate::sync::message::{Held, Kept, Reader, dm_holder, keep};
 
 /// What a message event is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,7 +49,7 @@ pub(crate) async fn message(
                 host: &host,
             };
             let held = Held {
-                holder: host.clone(),
+                holder: holder_in(&kept_place, &message.author).unwrap_or_else(|| host.clone()),
                 message,
                 reactions: Vec::new(),
             };
@@ -62,9 +64,11 @@ pub(crate) async fn message(
             if existing.is_none() && is_new_unread(store, &kept_place, &held.message, &actor)? {
                 kept.message.unread = true;
             }
-            // Events carry no reactions: those kept stay.
+            // Events carry no reactions: those kept stay, as does whether
+            // it is read.
             if let Some(existing) = &existing {
                 kept.message.reactions = existing.reactions.clone();
+                kept.message.unread = existing.unread;
             }
             let told = write(store, existing.as_ref(), &kept)?;
             advance(store, &kept_place, cursor, Some(kept.message.created))?;
@@ -247,6 +251,21 @@ fn is_new_unread(
         .social_message(&place.account, &place.id, marker)?
         .map(|m| m.created);
     Ok(read_up_to.is_none_or(|read| message.created_at.as_millisecond() > read))
+}
+
+/// Who holds a message `author` wrote in `place`, where that is not the
+/// provider it arrived from: in a conversation, the recipient's home
+/// (§7.4), whichever provider sent the copy. `None` for a channel, whose
+/// host holds it, and for a conversation kept without its participants.
+fn holder_in(
+    place: &SocialPlace,
+    author: &postrinch_ofscp::ofscp_core::Actor,
+) -> Option<postrinch_ofscp::ofscp_core::Authority> {
+    if place.kind != PlaceKind::Conversation {
+        return None;
+    }
+    let conversation = serde_json::from_value(place.object.clone()).ok()?;
+    dm_holder(&conversation, author)
 }
 
 /// The wire message a kept one holds.
