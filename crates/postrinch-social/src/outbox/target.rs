@@ -58,6 +58,18 @@ impl Target {
         }
     }
 
+    /// The provider that will hold a message sent here, when it is not
+    /// home: what an upload for it names as its `target` (§5.8 *Target*).
+    /// A channel's host; in a conversation, the other person's provider,
+    /// which keeps the messages sent to them (§7.4).
+    pub(crate) fn upload_target(&self, home: &Authority) -> Option<Authority> {
+        let holder = match self {
+            Self::Channel(at) => &at.authority,
+            Self::Conversation { other, .. } => other.domain(),
+        };
+        (holder != home).then(|| holder.clone())
+    }
+
     /// The message kept here as `kept`, at the provider holding it: in a
     /// channel, its host; in a conversation, home for a bare id, and the
     /// provider its URL names for one held at the other person's

@@ -17,6 +17,8 @@ base64 = "0.22"
 # "Postrinch on {hostname}", the name a device key is registered under.
 gethostname = "1"
 serde = { workspace = true }
+# Checking fetched media against its `sha-256` hash, and naming its blob.
+sha2 = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }

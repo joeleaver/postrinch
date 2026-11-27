@@ -105,6 +105,15 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
+    /// A media URL that cannot be fetched (§5.8: attachment URLs are
+    /// `https`).
+    #[error("cannot fetch {url:?}: {reason}")]
+    MediaUrl {
+        /// The URL.
+        url: String,
+        /// Why.
+        reason: &'static str,
+    },
     /// An upload that cannot be sent as given.
     #[error("cannot upload this: {0}")]
     InvalidUpload(&'static str),

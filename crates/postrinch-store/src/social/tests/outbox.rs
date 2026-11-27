@@ -141,3 +141,74 @@ fn the_persons_own_message_is_never_kept_unread() {
             .unread
     );
 }
+
+#[test]
+fn an_uploaded_file_is_kept_with_the_change_and_it_can_still_be_taken_back() {
+    let (_dir, store) = ada_with_general();
+    let picture = DraftMedia::File {
+        path: "/home/ada/cat.png".into(),
+        mime: None,
+    };
+    let change = SocialChange::Post(SocialPost {
+        kind: ContentKind::Article,
+        reply_to: None,
+        content: SocialContent {
+            body: "a cat".into(),
+            cover: Some(picture.clone()),
+            attachments: vec![picture.clone()],
+            ..SocialContent::default()
+        },
+    });
+    store
+        .queue_social_change(ADA, "c1", Some(GENERAL), &change, 1)
+        .unwrap();
+    assert_eq!(picture.file_name().as_deref(), Some("cat.png"));
+    assert_eq!(picture.mime(), "image/png");
+
+    // A failed upload says why, but is no attempt: nothing was sent.
+    let failed = store
+        .social_change_not_uploaded(ADA, "c1", "the connection broke")
+        .unwrap()
+        .unwrap();
+    assert_eq!(failed.error.as_deref(), Some("the connection broke"));
+    assert_eq!((failed.tried, failed.attempts), (false, 0));
+
+    let attachment = serde_json::json!({
+        "id": "att_1", "mime": "image/png", "url": "https://groups.example/m/1", "size": 3
+    });
+    let entry = store
+        .social_change_uploaded(ADA, "c1", &picture, serde_json::json!({ "old": true }), 5)
+        .unwrap()
+        .unwrap();
+    // Uploaded again, the newer upload replaces the older.
+    let entry_again = store
+        .social_change_uploaded(ADA, "c1", &picture, attachment.clone(), 10)
+        .unwrap()
+        .unwrap();
+    assert_eq!(entry.uploads.len(), 1);
+    assert_eq!(entry_again.uploads.len(), 1);
+    // The change keeps the file as picked; it is sent as uploaded while
+    // the upload is fresh enough.
+    assert_eq!(entry_again.change, change);
+    let uploaded = DraftMedia::Uploaded { attachment };
+    assert!(entry_again.uploaded_since(&picture, 10).is_some());
+    assert!(entry_again.uploaded_since(&picture, 11).is_none());
+    let SocialChange::Post(post) = entry_again.change_uploaded_since(10) else {
+        panic!("a post");
+    };
+    assert_eq!(post.content.cover.as_ref(), Some(&uploaded));
+    assert_eq!(post.content.attachments, [uploaded]);
+    assert_eq!(entry_again.change_uploaded_since(11), change);
+    assert_eq!(store.social_outbox(ADA).unwrap(), [entry_again]);
+
+    assert_eq!(
+        store.take_back_social_change(ADA, "c1").unwrap(),
+        TakeBack::Taken
+    );
+    assert_eq!(
+        store
+            .social_change_uploaded(ADA, "c1", &picture, serde_json::json!({}), 20)
+            .unwrap(),
+        None
+    );
+}

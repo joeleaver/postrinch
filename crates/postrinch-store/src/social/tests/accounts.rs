@@ -158,6 +158,7 @@ pub(super) fn media(account: &str, id: &str) -> SocialMedia {
         url: format!("https://cdn.example/{id}"),
         blob: None,
         fetched: None,
+        used: None,
         mime: Some("image/png".into()),
         size: Some(10),
         width: Some(2),

@@ -1,9 +1,12 @@
 //! OFSCP accounts from the command line, for development (docs/ofscp.md,
 //! "Crates": `add-ofscp`, `ofscp sync`): add one, list them, sign one in
-//! again, sync, and sign out and remove.
+//! again, sync, send what is queued, fetch an avatar, and sign out and
+//! remove.
+
+use std::path::PathBuf;
 
 use clap::Subcommand;
-use postrinch_social::{Added, Revocation, Social, Synced};
+use postrinch_social::{Added, LiveEvent, Revocation, Sent, Social, Synced};
 use postrinch_store::{SocialAccount, SocialAccountState};
 
 use crate::add_imap::Passwords;
@@ -24,6 +27,18 @@ pub enum OfscpCommand {
     /// Sync one account, or every account not waiting to sign in: its groups, channels,
     /// conversations and each one's newest page.
     Sync { actor: Option<String> },
+    /// Send what an account has queued: its posts' files uploaded first,
+    /// each upload's progress shown as it goes.
+    Send { actor: String },
+    /// Fetch a user's avatar, as an account sees it, into a file. Served
+    /// from the media cache while it is fresh.
+    Avatar {
+        actor: String,
+        /// The user whose avatar it is (handle@domain).
+        user: String,
+        /// Where to write it.
+        out: PathBuf,
+    },
     /// Sign an account out of this computer (its device key revoked) and
     /// remove everything stored for it.
     Remove { actor: String },
@@ -70,6 +85,8 @@ pub async fn run(
             Ok(())
         }
         OfscpCommand::Sync { actor } => sync(social, actor.as_deref()).await,
+        OfscpCommand::Send { actor } => send(social, &actor).await,
+        OfscpCommand::Avatar { actor, user, out } => avatar(social, &actor, &user, &out).await,
         OfscpCommand::Remove { actor } => {
             let removed = social.remove(&actor).await?;
             match removed.revocation {
@@ -139,6 +156,70 @@ async fn sync(social: &Social, only: Option<&str>) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+/// One pass over `actor`'s outbox, telling each upload's progress on
+/// standard error as each tenth of it goes.
+async fn send(social: &Social, actor: &str) -> Result<()> {
+    let mut events = social.live_events();
+    let progress = tokio::spawn(async move {
+        let mut shown: Option<(String, u64)> = None;
+        while let Ok(event) = events.recv().await {
+            let LiveEvent::Uploading(upload) = event else {
+                continue;
+            };
+            let tenth = (upload.sent * 10).checked_div(upload.total).unwrap_or(10);
+            let at = (format!("{}/{}", upload.client_id, upload.file), tenth);
+            if shown.as_ref() != Some(&at) {
+                eprintln!(
+                    "uploading {} ({} of {}): {}%",
+                    upload.name,
+                    upload.file + 1,
+                    upload.files,
+                    tenth * 10
+                );
+                shown = Some(at);
+            }
+        }
+    });
+    let sent = social.send_outbox(actor).await;
+    progress.abort();
+    let sent = sent?;
+    println!("{actor}: {}", sent_summary(&sent));
+    Ok(())
+}
+
+fn sent_summary(sent: &Sent) -> String {
+    format!(
+        "{} sent, {} to try again, {} refused, {} waiting for files",
+        sent.sent, sent.failed, sent.refused, sent.waiting
+    )
+}
+
+/// Write `user`'s avatar, as `actor`'s account sees it, to `out`.
+async fn avatar(social: &Social, actor: &str, user: &str, out: &std::path::Path) -> Result<()> {
+    let Some(avatar) = social.fetch_avatar(actor, user).await? else {
+        println!("{user} has no avatar.");
+        return Ok(());
+    };
+    std::fs::write(out, &avatar.bytes)?;
+    println!(
+        "{} bytes{} to {}{}",
+        avatar.bytes.len(),
+        avatar
+            .media
+            .mime
+            .as_deref()
+            .map(|m| format!(" ({m})"))
+            .unwrap_or_default(),
+        out.display(),
+        if avatar.from_cache {
+            ", from the cache"
+        } else {
+            ""
+        }
+    );
+    Ok(())
 }
 
 fn state(state: SocialAccountState) -> &'static str {

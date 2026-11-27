@@ -142,30 +142,3 @@ async fn the_outbox_survives_a_restart() {
     assert_eq!(at_provider.len(), 1);
     assert_eq!(kept_sent(&h, &place, "c1").id, at_provider[0].id.as_str());
 }
-
-#[tokio::test]
-async fn a_post_with_a_file_not_yet_uploaded_waits_untried() {
-    let h = home().await;
-    let (_bob, group, channel) = h.bob_with_group();
-    let place = channel_uri(&h.provider, &group, &channel);
-    h.add().await;
-
-    let mut post = chat("with a picture", None);
-    if let postrinch_store::SocialChange::Post(p) = &mut post {
-        p.content
-            .attachments
-            .push(postrinch_store::DraftMedia::File {
-                path: "/tmp/picture.png".into(),
-                mime: Some("image/png".into()),
-            });
-    }
-    queue(&h, "c1", &place, &post);
-    queue(&h, "c2", &place, &chat("after it", None));
-    let sent = send(&h).await;
-    assert_eq!((sent.sent, sent.waiting), (0, 1));
-    // Untried, so it may still be taken back; what follows it waits.
-    let waiting = outbox(&h);
-    assert_eq!(waiting.len(), 2);
-    assert!(!waiting[0].tried && !waiting[1].tried);
-    assert!(h.provider.messages(&group, &channel).is_empty());
-}

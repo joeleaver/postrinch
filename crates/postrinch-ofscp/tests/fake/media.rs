@@ -1,4 +1,5 @@
-//! Media upload (§5.8): progress, a cut-off body, the size limit.
+//! Media (§5.8): uploads with progress, a cut-off body, the size limit,
+//! and fetching an upload back by its URL.
 
 use std::sync::{Arc, Mutex};
 
@@ -53,4 +54,44 @@ async fn an_upload_over_the_limit_is_refused() {
         panic!("too large");
     };
     assert_eq!(problem.status, 413);
+}
+
+#[tokio::test]
+async fn an_upload_is_fetched_back_unsigned_by_its_url() {
+    let w = world().await;
+    let upload = picture(20_000);
+    let attachment = w.alice.upload(&upload, None).await.expect("an upload");
+    let transport = crate::common::transport();
+    let fetched = transport
+        .fetch_media(&attachment.url, 20_000)
+        .await
+        .expect("a fetch");
+    let expected: Vec<u8> = (0..20_000).map(|i| (i % 251) as u8).collect();
+    assert_eq!(fetched.bytes, expected);
+    assert_eq!(fetched.mime.as_deref(), Some("image/png"));
+    let served = w
+        .provider
+        .requests()
+        .into_iter()
+        .find(|r| r.method == "GET" && r.path.starts_with("/media/"))
+        .expect("the fetch reached the provider");
+    assert_eq!(served.header("signature"), None);
+
+    // Larger than asked for, gone, or not https: each refused.
+    let too_large = transport.fetch_media(&attachment.url, 19_999).await;
+    assert!(
+        matches!(too_large, Err(Error::TooLarge { .. })),
+        "{too_large:?}"
+    );
+    let gone = format!("{}/media/0000/a.png", w.provider.base_url());
+    let Err(Error::Problem(problem)) = transport.fetch_media(&gone, 100).await else {
+        panic!("no such file");
+    };
+    assert_eq!(problem.status, 404);
+    let plain = attachment.url.replacen("https:", "http:", 1);
+    let refused = transport.fetch_media(&plain, 100).await;
+    assert!(
+        matches!(refused, Err(Error::MediaUrl { .. })),
+        "{refused:?}"
+    );
 }

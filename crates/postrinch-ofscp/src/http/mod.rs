@@ -8,7 +8,9 @@
 //! decoded from problem details (§2.6) and acted on by its effective code.
 //! A `503` is retried with a fresh signature (§4.5); a `401` whose `Date`
 //! shows this machine's clock is off is signed once more on the provider's
-//! time. Redirects are never followed.
+//! time. Redirects are never followed, but by a media fetch
+//! ([`Transport::fetch_media`](crate::Transport::fetch_media)), which is
+//! not an OFSCP endpoint.
 //!
 //! Not covered, on purpose: calls (§9, a later wave), web push and webhook
 //! endpoints (§10, for browsers and servers), guest accounts (§4.8) and
@@ -17,6 +19,7 @@
 mod auth;
 mod directory;
 mod dms;
+pub(crate) mod fetch;
 mod groups;
 mod me;
 mod media;
@@ -36,6 +39,7 @@ use reqwest::Method;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+pub use fetch::FetchedMedia;
 pub use media::MediaUpload;
 pub use membership::JoinOutcome;
 pub use messages::Posted;

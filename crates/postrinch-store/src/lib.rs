@@ -66,7 +66,8 @@ type KeptStats = HashMap<String, (u64, HashMap<String, LabelStats>)>;
 
 const SCHEMA: &str = include_str!("schema.rhype");
 
-/// The store: one rhypedb database and one blob directory under a root.
+/// The store: one rhypedb database and two blob directories under a root:
+/// one for what must be kept, one for the social media cache.
 ///
 /// Cheap to clone; clones share the open database. Every method is a
 /// complete operation the caller can retry: none leaves the store in a
@@ -75,6 +76,11 @@ const SCHEMA: &str = include_str!("schema.rhype");
 pub struct Store {
     db: Arc<Database>,
     blobs: blobs::Blobs,
+    /// The social media cache: fetched pictures, videos and files, kept
+    /// up to a size and evicted least recently used first
+    /// (social/media_cache.rs). Only [`SocialMedia`] records refer to its
+    /// blobs, so it is apart from `blobs`, whose blobs are never evicted.
+    media_cache: blobs::Blobs,
     root: PathBuf,
     /// Held while an outbox entry takes the next sequence number.
     outbox_lock: Arc<Mutex<()>>,
@@ -150,8 +156,8 @@ impl Store {
 
     /// Delete raw messages no stored message refers to any more (after a
     /// message or an account is removed), attachments no queued mail
-    /// refers to, and social media bytes no attachment, draft or queued
-    /// social change refers to.
+    /// refers to, pictures no social draft or queued social change refers
+    /// to, and cached social media no attachment refers to.
     /// Blobs written in the last `grace` are kept, for writers still
     /// between storing a blob and what refers to it. Returns how many were
     /// deleted.
@@ -167,10 +173,15 @@ impl Store {
         for outgoing in self.outgoing()? {
             referenced.extend(outgoing.draft.attachments.into_iter().map(|a| a.blob));
         }
-        referenced.extend(self.social_media_blobs()?);
         referenced.extend(self.social_draft_blobs()?);
         referenced.extend(self.social_outbox_blobs()?);
-        Ok(self.blobs.retain(|hash| referenced.contains(hash), grace)?)
+        let kept = self.blobs.retain(|hash| referenced.contains(hash), grace)?;
+        let cached: std::collections::HashSet<String> =
+            self.social_media_blobs()?.into_iter().collect();
+        let uncached = self
+            .media_cache
+            .retain(|hash| cached.contains(hash), grace)?;
+        Ok(kept + uncached)
     }
 }
 
