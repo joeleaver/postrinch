@@ -312,3 +312,35 @@ fn a_view_naming_whole_groups_is_marked_by_them_alone() {
     }];
     assert_eq!(names(&of_rust), ["Rust Audio"]);
 }
+
+#[test]
+fn built_in_views_have_no_tabs() {
+    let places = [
+        conversation("mira@forumall.example"),
+        conversation("ada@forumall.example"),
+    ];
+    assert!(!shows_tabs(&built_in(BuiltInView::Messages), &places));
+    assert!(!shows_tabs(&built_in(BuiltInView::Mentions), &places));
+}
+
+#[test]
+fn a_tab_stays_chosen_only_while_it_is_one_of_the_views_tabs() {
+    let places = [
+        channel(RUST, "Rust Audio", "general", json!({})),
+        channel(RUST, "Rust Audio", "standup", json!({})),
+    ];
+    let general = crate::social_ui::place_ref(&places[0]);
+    let stream = own(ReadAs::Stream);
+    assert_eq!(chosen_tab(&stream, &places, None), None);
+    assert_eq!(
+        chosen_tab(&stream, &places, Some(&general)),
+        Some(general.clone())
+    );
+    // Taken out of the view: back to All.
+    assert_eq!(chosen_tab(&stream, &places[1..], Some(&general)), None);
+    // Read as a list, the view has no tabs.
+    assert_eq!(
+        chosen_tab(&own(ReadAs::List), &places, Some(&general)),
+        None
+    );
+}

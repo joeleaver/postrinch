@@ -177,7 +177,7 @@ pub fn places_field(__scope: &mut RenderScope, state: State) -> NodeHandle {
                 }
                 div { class: "social-offers",
                     for offer in offered.get() {
-                        div { key: format!("{:?}", offer.chosen),
+                        div { key: format!("{offer:?}"),
                             {offer_row(__scope, state, offer.clone())}
                         }
                     }
@@ -300,15 +300,19 @@ pub const CSS: &str = r#"
 .social-chips { display: flex; flex-wrap: wrap; gap: 6px; border: 1px solid var(--field); border-radius: 6px; padding: 6px; }
 .social-chip-slot { display: contents; }
 .social-chip {
-    display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+    display: flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0;
     padding: 2px 4px 2px 8px; border: 0; border-radius: 12px;
     background: var(--hover); color: var(--ink); font: inherit; font-size: 12.5px;
 }
-.social-chip small { color: var(--faint); font-size: 11px; }
+.social-chip > span, .social-chip-x { flex-shrink: 0; }
+.social-chip small {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--faint); font-size: 11px;
+}
 .social-chip.add { padding: 2px 8px; background: transparent; color: var(--accent); cursor: pointer; }
 .social-chip .rinch-dropdown-menu, .social-chip .rinch-dropdown-menu__target { display: flex; }
 .social-notices {
-    padding: 0 2px; border: 0; border-radius: 4px; background: transparent;
+    padding: 0 2px; border: 0; border-radius: 4px; background: transparent; white-space: nowrap; flex-shrink: 0;
     color: var(--faint); font: inherit; font-size: 11px; cursor: pointer;
 }
 .social-notices:hover { background: var(--field); color: var(--ink-2); }

@@ -17,7 +17,7 @@ use rinch::{Effect, untracked};
 use crate::loader::Request;
 use crate::social_edit::SocialEdit;
 use crate::social_load::Ask;
-use crate::social_shown::GroupMark;
+use crate::social_shown::{GroupMark, chosen_tab};
 use crate::state::{State, View};
 
 /// Social mode's signals. `Copy`, like the window's state.
@@ -86,11 +86,20 @@ impl SocialUi {
         })
     }
 
+    /// The open view's chosen tab, while it is still one of its tabs
+    /// (`None` is "All"): a saved change, a sync or reading it as a list
+    /// can take the place or the tabs away.
+    pub fn open_tab(self) -> Option<PlaceRef> {
+        let entry = self.open_entry()?;
+        let places = self.open_places();
+        self.tab.with(|t| chosen_tab(&entry, &places, t.as_ref()))
+    }
+
     /// The place the header is about: the tab chosen, or a view's only
     /// place.
     pub fn shown_place(self) -> Option<SocialPlaceInfo> {
         let places = self.open_places();
-        match self.tab.get() {
+        match self.open_tab() {
             Some(tab) => places.into_iter().find(|p| is_place(p, &tab)),
             None if places.len() == 1 => places.into_iter().next(),
             None => None,

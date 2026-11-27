@@ -52,7 +52,15 @@ pub fn social_head(state: State) -> NodeHandle {
                 {all_tab(__scope, state)}
                 for place in places.get() {
                     div {
-                        key: format!("{}|{}|{}|{:?}", place.place.account, place.place.id, place.name, place.group_name),
+                        // Keyed on all the tab says but its count, which follows in place.
+                        key: format!(
+                            "{}|{}|{}|{:?}|{}",
+                            place.place.account,
+                            place.place.id,
+                            place.name,
+                            place.group_name,
+                            place_glyph(place)
+                        ),
                         class: "social-tab-slot",
                         {tab(__scope, state, place.clone(), places)}
                     }
@@ -64,7 +72,7 @@ pub fn social_head(state: State) -> NodeHandle {
 
 /// "All": every place of the view, merged.
 fn all_tab(__scope: &mut RenderScope, state: State) -> NodeHandle {
-    let on = Memo::new(move || state.social.tab.with(Option::is_none));
+    let on = Memo::new(move || state.social.open_tab().is_none());
     rsx! {
         button {
             class: {move || if on.get() { "social-tab on" } else { "social-tab" }},
@@ -86,7 +94,7 @@ fn tab(
 ) -> NodeHandle {
     let r = place_ref(&place);
     let chosen = r.clone();
-    let on = Memo::new(move || state.social.tab.with(|t| t.as_ref() == Some(&chosen)));
+    let on = Memo::new(move || state.social.open_tab().as_ref() == Some(&chosen));
     let counted = r.clone();
     let unread = Memo::new(move || {
         places

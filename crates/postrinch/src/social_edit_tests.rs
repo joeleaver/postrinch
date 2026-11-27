@@ -138,3 +138,33 @@ fn filters_narrow_only_views_that_show_messages() {
     });
     assert!(!edit.filters_apply());
 }
+
+#[test]
+fn save_asks_for_a_name_closes_when_nothing_changed_and_else_writes() {
+    let mut new = SocialEdit::new_view();
+    assert_eq!(new.save_step(), SaveStep::NeedsName);
+    new.toggle_kind(ContentKind::Chat);
+    assert_eq!(new.save_step(), SaveStep::NeedsName);
+    new.draft.name = "Spec work".into();
+    assert_eq!(new.save_step(), SaveStep::Write);
+    let mut mine = SocialEdit::of(&own("Rust Audio"));
+    assert_eq!(mine.save_step(), SaveStep::Close);
+    mine.draft.name = "  ".into();
+    assert_eq!(mine.save_step(), SaveStep::NeedsName);
+    mine.draft.name = "Rust".into();
+    assert_eq!(mine.save_step(), SaveStep::Write);
+}
+
+#[test]
+fn a_built_in_view_put_back_opens_on_its_original_and_a_persons_own_has_none() {
+    let mut changed = home();
+    changed.view.read_as = ReadAs::Stream;
+    let mut edit = SocialEdit::of(&changed);
+    edit.error = Some("trouble".into());
+    let back = edit.put_back().unwrap();
+    assert_eq!(back.draft, BuiltInView::Home.original());
+    assert!(!back.changed());
+    assert_eq!(back.error, None);
+    assert_eq!(back.removal(), None);
+    assert_eq!(SocialEdit::of(&own("v")).put_back(), None);
+}

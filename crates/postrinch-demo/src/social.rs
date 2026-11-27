@@ -1,6 +1,6 @@
 //! The demo person's social account, after the Social mockup: Sam on
-//! forumall.app, a member of Rust Audio and Book club there, of OFSCP Spec
-//! on ofscp.dev and of Synth Makers on sonic.example, with private
+//! forumall.example, a member of Rust Audio and Book club there, of OFSCP Spec
+//! on ofscp.example and of Synth Makers on sonic.example, with private
 //! conversations with Mira, Ada and Tomás; a few unread messages in each,
 //! two that mention Sam; and Sam's own views (Rust Audio, Spec work, Long
 //! reads, Book club). Kept as sync keeps them, so the window's Social mode
@@ -18,11 +18,11 @@ use serde_json::{Value, json};
 use crate::DemoResult;
 
 /// The demo person's social account.
-pub const SAM: &str = "sam@forumall.app";
+pub const SAM: &str = "sam@forumall.example";
 
-const RUST: &str = "https://forumall.app/api/groups/rust-audio";
-const BOOKS: &str = "https://forumall.app/api/groups/book-club";
-const SPEC: &str = "https://ofscp.dev/api/groups/spec";
+const RUST: &str = "https://forumall.example/api/groups/rust-audio";
+const BOOKS: &str = "https://forumall.example/api/groups/book-club";
+const SPEC: &str = "https://ofscp.example/api/groups/spec";
 const SYNTH: &str = "https://sonic.example/api/groups/synth-makers";
 
 /// What a channel is for, which its glyph shows.
@@ -107,8 +107,8 @@ struct MessageSpec {
     text: &'static str,
 }
 
-const MIRA: &str = "mira@forumall.app";
-const ADA: &str = "ada@ofscp.dev";
+const MIRA: &str = "mira@forumall.example";
+const ADA: &str = "ada@ofscp.example";
 const TOMAS: &str = "tomas@sonic.example";
 
 /// Places are named here by group and channel ("rust/general") or by

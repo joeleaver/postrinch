@@ -5,7 +5,7 @@
 //! commands give, so they are tested without a window.
 
 use postrinch_commands::{BuiltInView, SocialPlaceInfo, SocialViewEntry, SocialViewTally};
-use postrinch_store::{ContentKind, Notices, PlaceKind, ReadAs};
+use postrinch_store::{ContentKind, Notices, PlaceKind, PlaceRef, ReadAs};
 
 use crate::ui::account_color;
 
@@ -194,10 +194,23 @@ pub fn account_domain(actor: &str) -> String {
         .to_ascii_lowercase()
 }
 
-/// Whether a view's header shows its places as tabs: a view read as a
-/// stream, with more than one place.
+/// Whether a view's header shows its places as tabs: one of the person's
+/// own views, read as a stream, with more than one place. Built-in views
+/// gather from everywhere (Messages, Mentions), so they have no tabs.
 pub fn shows_tabs(entry: &SocialViewEntry, places: &[SocialPlaceInfo]) -> bool {
-    entry.view.read_as == ReadAs::Stream && places.len() > 1
+    entry.built_in.is_none() && entry.view.read_as == ReadAs::Stream && places.len() > 1
+}
+
+/// The tab chosen, while it still is one: the view shows tabs and the
+/// place is still among its places. Else "All".
+pub fn chosen_tab(
+    entry: &SocialViewEntry,
+    places: &[SocialPlaceInfo],
+    tab: Option<&PlaceRef>,
+) -> Option<PlaceRef> {
+    let tab = tab?;
+    (shows_tabs(entry, places) && places.iter().any(|p| crate::social_ui::is_place(p, tab)))
+        .then(|| tab.clone())
 }
 
 /// Whether a view's tabs say which group each place is in: when its

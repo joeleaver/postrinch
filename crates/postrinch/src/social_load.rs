@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use postrinch_commands::{CommandResult, Commands};
+use postrinch_commands::{CommandError, Commands};
 
 use crate::social_shown::marking_groups;
 use crate::social_ui::Choices;
@@ -20,22 +20,39 @@ pub struct Ask {
     pub panel: bool,
 }
 
-/// Load what `ask` wants into the window's signals.
+/// Load what `ask` wants into the window's signals. What loads is shown
+/// even where some of it fails: a view whose places or count cannot be
+/// read shows without them, and the first failure is said.
 pub fn answer(commands: &Commands, state: State, ask: Ask) {
-    if let Err(e) = load(commands, state, ask) {
-        state.error.send(Some(e.to_string()));
-    }
-}
-
-fn load(commands: &Commands, state: State, ask: Ask) -> CommandResult<()> {
-    let views = commands.social_views()?;
+    let mut trouble: Option<String> = None;
+    let mut note = |e: CommandError| {
+        trouble.get_or_insert_with(|| e.to_string());
+    };
+    let views = match commands.social_views() {
+        Ok(views) => views,
+        Err(e) => {
+            state.error.send(Some(e.to_string()));
+            return;
+        }
+    };
     let mut tallies = HashMap::new();
     let mut groups = HashMap::new();
     let mut open_places = Vec::new();
     for entry in &views {
         let id = entry.view.id.clone();
-        let places = commands.social_view_places(&id)?;
-        tallies.insert(id.clone(), commands.social_view_tally(&id)?);
+        match commands.social_view_tally(&id) {
+            Ok(tally) => {
+                tallies.insert(id.clone(), tally);
+            }
+            Err(e) => note(e),
+        }
+        let places = match commands.social_view_places(&id) {
+            Ok(places) => places,
+            Err(e) => {
+                note(e);
+                continue;
+            }
+        };
         groups.insert(id.clone(), marking_groups(entry, &places));
         if id == ask.open {
             open_places = places;
@@ -47,10 +64,17 @@ fn load(commands: &Commands, state: State, ask: Ask) -> CommandResult<()> {
     state.social.tallies.send(tallies);
     state.social.groups.send(groups);
     if ask.panel {
-        state.social.choices.send(Choices {
-            groups: commands.social_groups()?,
-            places: commands.social_places()?,
-        });
+        match commands.social_groups().and_then(|groups| {
+            Ok(Choices {
+                groups,
+                places: commands.social_places()?,
+            })
+        }) {
+            Ok(choices) => state.social.choices.send(choices),
+            Err(e) => note(e),
+        }
     }
-    Ok(())
+    if let Some(trouble) = trouble {
+        state.error.send(Some(trouble));
+    }
 }

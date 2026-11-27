@@ -7,8 +7,11 @@ use postrinch_commands::{HOME, SocialPlaceInfo};
 use postrinch_store::{GroupRef, Notices, PlaceRef};
 use rinch::batch;
 
-use crate::social_edit::{Removal, SocialEdit};
+use crate::social_edit::{Removal, SaveStep, SocialEdit};
 use crate::state::State;
+
+/// Said in the panel when Save is asked of a view with no name.
+const NEEDS_NAME: &str = "Give the view a name to save it.";
 
 impl State {
     /// Open a view, on All. An open panel closes without saving, as
@@ -80,10 +83,16 @@ impl State {
         let Some(edit) = self.social.edit.get() else {
             return;
         };
-        // Nothing changed: nothing to write, so Save just closes the panel.
-        if !edit.changed() {
-            self.social.edit.set(None);
-            return;
+        match edit.save_step() {
+            SaveStep::NeedsName => {
+                self.change_error(NEEDS_NAME.to_owned());
+                return;
+            }
+            SaveStep::Close => {
+                self.social.edit.set(None);
+                return;
+            }
+            SaveStep::Write => {}
         }
         let Some(commands) = crate::actions::commands() else {
             return;
@@ -117,14 +126,8 @@ impl State {
             return;
         }
         batch(|| {
-            match (removal, &edit.original) {
-                (Removal::PutBack, Some(original)) => {
-                    let mut back = edit.clone();
-                    back.before = original.clone();
-                    back.draft = original.clone();
-                    back.error = None;
-                    self.social.edit.set(Some(back));
-                }
+            match (removal, edit.put_back()) {
+                (Removal::PutBack, Some(back)) => self.social.edit.set(Some(back)),
                 _ => {
                     self.social.edit.set(None);
                     if self.social.open.get() == id {

@@ -77,6 +77,31 @@ impl SocialEdit {
         !self.draft.name.trim().is_empty()
     }
 
+    /// What Save does with the panel as it is: refuse a view with no
+    /// name, close a panel with nothing changed, else write the view.
+    pub fn save_step(&self) -> SaveStep {
+        if !self.can_save() {
+            SaveStep::NeedsName
+        } else if !self.changed() {
+            SaveStep::Close
+        } else {
+            SaveStep::Write
+        }
+    }
+
+    /// The panel once its built-in view is put back as it first was: open
+    /// on the original, nothing changed. `None` for a view of the
+    /// person's own, whose panel closes once it is deleted.
+    pub fn put_back(&self) -> Option<SocialEdit> {
+        let original = self.original.as_ref()?;
+        Some(SocialEdit {
+            before: original.clone(),
+            draft: original.clone(),
+            error: None,
+            ..self.clone()
+        })
+    }
+
     /// What the left button of the panel's foot does, if anything: delete
     /// one of the person's views, or put a built-in one back as it first
     /// was (nothing when it is as it first was, or not made yet).
@@ -185,3 +210,14 @@ fn same_group(a: &GroupRef, b: &GroupRef) -> bool {
 #[cfg(test)]
 #[path = "social_edit_tests.rs"]
 mod tests;
+
+/// What Save does (see [`SocialEdit::save_step`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveStep {
+    /// The view has no name: say so, and keep the panel open.
+    NeedsName,
+    /// Nothing changed: close the panel, writing nothing.
+    Close,
+    /// Write the view.
+    Write,
+}
