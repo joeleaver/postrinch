@@ -5,8 +5,8 @@
 //! the pointer calls go to the signer's home. Not here, for want of a type
 //! in ofscp-core: the role change and display-name `PATCH`es (no request
 //! body type), and the join request's optional `{ message }` body
-//! (re-ofscp#43). The spec gives the join-request list no shape; it is
-//! read as paged per §7.2, like the member list (re-ofscp#43).
+//! (re-ofscp#43). The pending join requests are listed paged per §7.2,
+//! newest first (re-ofscp#43).
 
 use ofscp_core::wire::{
     GroupPointer, GroupPointerRequest, GroupPointersResponse, JoinRequest, Member, Paged,

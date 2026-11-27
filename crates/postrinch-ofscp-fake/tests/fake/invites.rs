@@ -273,3 +273,49 @@ async fn a_request_is_not_approved_once_the_group_is_invite_only() {
     let r = erin.send(&p, Method::POST, &join, None).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
 }
+
+/// The ids of a listing walked backward `limit` at a time, page by page.
+async fn walk(p: &FakeProvider, by: &User, path: &str, limit: u32) -> Vec<Vec<String>> {
+    let mut pages = Vec::new();
+    let mut target = format!("{path}?limit={limit}");
+    loop {
+        let r = by.send(p, Method::GET, &target, None).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+        let ids = r.json["items"].as_array().unwrap().iter();
+        pages.push(ids.map(|i| i["id"].as_str().unwrap().to_owned()).collect());
+        match r.json["page"]["nextCursor"].as_str() {
+            Some(next) => target = format!("{path}?limit={limit}&cursor={next}"),
+            None => return pages,
+        }
+    }
+}
+
+#[tokio::test]
+async fn invites_and_requests_list_newest_first_across_pages() {
+    let p = FakeProvider::start().await.unwrap();
+    let (alice, _, group, _) = team(&p);
+    for _ in 0..3 {
+        invite(&p, &alice, &group, json!({})).await;
+    }
+    let mut made = p.invites(&group);
+    made.sort_by(|a, b| (b.created_at, &b.id).cmp(&(a.created_at, &a.id)));
+    let newest_first: Vec<String> = made.iter().map(|i| i.id.as_str().to_owned()).collect();
+    let path = format!("/api/groups/{}/invites", group.as_str());
+    let pages = walk(&p, &alice, &path, 2).await;
+    assert_eq!(pages.len(), 2);
+    assert_eq!(pages.concat(), newest_first);
+
+    p.configure_group(&group, |g| {
+        g.tier = ofscp_core::wire::Tier::Public;
+        g.join_policy = JoinPolicy::Request;
+    });
+    let join = format!("/api/groups/{}/join", group.as_str());
+    for handle in ["carol", "dan", "erin"] {
+        user(&p, handle).send(&p, Method::POST, &join, None).await;
+    }
+    let mut asked = p.join_requests(&group);
+    asked.sort_by(|a, b| (b.requested_at, &b.id).cmp(&(a.requested_at, &a.id)));
+    let newest_first: Vec<String> = asked.iter().map(|r| r.id.as_str().to_owned()).collect();
+    let path = format!("/api/groups/{}/requests", group.as_str());
+    assert_eq!(walk(&p, &alice, &path, 2).await.concat(), newest_first);
+}

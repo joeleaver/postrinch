@@ -62,12 +62,15 @@ async fn list(
     let gid = id(&raw)?;
     let state = inner.state.lock().unwrap();
     let g = overseen(&state, &gid, &actor)?;
-    let list: Vec<JoinRequest> = g
+    // Pending only, oldest first by `requestedAt` and then id
+    // (re-ofscp#43), so paging backward gives the newest first.
+    let mut list: Vec<JoinRequest> = g
         .requests
         .iter()
         .filter(|r| r.state == JoinRequestState::Pending)
         .cloned()
         .collect();
+    list.sort_by(|a, b| (a.requested_at, &a.id).cmp(&(b.requested_at, &b.id)));
     ok(&paging::page(
         &list,
         &page_query(&params, 50),

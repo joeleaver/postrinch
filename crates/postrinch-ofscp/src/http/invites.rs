@@ -2,8 +2,7 @@
 //! listed and revoked by its managers, and redeemed by anyone holding the
 //! token.
 //!
-//! The spec gives the invite list no shape; it is read as paged per §7.2,
-//! like the member list (re-ofscp#43).
+//! The invite list is paged per §7.2, newest first (re-ofscp#43).
 
 use ofscp_core::LocalId;
 use ofscp_core::wire::{

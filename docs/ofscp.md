@@ -389,8 +389,8 @@ when an account is deleted.
   channel followed without joining is kept as `Followed`, so All channels can name it and
   offer Join. Neither has a session of its own. Making, listing and revoking invites and
   answering requests ask the group's provider and keep nothing. The invite and request lists
-  are read as paged lists (§7.2), and a join is sent without a message, until the spec says
-  otherwise (re-ofscp#43).
+  are paged per §7.2, newest first (re-ofscp#43, settled 2026-11-27). A join's optional
+  `message` goes once ofscp-core has its `JoinCreate` type.
 
 ### Agents (MCP)
 

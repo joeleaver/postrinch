@@ -131,12 +131,15 @@ async fn list_invites(
     let gid = id(&raw)?;
     let state = inner.state.lock().unwrap();
     managed(&state, &gid, &actor)?;
-    let list: Vec<Invite> = state
+    // Oldest first, by `createdAt` and then id (re-ofscp#43), so paging
+    // backward gives the newest first.
+    let mut list: Vec<Invite> = state
         .invites
         .values()
         .filter(|r| r.invite.group_id == gid)
         .map(|r| r.invite.clone())
         .collect();
+    list.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
     ok(&paging::page(
         &list,
         &page_query(&params, 50),

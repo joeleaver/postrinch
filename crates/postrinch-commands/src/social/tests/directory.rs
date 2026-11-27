@@ -53,7 +53,13 @@ fn all_channels_lists_every_group_and_where_the_account_stands() {
     let loose_group = "https://loose.example/api/groups/g9";
     assert_eq!(
         names,
-        ["Far group", "Home group", "Asks first", loose_group, "Open house"],
+        [
+            "Far group",
+            "Home group",
+            "Asks first",
+            loose_group,
+            "Open house"
+        ],
         "the account's own groups first, then by name"
     );
     let by = |uri: &str| groups.iter().find(|g| g.uri == uri).unwrap();
@@ -81,10 +87,17 @@ fn all_channels_lists_every_group_and_where_the_account_stands() {
             policy: Some("open".into())
         }
     );
-    let blog: Vec<&str> = by(FOLLOWED).channels.iter().map(|c| c.name.as_str()).collect();
+    let blog: Vec<&str> = by(FOLLOWED)
+        .channels
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
     assert_eq!(blog, ["blog"]);
     let unknown = by(loose_group);
-    assert_eq!(unknown.standing, SocialGroupStanding::Outside { policy: None });
+    assert_eq!(
+        unknown.standing,
+        SocialGroupStanding::Outside { policy: None }
+    );
     assert!(unknown.group.is_none());
     assert_eq!(unknown.channels[0].place.id, LOOSE);
     // The conversation is not a channel.
