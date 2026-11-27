@@ -162,5 +162,10 @@ async fn a_key_fetch_the_outbound_rules_refuse_is_403() {
     };
     let r = stranger.send(&p, Method::GET, "/api/me", None).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.json);
-    assert!(r.json["detail"].as_str().unwrap().contains("outbound-request rules"));
+    assert!(
+        r.json["detail"]
+            .as_str()
+            .unwrap()
+            .contains("outbound-request rules")
+    );
 }
