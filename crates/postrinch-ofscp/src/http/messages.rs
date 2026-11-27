@@ -1,12 +1,11 @@
 //! Channel messages over REST: history and replies (§7.2), create, edit
 //! and delete (§7.1), and reactions (§7.1 *Reactions*), on the channel's
 //! host provider.
-//!
-//! Not here: `PUT …/reactions/{key}`, whose answer the spec leaves
-//! unspecified. Over a live connection, `reaction.add` does the same.
 
 use ofscp_core::LocalId;
-use ofscp_core::wire::{Message, MessageCreate, MessageUpdate, MessagesPage, Paged, Reaction};
+use ofscp_core::wire::{
+    Message, MessageCreate, MessageUpdate, MessagesPage, Paged, Reaction, ReactionPut,
+};
 use reqwest::Method;
 
 use super::path::{PageRequest, Query, path};
@@ -167,6 +166,25 @@ impl Client {
             message_path(group_id, channel_id, message_id)
         );
         self.get(path, page.query()).await
+    }
+
+    /// Add the signer's reaction `key` to a message (§7.1 *Reactions*,
+    /// `PUT …/reactions/{key}`), shown as `looks` says. Idempotent: a
+    /// repeat answers the reaction already held, unchanged.
+    pub async fn put_reaction(
+        &self,
+        group_id: &LocalId,
+        channel_id: &LocalId,
+        message_id: &LocalId,
+        key: &str,
+        looks: &ReactionPut,
+    ) -> Result<Reaction> {
+        let path = format!(
+            "{}{}",
+            message_path(group_id, channel_id, message_id),
+            path("/reactions/{}", &[key])
+        );
+        self.send_json(Method::PUT, path, looks).await
     }
 
     /// Take back the signer's reaction `key` on a message (§7.1

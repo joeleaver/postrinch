@@ -188,3 +188,56 @@ async fn a_key_fetch_the_outbound_rules_refuse_is_403() {
             .contains("outbound-request rules")
     );
 }
+
+#[tokio::test]
+async fn a_dm_reply_names_the_provider_holding_its_parent() {
+    let a = FakeProvider::start().await.unwrap();
+    let b = FakeProvider::start().await.unwrap();
+    let alice = user(&a, "alice");
+    let bob = user(&b, "bob");
+    let dm = DmId::derive(&alice.actor, &bob.actor);
+    let path = format!("/api/federation/dms/{}/messages", dm.as_str());
+    let reply = |client_id: &str, parent: &str, provider: Option<String>| {
+        let mut body = dm_body(client_id, &alice.actor, "an answer");
+        body["reference"] = json!({"type": "reply", "id": parent});
+        // Absent when held here: `null` is refused.
+        if let Some(provider) = provider {
+            body["reference"]["provider"] = json!(provider);
+        }
+        body
+    };
+
+    // Held at Bob's home, whose existence Alice's cannot check: taken.
+    let at_b = Some(b.authority().to_string());
+    let r = bob
+        .send(&a, Method::POST, &path, Some(&reply("d-1", "msg_9", at_b)))
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    assert_eq!(r.json["reference"]["provider"], b.authority().to_string());
+    // Held here, it must be in the conversation.
+    let r = bob
+        .send(&a, Method::POST, &path, Some(&reply("d-2", "msg_9", None)))
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.json);
+    // A provider neither participant lives on is refused...
+    let nowhere = Some("nowhere.example".to_owned());
+    let r = bob
+        .send(
+            &a,
+            Method::POST,
+            &path,
+            Some(&reply("d-3", "msg_9", nowhere.clone())),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.json);
+    // ...but only after the duplicate lookup: a repeat is answered.
+    let r = bob
+        .send(
+            &a,
+            Method::POST,
+            &path,
+            Some(&reply("d-1", "msg_9", nowhere)),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+}

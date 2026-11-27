@@ -78,7 +78,7 @@ async fn gate(State(inner): State<Arc<Inner>>, request: Request, next: Next) -> 
     let kill = parts.extensions.get::<ConnKill>().cloned();
     let nonce = header_str(&parts.headers, signing_headers::NONCE).map(str::to_owned);
 
-    let (authentication, response) = match read_body(&inner, body, upload, kill).await {
+    let (authentication, response) = match read_body(&inner, body, upload, kill.clone()).await {
         Err(problem) => (Authentication::Unsigned, problem.into_response()),
         Ok(bytes) => {
             let (authentication, caller) = authenticate(&inner, &parts, &bytes).await;
@@ -94,6 +94,13 @@ async fn gate(State(inner): State<Arc<Inner>>, request: Request, next: Next) -> 
         }
     };
     let mut response = response;
+    // Carried out, but never answered: the connection goes instead.
+    let drop = matches!(authentication, Authentication::Verified { .. })
+        && inner
+            .faults
+            .lock()
+            .unwrap()
+            .take_drop_answer(&method, &path);
     let date = httpdate::fmt_http_date(inner.clock.system_now());
     if let Ok(date) = HeaderValue::from_str(&date) {
         response.headers_mut().insert(header::DATE, date);
@@ -116,6 +123,10 @@ async fn gate(State(inner): State<Arc<Inner>>, request: Request, next: Next) -> 
         authentication,
         status: response.status().as_u16(),
     });
+    if drop && let Some(kill) = &kill {
+        kill.kill();
+        std::future::pending::<()>().await;
+    }
     response
 }
 

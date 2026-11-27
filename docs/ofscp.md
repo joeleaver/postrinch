@@ -275,7 +275,7 @@ when an account is deleted.
 | `SocialMedia` | acct + provider + attachment id | URL, blob hash, fetched | mime, size, width, height, duration, poster |
 | `SocialDraft` | draft id | account, place, updated | kind, title, Markdown body, tags, cover, attachments (local files and uploaded ones) |
 | `SocialNotification` | acct + id | account, created, read | the notification |
-| `SocialOutbox` | acct + client id | account, place, seq | the change (post, reply, edit, delete, react, read marker, follow, DM pointer, group pointer, profile), attempts, last error |
+| `SocialOutbox` | acct + client id | account, place, seq | the change (post, reply, edit, delete, react, read marker, follow, DM pointer, group pointer, profile), whether tried, attempts, last error, whether refused |
 
 - Messages stay small (mail's rule, and the same guard test). Media bytes live in the blob
   store.
@@ -308,12 +308,36 @@ when an account is deleted.
   account has sessions with, and forgotten when a session ends.
 - **Writes are idempotent** (upserts by id).
 - **The outbox:**
-  - Sends in order, per place.
-  - Survives dropped sockets and restarts.
-  - Matches a sent message to the provider's copy by `clientMessageId`.
-  - Media is uploaded before the message that carries it.
+  - Sends in order, per place. A change that fails for now (the provider can't be reached,
+    a `5xx`, a `429`, a `401` from a provider other than home) is tried again with backoff,
+    no sooner than a `Retry-After`. The changes after it in its place wait; other places
+    go on.
+  - A change refused for good (another `4xx`) is kept with the reason, for the person to
+    give up. It isn't tried again and holds nothing back.
+  - Survives dropped sockets and restarts: the queue is in the store. A change is marked
+    tried before its request goes, and every request is signed afresh. A live account
+    sends when it goes live, when told there's more, after each session catches up, and on
+    its backoff timer.
+  - Matches a sent message to the provider's copy by `clientMessageId`. A repeat is answered
+    `200` with the first copy, and keeping a copy (the answer, or one arriving on a socket,
+    a sync or a backfill first) settles the queued post. Whichever write settles it tells
+    `LiveEvent::Sent`, so a post is told sent once. The other changes are idempotent by nature: an edit sets
+    the same content, a repeated delete or reaction removal succeeds, a repeated reaction is
+    answered unchanged.
+  - What the provider answers is kept as live events are: the sent or edited message, the
+    tombstone, the message's reactions read again in full. A change the provider has is
+    done even when reading back fails: the next live event or sync reads it again.
+  - A read marker is sent only for a place home keeps markers for: a home channel, or a
+    conversation up to a message home holds. A follow names a home channel by local id and
+    any other by URI; an unfollow names the ref exactly as home lists it.
+  - Media is uploaded before the message that carries it (PR 11). Until then a change
+    carrying a file not yet uploaded waits, untried.
+  - Notices settings and the profile are queued but not sent yet (rows 14 and 22).
 - **Private messages:** sending goes to the recipient's provider, then the pointer is written
-  at home. Reading merges both providers by `createdAt`. Each message lives only with its
+  at home (best effort). A reply whose parent is held by the other side names that provider
+  in `reference.provider`, as parents are keyed by (provider, id); one held by the
+  recipient's provider leaves it out. Edits and deletes go to the provider holding the
+  message by its federation path, reactions to its `/api/dms` path. Reading merges both providers by `createdAt`. Each message lives only with its
   recipient (§7.4), and ids are unique only per provider (§2.2), so one held at the other
   person's provider is stored under its URL there (`https://{provider}/api/dms/{dmId}/messages/{id}`,
   its reply parent likewise); one held at home keeps its id, which home's read marker names.

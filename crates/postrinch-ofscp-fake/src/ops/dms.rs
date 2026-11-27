@@ -3,8 +3,8 @@
 
 use jiff::Timestamp;
 use ofscp_core::wire::{
-    ConversationPointer, DmConversation, DmMessageCreate, Message, MessagePermissions, MessageType,
-    MessageUpdate, Reaction, ReferenceKind,
+    ConversationPointer, DmConversation, DmMessageCreate, Message, MessagePermissions,
+    MessageReference, MessageType, MessageUpdate, Reaction, ReferenceKind,
 };
 use ofscp_core::ws::{DmConversationEvent, DmMessage, DmReaction, Event, ReactionState};
 use ofscp_core::{Actor, DmId, LocalId};
@@ -66,15 +66,7 @@ pub(crate) fn send(
         return Ok(Made::Existing(existing.message.clone()));
     }
     if let Some(r) = &body.reference {
-        let parent_here = state
-            .dms
-            .get(dm)
-            .is_some_and(|d| d.timeline.get(&r.id).is_some());
-        if r.kind != ReferenceKind::Reply || !parent_here {
-            return Err(Problem::bad_request(
-                "the parent is not a message in this conversation",
-            ));
-        }
+        check_reply(inner, &state, dm, [author, &recipient], r)?;
     }
     let attachments = attach::check(
         &state,
@@ -150,6 +142,46 @@ pub(crate) fn send(
         );
     }
     Ok(Made::New(message))
+}
+
+/// The reply checks of §7.4 *Replies*, made only for a new message (after
+/// the duplicate lookup). A parent held here (`provider` absent or this
+/// provider) must be a message of the conversation; one held elsewhere
+/// must be on a participant's home provider, and is not looked for.
+fn check_reply(
+    inner: &Inner,
+    state: &State,
+    dm: &DmId,
+    participants: [&Actor; 2],
+    reference: &MessageReference,
+) -> Outcome<()> {
+    if reference.kind != ReferenceKind::Reply {
+        return Err(Problem::bad_request("reference.type must be reply"));
+    }
+    match &reference.provider {
+        Some(provider) if *provider != inner.authority => {
+            if participants.iter().any(|p| p.domain() == provider) {
+                Ok(())
+            } else {
+                Err(Problem::bad_request(
+                    "reference.provider is neither participant's home provider",
+                ))
+            }
+        }
+        _ => {
+            let parent_here = state
+                .dms
+                .get(dm)
+                .is_some_and(|d| d.timeline.get(&reference.id).is_some());
+            if parent_here {
+                Ok(())
+            } else {
+                Err(Problem::bad_request(
+                    "the parent is not a message in this conversation",
+                ))
+            }
+        }
+    }
 }
 
 /// The inbox owner here: the local participant that is not `actor`, or

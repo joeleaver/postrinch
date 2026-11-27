@@ -14,6 +14,7 @@ use postrinch_ofscp::http::{Client, Direction, PageRequest};
 use postrinch_ofscp::ofscp_core::wire::MessagesPage;
 use postrinch_store::social_account_key;
 
+use super::apply;
 use super::session::Context;
 use super::subscribe::Scope;
 use super::{LiveEvent, MessageChange};
@@ -132,7 +133,7 @@ async fn fetch(
 
 /// Keep a page; how many of its messages were new. Each new one is told.
 async fn keep_page(cx: &Context, had: &HashSet<String>, page: Vec<Kept>) -> SocialResult<usize> {
-    let told: Vec<LiveEvent> = page
+    let mut told: Vec<LiveEvent> = page
         .iter()
         .filter(|k| !had.contains(&k.message.id))
         .map(|k| LiveEvent::Message {
@@ -145,12 +146,14 @@ async fn keep_page(cx: &Context, had: &HashSet<String>, page: Vec<Kept>) -> Soci
         })
         .collect();
     let (account, place) = (cx.actor(), page.first().map(|k| k.message.place.clone()));
-    cx.social
+    let sent = cx
+        .social
         .blocking(move |store| {
-            let mut newest = None;
+            let (mut newest, mut sent) = (None, Vec::new());
             for k in &page {
                 // Reactions come with the page (§7.2), so they are fresh.
-                store.put_social_message(&k.message, &k.search_text)?;
+                let put = store.put_social_message(&k.message, &k.search_text)?;
+                sent.extend(apply::sent(&k.message, &put));
                 newest = newest.max(Some(k.message.created));
             }
             if let Some(place) = place {
@@ -158,10 +161,11 @@ async fn keep_page(cx: &Context, had: &HashSet<String>, page: Vec<Kept>) -> Soci
                     p.last_activity = p.last_activity.max(newest);
                 })?;
             }
-            Ok(())
+            Ok(sent)
         })
         .await?;
     let count = told.len();
+    told.extend(sent);
     for event in told {
         cx.tell(event);
     }

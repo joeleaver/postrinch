@@ -25,7 +25,12 @@ fn a_message_reads_back_as_it_was_kept() {
         mine: true,
     }];
     kept.mentions_me = true;
-    assert!(store.put_social_message(&kept, "hello ada").unwrap());
+    assert!(
+        store
+            .put_social_message(&kept, "hello ada")
+            .unwrap()
+            .changed
+    );
     let read = store.social_message(ADA, GENERAL, "m2").unwrap().unwrap();
     assert_eq!(
         read,
@@ -35,15 +40,21 @@ fn a_message_reads_back_as_it_was_kept() {
         }
     );
     // A replayed event changes nothing; an edit does.
-    assert!(!store.put_social_message(&kept, "hello ada").unwrap());
+    assert!(
+        !store
+            .put_social_message(&kept, "hello ada")
+            .unwrap()
+            .changed
+    );
     assert!(
         store
             .put_social_message(&kept, "hello ada, edited")
             .unwrap()
+            .changed
     );
     let mut edited = kept.clone();
     edited.message = json!({ "id": "m2", "content": { "text": "edited" } });
-    assert!(store.put_social_message(&edited, "edited").unwrap());
+    assert!(store.put_social_message(&edited, "edited").unwrap().changed);
     let read = store.social_message(ADA, GENERAL, "m2").unwrap().unwrap();
     assert_eq!(read.message, edited.message);
     assert_eq!(store.db.count_type(CONTENT).unwrap(), 1);
@@ -223,7 +234,7 @@ fn an_interrupted_put_is_not_read_and_its_repeat_finishes_it() {
             .unwrap()
             .is_empty()
     );
-    assert!(store.put_social_message(&kept, "m1").unwrap());
+    assert!(store.put_social_message(&kept, "m1").unwrap().changed);
     assert_eq!(
         store.social_message(ADA, GENERAL, "m1").unwrap(),
         Some(kept)
@@ -242,10 +253,10 @@ fn an_edit_arriving_never_makes_a_read_message_unread() {
         count: 1,
         mine: false,
     }];
-    assert!(store.put_social_message(&kept, "m1").unwrap());
+    assert!(store.put_social_message(&kept, "m1").unwrap().changed);
     let read = store.social_message(ADA, GENERAL, "m1").unwrap().unwrap();
     assert!(!read.unread);
     assert_eq!(read.reactions, kept.reactions);
     // Unchanged but for `unread`: nothing to write.
-    assert!(!store.put_social_message(&kept, "m1").unwrap());
+    assert!(!store.put_social_message(&kept, "m1").unwrap().changed);
 }

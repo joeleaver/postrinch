@@ -37,6 +37,7 @@ impl Store {
                 tried: false,
                 attempts: 0,
                 error: None,
+                refused: false,
             };
             self.write_social_change(&key, &entry)?;
             Ok(entry)
@@ -124,21 +125,22 @@ impl Store {
 
     /// Forget a queued post that sync has kept as `place`'s message: its
     /// provider has it. Called with the social lock held, as the message
-    /// is written.
+    /// is written. Returns whether a post was queued there.
     pub(super) fn settle_social_post(
         &self,
         account: &str,
         place: &str,
         client_id: &str,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<bool> {
         let key = scoped(account, client_id);
         if let Some(entry) = self.social_record::<SocialOutboxEntry>(OUTBOX, KEY, &key)?
             && matches!(entry.change, SocialChange::Post(_))
             && entry.place.as_deref() == Some(place)
         {
             self.social_remove(OUTBOX, KEY, &key)?;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
     /// Record an attempt to send a queued change that failed, and why.
@@ -157,6 +159,30 @@ impl Store {
             };
             entry.attempts += 1;
             entry.error = Some(error.to_owned());
+            self.write_social_change(&key, &entry)?;
+            Ok(Some(entry))
+        })
+    }
+
+    /// Record that the provider refused a queued change for good, and why:
+    /// it is kept, for the person to see and give up, but not tried
+    /// again. Returns the entry as it is now, or `None` when it is not
+    /// queued.
+    pub fn social_change_refused(
+        &self,
+        account: &str,
+        client_id: &str,
+        error: &str,
+    ) -> StoreResult<Option<SocialOutboxEntry>> {
+        let key = scoped(account, client_id);
+        self.social_locked(|| {
+            let Some(mut entry) = self.social_record::<SocialOutboxEntry>(OUTBOX, KEY, &key)?
+            else {
+                return Ok(None);
+            };
+            entry.attempts += 1;
+            entry.error = Some(error.to_owned());
+            entry.refused = true;
             self.write_social_change(&key, &entry)?;
             Ok(Some(entry))
         })

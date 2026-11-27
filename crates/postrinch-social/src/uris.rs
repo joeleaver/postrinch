@@ -21,6 +21,18 @@ pub(crate) fn dm_message_url(authority: &Authority, dm: &str, message: &str) -> 
     format!("https://{authority}/api/dms/{dm}/messages/{message}")
 }
 
+/// The provider holding a private message kept under its URL there, with
+/// the message's id ([`dm_message_url`] read back); `None` for anything
+/// else, such as a message kept under its bare id.
+pub(crate) fn parse_dm_message_url(url: &str) -> Option<(Authority, LocalId)> {
+    let rest = url.strip_prefix("https://")?;
+    let (authority, path) = rest.split_once('/')?;
+    let path = path.strip_prefix("api/dms/")?;
+    let (_dm, message) = path.split_once("/messages/")?;
+    let authority = Authority::canonicalize(authority).ok()?;
+    Some((authority, LocalId::new(message).ok()?))
+}
+
 /// The provider and id of a group's object URI; `None` for a URI that is
 /// not one.
 pub(crate) fn parse_group(uri: &ObjectUri) -> Option<(Authority, LocalId)> {
@@ -116,6 +128,16 @@ mod tests {
         assert_eq!((at.authority, at.channel), (a, id("chn_2")));
         assert_eq!(parse_channel_uri(&group), None);
         assert_eq!(parse_channel_uri("not a uri"), None);
+    }
+
+    #[test]
+    fn a_private_message_url_reads_back() {
+        let a = authority("a.example:8443");
+        let url = dm_message_url(&a, "dm_1", "msg_2");
+        assert_eq!(parse_dm_message_url(&url), Some((a, id("msg_2"))));
+        assert_eq!(parse_dm_message_url("msg_2"), None);
+        let channel = "https://a.example/api/groups/g/channels/c";
+        assert_eq!(parse_dm_message_url(channel), None);
     }
 
     #[test]

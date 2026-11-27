@@ -150,6 +150,34 @@ impl User {
         content_type: Option<&str>,
         tweak: Tweak,
     ) -> Reply {
+        self.try_send_raw(to, method, target, body, content_type, tweak)
+            .await
+            .expect("an answer")
+    }
+
+    /// A signed JSON request to `to` that may get no answer.
+    pub async fn try_send(
+        &self,
+        to: &FakeProvider,
+        method: Method,
+        target: &str,
+        body: &Value,
+    ) -> reqwest::Result<Reply> {
+        let bytes = serde_json::to_vec(body).unwrap();
+        let json = Some("application/json");
+        self.try_send_raw(to, method, target, bytes, json, Tweak::default())
+            .await
+    }
+
+    async fn try_send_raw(
+        &self,
+        to: &FakeProvider,
+        method: Method,
+        target: &str,
+        body: Vec<u8>,
+        content_type: Option<&str>,
+        tweak: Tweak,
+    ) -> reqwest::Result<Reply> {
         let signed_body = tweak.signed_body.clone().unwrap_or_else(|| body.clone());
         let headers = self.sign(
             &to.authority(),
@@ -168,7 +196,7 @@ impl User {
         for (name, value) in headers {
             request = request.header(name, value);
         }
-        reply(request.send().await.unwrap()).await
+        Ok(reply(request.send().await?).await)
     }
 }
 

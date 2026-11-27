@@ -28,10 +28,11 @@
 //! for every place, as the first sync does.
 //!
 //! What changes is told on [`Social::live_events`], for the window's
-//! notices and counts.
+//! notices and counts. A live account also sends its outbox
+//! ([`crate::outbox`]).
 
 mod account;
-mod apply;
+pub(crate) mod apply;
 mod backfill;
 mod events;
 pub(crate) mod markers;
@@ -153,6 +154,22 @@ pub enum LiveEvent {
         place: String,
         user: String,
         typing: bool,
+    },
+    /// A queued change reached its provider, and left the outbox.
+    Sent {
+        account: String,
+        client_id: String,
+        place: Option<String>,
+    },
+    /// A queued change was not sent: it is tried again later, or, when
+    /// `refused`, its provider refused it for good and it waits for the
+    /// person to give it up.
+    NotSent {
+        account: String,
+        client_id: String,
+        place: Option<String>,
+        error: String,
+        refused: bool,
     },
     /// The account can no longer connect: it must sign in again, or set
     /// its clock right.

@@ -215,3 +215,65 @@ async fn notification_settings_are_served_as_seeded() {
         json!({"prefs": [{"scopeType": "group", "scopeId": group.as_str(), "mode": "mentions"}]})
     );
 }
+
+#[tokio::test]
+async fn a_message_posted_over_rest_is_made_once_per_client_id() {
+    let p = FakeProvider::start().await.unwrap();
+    let alice = user(&p, "alice");
+    let group = p.create_group(&alice.actor, "Team");
+    let channel = p.create_channel(&group, "general");
+    let parent = p.post_as(&alice.actor, &group, &channel, "a question");
+    let path = format!("/api/groups/{group}/channels/{channel}/messages");
+    let body = |client_id: &str, provider: &str| {
+        json!({
+            "clientMessageId": client_id,
+            "content": {"text": "an answer", "mime": "text/markdown"},
+            "reference": {"type": "reply", "id": parent.id.as_str(), "provider": provider},
+        })
+    };
+    let own = p.authority().to_string();
+    let r = alice
+        .send(&p, Method::POST, &path, Some(&body("c1", &own)))
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    let id = r.json["id"].clone();
+    assert_eq!(r.json["clientMessageId"], "c1");
+
+    // A repeat is found before anything else is checked (§7.1): even one
+    // whose reference would now be refused.
+    let elsewhere = "elsewhere.example";
+    let r = alice
+        .send(&p, Method::POST, &path, Some(&body("c1", elsewhere)))
+        .await;
+    assert_eq!((r.status, &r.json["id"]), (StatusCode::OK, &id));
+    // A new message's parent is held by the channel's provider.
+    let r = alice
+        .send(&p, Method::POST, &path, Some(&body("c2", elsewhere)))
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.json);
+    assert_eq!(p.messages(&group, &channel).len(), 2);
+}
+
+#[tokio::test]
+async fn a_dropped_answer_leaves_the_request_carried_out() {
+    let p = FakeProvider::start().await.unwrap();
+    let alice = user(&p, "alice");
+    let group = p.create_group(&alice.actor, "Team");
+    let channel = p.create_channel(&group, "general");
+    let path = format!("/api/groups/{group}/channels/{channel}/messages");
+    let body = json!({
+        "clientMessageId": "c1",
+        "content": {"text": "hello", "mime": "text/markdown"},
+    });
+    p.faults().drop_answers("POST", "/messages", 1);
+    let lost = alice.try_send(&p, Method::POST, &path, &body).await;
+    assert!(lost.is_err(), "no answer");
+    assert_eq!(p.messages(&group, &channel).len(), 1);
+    // Once only: the retry is answered, with the message already made.
+    let r = alice
+        .try_send(&p, Method::POST, &path, &body)
+        .await
+        .unwrap();
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(p.messages(&group, &channel).len(), 1);
+}

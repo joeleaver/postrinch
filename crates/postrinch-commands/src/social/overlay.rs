@@ -23,6 +23,9 @@ pub struct SocialPending {
     pub attempts: u32,
     /// Why the last attempt failed; `None` while none has.
     pub error: Option<String>,
+    /// Whether its provider refused it for good: it is not tried again,
+    /// and waits to be given up.
+    pub refused: bool,
     /// What a pending post or edit says, its pictures and files still to
     /// upload among them: the message shows what has been uploaded.
     pub content: Option<SocialContent>,
@@ -34,6 +37,7 @@ impl SocialPending {
             client_id: entry.client_id.clone(),
             attempts: entry.attempts,
             error: entry.error.clone(),
+            refused: entry.refused,
             content,
         }
     }

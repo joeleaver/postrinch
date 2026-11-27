@@ -1,48 +1,67 @@
-//! Live timeline events kept: messages, edits, deletes and reactions.
+//! Messages kept as a provider gives them: live timeline events (new
+//! messages, edits, deletes and reactions), and the outbox's answers.
 //!
 //! Delivery is at least once (§7.1), and a resume may replay what already
 //! arrived, so every write is checked against what is kept: an event that
 //! changes nothing is a duplicate, and is neither written nor told.
 
-use postrinch_ofscp::ofscp_core::wire::{Message, Reaction, Timestamp};
+use postrinch_ofscp::http::{Direction, PageRequest};
+use postrinch_ofscp::ofscp_core::wire::{Message, Paged, Reaction, Timestamp};
 use postrinch_ofscp::ofscp_core::{Actor, Authority};
 use postrinch_store::{
-    PlaceKind, SocialMessage, SocialPlace, Store, StoreResult, social_account_key,
+    MessagePut, PlaceKind, SocialMessage, SocialPlace, Store, StoreResult, social_account_key,
 };
 
-use super::session::Context;
 use super::{LiveEvent, MessageChange};
-use crate::SocialResult;
 use crate::sync::message::{Held, Kept, Reader, dm_holder, keep};
+use crate::{Social, SocialResult};
+
+/// Who keeps a provider's messages: the engine, the account, and the
+/// provider hosting the place (home, for a conversation).
+pub(crate) struct Keeper<'a> {
+    pub social: &'a Social,
+    pub actor: &'a Actor,
+    pub host: &'a Authority,
+}
+
+impl Keeper<'_> {
+    fn tell(&self, event: LiveEvent) {
+        self.social.live.tell(event);
+    }
+}
 
 /// What a message event is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Arrival {
     /// `message.created`, or a private message (`dm.message` is sent for
-    /// new, edited and deleted messages alike, §7.4): kept whether or not
-    /// it is here already.
+    /// new, edited and deleted messages alike, §7.4), or the provider's
+    /// answer to a send or an edit: kept whether or not it is here
+    /// already.
     Any,
     /// `message.updated`: an edit of a message that is not kept (older
     /// than what is here) waits for scrolling back to it.
     IfKept,
 }
 
-/// Keep `message`, which arrived live in `place` with `cursor`.
+/// Keep `message`, which arrived in `place` with `cursor`. When it is the
+/// copy of a post of the account's still queued, keeping it settles the
+/// post, which is told as sent ([`sent`]): its copy may arrive on a socket
+/// before the provider's answer.
 pub(crate) async fn message(
-    cx: &Context,
+    k: &Keeper<'_>,
     place: String,
     message: Message,
     cursor: Option<String>,
     arrival: Arrival,
 ) -> SocialResult<()> {
-    let actor = cx.identity.actor().clone();
-    let host = cx.authority.clone();
-    let told = cx
+    let actor = k.actor.clone();
+    let host = k.host.clone();
+    let told = k
         .social
         .blocking(move |store| {
             let account = actor.to_string();
             let Some(kept_place) = store.social_place(&account, &place)? else {
-                return Ok(None);
+                return Ok(Vec::new());
             };
             let reader = Reader {
                 account: &actor,
@@ -61,7 +80,7 @@ pub(crate) async fn message(
             let existing = store.social_message(&account, &place, &kept.message.id)?;
             if existing.is_none() && arrival == Arrival::IfKept {
                 advance(store, &kept_place, cursor, None)?;
-                return Ok(None);
+                return Ok(Vec::new());
             }
             if existing.is_none() && is_new_unread(store, &kept_place, &held.message, &actor)? {
                 kept.message.unread = true;
@@ -77,39 +96,51 @@ pub(crate) async fn message(
             Ok(told)
         })
         .await?;
-    if let Some(event) = told {
-        cx.tell(event);
+    for event in told {
+        k.tell(event);
     }
     Ok(())
 }
 
-/// Make the kept message `id` in `place` a tombstone (§7.1 `message.deleted`).
+/// What keeping `message` tells besides the message itself: that it sent
+/// the account's queued post it is the copy of, if it settled one. Every
+/// write of a message tells it, so a post is told sent exactly once,
+/// however its copy arrived (an answer, a socket, a sync or a backfill).
+pub(crate) fn sent(message: &SocialMessage, put: &MessagePut) -> Option<LiveEvent> {
+    put.settled.clone().map(|client_id| LiveEvent::Sent {
+        account: message.account.clone(),
+        client_id,
+        place: Some(message.place.clone()),
+    })
+}
+
+/// Make the kept message `id` in `place` a tombstone deleted at
+/// `deleted_at` (§7.1 `message.deleted`, or a delete the provider took).
 pub(crate) async fn deleted(
-    cx: &Context,
+    k: &Keeper<'_>,
     place: String,
     id: String,
-    deleted_at: Option<Timestamp>,
+    deleted_at: Timestamp,
     cursor: Option<String>,
 ) -> SocialResult<()> {
-    let actor = cx.identity.actor().clone();
-    let host = cx.authority.clone();
-    let now = cx.client().provider().clock().now();
-    let told = cx
+    let actor = k.actor.clone();
+    let host = k.host.clone();
+    let told = k
         .social
         .blocking(move |store| {
             let account = actor.to_string();
             let Some(kept_place) = store.social_place(&account, &place)? else {
-                return Ok(None);
+                return Ok(Vec::new());
             };
             let Some(existing) = store.social_message(&account, &place, &id)? else {
                 advance(store, &kept_place, cursor, None)?;
-                return Ok(None);
+                return Ok(Vec::new());
             };
             let Some(mut message) = wire(&existing) else {
-                return Ok(None);
+                return Ok(Vec::new());
             };
             if message.deleted_at.is_none() {
-                tombstone(&mut message, deleted_at.unwrap_or(now));
+                tombstone(&mut message, deleted_at);
             }
             let reader = Reader {
                 account: &actor,
@@ -117,7 +148,8 @@ pub(crate) async fn deleted(
                 host: &host,
             };
             let held = Held {
-                holder: host.clone(),
+                holder: holder_in(&kept_place, &message.author, &actor)
+                    .unwrap_or_else(|| host.clone()),
                 message,
                 reactions: Vec::new(),
             };
@@ -128,8 +160,8 @@ pub(crate) async fn deleted(
             Ok(told)
         })
         .await?;
-    if let Some(event) = told {
-        cx.tell(event);
+    for event in told {
+        k.tell(event);
     }
     Ok(())
 }
@@ -138,23 +170,26 @@ pub(crate) async fn deleted(
 /// them, onto it. Reading them all, rather than adding or taking away the
 /// one an event names, makes a repeated event change nothing.
 pub(crate) async fn reactions(
-    cx: &Context,
+    k: &Keeper<'_>,
     place: String,
     id: String,
     reactions: Vec<Reaction>,
 ) -> SocialResult<()> {
-    let actor = cx.identity.actor().clone();
-    let host = cx.authority.clone();
+    let actor = k.actor.clone();
+    let host = k.host.clone();
     let (place_told, id_told) = (place.clone(), id.clone());
-    let told = cx
+    let told = k
         .social
         .blocking(move |store| {
             let account = actor.to_string();
+            let Some(kept_place) = store.social_place(&account, &place)? else {
+                return Ok(None);
+            };
             let Some(existing) = store.social_message(&account, &place, &id)? else {
-                return Ok(false);
+                return Ok(None);
             };
             let Some(message) = wire(&existing) else {
-                return Ok(false);
+                return Ok(None);
             };
             let reader = Reader {
                 account: &actor,
@@ -162,21 +197,25 @@ pub(crate) async fn reactions(
                 host: &host,
             };
             let held = Held {
-                holder: host.clone(),
+                holder: holder_in(&kept_place, &message.author, &actor)
+                    .unwrap_or_else(|| host.clone()),
                 message,
                 reactions,
             };
             let kept = keep(&reader, &held, existing.unread);
             if kept.message.reactions == existing.reactions {
-                return Ok(false);
+                return Ok(None);
             }
-            store.put_social_message(&kept.message, &kept.search_text)?;
-            Ok(true)
+            let put = store.put_social_message(&kept.message, &kept.search_text)?;
+            Ok(Some(sent(&kept.message, &put)))
         })
         .await?;
-    if told {
-        cx.tell(LiveEvent::Reactions {
-            account: cx.actor(),
+    if let Some(sent) = told {
+        if let Some(event) = sent {
+            k.tell(event);
+        }
+        k.tell(LiveEvent::Reactions {
+            account: k.actor.to_string(),
             place: place_told,
             id: id_told,
         });
@@ -184,31 +223,34 @@ pub(crate) async fn reactions(
     Ok(())
 }
 
-/// Write `kept` unless it is what `existing` already holds; the event to
+/// Write `kept` unless it is what `existing` already holds; the events to
 /// tell when it was written.
 fn write(
     store: &Store,
     existing: Option<&SocialMessage>,
     kept: &Kept,
-) -> StoreResult<Option<LiveEvent>> {
+) -> StoreResult<Vec<LiveEvent>> {
     let change = match existing {
+        // Its first write settled whatever post it is the copy of.
         Some(e) if e.message == kept.message.message && e.reactions == kept.message.reactions => {
-            return Ok(None);
+            return Ok(Vec::new());
         }
         None => MessageChange::New,
         Some(e) if !e.deleted && kept.message.deleted => MessageChange::Deleted,
         Some(_) => MessageChange::Edited,
     };
-    store.put_social_message(&kept.message, &kept.search_text)?;
+    let put = store.put_social_message(&kept.message, &kept.search_text)?;
     let unread = existing.map_or(kept.message.unread, |e| e.unread);
-    Ok(Some(LiveEvent::Message {
+    let mut told = vec![LiveEvent::Message {
         account: kept.message.account.clone(),
         place: kept.message.place.clone(),
         id: kept.message.id.clone(),
         change,
         unread,
         mentions_me: kept.message.mentions_me,
-    }))
+    }];
+    told.extend(sent(&kept.message, &put));
+    Ok(told)
 }
 
 /// Move `place`'s live cursor to `cursor` and its latest activity to
@@ -293,4 +335,13 @@ fn tombstone(message: &mut Message, at: Timestamp) {
     message.tags = None;
     message.mentions = None;
     message.deleted_at = Some(at);
+}
+
+/// Add a page of reactions to `all`; the request for the next page, if
+/// there is one (§7.2: continue in the same direction).
+pub(crate) fn collect(all: &mut Vec<Reaction>, page: Paged<Reaction>) -> Option<PageRequest> {
+    all.extend(page.items);
+    page.page
+        .next_cursor
+        .map(|next| PageRequest::after(next, Direction::Backward))
 }

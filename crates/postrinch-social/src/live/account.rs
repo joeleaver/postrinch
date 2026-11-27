@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 use super::session::{self, SessionCmd};
 use super::{LiveEvent, Status};
 use crate::uris::{parse_channel_uri, parse_group_uri};
-use crate::{Social, SocialResult};
+use crate::{Social, SocialResult, outbox};
 
 /// What an account's run is told, by the engine or by its sessions.
 #[derive(Debug, Clone)]
@@ -28,6 +28,8 @@ pub(crate) enum Control {
     Unusable(SocialAccountState),
     /// The people whose presence is watched changed.
     Watch,
+    /// The outbox has new changes: send them.
+    Outbox,
 }
 
 /// An account's run, as [`Social::go_live`] starts it.
@@ -53,6 +55,14 @@ struct Session {
 pub(crate) async fn run(mut account: Account) {
     let mut sessions: BTreeMap<Authority, Session> = BTreeMap::new();
     let mut unusable = None;
+    let (nudge, nudges) = mpsc::unbounded_channel();
+    let actor = account.identity.actor().clone();
+    let outbox = tokio::spawn(outbox::run::run(
+        account.social.clone(),
+        actor,
+        account.control.clone(),
+        nudges,
+    ));
     if let Err(error) = reconcile(&account, &mut sessions).await {
         tracing::warn!(actor = %account.identity.actor(), %error, "cannot read the providers");
     }
@@ -76,7 +86,18 @@ pub(crate) async fn run(mut account: Account) {
                     let _ = session.cmds.send(SessionCmd::Presence);
                 }
             }
+            Control::Outbox => {
+                let _ = nudge.send(());
+            }
         }
+    }
+    // A change being sent when stopped is tried again on the next pass:
+    // it is marked tried, and sending it again is safe.
+    outbox.abort();
+    if let Err(error) = outbox.await
+        && !error.is_cancelled()
+    {
+        tracing::warn!(actor = %account.identity.actor(), %error, "the outbox's task failed");
     }
     for (authority, session) in std::mem::take(&mut sessions) {
         stop(&account, &authority, session).await;
