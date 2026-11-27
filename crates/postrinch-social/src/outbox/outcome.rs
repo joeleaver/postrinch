@@ -132,6 +132,23 @@ mod tests {
     }
 
     #[test]
+    fn a_file_gone_is_a_refusal_but_one_that_failed_to_read_is_tried_again() {
+        let read = |kind: std::io::ErrorKind| {
+            SocialError::Transport(Error::Read {
+                path: "/home/ada/cat.png".into(),
+                source: std::io::Error::from(kind),
+            })
+        };
+        use std::io::ErrorKind::{Interrupted, IsADirectory, NotFound, PermissionDenied, TimedOut};
+        for kind in [NotFound, PermissionDenied, IsADirectory] {
+            assert!(matches!(outcome_of(read(kind)), Ok(Outcome::Refused(_))));
+        }
+        for kind in [TimedOut, Interrupted] {
+            assert!(matches!(outcome_of(read(kind)), Ok(Outcome::Again { .. })));
+        }
+    }
+
+    #[test]
     fn a_failure_keeps_the_wait_its_provider_asks_for() {
         let wait = Some(Duration::from_secs(7));
         let Ok(Outcome::Again { retry_after, .. }) = outcome_of(problem(503, wait)) else {

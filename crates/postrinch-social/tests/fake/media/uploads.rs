@@ -235,6 +235,9 @@ async fn a_file_up_too_long_ago_is_uploaded_again() {
     assert_eq!(social.send_outbox(&h.account()).await.unwrap().failed, 1);
     assert_eq!(uploads(&h.provider), 1);
     let first = outbox(&h)[0].uploads[0].attachment["id"].clone();
+    // Times are whole milliseconds: let one go by, so the upload is older
+    // than the next pass's now.
+    tokio::time::sleep(Duration::from_millis(5)).await;
 
     h.provider.faults().cut_uploads_after(None);
     assert_eq!(social.send_outbox(&h.account()).await.unwrap().sent, 1);
