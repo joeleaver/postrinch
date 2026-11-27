@@ -1,9 +1,10 @@
 //! Desktop notices for new social messages (docs/ofscp.md, "Organizing:
 //! views, not providers"): those their places' notices let through
-//! (`postrinch_commands::Commands::social_notices`), told as new mail is (notify.rs),
-//! under the same Settings › Notifications: what a notice shows, several
-//! at once, quiet hours and not while the window is in front. A click
-//! opens the view the message shows in, on its place's tab.
+//! (`postrinch_commands::Commands::social_notices`), told as new mail is
+//! (notify.rs) when Settings › Notifications says so, and under its
+//! options: what a notice shows, several at once, quiet hours and not
+//! while the window is in front. A click opens the view the message shows
+//! in, on its place's tab.
 
 use postrinch_commands::SocialArrived;
 use rinch::notification::Notification;
