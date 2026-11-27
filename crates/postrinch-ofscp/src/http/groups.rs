@@ -7,7 +7,8 @@
 use ofscp_core::LocalId;
 use ofscp_core::wire::{
     Channel, ChannelCreateRequest, ChannelUpdateRequest, ChannelsResponse, Group,
-    GroupCreateRequest, GroupUpdateRequest, Invite, InviteCreateRequest, InviteRedeemResponse,
+    GroupCreateRequest, GroupUpdateRequest, InviteCreateRequest, InviteCreateResponse,
+    InviteRedeemResponse,
 };
 use reqwest::Method;
 
@@ -109,12 +110,13 @@ impl Client {
     }
 
     /// Make an invite to a group (§5.6). Needs `manage`; answered `201`
-    /// with the invite, token included.
+    /// with an [`InviteCreateResponse`], the only answer that carries the
+    /// invite's token: listings and reads of an invite leave it out.
     pub async fn create_invite(
         &self,
         group_id: &LocalId,
         request: &InviteCreateRequest,
-    ) -> Result<Invite> {
+    ) -> Result<InviteCreateResponse> {
         let path = path("/api/groups/{}/invites", &[group_id.as_str()]);
         self.send_json(Method::POST, path, request).await
     }
