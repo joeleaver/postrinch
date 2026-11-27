@@ -148,6 +148,25 @@ async fn fail_next_answers_signed_requests_only_with_503() {
 }
 
 #[tokio::test]
+async fn refuse_signatures_answers_signed_requests_only_with_401() {
+    let p = FakeProvider::start().await.unwrap();
+    let alice = user(&p, "alice");
+    p.faults().refuse_signatures(true);
+    let r = anonymous(&p, Method::GET, "/.well-known/ofscp-provider", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let r = alice.send(&p, Method::GET, "/api/me", None).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(r.json["errorCode"], "unauthorized");
+    assert_eq!(
+        p.requests().pop().unwrap().authentication,
+        Authentication::Faulted { status: 401 }
+    );
+    p.faults().refuse_signatures(false);
+    let r = alice.send(&p, Method::GET, "/api/me", None).await;
+    assert_eq!(r.status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn a_restarted_replay_store_answers_503_while_it_warms_up() {
     let p = FakeProvider::start().await.unwrap();
     let alice = user(&p, "alice");

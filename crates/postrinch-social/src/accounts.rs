@@ -68,6 +68,7 @@ impl Social {
     /// whatever was stored are deleted.
     pub async fn add(&self, found: &Found, password: &str) -> SocialResult<Added> {
         let actor = &found.actor;
+        let _held = self.hold(actor).await;
         self.refuse_if_added(actor).await?;
         let identity = Arc::new(self.sign_in(actor, password).await?);
         match self.keep_and_sync(&identity).await {
@@ -97,7 +98,7 @@ impl Social {
         self.blocking(move |store| store.put_social_account(&kept))
             .await?;
         let synced = self.sync_as(&account, identity).await?;
-        let account = self.account(identity.actor())?;
+        let account = self.account(identity.actor()).await?;
         Ok(Added { account, synced })
     }
 
@@ -106,11 +107,18 @@ impl Social {
     /// it. The account is active again; sync it next.
     pub async fn sign_in_again(&self, actor: &str, password: &str) -> SocialResult<SocialAccount> {
         let actor = parse_actor(actor)?;
-        let old = self.account(&actor)?;
+        let _held = self.hold(&actor).await;
+        let old = self.account(&actor).await?;
         let identity = Arc::new(self.sign_in(&actor, password).await?);
         if let Err(e) = self.keep_key(&identity).await {
             self.revoke(&identity).await;
             return Err(e);
+        }
+        // The keychain now holds only the new key, so the old one is
+        // revoked whatever happens next: nothing here can sign with it.
+        let old_key = old.key_id.filter(|k| k != identity.key_id());
+        if let Some(old_key) = &old_key {
+            self.revoke_old(&identity, old_key).await;
         }
         let key_id = identity.key_id().to_owned();
         let name = actor.to_string();
@@ -121,22 +129,40 @@ impl Social {
                     a.key_id = Some(key_id);
                 })
             })
-            .await?;
-        let Some(account) = changed else {
-            // Removed meanwhile: the new key is not wanted either.
-            self.revoke(&identity).await;
-            self.forget_key(&actor).await?;
-            return Err(SocialError::NoAccount(actor.to_string()));
-        };
-        if let Some(old_key) = old.key_id.filter(|k| k != identity.key_id()) {
-            let home = self.client(&identity, actor.domain());
-            match home.revoke_device_key(&old_key).await {
-                Ok(()) => {}
-                Err(e) if refused::key_already_gone(&e) => {}
-                Err(e) => tracing::warn!(%actor, error = %e, "could not revoke the old key"),
+            .await;
+        match changed {
+            Ok(Some(account)) => Ok(account),
+            // Removed meanwhile (by another process): the new key is not
+            // wanted either.
+            Ok(None) => {
+                self.revoke(&identity).await;
+                self.forget_key(&actor).await?;
+                Err(SocialError::NoAccount(actor.to_string()))
+            }
+            // The store still names the old key, now revoked: undo the
+            // new one too, so no key is left registered that nothing here
+            // knows of; the account then needs to sign in.
+            Err(e) => {
+                self.revoke(&identity).await;
+                if let Err(undo) = self.forget_key(&actor).await {
+                    tracing::warn!(%actor, error = %undo, "could not delete the new key");
+                }
+                Err(e)
             }
         }
-        Ok(account)
+    }
+
+    /// Revoke `old_key`, signing as the new `identity`; one already gone
+    /// is fine, and a failure is logged (the person can revoke it from
+    /// another device, where it shows under this computer's name).
+    async fn revoke_old(&self, identity: &Arc<Identity>, old_key: &str) {
+        let actor = identity.actor();
+        let home = self.client(identity, actor.domain());
+        match home.revoke_device_key(old_key).await {
+            Ok(()) => {}
+            Err(e) if refused::key_already_gone(&home, &e) => {}
+            Err(e) => tracing::warn!(%actor, error = %e, "could not revoke the old key"),
+        }
     }
 
     /// Sign `actor` out of this computer and remove it: revoke this
@@ -145,7 +171,8 @@ impl Social {
     /// revoke does not keep the account here: the answer says so.
     pub async fn remove(&self, actor: &str) -> SocialResult<Removed> {
         let actor = parse_actor(actor)?;
-        let account = self.account(&actor)?;
+        let _held = self.hold(&actor).await;
+        let account = self.account(&actor).await?;
         let revocation = self.revoke_own(&account, &actor).await;
         self.forget(&actor).await?;
         Ok(Removed { revocation })
@@ -170,9 +197,10 @@ impl Social {
             }
             Some(Err(e)) => return Revocation::Failed(e.to_string()),
         };
-        match self.client(&identity, actor.domain()).sign_out().await {
+        let home = self.client(&identity, actor.domain());
+        match home.sign_out().await {
             Ok(()) => Revocation::Revoked,
-            Err(e) if refused::key_already_gone(&e) => Revocation::AlreadyGone,
+            Err(e) if refused::key_already_gone(&home, &e) => Revocation::AlreadyGone,
             Err(e) => Revocation::Failed(e.to_string()),
         }
     }
@@ -203,15 +231,18 @@ impl Social {
         }
     }
 
-    /// Delete `actor`'s keychain entry and everything stored for it.
+    /// Delete `actor`'s keychain entry and everything stored for it. Both
+    /// are tried whatever the other does; the first failure is given.
     async fn forget(&self, actor: &Actor) -> SocialResult<()> {
-        self.forget_key(actor).await?;
+        let key = self.forget_key(actor).await;
         let name = actor.to_string();
-        self.blocking(move |store| {
-            store.remove_social_account(&name)?;
-            store.collect_garbage(Duration::ZERO).map(|_| ())
-        })
-        .await
+        let stored = self
+            .blocking(move |store| {
+                store.remove_social_account(&name)?;
+                store.collect_garbage(Duration::ZERO).map(|_| ())
+            })
+            .await;
+        key.and(stored)
     }
 
     async fn refuse_if_added(&self, actor: &Actor) -> SocialResult<()> {

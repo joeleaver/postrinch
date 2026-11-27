@@ -267,3 +267,95 @@ async fn syncing_again_refreshes_without_doubling() {
         [true, true]
     );
 }
+
+#[tokio::test]
+async fn a_channel_still_followed_outlives_leaving_its_group() {
+    let h = home().await;
+    let (bob, group, channel) = h.bob_with_group();
+    h.provider
+        .configure_group(&group, |g| g.tier = Tier::Public);
+    h.provider
+        .configure_channel(&channel, |c| c.tier = Tier::Public);
+    h.provider.post_as(&bob, &group, &channel, "hello");
+    h.phone
+        .follow(&FollowCreateRequest {
+            channel: ObjectRef::Local(channel.clone()),
+            group_id: Some(ObjectRef::Local(group.clone())),
+        })
+        .await
+        .unwrap();
+    h.add().await;
+
+    h.phone.leave(&group).await.expect("left");
+    let synced = h.social.sync(&h.account()).await.unwrap();
+    assert_eq!((synced.groups, synced.places), (0, 1));
+    let store = h.social.store();
+    assert!(store.social_groups(&h.account()).unwrap().is_empty());
+    let place_id = channel_uri(&h.provider, &group, &channel);
+    let place = store
+        .social_place(&h.account(), &place_id)
+        .unwrap()
+        .expect("still followed");
+    assert!(place.followed);
+    assert_eq!(h.messages(&place_id).len(), 1);
+}
+
+#[tokio::test]
+async fn a_conversation_with_someone_elsewhere_has_both_sides() {
+    let h = home().await;
+    let away = FakeProvider::start().await.unwrap();
+    let erin = away.add_user("erin", PASSWORD);
+    let endpoint = Endpoint::new(away.authority());
+    let identity = h
+        .transport
+        .provider(endpoint.clone())
+        .sign_in("erin", PASSWORD, "erin's")
+        .await
+        .unwrap();
+    let erin_client = h.transport.client(Arc::new(identity), endpoint);
+    let dm = dm_id(&erin, &h.ada);
+    let to = |who: &postrinch_ofscp::ofscp_core::Actor, id: &str, text: &str| -> DmMessageCreate {
+        serde_json::from_value(json!({
+            "clientMessageId": id,
+            "to": who.to_string(),
+            "content": { "text": text, "mime": "text/plain" },
+        }))
+        .unwrap()
+    };
+    // Erin's message goes to Ada's provider; Ada's answer to Erin's.
+    let at_home = h.transport.client(
+        erin_client.identity().clone(),
+        Endpoint::new(h.provider.authority()),
+    );
+    at_home
+        .send_dm(&dm, &to(&h.ada, "e1", "hi Ada"))
+        .await
+        .expect("to Ada");
+    let phone_away = h
+        .transport
+        .client(h.phone.identity().clone(), Endpoint::new(away.authority()));
+    phone_away
+        .send_dm(&dm, &to(&erin, "a1", "hi Erin"))
+        .await
+        .expect("to Erin");
+
+    h.add().await;
+    let kept = h.messages(dm.as_str());
+    assert_eq!(kept.len(), 2);
+    // Both were sent in the same instant, so find each by its text.
+    let said = |text: &str| {
+        kept.iter()
+            .find(|m| m.message["content"]["text"] == text)
+            .unwrap_or_else(|| panic!("{text:?} is kept"))
+    };
+    // Each provider numbers its own messages: the one held at Erin's is
+    // kept under its URL there, so the two never collide.
+    let (theirs, mine) = (said("hi Ada"), said("hi Erin"));
+    let local = mine.message["id"].as_str().unwrap();
+    assert_eq!(
+        mine.id,
+        format!("https://{}/api/dms/{dm}/messages/{local}", away.authority())
+    );
+    assert_eq!(theirs.id, theirs.message["id"].as_str().unwrap());
+    assert!(theirs.unread && !mine.unread);
+}

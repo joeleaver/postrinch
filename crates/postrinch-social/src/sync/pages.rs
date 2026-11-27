@@ -3,21 +3,26 @@
 //! that, and older pages on scrolling).
 
 use postrinch_ofscp::http::PageRequest;
-use postrinch_ofscp::ofscp_core::wire::{Message, MessagesPage, Reaction};
+use postrinch_ofscp::ofscp_core::Authority;
+use postrinch_ofscp::ofscp_core::wire::MessagesPage;
 
 use super::Run;
-use super::message::{Reader, keep, messages_of};
+use super::message::{Held, Reader, held_by, in_order, keep};
 use super::places::{Marker, Source, Target};
 use crate::SocialResult;
 
 impl Run<'_> {
     /// Fetch and keep `target`'s newest page.
     pub(super) async fn page(&mut self, target: &Target) -> SocialResult<()> {
-        let Some(page) = self.newest(target).await? else {
+        let Some(Newest {
+            mut held,
+            older,
+            complete,
+        }) = self.newest(target).await?
+        else {
             return Ok(());
         };
-        let older = page.page.next_cursor.clone();
-        let messages = messages_of(page.items);
+        in_order(&mut held);
         let (account, place) = (self.actor(), target.place.clone());
         let kept_place = self
             .social
@@ -28,20 +33,24 @@ impl Run<'_> {
             (Marker::Local, Some(local)) => Marker::Provider(Some(local)),
             (marker, _) => marker.clone(),
         };
-        let unread = unread(&messages, &marker);
+        let unread = unread(&held, &target.host, &marker);
         let reader = Reader {
             account: self.identity.actor(),
             place: &target.place,
             host: &target.host,
         };
-        let kept: Vec<_> = messages
+        let kept: Vec<_> = held
             .iter()
             .zip(&unread)
-            .map(|((message, reactions), &unread)| keep(&reader, message, reactions, unread))
+            .map(|(held, &unread)| keep(&reader, held, unread))
             .collect();
-        let newest = messages
-            .last()
-            .map(|(m, _)| (m.id.to_string(), m.created_at.as_millisecond()));
+        let last_activity = held.last().map(|h| h.message.created_at.as_millisecond());
+        // A marker names a message the place's host holds.
+        let newest_here = held
+            .iter()
+            .rev()
+            .find(|h| h.holder == target.host)
+            .map(|h| h.message.id.to_string());
         let count = kept.len();
         let (account, place) = (self.actor(), target.place.clone());
         self.social
@@ -50,17 +59,19 @@ impl Run<'_> {
                     store.put_social_message(&k.message, &k.search_text)?;
                 }
                 store.change_social_place(&account, &place, |p| {
-                    if let Some((id, created)) = newest {
-                        p.last_activity = p.last_activity.max(Some(created));
-                        match marker {
-                            Marker::Provider(read) => p.read_marker = read.or(p.read_marker.take()),
-                            Marker::Local => p.read_marker = Some(id),
+                    p.last_activity = p.last_activity.max(last_activity);
+                    match marker {
+                        Marker::Provider(read) => p.read_marker = read.or(p.read_marker.take()),
+                        Marker::Local => {
+                            if newest_here.is_some() {
+                                p.read_marker = newest_here;
+                            }
                         }
                     }
                     // The first page sets where scrolling back starts; later
                     // syncs leave it to the scrolling.
                     if p.cursors.older.is_none() && !p.cursors.complete {
-                        p.cursors.complete = older.is_none();
+                        p.cursors.complete = complete;
                         p.cursors.older = older;
                     }
                 })?;
@@ -72,7 +83,7 @@ impl Run<'_> {
     }
 
     /// The newest page of `target`, or `None` when it is out of reach.
-    async fn newest(&mut self, target: &Target) -> SocialResult<Option<MessagesPage>> {
+    async fn newest(&mut self, target: &Target) -> SocialResult<Option<Newest>> {
         let request = PageRequest::newest();
         match &target.source {
             Source::Channel {
@@ -81,28 +92,76 @@ impl Run<'_> {
                 channel,
             } => {
                 let found = client.messages(group, channel, &request).await;
-                self.reachable(client, found).await
+                let page = self.reachable(client, found).await?.got();
+                Ok(page.map(|page| Newest::new(&target.host, page)))
             }
-            Source::Conversation { dm } => {
+            Source::Conversation { dm, other } => {
                 let home = self.home.clone();
                 let found = home.dm_messages(dm, &request).await;
-                self.reachable(&home, found).await
+                let Some(page) = self.reachable(&home, found).await?.got() else {
+                    return Ok(None);
+                };
+                let mut newest = Newest::new(&target.host, page);
+                if let Some(other) = other {
+                    let found = other.dm_messages(dm, &request).await;
+                    if let Some(theirs) = self.reachable(other, found).await?.got() {
+                        newest.add_theirs(other.provider().endpoint().authority(), theirs);
+                    }
+                }
+                Ok(Some(newest))
             }
         }
     }
 }
 
-/// Which of a page's messages (oldest first) are unread by `marker`: those
-/// after the newest one read. A marker not on the page is older than all
-/// of it, as markers only move forward and this is the newest page.
-fn unread(messages: &[(Message, Vec<Reaction>)], marker: &Marker) -> Vec<bool> {
+/// A place's newest messages, and where scrolling back starts.
+struct Newest {
+    held: Vec<Held>,
+    /// The cursor of the next older page, at the place's host (home, for
+    /// a conversation).
+    older: Option<String>,
+    /// Whether nothing is older.
+    complete: bool,
+}
+
+impl Newest {
+    /// The newest page `host` gave.
+    fn new(host: &Authority, page: MessagesPage) -> Self {
+        Self {
+            held: held_by(host, page.items),
+            complete: page.page.next_cursor.is_none(),
+            older: page.page.next_cursor,
+        }
+    }
+
+    /// Add the other provider's newest page of a conversation (§7.4: it
+    /// holds the messages the person sent). The conversation is complete
+    /// only when both pages are the last; going back through the other
+    /// provider's older pages is the backfill's (the plan's PR 9), which
+    /// keeps that provider's cursor too.
+    fn add_theirs(&mut self, holder: &Authority, theirs: MessagesPage) {
+        self.held.extend(held_by(holder, theirs.items));
+        self.complete &= theirs.page.next_cursor.is_none();
+    }
+}
+
+/// Which of a page's messages (oldest first) are unread by `marker`, a
+/// marker of `host`'s: those it holds after the newest one read. A marker
+/// not on the page is older than all of it, as markers only move forward
+/// and this is the newest page. The messages of a conversation held
+/// elsewhere are the person's own, sent from here.
+fn unread(held: &[Held], host: &Authority, marker: &Marker) -> Vec<bool> {
+    let here = |h: &Held| h.holder == *host;
     match marker {
-        Marker::Local => vec![false; messages.len()],
-        Marker::Provider(None) => vec![true; messages.len()],
+        Marker::Local => vec![false; held.len()],
+        Marker::Provider(None) => held.iter().map(here).collect(),
         Marker::Provider(Some(read)) => {
-            let at = messages.iter().position(|(m, _)| m.id.as_str() == read);
-            (0..messages.len())
-                .map(|i| at.is_none_or(|at| i > at))
+            let at = held
+                .iter()
+                .position(|h| here(h) && h.message.id.as_str() == read);
+            held.iter()
+                .enumerate()
+                .map(|(i, h)| here(h) && at.is_none_or(|at| i > at))
                 .collect()
         }
     }
@@ -110,36 +169,66 @@ fn unread(messages: &[(Message, Vec<Reaction>)], marker: &Marker) -> Vec<bool> {
 
 #[cfg(test)]
 mod tests {
+    use postrinch_ofscp::ofscp_core::wire::Message;
     use serde_json::json;
 
     use super::*;
 
-    fn page(ids: &[&str]) -> Vec<(Message, Vec<Reaction>)> {
+    fn host(name: &str) -> Authority {
+        Authority::canonicalize(name).unwrap()
+    }
+
+    fn page(ids: &[(&str, &str)]) -> Vec<Held> {
         ids.iter()
-            .map(|id| {
-                let m: Message = serde_json::from_value(json!({
+            .map(|(holder, id)| {
+                let message: Message = serde_json::from_value(json!({
                     "id": id, "author": "bob@a.example", "type": "message",
                     "content": { "text": "x", "mime": "text/plain" },
                     "attachments": [], "createdAt": "2026-01-01T12:00:00Z",
                 }))
                 .unwrap();
-                (m, Vec::new())
+                Held {
+                    holder: host(holder),
+                    message,
+                    reactions: Vec::new(),
+                }
             })
             .collect()
     }
 
     #[test]
     fn messages_after_the_marker_are_unread() {
-        let p = page(&["m1", "m2", "m3"]);
+        let a = host("a.example");
+        let p = page(&[
+            ("a.example", "m1"),
+            ("a.example", "m2"),
+            ("a.example", "m3"),
+        ]);
         assert_eq!(
-            unread(&p, &Marker::Provider(Some("m2".into()))),
+            unread(&p, &a, &Marker::Provider(Some("m2".into()))),
             [false, false, true]
         );
-        assert_eq!(unread(&p, &Marker::Provider(None)), [true, true, true]);
+        assert_eq!(unread(&p, &a, &Marker::Provider(None)), [true, true, true]);
         assert_eq!(
-            unread(&p, &Marker::Provider(Some("m0".into()))),
+            unread(&p, &a, &Marker::Provider(Some("m0".into()))),
             [true, true, true]
         );
-        assert_eq!(unread(&p, &Marker::Local), [false, false, false]);
+        assert_eq!(unread(&p, &a, &Marker::Local), [false, false, false]);
+    }
+
+    #[test]
+    fn a_marker_names_only_messages_its_provider_holds() {
+        let a = host("a.example");
+        // The person's own m2, held at b, shares an id with the marker.
+        let p = page(&[
+            ("a.example", "m1"),
+            ("b.example", "m2"),
+            ("a.example", "m3"),
+        ]);
+        assert_eq!(
+            unread(&p, &a, &Marker::Provider(Some("m2".into()))),
+            [true, false, true]
+        );
+        assert_eq!(unread(&p, &a, &Marker::Provider(None)), [true, false, true]);
     }
 }

@@ -21,7 +21,7 @@ pub enum OfscpCommand {
         #[arg(long)]
         password_stdin: bool,
     },
-    /// Sync one account, or every account that can: its groups, channels,
+    /// Sync one account, or every account not waiting to sign in: its groups, channels,
     /// conversations and each one's newest page.
     Sync { actor: Option<String> },
     /// Sign an account out of this computer (its device key revoked) and
@@ -109,10 +109,13 @@ pub fn list(accounts: &[SocialAccount]) {
 async fn sync(social: &Social, only: Option<&str>) -> Result<()> {
     let accounts = match only {
         Some(actor) => vec![actor.to_owned()],
+        // An account whose clock was off is tried again: a sync home
+        // answers makes it active.
         None => social
             .store()
-            .social_accounts_in(SocialAccountState::Active)?
+            .social_accounts()?
             .into_iter()
+            .filter(|a| a.state != SocialAccountState::NeedsSignIn)
             .map(|a| a.actor)
             .collect(),
     };

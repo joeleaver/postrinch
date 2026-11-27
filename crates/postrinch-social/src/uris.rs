@@ -1,5 +1,5 @@
 //! The canonical object URIs of groups and channels (§2.2), which the
-//! store keys them by, made and read.
+//! store keys them by, made and read; and the URL of a private message.
 
 use postrinch_ofscp::ofscp_core::{Authority, LocalId, ObjectRef, ObjectUri};
 
@@ -11,6 +11,14 @@ pub(crate) fn group_uri(authority: &Authority, group: &LocalId) -> String {
 /// `https://{authority}/api/groups/{group}/channels/{channel}`.
 pub(crate) fn channel_uri(authority: &Authority, group: &LocalId, channel: &LocalId) -> String {
     format!("https://{authority}/api/groups/{group}/channels/{channel}")
+}
+
+/// `https://{authority}/api/dms/{dm}/messages/{message}`: where a private
+/// message is read at the provider holding it (§7.4). The spec names no
+/// object URI for one; this is what the store keys a message by when it
+/// is held elsewhere than the conversation's home.
+pub(crate) fn dm_message_url(authority: &Authority, dm: &str, message: &str) -> String {
+    format!("https://{authority}/api/dms/{dm}/messages/{message}")
 }
 
 /// The provider and id of a group's object URI; `None` for a URI that is

@@ -40,10 +40,11 @@ pub(crate) fn is_out_of_reach(error: &Error) -> bool {
         .is_some_and(|p| p.is(&ErrorCode::NotFound) || p.is(&ErrorCode::Forbidden))
 }
 
-/// Whether `error` says the key being revoked is gone already: a `401`
-/// (revoked, so it can no longer sign its own revocation) or a `404`.
-pub(crate) fn key_already_gone(error: &Error) -> bool {
-    error
-        .problem()
-        .is_some_and(|p| p.is(&ErrorCode::Unauthorized) || p.is(&ErrorCode::NotFound))
+/// Whether `error`, the answer to revoking a key through `client`, says
+/// the key is gone already: a `404`, or a `401` put down to the key
+/// (revoked, so it can no longer sign its own revocation). A `401` put
+/// down to the clock is not: the key may well still be registered.
+pub(crate) fn key_already_gone(client: &Client, error: &Error) -> bool {
+    error.problem().is_some_and(|p| p.is(&ErrorCode::NotFound))
+        || account_state(client, error) == Some(SocialAccountState::NeedsSignIn)
 }

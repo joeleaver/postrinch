@@ -15,8 +15,10 @@
 //! and keeps what is local to a place (its cursors, its notices). A group
 //! or channel the person can no longer read (`403`, `404`) is left out
 //! rather than stopping the sync, and what the home provider no longer
-//! lists is forgotten ([`gone`]); a refused signature stops it and puts
-//! the account in the state that says why.
+//! lists is forgotten ([`gone`]). A signature the home provider refuses
+//! stops the sync and puts the account in the state that says why; one
+//! another provider refuses (it may not have fetched the new key yet)
+//! leaves out, and leaves alone, what that provider holds.
 
 mod gone;
 mod pages;
@@ -24,13 +26,13 @@ mod places;
 
 pub(crate) mod message;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use postrinch_ofscp::http::Client;
 use postrinch_ofscp::ofscp_core::Authority;
 use postrinch_ofscp::{Endpoint, Identity};
-use postrinch_store::{SocialAccount, SocialProvider};
+use postrinch_store::{SocialAccount, SocialAccountState, SocialProvider};
 
 use crate::{Social, SocialError, SocialResult, parse_actor, refused};
 
@@ -53,7 +55,8 @@ impl Social {
     /// clock is off) is refused with the reason.
     pub async fn sync(&self, actor: &str) -> SocialResult<Synced> {
         let actor = parse_actor(actor)?;
-        let account = self.account(&actor)?;
+        let _held = self.hold(&actor).await;
+        let account = self.account(&actor).await?;
         let identity = self.identity(&account).await?;
         self.sync_as(&account, &identity).await
     }
@@ -70,6 +73,7 @@ impl Social {
             home: self.client(identity, identity.actor().domain()),
             providers: BTreeSet::new(),
             markers: HashMap::new(),
+            spared: HashSet::new(),
             synced: Synced::default(),
         };
         run.providers.insert(identity.actor().domain().clone());
@@ -94,7 +98,28 @@ pub(crate) struct Run<'a> {
     /// The home provider's read markers, by scope id (a channel's local
     /// id, or a dmId): the newest message read, `None` for none (§7.7).
     markers: HashMap<String, Option<String>>,
+    /// Groups (by URI) and places (by id) on a provider that refused the
+    /// signature: what is kept of them stays as it is.
+    spared: HashSet<String>,
     synced: Synced,
+}
+
+/// How a request for something a sync may leave out was answered.
+pub(crate) enum Reach<T> {
+    Got(T),
+    /// `403` or `404`: not there for this account.
+    Gone,
+    /// Another provider refused the signature: unknown, for now.
+    Refused,
+}
+
+impl<T> Reach<T> {
+    fn got(self) -> Option<T> {
+        match self {
+            Reach::Got(value) => Some(value),
+            Reach::Gone | Reach::Refused => None,
+        }
+    }
 }
 
 impl Run<'_> {
@@ -110,7 +135,13 @@ impl Run<'_> {
         self.social.client(&self.identity, authority)
     }
 
-    /// A signed request's answer, a refused signature marking the account.
+    /// Whether `client` is for the home provider.
+    fn is_home(&self, client: &Client) -> bool {
+        client.provider().endpoint().authority() == self.identity.actor().domain()
+    }
+
+    /// A signed request's answer. A signature the home provider refuses
+    /// marks the account; it is the key's only judge (§4.6).
     async fn checked<T>(
         &self,
         client: &Client,
@@ -119,36 +150,61 @@ impl Run<'_> {
         match result {
             Ok(value) => Ok(value),
             Err(error) => match refused::account_state(client, &error) {
-                Some(state) => {
+                Some(state) if self.is_home(client) => {
                     tracing::warn!(actor = %self.actor(), ?state, %error, "signature refused");
-                    Err(self.social.mark(self.identity.actor(), state).await?)
+                    let key_id = Some(self.identity.key_id().to_owned());
+                    let otherwise = SocialError::Transport(error);
+                    Err(self
+                        .social
+                        .mark(self.identity.actor(), key_id, state, otherwise)
+                        .await?)
                 }
-                None => Err(SocialError::Transport(error)),
+                _ => Err(SocialError::Transport(error)),
             },
         }
     }
 
-    /// A signed request's answer, or `None` for something out of reach
-    /// (counted as skipped).
+    /// A signed request's answer, unless it is out of reach (`403`, `404`)
+    /// or another provider refused the signature; either is counted as
+    /// skipped.
     async fn reachable<T>(
         &mut self,
         client: &Client,
         result: postrinch_ofscp::Result<T>,
-    ) -> SocialResult<Option<T>> {
-        match result {
-            Err(error) if refused::is_out_of_reach(&error) => {
-                tracing::info!(actor = %self.actor(), %error, "left out of the sync");
-                self.synced.skipped += 1;
-                Ok(None)
+    ) -> SocialResult<Reach<T>> {
+        let reach = match &result {
+            Err(error) if refused::is_out_of_reach(error) => Reach::Gone,
+            Err(error)
+                if !self.is_home(client) && refused::account_state(client, error).is_some() =>
+            {
+                Reach::Refused
             }
-            result => self.checked(client, result).await.map(Some),
+            _ => return self.checked(client, result).await.map(Reach::Got),
+        };
+        if let Err(error) = result {
+            tracing::info!(actor = %self.actor(), %error, "left out of the sync");
         }
+        self.synced.skipped += 1;
+        Ok(reach)
     }
 
     /// The person's profile, settings and read markers, from home.
     async fn home(&mut self, account: &SocialAccount) -> SocialResult<()> {
         let home = self.home.clone();
         let me = self.checked(&home, home.me().await).await?;
+        if account.state == SocialAccountState::ClockSkewed {
+            // Home answered a signed request: the clock is right again.
+            let (name, key_id) = (account.actor.clone(), account.key_id.clone());
+            self.social
+                .blocking(move |store| {
+                    store.change_social_account(&name, |a| {
+                        if a.key_id == key_id {
+                            a.state = SocialAccountState::Active;
+                        }
+                    })
+                })
+                .await?;
+        }
         let notices = self
             .checked(&home, home.notification_settings().await)
             .await?;

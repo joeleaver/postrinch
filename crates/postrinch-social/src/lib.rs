@@ -20,9 +20,14 @@
 //!   and each place's newest page of messages, read as the home provider's
 //!   read markers say.
 //!
-//! A request refused for its signature (a revoked key, or a clock too far
-//! off) puts the account in the state that says so
-//! ([`SocialAccountState`]), as mail does.
+//! A request to the home provider refused for its signature (a revoked
+//! key, or a clock too far off) puts the account in the state that says so
+//! ([`SocialAccountState`]), as mail does. An account whose clock was off
+//! may sync again: the transport signs on the provider's clock, and a sync
+//! the home provider answers makes it active again.
+//!
+//! Each account's operations run one at a time: adding, signing in again,
+//! syncing and removing it wait for one another.
 //!
 //! Live sessions, resuming and scrolling back, and the outbox come next
 //! (the plan's PRs 9 and 10).
@@ -34,12 +39,14 @@ mod refused;
 mod sync;
 mod uris;
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use postrinch_ofscp::http::Client;
 use postrinch_ofscp::ofscp_core::{Actor, Authority};
 use postrinch_ofscp::{Endpoint, Identity, Transport};
-use postrinch_store::{SocialAccount, SocialAccountState, Store};
+use postrinch_store::{SocialAccount, SocialAccountState, Store, social_account_key};
+use tokio::sync::OwnedMutexGuard;
 
 pub use accounts::{Added, Found, Removed, Revocation};
 pub use error::{SocialError, SocialResult};
@@ -55,6 +62,9 @@ pub struct Social {
     transport: Transport,
     keys: Arc<dyn DeviceKeys>,
     device_name: String,
+    /// One lock per account (by its store key), held for the whole of an
+    /// operation on it.
+    locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 impl Social {
@@ -74,6 +84,7 @@ impl Social {
             transport,
             keys,
             device_name,
+            locks: Arc::default(),
         }
     }
 
@@ -93,19 +104,31 @@ impl Social {
         &self.store
     }
 
+    /// Wait for, then hold, `actor`'s lock: no other operation on the
+    /// account runs until the guard is dropped.
+    async fn hold(&self, actor: &Actor) -> OwnedMutexGuard<()> {
+        let lock = {
+            let mut locks = self.locks.lock().unwrap_or_else(|p| p.into_inner());
+            let key = social_account_key(&actor.to_string());
+            Arc::clone(locks.entry(key).or_default())
+        };
+        lock.lock_owned().await
+    }
+
     /// The account of `actor`, in any spelling.
-    fn account(&self, actor: &Actor) -> SocialResult<SocialAccount> {
-        self.store
-            .social_account(&actor.to_string())?
+    async fn account(&self, actor: &Actor) -> SocialResult<SocialAccount> {
+        let name = actor.to_string();
+        self.blocking(move |store| store.social_account(&name))
+            .await?
             .ok_or_else(|| SocialError::NoAccount(actor.to_string()))
     }
 
     /// The identity `account` signs as: its keychain key, if it is the one
     /// registered. Without one the account needs to sign in, and is marked
-    /// so.
+    /// so. An account whose clock was off is let try again.
     async fn identity(&self, account: &SocialAccount) -> SocialResult<Arc<Identity>> {
         let actor = parse_actor(&account.actor)?;
-        if account.state != SocialAccountState::Active {
+        if account.state == SocialAccountState::NeedsSignIn {
             return Err(SocialError::Unusable {
                 actor: actor.to_string(),
                 state: account.state,
@@ -123,22 +146,48 @@ impl Social {
             Some(identity) => Ok(Arc::new(identity)),
             None => {
                 tracing::warn!(%actor, "no device key kept for the registered key id");
-                Err(self.mark(&actor, SocialAccountState::NeedsSignIn).await?)
+                let unusable = SocialError::Unusable {
+                    actor: actor.to_string(),
+                    state: SocialAccountState::NeedsSignIn,
+                };
+                let key_id = account.key_id.clone();
+                Err(self
+                    .mark(&actor, key_id, SocialAccountState::NeedsSignIn, unusable)
+                    .await?)
             }
         }
     }
 
-    /// Put `actor`'s account in `state`, and give the error that says so.
-    async fn mark(&self, actor: &Actor, state: SocialAccountState) -> SocialResult<SocialError> {
-        let store = self.store.clone();
+    /// Put `actor`'s account in `state` if it still signs with `key_id`
+    /// (another process may have signed it in again meanwhile), and give
+    /// the error that says so; `otherwise` when it signs with another key.
+    async fn mark(
+        &self,
+        actor: &Actor,
+        key_id: Option<String>,
+        state: SocialAccountState,
+        otherwise: SocialError,
+    ) -> SocialResult<SocialError> {
         let name = actor.to_string();
-        tokio::task::spawn_blocking(move || {
-            store.change_social_account(&name, |a| a.state = state)
-        })
-        .await??;
-        Ok(SocialError::Unusable {
-            actor: actor.to_string(),
-            state,
+        let marked = self
+            .blocking(move |store| {
+                let mut marked = false;
+                store.change_social_account(&name, |a| {
+                    if a.key_id == key_id {
+                        a.state = state;
+                        marked = true;
+                    }
+                })?;
+                Ok(marked)
+            })
+            .await?;
+        Ok(if marked {
+            SocialError::Unusable {
+                actor: actor.to_string(),
+                state,
+            }
+        } else {
+            otherwise
         })
     }
 

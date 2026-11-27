@@ -21,6 +21,8 @@ pub(crate) struct FaultState {
     pub(crate) duplicate_events: bool,
     /// Every WebSocket `authenticate` fails (`error`, then close 4001).
     pub(crate) refuse_ws_auth: bool,
+    /// Every signed request is answered `401` before it is checked.
+    pub(crate) refuse_signatures: bool,
     /// `POST /api/media` drops its connection after this many body bytes.
     pub(crate) cut_uploads_after: Option<usize>,
     /// `POST /api/media` bodies are read at this many bytes a second.
@@ -81,6 +83,13 @@ impl Faults {
     pub fn drop_sockets(&self) {
         self.inner.hub.drop_all();
         self.inner.conns.abort_all();
+    }
+
+    /// Answer every **signed** request `401 unauthorized` before checking
+    /// it, as a provider does that cannot get the signer's keys from their
+    /// home provider (§4.6). Unsigned requests are answered as usual.
+    pub fn refuse_signatures(&self, on: bool) {
+        self.inner.faults.lock().unwrap().refuse_signatures = on;
     }
 
     /// Make every WebSocket `authenticate` fail with `error`

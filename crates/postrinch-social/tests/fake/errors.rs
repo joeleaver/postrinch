@@ -1,10 +1,13 @@
 //! What goes wrong on the way: a busy provider, a clock that is off, a
 //! key revoked from another device.
 
+use postrinch_ofscp::ofscp_core::ObjectUri;
+use postrinch_ofscp::ofscp_core::wire::GroupPointerRequest;
+use postrinch_ofscp_fake::FakeProvider;
 use postrinch_social::SocialError;
 use postrinch_store::SocialAccountState;
 
-use crate::common::{home, requests_to};
+use crate::common::{PASSWORD, channel_uri, group_uri, home, requests_to};
 
 #[tokio::test]
 async fn a_503_during_sync_is_retried() {
@@ -82,4 +85,63 @@ async fn a_revoked_key_puts_the_account_in_need_of_sign_in() {
     let before = h.provider.requests().len();
     assert!(h.social.sync(&h.account()).await.is_err());
     assert_eq!(h.provider.requests().len(), before);
+}
+
+#[tokio::test]
+async fn an_account_whose_clock_was_off_syncs_again_and_is_active() {
+    let h = home().await;
+    h.add().await;
+    h.social
+        .store()
+        .change_social_account(&h.account(), |a| a.state = SocialAccountState::ClockSkewed)
+        .unwrap();
+    h.social.sync(&h.account()).await.expect("tried again");
+    let account = h
+        .social
+        .store()
+        .social_account(&h.account())
+        .unwrap()
+        .unwrap();
+    assert_eq!(account.state, SocialAccountState::Active);
+}
+
+#[tokio::test]
+async fn another_provider_refusing_the_key_leaves_the_account_and_its_group_alone() {
+    let h = home().await;
+    let away = FakeProvider::start().await.unwrap();
+    let dan = away.add_user("dan", PASSWORD);
+    let group = away.create_group(&dan, "Away");
+    let channel = away.create_channel(&group, "general");
+    away.add_member(&group, &h.ada, "member");
+    away.post_as(&dan, &group, &channel, "first");
+    let uri = ObjectUri::canonicalize(&group_uri(&away, &group)).unwrap();
+    h.phone
+        .put_group_pointer(&uri, &GroupPointerRequest { role: None })
+        .await
+        .unwrap();
+    // The other provider cannot check Ada's signatures (it cannot reach
+    // her home for her keys, say); home can.
+    away.faults().refuse_signatures(true);
+
+    let added = h.add().await;
+    assert_eq!(added.account.state, SocialAccountState::Active);
+    assert_eq!(added.synced.skipped, 1, "the group is left out");
+    let store = h.social.store();
+    assert!(store.social_groups(&h.account()).unwrap().is_empty());
+    // The pointer stays at home: nothing said the group is gone.
+    assert_eq!(h.phone.my_groups().await.unwrap().groups.len(), 1);
+    let place = channel_uri(&away, &group, &channel);
+    assert!(store.social_place(&h.account(), &place).unwrap().is_none());
+
+    // Once it can, the group comes in; when it cannot again, what is kept
+    // of it stays as it was.
+    away.faults().refuse_signatures(false);
+    let synced = h.social.sync(&h.account()).await.unwrap();
+    assert_eq!((synced.groups, synced.places), (1, 1));
+    away.faults().refuse_signatures(true);
+    h.social.sync(&h.account()).await.expect("still syncs");
+    assert_eq!(store.social_groups(&h.account()).unwrap().len(), 1);
+    assert_eq!(h.messages(&place).len(), 1);
+    let account = store.social_account(&h.account()).unwrap().unwrap();
+    assert_eq!(account.state, SocialAccountState::Active);
 }

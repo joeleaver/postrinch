@@ -9,13 +9,15 @@ use postrinch_ofscp::ofscp_core::{Actor, Authority};
 use postrinch_render::social::{Attachment, Body, Options, render};
 use postrinch_store::{ReactionSum, SocialMessage, social_account_key};
 
+use crate::uris::dm_message_url;
+
 /// Who reads a place, and where it is: what a message is kept against.
 pub(crate) struct Reader<'a> {
     /// The account's actor.
     pub account: &'a Actor,
     /// The place's id (a channel URI, or a dmId).
     pub place: &'a str,
-    /// The provider hosting the place: whom a bare `@handle` names.
+    /// The provider hosting the place: home, for a conversation.
     pub host: &'a Authority,
 }
 
@@ -25,9 +27,19 @@ pub(crate) struct Kept {
     pub search_text: String,
 }
 
-/// A page's messages, oldest first, each with the reactions the page
-/// carries for it summed (§7.2: reactions are items of the page too).
-pub(crate) fn messages_of(items: Vec<TimelineItem>) -> Vec<(Message, Vec<Reaction>)> {
+/// A message as one provider holds it, with the reactions it gave for it.
+pub(crate) struct Held {
+    /// The provider holding it: the place's host, except in a
+    /// conversation, where each message lives with its recipient (§7.4).
+    pub holder: Authority,
+    pub message: Message,
+    pub reactions: Vec<Reaction>,
+}
+
+/// One provider's page of messages, each with the reactions the page
+/// carries for it (§7.2: reactions are items of the page too), oldest
+/// first.
+pub(crate) fn held_by(holder: &Authority, items: Vec<TimelineItem>) -> Vec<Held> {
     let mut messages = Vec::new();
     let mut reactions: HashMap<String, Vec<Reaction>> = HashMap::new();
     for item in items {
@@ -39,29 +51,54 @@ pub(crate) fn messages_of(items: Vec<TimelineItem>) -> Vec<(Message, Vec<Reactio
                 .push(*reaction),
         }
     }
-    messages.sort_by(|a, b| {
-        a.created_at
-            .cmp(&b.created_at)
-            .then_with(|| a.id.as_str().cmp(b.id.as_str()))
-    });
-    messages
+    let mut held: Vec<Held> = messages
         .into_iter()
-        .map(|m| {
-            let on = reactions.remove(m.id.as_str()).unwrap_or_default();
-            (m, on)
+        .map(|message| Held {
+            holder: holder.clone(),
+            reactions: reactions.remove(message.id.as_str()).unwrap_or_default(),
+            message,
         })
-        .collect()
+        .collect();
+    in_order(&mut held);
+    held
 }
 
-/// `message` as `reader` keeps it, `unread` if it is new here.
-pub(crate) fn keep(
-    reader: &Reader,
-    message: &Message,
-    reactions: &[Reaction],
-    unread: bool,
-) -> Kept {
+/// Put messages, perhaps from two providers, oldest first (§7.4: a
+/// conversation is merged by `createdAt`). Their ids cannot repeat: each
+/// provider holds different messages, and one id from two providers
+/// names two of them (§2.2).
+pub(crate) fn in_order(held: &mut [Held]) {
+    held.sort_by(|a, b| {
+        a.message
+            .created_at
+            .cmp(&b.message.created_at)
+            .then_with(|| a.holder.cmp(&b.holder))
+            .then_with(|| a.message.id.as_str().cmp(b.message.id.as_str()))
+    });
+}
+
+/// The id `holder`'s message `id` is kept under in `reader`'s place. Ids
+/// are unique only at the provider that gave them (§2.2): a message the
+/// place's host holds keeps its own, and one of a conversation held at the
+/// other person's provider is kept under its URL there.
+pub(crate) fn kept_id(reader: &Reader, holder: &Authority, id: &str) -> String {
+    if holder == reader.host {
+        id.to_owned()
+    } else {
+        dm_message_url(holder, reader.place, id)
+    }
+}
+
+/// `held` as `reader` keeps it, `unread` if it is new here.
+pub(crate) fn keep(reader: &Reader, held: &Held, unread: bool) -> Kept {
+    let Held {
+        holder,
+        message,
+        reactions,
+    } = held;
     let me = social_account_key(&reader.account.to_string());
-    let (mentioned, text) = read_body(reader.host, message);
+    // A bare `@handle` names a user of the provider holding the message.
+    let (mentioned, text) = read_body(holder, message);
     let author = message.author.to_string();
     let mut search_text = author.clone();
     for part in [message.title.as_deref(), message.summary.as_deref()]
@@ -87,11 +124,12 @@ pub(crate) fn keep(
         .reference
         .as_ref()
         .filter(|r| r.kind == ReferenceKind::Reply)
-        .map(|r| r.id.to_string());
+        // A reply answers a message held by the same provider.
+        .map(|r| kept_id(reader, holder, r.id.as_str()));
     let kept = SocialMessage {
         account: reader.account.to_string(),
         place: reader.place.to_owned(),
-        id: message.id.to_string(),
+        id: kept_id(reader, holder, message.id.as_str()),
         author,
         kind,
         created: message.created_at.as_millisecond(),
@@ -200,7 +238,12 @@ mod tests {
             }))
             .unwrap()
         };
-        let kept = keep(&reader, &m, &[reaction("ada"), reaction("carl")], true);
+        let held = Held {
+            holder: host.clone(),
+            message: m,
+            reactions: vec![reaction("ada"), reaction("carl")],
+        };
+        let kept = keep(&reader, &held, true);
         let k = &kept.message;
         assert_eq!(k.parent.as_deref(), Some("msg_1"));
         assert_eq!(k.kind, "message");
@@ -237,7 +280,12 @@ mod tests {
             "attachments": [], "createdAt": "2026-01-01T12:00:00Z",
             "deletedAt": "2026-01-01T12:05:00Z",
         }));
-        let kept = keep(&reader, &m, &[], false);
+        let held = Held {
+            holder: host.clone(),
+            message: m,
+            reactions: Vec::new(),
+        };
+        let kept = keep(&reader, &held, false);
         assert!(kept.message.deleted);
         assert!(!kept.message.mentions_me);
         assert_eq!(kept.search_text, "bob@a.example");
@@ -257,10 +305,52 @@ mod tests {
               "createdAt": "2026-01-01T12:01:00Z" },
         ]))
         .unwrap();
-        let page = messages_of(items);
-        let ids: Vec<&str> = page.iter().map(|(m, _)| m.id.as_str()).collect();
+        let (_, host) = reader_parts();
+        let page = held_by(&host, items);
+        let ids: Vec<&str> = page.iter().map(|h| h.message.id.as_str()).collect();
         assert_eq!(ids, ["msg_1", "msg_2"]);
-        assert_eq!(page[0].1.len(), 1);
-        assert!(page[1].1.is_empty());
+        assert_eq!(page[0].reactions.len(), 1);
+        assert!(page[1].reactions.is_empty());
+    }
+
+    #[test]
+    fn one_id_from_both_sides_of_a_conversation_is_two_messages() {
+        let (ada, home) = reader_parts();
+        let away = Authority::canonicalize("b.example").unwrap();
+        let reader = Reader {
+            account: &ada,
+            place: "dm_1",
+            host: &home,
+        };
+        let m = |author: &str, minute: u8| -> Message {
+            message(json!({
+                "id": "msg_1", "author": author, "type": "message",
+                "content": { "text": "x", "mime": "text/plain" }, "attachments": [],
+                "reference": { "type": "reply", "id": "msg_0" },
+                "createdAt": format!("2026-01-01T12:0{minute}:00Z"),
+            }))
+        };
+        let mut held = vec![
+            Held {
+                holder: away.clone(),
+                message: m("ada@a.example", 2),
+                reactions: Vec::new(),
+            },
+            Held {
+                holder: home.clone(),
+                message: m("erin@b.example", 1),
+                reactions: Vec::new(),
+            },
+        ];
+        in_order(&mut held);
+        let kept: Vec<_> = held
+            .iter()
+            .map(|h| keep(&reader, h, false).message)
+            .collect();
+        assert_eq!(kept[0].id, "msg_1");
+        assert_eq!(kept[0].parent.as_deref(), Some("msg_0"));
+        let there = "https://b.example/api/dms/dm_1/messages/";
+        assert_eq!(kept[1].id, format!("{there}msg_1"));
+        assert_eq!(kept[1].parent, Some(format!("{there}msg_0")));
     }
 }

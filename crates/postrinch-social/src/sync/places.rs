@@ -9,7 +9,7 @@ use postrinch_ofscp::ofscp_core::{Authority, DmId, LocalId};
 use postrinch_store::{GroupFound, PlaceKind, SocialGroup, SocialPlace};
 use serde_json::Value;
 
-use super::Run;
+use super::{Reach, Run};
 use crate::SocialResult;
 use crate::uris::{channel_uri, group_uri, parse_channel, parse_group};
 
@@ -31,8 +31,10 @@ pub(crate) enum Source {
         group: LocalId,
         channel: LocalId,
     },
-    /// A private conversation, from the home provider.
-    Conversation { dm: DmId },
+    /// A private conversation: from the home provider, and from the other
+    /// person's when it is another, as each holds what was sent to it
+    /// (§7.4, docs/ofscp.md "Private messages").
+    Conversation { dm: DmId, other: Option<Client> },
 }
 
 /// What says which of a place's messages are read.
@@ -68,21 +70,28 @@ impl Run<'_> {
                 groups.insert(uri);
             }
         }
+        self.forget_groups(&groups, &followed_uris).await?;
         // Channels followed in groups the person is not in.
         followed.retain(|(uri, _)| !targets.iter().any(|t: &Target| &t.place == uri));
-        for (_, at) in followed {
+        for (uri, at) in followed {
             let client = self.client_for(&at.authority);
             let found = client.channel(&at.group, &at.channel).await;
-            if let Some(channel) = self.reachable(&client, found).await? {
-                let group = group_uri(&at.authority, &at.group);
-                targets.push(self.channel(client, &group, &channel, true).await?);
+            match self.reachable(&client, found).await? {
+                Reach::Got(channel) => {
+                    let group = group_uri(&at.authority, &at.group);
+                    targets.push(self.channel(client, &group, &channel, true).await?);
+                }
+                Reach::Refused => {
+                    self.spared.insert(uri);
+                }
+                Reach::Gone => {}
             }
         }
+        let channels = targets.iter().map(|t| t.place.clone()).collect();
+        self.forget_places(&channels).await?;
         let conversations = self
             .checked(&home, home.conversations(&PageRequest::newest()).await)
             .await?;
-        let channels = targets.iter().map(|t| t.place.clone()).collect();
-        self.forget_the_rest(groups, channels).await?;
         for conversation in &conversations.items {
             targets.push(self.conversation(conversation).await?);
         }
@@ -90,7 +99,8 @@ impl Run<'_> {
     }
 
     /// Keep a group the home provider lists the person in, with its
-    /// channels; its URI, or `None` when it is gone or not a group.
+    /// channels; its URI, or `None` when it is gone or not a group. A
+    /// group whose provider refused the signature is left as it is kept.
     async fn group(
         &mut self,
         pointer: &GroupPointer,
@@ -105,18 +115,29 @@ impl Run<'_> {
         let uri = group_uri(&authority, &id);
         let client = self.client_for(&authority);
         let found = client.group(&id).await;
-        let Some(group) = self.reachable(&client, found).await? else {
-            self.group_gone(pointer, &uri).await?;
-            return Ok(None);
-        };
-        let found = client.channels(&id).await;
-        let Some(channels) = self.reachable(&client, found).await? else {
-            self.group_gone(pointer, &uri).await?;
-            return Ok(None);
+        let group = match self.reachable(&client, found).await? {
+            Reach::Got(group) => group,
+            Reach::Gone => {
+                self.group_gone(pointer, &uri, followed).await?;
+                return Ok(None);
+            }
+            Reach::Refused => {
+                self.spared.insert(uri.clone());
+                return Ok(Some(uri));
+            }
         };
         self.keep_group(&uri, &authority, &group, pointer).await?;
+        // Only the group's own answer says it is gone (docs/ofscp.md,
+        // "Groups on other providers"): a refused channel list leaves the
+        // group, with no channel readable.
+        let found = client.channels(&id).await;
+        let channels = self
+            .reachable(&client, found)
+            .await?
+            .got()
+            .unwrap_or_default();
         for channel in &channels {
-            let place = channel_uri(&authority, &id, &channel.id);
+            let place = channel_uri(&authority, &channel.group_id, &channel.id);
             let is_followed = followed.contains(&place);
             targets.push(
                 self.channel(client.clone(), &uri, channel, is_followed)
@@ -215,12 +236,21 @@ impl Run<'_> {
             notices: None,
         };
         self.keep_place(fresh).await?;
+        let home = self.identity.actor().domain().clone();
+        let other = conversation
+            .participants
+            .iter()
+            .map(|p| p.domain())
+            .find(|domain| **domain != home)
+            .cloned()
+            .map(|domain| self.client_for(&domain));
         Ok(Target {
             marker: self.marker(&place),
             place,
-            host: self.identity.actor().domain().clone(),
+            host: home,
             source: Source::Conversation {
                 dm: conversation.id.clone(),
+                other,
             },
         })
     }

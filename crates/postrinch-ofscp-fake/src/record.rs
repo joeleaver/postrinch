@@ -14,7 +14,8 @@ pub enum Authentication {
     /// A check of §4.5 failed, answered with this status and code.
     Rejected { status: u16, error_code: String },
     /// A fault answered the signed request before it was checked
-    /// ([`Faults::fail_next`](crate::Faults::fail_next)).
+    /// ([`Faults::fail_next`](crate::Faults::fail_next),
+    /// [`Faults::refuse_signatures`](crate::Faults::refuse_signatures)).
     Faulted { status: u16 },
 }
 

@@ -172,3 +172,54 @@ async fn an_unknown_account_is_refused() {
     let error = h.social.sync("not an actor").await.unwrap_err();
     assert!(matches!(error, SocialError::NotAnActor { .. }), "{error}");
 }
+
+/// Keys in memory whose deletes fail, as a locked keychain's would.
+struct Undeletable(postrinch_sync_core::MemorySecrets);
+
+impl postrinch_social::DeviceKeys for Undeletable {
+    fn get(&self, key: &str) -> postrinch_sync_core::KeychainResult<Option<String>> {
+        self.0.get_key(key)
+    }
+
+    fn set(&self, key: &str, entry: &str) -> postrinch_sync_core::KeychainResult<()> {
+        self.0.set_key(key, entry)
+    }
+
+    fn delete(&self, _: &str) -> postrinch_sync_core::KeychainResult<()> {
+        Err(postrinch_sync_core::KeychainError::new(
+            "the keychain is locked",
+        ))
+    }
+}
+
+#[tokio::test]
+async fn undoing_an_add_forgets_the_account_even_when_the_keychain_fails() {
+    let h = home().await;
+    let away = FakeProvider::start().await.unwrap();
+    let group = away.create_group(&h.ada, "Away");
+    let uri = ObjectUri::canonicalize(&group_uri(&away, &group)).unwrap();
+    h.phone
+        .put_group_pointer(&uri, &GroupPointerRequest { role: None })
+        .await
+        .unwrap();
+    drop(away);
+    let keys = std::sync::Arc::new(Undeletable(Default::default()));
+    let social = h.social_with_keys(keys);
+
+    let found = social.look_up(&h.account()).await.unwrap();
+    assert!(social.add(&found, PASSWORD).await.is_err());
+    assert!(social.store().social_accounts().unwrap().is_empty());
+    assert_eq!(h.device_keys().await.len(), 1, "the new key was revoked");
+}
+
+#[tokio::test]
+async fn removing_reports_a_keychain_failure_but_still_forgets_the_account() {
+    let h = home().await;
+    let keys = std::sync::Arc::new(Undeletable(Default::default()));
+    let social = h.social_with_keys(keys);
+    let found = social.look_up(&h.account()).await.unwrap();
+    social.add(&found, PASSWORD).await.expect("added");
+    let error = social.remove(&h.account()).await.unwrap_err();
+    assert!(matches!(error, SocialError::Keychain(_)), "{error}");
+    assert!(social.store().social_accounts().unwrap().is_empty());
+}

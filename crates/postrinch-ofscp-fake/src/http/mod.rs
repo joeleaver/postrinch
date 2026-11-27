@@ -67,7 +67,7 @@ pub(crate) fn router(inner: Arc<Inner>) -> Router {
 }
 
 /// Every request: read the body (under the upload faults), answer the
-/// `fail_next` fault, check a signature, then route; record the outcome
+/// signed-request faults, check a signature, then route; record the outcome
 /// and stamp `Date` from the provider's clock.
 async fn gate(State(inner): State<Arc<Inner>>, request: Request, next: Next) -> Response {
     let (mut parts, body) = request.into_parts();
@@ -175,9 +175,16 @@ async fn authenticate(
     }
 }
 
-/// The `fail_next` fault: one 503 per signed request while it lasts.
+/// The faults that answer a signed request before it is checked:
+/// `refuse_signatures` (a 401 while on), then `fail_next` (one 503 per
+/// signed request while it lasts).
 fn take_fault(inner: &Inner) -> Option<Problem> {
     let mut faults = inner.faults.lock().unwrap();
+    if faults.refuse_signatures {
+        return Some(Problem::unauthorized(
+            "fault: signatures are refused (refuse_signatures)",
+        ));
+    }
     if faults.fail_next == 0 {
         return None;
     }

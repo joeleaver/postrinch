@@ -9,7 +9,7 @@ use postrinch_ofscp::ofscp_core::wire::DeviceKeyInfo;
 use postrinch_ofscp::ofscp_core::{Actor, LocalId};
 use postrinch_ofscp::{Endpoint, Options, RetryPolicy, Tls, Transport};
 use postrinch_ofscp_fake::{FakeProvider, RecordedRequest, root_certificate_der};
-use postrinch_social::{Added, Social};
+use postrinch_social::{Added, DeviceKeys, Social};
 use postrinch_store::{SocialMessage, Store, social_account_key};
 use postrinch_sync_core::MemorySecrets;
 
@@ -70,6 +70,13 @@ impl Home {
     /// Ada's actor, as the store keys her account.
     pub fn account(&self) -> String {
         self.ada.to_string()
+    }
+
+    /// Another engine over the same store and transport, keeping keys in
+    /// `keys`.
+    pub fn social_with_keys(&self, keys: Arc<dyn DeviceKeys>) -> Social {
+        Social::new(self.social.store().clone(), self.transport.clone(), keys)
+            .with_device_name(DEVICE)
     }
 
     /// Add Ada's account.
