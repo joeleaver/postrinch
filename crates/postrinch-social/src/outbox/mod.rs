@@ -42,10 +42,13 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use postrinch_ofscp::ofscp_core::Actor;
-use postrinch_store::{SocialChange, SocialContent, SocialOutboxEntry, social_account_key};
+use postrinch_store::{
+    ContentKind, SocialChange, SocialOutboxEntry, SocialPlace, social_account_key,
+};
 
 use crate::live::{Control, LiveEvent};
 use crate::{Social, SocialResult, parse_actor};
+use content::NotReady;
 use outcome::Outcome;
 use send::{Going, Sender, settled};
 use target::Target;
@@ -117,14 +120,33 @@ impl Social {
         Ok(sent)
     }
 
+    /// Whether every file `change` carries is uploaded, so it can go. An
+    /// edit's cover counts only when the message it edits is an article.
+    async fn ready(
+        &self,
+        sender: &Sender<'_>,
+        place: &SocialPlace,
+        change: &SocialChange,
+    ) -> SocialResult<Result<(), NotReady>> {
+        Ok(match change {
+            SocialChange::Post(post) => {
+                content::ready(&post.content, post.kind == ContentKind::Article)
+            }
+            SocialChange::Edit { message, content } => {
+                content::ready(content, sender.is_article(place, message).await?)
+            }
+            _ => Ok(()),
+        })
+    }
+
     /// Send one queued change; `None` when it was taken back meanwhile.
     async fn send_entry(
         &self,
         sender: &Sender<'_>,
         entry: &SocialOutboxEntry,
     ) -> SocialResult<Option<Outcome>> {
-        if let Some(outcome) = unsendable(&entry.change) {
-            return Ok(Some(outcome));
+        if unsent_here(&entry.change) {
+            return Ok(Some(Outcome::NotSentHere));
         }
         let Some(place_id) = entry.place.clone() else {
             return Ok(Some(Outcome::Refused("the change names no place".into())));
@@ -143,6 +165,11 @@ impl Social {
             let why = format!("{} cannot be sent to", place.id);
             return Ok(Some(Outcome::Refused(why)));
         };
+        // Checked before it is marked tried: one that waits for its files
+        // may still be taken back.
+        if let Err(not_ready) = self.ready(sender, &place, &entry.change).await? {
+            return Ok(Some(not_ready.into()));
+        }
         let (account, client_id) = (entry.account.clone(), entry.client_id.clone());
         let tried = self
             .blocking(move |store| store.social_change_tried(&account, &client_id))
@@ -173,11 +200,12 @@ impl Social {
 
     /// Keep what came of `entry`, count it, and say so.
     ///
-    /// A post leaves the outbox as its copy is kept, which tells it sent
-    /// ([`crate::live::apply::message`]); it may arrive on a socket while
-    /// its own answer is lost, so a failure is not kept for a post no
-    /// longer queued: it is sent. Any other change no longer queued was
-    /// given up.
+    /// A post leaves the outbox as its copy is kept, by whichever write
+    /// keeps it first (the answer, a socket, a sync or a backfill), and
+    /// that write tells it sent ([`crate::live::apply::sent`]). Its copy
+    /// may arrive while its own answer is lost, so a failure is not kept
+    /// for a post no longer queued: it is sent, and was told so. Any other
+    /// change no longer queued was given up.
     async fn record(
         &self,
         account: &str,
@@ -282,20 +310,13 @@ enum Recorded {
     Nothing,
 }
 
-/// What a change that cannot go as it is comes to, before anything is
-/// tried: one carrying a file not yet uploaded waits, and one of the
-/// features another engine sends is left for it.
-fn unsendable(change: &SocialChange) -> Option<Outcome> {
-    let content_of = |content: &SocialContent| content::ready(content).err().map(Outcome::from);
-    match change {
-        SocialChange::Post(post) => content_of(&post.content),
-        SocialChange::Edit { content, .. } => content_of(content),
+/// Whether `change` is one of the features another engine sends (notices
+/// settings, the profile): it is left queued for it.
+fn unsent_here(change: &SocialChange) -> bool {
+    matches!(
+        change,
         SocialChange::ChannelNotices { .. }
-        | SocialChange::GroupNotices { .. }
-        | SocialChange::Profile(_) => Some(Outcome::NotSentHere),
-        SocialChange::Delete { .. }
-        | SocialChange::React { .. }
-        | SocialChange::Read { .. }
-        | SocialChange::Follow { .. } => None,
-    }
+            | SocialChange::GroupNotices { .. }
+            | SocialChange::Profile(_)
+    )
 }

@@ -11,13 +11,20 @@ use postrinch_sync_core::Backoff;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::Instant;
 
+use crate::live::Control;
 use crate::live::LiveEvent;
 use crate::{Social, SocialError};
 
 /// Send `actor`'s outbox until `nudges` closes: a pass now, and another
-/// after each nudge. Ends by itself when the account can no longer sign
-/// or is gone; its sessions find that too, and end the live account.
-pub(crate) async fn run(social: Social, actor: Actor, mut nudges: mpsc::UnboundedReceiver<()>) {
+/// after each nudge. When the account can no longer sign, or is gone, it
+/// tells the account's run by `control` (which ends the live account,
+/// saying why) and ends.
+pub(crate) async fn run(
+    social: Social,
+    actor: Actor,
+    control: mpsc::UnboundedSender<Control>,
+    mut nudges: mpsc::UnboundedReceiver<()>,
+) {
     let key = social_account_key(&actor.to_string());
     let options = &social.live.options;
     let mut backoff = Backoff::with(options.first_backoff, options.max_backoff);
@@ -32,7 +39,14 @@ pub(crate) async fn run(social: Social, actor: Actor, mut nudges: mpsc::Unbounde
                 None
             }
             Ok(sent) => Some(wait(&mut backoff, sent.retry_after)),
-            Err(SocialError::Unusable { .. } | SocialError::NoAccount(_)) => return,
+            Err(SocialError::Unusable { state, .. }) => {
+                let _ = control.send(Control::Unusable(state));
+                return;
+            }
+            Err(SocialError::NoAccount(_)) => {
+                let _ = control.send(Control::Stop);
+                return;
+            }
             Err(error) => {
                 tracing::warn!(%actor, %error, "the outbox could not be sent");
                 Some(wait(&mut backoff, None))

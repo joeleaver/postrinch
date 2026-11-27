@@ -57,7 +57,12 @@ pub(crate) async fn run(mut account: Account) {
     let mut unusable = None;
     let (nudge, nudges) = mpsc::unbounded_channel();
     let actor = account.identity.actor().clone();
-    let outbox = tokio::spawn(outbox::run::run(account.social.clone(), actor, nudges));
+    let outbox = tokio::spawn(outbox::run::run(
+        account.social.clone(),
+        actor,
+        account.control.clone(),
+        nudges,
+    ));
     if let Err(error) = reconcile(&account, &mut sessions).await {
         tracing::warn!(actor = %account.identity.actor(), %error, "cannot read the providers");
     }

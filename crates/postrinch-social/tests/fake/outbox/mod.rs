@@ -9,7 +9,8 @@ mod posts;
 
 use postrinch_social::{LiveEvent, Sent};
 use postrinch_store::{
-    ContentKind, SocialChange, SocialContent, SocialMessage, SocialOutboxEntry, SocialPost,
+    ContentKind, SocialAccountState, SocialChange, SocialContent, SocialMessage, SocialOutboxEntry,
+    SocialPost,
 };
 
 use crate::common::Home;
@@ -166,6 +167,69 @@ async fn an_account_that_goes_live_sends_what_waited() {
         |e| matches!(e, LiveEvent::Sent { client_id, .. } if client_id == "c1"),
     )
     .await;
+    assert_eq!(h.provider.messages(&group, &channel).len(), 1);
+    social.go_offline(&h.account()).await.unwrap();
+}
+
+#[tokio::test]
+async fn an_account_its_outbox_finds_unusable_stops_being_live() {
+    let h = crate::common::home().await;
+    let (social, mut told) = live(&h, 1).await;
+
+    // Its sessions stay connected; only the outbox's next pass reads the
+    // account again, and finds it must sign in.
+    social
+        .store()
+        .change_social_account(&h.account(), |a| {
+            a.state = SocialAccountState::NeedsSignIn;
+        })
+        .unwrap()
+        .expect("Ada is here");
+    social.outbox_changed(&h.account());
+    let event = told
+        .until("the account's state", |e| {
+            matches!(e, LiveEvent::AccountState { .. })
+        })
+        .await;
+    assert_eq!(
+        event,
+        LiveEvent::AccountState {
+            account: h.account(),
+            state: SocialAccountState::NeedsSignIn,
+        }
+    );
+    assert!(social.sessions(&h.account()).is_empty());
+}
+
+#[tokio::test]
+async fn a_post_whose_answer_was_lost_is_told_sent_once_when_live() {
+    let h = crate::common::home().await;
+    let (_bob, group, channel) = h.bob_with_group();
+    let place = crate::common::channel_uri(&h.provider, &group, &channel);
+    h.add().await;
+    h.provider.faults().drop_answers("POST", "/messages", 1);
+    queue(&h, "c1", &place, &chat("hello", None));
+    assert_eq!(send(&h).await.failed, 1);
+
+    // Going live, its copy may be kept by catching up before the outbox
+    // tries it again, or the other way round: whichever keeps it tells it
+    // sent, and nothing else does.
+    let social = h.social.clone().with_live_options(crate::live::options());
+    let mut told = crate::live::Told::new(&social);
+    social.go_live(&h.account()).await.unwrap();
+    told.until(
+        "the post sent",
+        |e| matches!(e, LiveEvent::Sent { client_id, .. } if client_id == "c1"),
+    )
+    .await;
+    told.settle(std::time::Duration::from_millis(300)).await;
+    let sent = told
+        .seen
+        .iter()
+        .filter(|e| matches!(e, LiveEvent::Sent { .. }))
+        .count();
+    assert_eq!(sent, 1, "told {:#?}", told.seen);
+    assert!(outbox(&h).is_empty());
     assert_eq!(h.provider.messages(&group, &channel).len(), 1);
     social.go_offline(&h.account()).await.unwrap();
 }

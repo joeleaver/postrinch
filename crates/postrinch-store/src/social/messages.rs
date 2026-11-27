@@ -22,6 +22,16 @@ struct Body {
     reactions: Vec<ReactionSum>,
 }
 
+/// What keeping a message did ([`Store::put_social_message`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MessagePut {
+    /// Whether it changed what is kept: a replayed event changes nothing.
+    pub changed: bool,
+    /// The client id of the account's queued post it took off the outbox,
+    /// being that post's copy: the post is sent.
+    pub settled: Option<String>,
+}
+
 fn message_key(account: &str, place: &str, id: &str) -> String {
     format!("{}{SEP}{id}", scoped(account, place))
 }
@@ -32,8 +42,11 @@ impl Store {
     /// that changed anything: a replayed event is not written again. A
     /// repeat of the same call finishes what an interrupted one left.
     ///
-    /// A message that carries the client id of a post queued to its place
-    /// (`clientMessageId`) takes that post off the outbox.
+    /// A message of the account's own that carries the client id of a post
+    /// queued to its place (`clientMessageId`) takes that post off the
+    /// outbox, and says so ([`MessagePut::settled`]), whether or not the
+    /// message itself changed: this is the one place a post leaves the
+    /// outbox for being sent, however its copy arrived.
     ///
     /// [`SocialMessage::unread`] is taken only for a message not here yet,
     /// and never for the person's own:
@@ -45,8 +58,32 @@ impl Store {
         &self,
         message: &SocialMessage,
         search_text: &str,
-    ) -> StoreResult<bool> {
-        self.social_locked(|| self.write_social_message(message, search_text))
+    ) -> StoreResult<MessagePut> {
+        self.social_locked(|| {
+            let settled = self.settle_own_post(message)?;
+            let changed = self.write_social_message(message, search_text)?;
+            Ok(MessagePut { changed, settled })
+        })
+    }
+
+    /// Take off the outbox the account's queued post `message` is the copy
+    /// of, if it is one, returning its client id. The client id is matched
+    /// only on the account's own messages: others choose theirs, and may
+    /// choose the same.
+    fn settle_own_post(&self, message: &SocialMessage) -> StoreResult<Option<String>> {
+        let account = social_account_key(&message.account);
+        if social_account_key(&message.author) != account {
+            return Ok(None);
+        }
+        let Some(client_id) = message
+            .message
+            .get("clientMessageId")
+            .and_then(Value::as_str)
+        else {
+            return Ok(None);
+        };
+        let settled = self.settle_social_post(&account, &message.place, client_id)?;
+        Ok(settled.then(|| client_id.to_owned()))
     }
 
     fn write_social_message(
@@ -57,16 +94,6 @@ impl Store {
         let key = message_key(&message.account, &message.place, &message.id);
         let kept = self.social_message_at(&key)?;
         let account = social_account_key(&message.account);
-        // A post of the person's being sent is done with once its provider
-        // has it, so it never shows twice.
-        if social_account_key(&message.author) == account
-            && let Some(client_id) = message
-                .message
-                .get("clientMessageId")
-                .and_then(Value::as_str)
-        {
-            self.settle_social_post(&account, &message.place, client_id)?;
-        }
         // As it reads back: by its account's key, read as it is here. What
         // the person wrote is never unread to them.
         let own = social_account_key(&message.author) == account;

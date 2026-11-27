@@ -27,6 +27,7 @@ use rhypedb_engine::CompareOp;
 use serde::de::DeserializeOwned;
 
 pub use changes::*;
+pub use messages::MessagePut;
 pub use outbox::TakeBack;
 pub use types::*;
 

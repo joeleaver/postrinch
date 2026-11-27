@@ -87,6 +87,36 @@ async fn edits_reactions_and_deletes_are_sent_and_kept() {
 }
 
 #[tokio::test]
+async fn a_reaction_the_provider_has_is_done_though_reading_back_fails() {
+    let h = home().await;
+    let (bob, group, channel) = h.bob_with_group();
+    let place = channel_uri(&h.provider, &group, &channel);
+    let bobs = h.provider.post_as(&bob, &group, &channel, "Bob's");
+    h.add().await;
+
+    // The reaction is put; reading the message's reactions back fails.
+    h.provider.faults().fail_reads_ending(Some("/reactions"));
+    let react = SocialChange::React {
+        message: bobs.id.to_string(),
+        key: "👍".into(),
+        on: true,
+    };
+    queue(&h, "r1", &place, &react);
+    queue(&h, "c1", &place, &chat("after it", None));
+    let sent = send(&h).await;
+    assert_eq!((sent.sent, sent.failed, sent.refused), (2, 0, 0));
+    assert!(outbox(&h).is_empty());
+    let reacted = format!("/messages/{}/reactions/", bobs.id);
+    let puts = h
+        .provider
+        .requests()
+        .into_iter()
+        .filter(|r| r.method == "PUT" && r.path.contains(&reacted))
+        .count();
+    assert_eq!(puts, 1, "put once, not again");
+}
+
+#[tokio::test]
 async fn a_read_marker_moves_at_home() {
     let h = home().await;
     let (bob, group, channel) = h.bob_with_group();

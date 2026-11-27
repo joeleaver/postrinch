@@ -67,8 +67,10 @@ async fn a_reply_to_a_message_held_at_home_names_its_provider() {
 
     // The answer goes to Erin's provider, which holds it; its parent is
     // held at Ada's, so the reference names that provider. The first
-    // answer is lost: the retry is matched by its client id, after which
-    // the parent is checked (§7.4).
+    // answer is lost: the retry, the same reply signed afresh, is answered
+    // with the copy the first made, matched by its client id (§7.4). That
+    // the provider looks for it before checking the reply is the fake's
+    // own test (`a_dm_reply_names_the_provider_holding_its_parent`).
     away.provider.faults().drop_answers("POST", "/messages", 1);
     queue(&h, "a1", &place, &chat("hi Erin", Some(&away.first)));
     assert_eq!(send(&h).await.failed, 1);

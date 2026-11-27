@@ -319,12 +319,14 @@ when an account is deleted.
     sends when it goes live, when told there's more, after each session catches up, and on
     its backoff timer.
   - Matches a sent message to the provider's copy by `clientMessageId`. A repeat is answered
-    `200` with the first copy, and keeping a copy (the answer, or one arriving on a socket
-    first) settles the queued post. The other changes are idempotent by nature: an edit sets
+    `200` with the first copy, and keeping a copy (the answer, or one arriving on a socket,
+    a sync or a backfill first) settles the queued post. Whichever write settles it tells
+    `LiveEvent::Sent`, so a post is told sent once. The other changes are idempotent by nature: an edit sets
     the same content, a repeated delete or reaction removal succeeds, a repeated reaction is
     answered unchanged.
   - What the provider answers is kept as live events are: the sent or edited message, the
-    tombstone, the message's reactions read again in full.
+    tombstone, the message's reactions read again in full. A change the provider has is
+    done even when reading back fails: the next live event or sync reads it again.
   - A read marker is sent only for a place home keeps markers for: a home channel, or a
     conversation up to a message home holds. A follow names a home channel by local id and
     any other by URI; an unfollow names the ref exactly as home lists it.

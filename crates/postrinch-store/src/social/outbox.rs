@@ -125,22 +125,22 @@ impl Store {
 
     /// Forget a queued post that sync has kept as `place`'s message: its
     /// provider has it. Called with the social lock held, as the message
-    /// is written. The client id is matched only on the account's own
-    /// messages: others choose theirs, and may choose the same.
+    /// is written. Returns whether a post was queued there.
     pub(super) fn settle_social_post(
         &self,
         account: &str,
         place: &str,
         client_id: &str,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<bool> {
         let key = scoped(account, client_id);
         if let Some(entry) = self.social_record::<SocialOutboxEntry>(OUTBOX, KEY, &key)?
             && matches!(entry.change, SocialChange::Post(_))
             && entry.place.as_deref() == Some(place)
         {
             self.social_remove(OUTBOX, KEY, &key)?;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
     /// Record an attempt to send a queued change that failed, and why.

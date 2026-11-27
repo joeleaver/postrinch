@@ -23,7 +23,7 @@ use super::content::{self, NotReady};
 use super::outcome::{Outcome, is_not_found, outcome_of};
 use super::target::{MessageAt, Target};
 use crate::live::apply::{self, Arrival, Keeper, collect};
-use crate::{Social, SocialResult};
+use crate::{Social, SocialError, SocialResult};
 
 /// An account sending its changes.
 pub(crate) struct Sender<'a> {
@@ -177,7 +177,7 @@ impl Sender<'_> {
         let Some(at) = going.target.message(kept, self.home()) else {
             return Ok(no_such_message(kept));
         };
-        let article = self.is_article(going, kept).await?;
+        let article = self.is_article(going.place, kept).await?;
         let in_channel = matches!(going.target, Target::Channel(_));
         let update = match content::edit(content, article, in_channel) {
             Ok(update) => update,
@@ -207,12 +207,8 @@ impl Sender<'_> {
 
     /// Whether the kept message `kept` is an article: its title and cover
     /// are edited with it.
-    async fn is_article(&self, going: &Going<'_>, kept: &str) -> SocialResult<bool> {
-        let (account, place, id) = (
-            self.actor().to_string(),
-            going.place.id.clone(),
-            kept.to_owned(),
-        );
+    pub(crate) async fn is_article(&self, place: &SocialPlace, kept: &str) -> SocialResult<bool> {
+        let (account, place, id) = (self.actor().to_string(), place.id.clone(), kept.to_owned());
         let message = self
             .social
             .blocking(move |store| store.social_message(&account, &place, &id))
@@ -255,6 +251,11 @@ impl Sender<'_> {
     /// Add or take back the account's reaction `key` (§7.1 *Reactions*),
     /// then read the message's reactions again, all of them. A reaction is
     /// held with its message, at the provider holding that (§7.4).
+    ///
+    /// Once the provider has the change it is done, whatever reading the
+    /// reactions back then meets: sending it again would change nothing,
+    /// and the provider's `message.reaction` event, or the next sync,
+    /// reads them again.
     pub(crate) async fn react(
         &self,
         going: &Going<'_>,
@@ -292,7 +293,14 @@ impl Sender<'_> {
             Err(error) if !on && is_not_found(&error) => return Ok(Outcome::Done),
             Err(error) => return Err(error),
         }
-        let all = self.reactions(going.target, &client, &at).await?;
+        let all = match self.reactions(going.target, &client, &at).await {
+            Ok(all) => all,
+            Err(error @ (SocialError::Transport(_) | SocialError::Socket(_))) => {
+                tracing::info!(client_id = going.client_id, %error, "a reaction was sent; its message's reactions could not be read back");
+                return Ok(Outcome::Done);
+            }
+            Err(error) => return Err(error),
+        };
         let host = going.target.host(self.home());
         let place = going.place.id.clone();
         apply::reactions(&self.keeper(&host), place, kept.to_owned(), all).await?;

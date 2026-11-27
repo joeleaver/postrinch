@@ -10,6 +10,7 @@ use super::Run;
 use super::message::{Held, Reader, held_by, in_order, keep};
 use super::places::{Marker, Source, Target};
 use crate::SocialResult;
+use crate::live::apply;
 
 impl Run<'_> {
     /// Fetch and keep `target`'s newest page.
@@ -54,10 +55,13 @@ impl Run<'_> {
             .map(|h| h.message.id.to_string());
         let count = kept.len();
         let (account, place) = (self.actor(), target.place.clone());
-        self.social
+        let sent = self
+            .social
             .blocking(move |store| {
+                let mut sent = Vec::new();
                 for k in &kept {
-                    store.put_social_message(&k.message, &k.search_text)?;
+                    let put = store.put_social_message(&k.message, &k.search_text)?;
+                    sent.extend(apply::sent(&k.message, &put));
                 }
                 store.change_social_place(&account, &place, |p| {
                     p.last_activity = p.last_activity.max(last_activity);
@@ -81,9 +85,12 @@ impl Run<'_> {
                         p.cursors.older = older;
                     }
                 })?;
-                Ok(())
+                Ok(sent)
             })
             .await?;
+        for event in sent {
+            self.social.live.tell(event);
+        }
         self.synced.messages += count;
         Ok(())
     }

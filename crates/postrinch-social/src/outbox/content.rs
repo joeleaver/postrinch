@@ -34,9 +34,11 @@ pub(crate) struct Media {
     pub cover: Option<LocalId>,
 }
 
-/// Whether every file `content` carries is uploaded, so it can go.
-pub(crate) fn ready(content: &SocialContent) -> Result<(), NotReady> {
-    media(content, true).map(|_| ())
+/// Whether every file `content` carries is uploaded, so it can go: its
+/// attachments, and its cover when it is an `article`'s (another kind's
+/// cover is not sent, so it holds nothing back).
+pub(crate) fn ready(content: &SocialContent, article: bool) -> Result<(), NotReady> {
+    media(content, article).map(|_| ())
 }
 
 /// `content`'s files as the wire names them; an article's cover is kept,
@@ -232,7 +234,7 @@ mod tests {
             path: PathBuf::from("/tmp/a.png"),
             mime: None,
         });
-        assert_eq!(ready(&post.content), Err(NotReady::Waiting));
+        assert_eq!(ready(&post.content, true), Err(NotReady::Waiting));
         assert_eq!(
             channel_post("c1", &post, None).unwrap_err(),
             NotReady::Waiting
@@ -240,6 +242,23 @@ mod tests {
         post.content.attachments = vec![DraftMedia::Uploaded {
             attachment: json!({"id": 3}),
         }];
-        assert!(matches!(ready(&post.content), Err(NotReady::Damaged(_))));
+        assert!(matches!(
+            ready(&post.content, true),
+            Err(NotReady::Damaged(_))
+        ));
+    }
+
+    #[test]
+    fn a_cover_not_yet_uploaded_holds_back_only_an_article() {
+        let mut post = article();
+        post.content.cover = Some(DraftMedia::File {
+            path: PathBuf::from("/tmp/cover.png"),
+            mime: None,
+        });
+        assert_eq!(ready(&post.content, true), Err(NotReady::Waiting));
+        // Another kind's cover is not sent.
+        assert_eq!(ready(&post.content, false), Ok(()));
+        post.kind = ContentKind::Chat;
+        assert!(channel_post("c1", &post, None).is_ok());
     }
 }

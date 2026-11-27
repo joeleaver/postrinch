@@ -68,22 +68,28 @@ fn a_kept_message_settles_the_post_it_was_sent_as() {
     // post, settles nothing.
     let mut other = message(ADA, GENERAL, "m1", 10);
     other.message["clientMessageId"] = json!("c2");
-    store.put_social_message(&other, "").unwrap();
+    assert_eq!(store.put_social_message(&other, "").unwrap().settled, None);
     let mut odd = message(ADA, GENERAL, "m2", 11);
     odd.message["clientMessageId"] = json!("c3");
-    store.put_social_message(&odd, "").unwrap();
+    assert_eq!(store.put_social_message(&odd, "").unwrap().settled, None);
     assert_eq!(store.social_outbox(ADA).unwrap().len(), 3);
 
     // Nor does someone else's message that happens to use the same id.
     let mut theirs = message(ADA, GENERAL, "m3", 12);
     theirs.message["clientMessageId"] = json!("c1");
-    store.put_social_message(&theirs, "").unwrap();
+    assert_eq!(store.put_social_message(&theirs, "").unwrap().settled, None);
     assert_eq!(store.social_outbox(ADA).unwrap().len(), 3);
 
     let mut sent = message(ADA, GENERAL, "m4", 13);
     sent.author = "Ada@Groups.example".into();
     sent.message["clientMessageId"] = json!("c1");
-    store.put_social_message(&sent, "").unwrap();
+    let put = store.put_social_message(&sent, "").unwrap();
+    assert_eq!(put.settled.as_deref(), Some("c1"));
+    // Its copy kept again settles nothing more, changed or not.
+    let again = store.put_social_message(&sent, "").unwrap();
+    assert_eq!(again, MessagePut::default());
+    sent.message["content"] = json!({ "text": "edited" });
+    assert_eq!(store.put_social_message(&sent, "").unwrap().settled, None);
     let left: Vec<String> = store
         .social_outbox(ADA)
         .unwrap()
