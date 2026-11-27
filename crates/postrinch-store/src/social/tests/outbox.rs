@@ -74,7 +74,14 @@ fn a_kept_message_settles_the_post_it_was_sent_as() {
     store.put_social_message(&odd, "").unwrap();
     assert_eq!(store.social_outbox(ADA).unwrap().len(), 3);
 
-    let mut sent = message(ADA, GENERAL, "m3", 12);
+    // Nor does someone else's message that happens to use the same id.
+    let mut theirs = message(ADA, GENERAL, "m3", 12);
+    theirs.message["clientMessageId"] = json!("c1");
+    store.put_social_message(&theirs, "").unwrap();
+    assert_eq!(store.social_outbox(ADA).unwrap().len(), 3);
+
+    let mut sent = message(ADA, GENERAL, "m4", 13);
+    sent.author = "Ada@Groups.example".into();
     sent.message["clientMessageId"] = json!("c1");
     store.put_social_message(&sent, "").unwrap();
     let left: Vec<String> = store
@@ -84,6 +91,23 @@ fn a_kept_message_settles_the_post_it_was_sent_as() {
         .map(|e| e.client_id)
         .collect();
     assert_eq!(left, ["c2", "c3"]);
+}
+
+#[test]
+fn a_refused_change_stays_queued_and_says_why() {
+    let (_dir, store) = ada_with_general();
+    store
+        .queue_social_change(ADA, "c1", Some(GENERAL), &post(), 1)
+        .unwrap();
+    let refused = store
+        .social_change_refused(ADA, "c1", "403 forbidden")
+        .unwrap()
+        .unwrap();
+    assert!(refused.refused);
+    assert_eq!(refused.attempts, 1);
+    assert_eq!(refused.error.as_deref(), Some("403 forbidden"));
+    assert_eq!(store.social_outbox(ADA).unwrap(), [refused]);
+    assert_eq!(store.social_change_refused(ADA, "c0", "x").unwrap(), None);
 }
 
 #[test]

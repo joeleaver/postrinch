@@ -34,18 +34,25 @@
 //! places on, connected again with backoff, resuming from each place's
 //! cursor and reading over REST what a resume cannot give; read markers,
 //! notifications and presence as they change. What changed is told on
-//! [`Social::live_events`]. The outbox comes next (the plan's PR 10).
+//! [`Social::live_events`].
+//!
+//! Its third part (the plan's PR 10) is the outbox ([`Social::send_outbox`]):
+//! the posts, edits, deletes, reactions, read markers and follows the
+//! commands queue in the store, sent in order, per place, and kept as their
+//! providers answer. A live account sends by itself, and again with
+//! backoff after a failure; [`Social::outbox_changed`] says there is more.
 
 mod accounts;
 mod error;
 mod keys;
 mod live;
+mod locks;
+mod outbox;
 mod refused;
 mod sync;
 mod uris;
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use postrinch_ofscp::http::Client;
 use postrinch_ofscp::ofscp_core::{Actor, Authority};
@@ -57,6 +64,7 @@ pub use accounts::{Added, Found, Removed, Revocation};
 pub use error::{SocialError, SocialResult};
 pub use keys::DeviceKeys;
 pub use live::{LiveEvent, LiveOptions, MessageChange, SessionStatus};
+pub use outbox::Sent;
 pub use postrinch_sync_core::Keychain;
 pub use sync::Synced;
 
@@ -70,7 +78,10 @@ pub struct Social {
     device_name: String,
     /// One lock per account (by its store key), held for the whole of an
     /// operation on it.
-    locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    locks: locks::Locks,
+    /// One lock per account, held for the whole of a pass over its outbox,
+    /// so two passes never send the same change at once.
+    passes: locks::Locks,
     /// The accounts kept live, and where what changed is told.
     live: Arc<live::Registry>,
 }
@@ -92,7 +103,8 @@ impl Social {
             transport,
             keys,
             device_name,
-            locks: Arc::default(),
+            locks: locks::Locks::default(),
+            passes: locks::Locks::default(),
             live: Arc::new(live::Registry::new(LiveOptions::default())),
         }
     }
@@ -116,12 +128,9 @@ impl Social {
     /// Wait for, then hold, `actor`'s lock: no other operation on the
     /// account runs until the guard is dropped.
     async fn hold(&self, actor: &Actor) -> OwnedMutexGuard<()> {
-        let lock = {
-            let mut locks = self.locks.lock().unwrap_or_else(|p| p.into_inner());
-            let key = social_account_key(&actor.to_string());
-            Arc::clone(locks.entry(key).or_default())
-        };
-        lock.lock_owned().await
+        self.locks
+            .hold(social_account_key(&actor.to_string()))
+            .await
     }
 
     /// The account of `actor`, in any spelling.

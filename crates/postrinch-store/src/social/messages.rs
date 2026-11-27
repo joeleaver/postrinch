@@ -59,10 +59,11 @@ impl Store {
         let account = social_account_key(&message.account);
         // A post of the person's being sent is done with once its provider
         // has it, so it never shows twice.
-        if let Some(client_id) = message
-            .message
-            .get("clientMessageId")
-            .and_then(Value::as_str)
+        if social_account_key(&message.author) == account
+            && let Some(client_id) = message
+                .message
+                .get("clientMessageId")
+                .and_then(Value::as_str)
         {
             self.settle_social_post(&account, &message.place, client_id)?;
         }

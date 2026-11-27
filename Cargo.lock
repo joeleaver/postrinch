@@ -4200,7 +4200,7 @@ dependencies = [
 [[package]]
 name = "ofscp-core"
 version = "0.1.0"
-source = "git+https://github.com/joeleaver/re-ofscp?rev=2e35293766b8155bb45330b5c1cc04323549a7fa#2e35293766b8155bb45330b5c1cc04323549a7fa"
+source = "git+https://github.com/joeleaver/re-ofscp?rev=422d38f83eec0468f9d2736c88f6d9f02f60cd81#422d38f83eec0468f9d2736c88f6d9f02f60cd81"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",

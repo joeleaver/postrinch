@@ -30,6 +30,35 @@ pub(crate) struct FaultState {
     pub(crate) cut_uploads_after: Option<usize>,
     /// `POST /api/media` bodies are read at this many bytes a second.
     pub(crate) upload_bytes_per_sec: Option<u64>,
+    /// Signed requests to answer and then drop unanswered.
+    pub(crate) drop_answers: Option<DropAnswers>,
+}
+
+/// Which signed requests are carried out and then left unanswered.
+#[derive(Debug, Clone)]
+pub(crate) struct DropAnswers {
+    pub(crate) method: String,
+    pub(crate) suffix: String,
+    /// How many more.
+    pub(crate) left: u32,
+}
+
+impl FaultState {
+    /// Whether the answer to a signed `method` request to `path` is to be
+    /// dropped; counts it if so.
+    pub(crate) fn take_drop_answer(&mut self, method: &str, path: &str) -> bool {
+        let Some(drop) = &mut self.drop_answers else {
+            return false;
+        };
+        if !drop.method.eq_ignore_ascii_case(method) || !path.ends_with(&drop.suffix) {
+            return false;
+        }
+        drop.left -= 1;
+        if drop.left == 0 {
+            self.drop_answers = None;
+        }
+        true
+    }
 }
 
 /// The faults of one provider, from [`FakeProvider::faults`](crate::FakeProvider::faults).
@@ -128,6 +157,19 @@ impl Faults {
     /// Deliver every timeline event twice.
     pub fn duplicate_events(&self, on: bool) {
         self.inner.faults.lock().unwrap().duplicate_events = on;
+    }
+
+    /// Carry out the next `n` signed `method` requests whose path ends
+    /// with `suffix`, then drop each one's connection instead of answering:
+    /// the change is made, but the client never hears so, as when the
+    /// network fails after the provider took a request. `n` of 0 turns it
+    /// off.
+    pub fn drop_answers(&self, method: &str, suffix: &str, n: u32) {
+        self.inner.faults.lock().unwrap().drop_answers = (n > 0).then(|| DropAnswers {
+            method: method.to_owned(),
+            suffix: suffix.to_owned(),
+            left: n,
+        });
     }
 
     /// Drop the connection of a `POST /api/media` once `bytes` bytes of its

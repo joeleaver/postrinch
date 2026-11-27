@@ -32,8 +32,8 @@ rinch-html = { git = "https://github.com/joeleaver/rinch.git", branch = "postrin
 rinch-visual-test = { git = "https://github.com/joeleaver/rinch.git", branch = "postrinch/html-allow-list" }
 
 # The OFSCP protocol core, shared with Joe's provider (docs/ofscp.md,
-# "Shared with re-ofscp"): re-ofscp #28, with the WebSocket frames.
-ofscp-core = { git = "https://github.com/joeleaver/re-ofscp", rev = "2e35293766b8155bb45330b5c1cc04323549a7fa" }
+# "Shared with re-ofscp"): re-ofscp #37, with `MessageReference.provider`.
+ofscp-core = { git = "https://github.com/joeleaver/re-ofscp", rev = "422d38f83eec0468f9d2736c88f6d9f02f60cd81" }
 
 # rhypedb v0.2.1: link-peer ordering (rhypedb#52, #55) and the
 # generation-race fix for relation copies (rhypedb#54, #56). The

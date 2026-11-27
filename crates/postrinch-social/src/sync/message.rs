@@ -47,10 +47,22 @@ pub(crate) fn held_by(holder: &Authority, items: Vec<TimelineItem>) -> Vec<Held>
     for item in items {
         match item {
             TimelineItem::Message(message) => messages.push(*message),
-            TimelineItem::Reaction(reaction) => reactions
-                .entry(reaction.reference.id.to_string())
-                .or_default()
-                .push(*reaction),
+            // A reaction is kept with its message, by the provider holding
+            // it (§7.1 *Reactions*): one naming another provider is on no
+            // message of this page.
+            TimelineItem::Reaction(reaction)
+                if reaction
+                    .reference
+                    .provider
+                    .as_ref()
+                    .is_none_or(|p| p == holder) =>
+            {
+                reactions
+                    .entry(reaction.reference.id.to_string())
+                    .or_default()
+                    .push(*reaction);
+            }
+            TimelineItem::Reaction(_) => {}
         }
     }
     let mut held: Vec<Held> = messages
@@ -142,8 +154,9 @@ pub(crate) fn keep(reader: &Reader, held: &Held, unread: bool) -> Kept {
         .reference
         .as_ref()
         .filter(|r| r.kind == ReferenceKind::Reply)
-        // A reply answers a message held by the same provider.
-        .map(|r| kept_id(reader, holder, r.id.as_str()));
+        // A parent is named by (provider, id): the reference's provider
+        // when it names one, else the provider holding this reply (§5.3).
+        .map(|r| kept_id(reader, r.provider.as_ref().unwrap_or(holder), r.id.as_str()));
     let kept = SocialMessage {
         account: reader.account.to_string(),
         place: reader.place.to_owned(),
@@ -370,6 +383,66 @@ mod tests {
         let there = "https://b.example/api/dms/dm_1/messages/";
         assert_eq!(kept[1].id, format!("{there}msg_1"));
         assert_eq!(kept[1].parent, Some(format!("{there}msg_0")));
+    }
+
+    #[test]
+    fn a_reply_names_a_parent_on_the_other_side_by_its_provider() {
+        let (ada, home) = reader_parts();
+        let away = Authority::canonicalize("b.example").unwrap();
+        let reader = Reader {
+            account: &ada,
+            place: "dm_1",
+            host: &home,
+        };
+        let reply = |provider: Option<&str>| -> Kept {
+            let mut reference = json!({ "type": "reply", "id": "msg_0" });
+            if let Some(p) = provider {
+                reference["provider"] = json!(p);
+            }
+            let held = Held {
+                holder: away.clone(),
+                message: message(json!({
+                    "id": "msg_5", "author": "ada@a.example", "type": "message",
+                    "content": { "text": "x", "mime": "text/plain" }, "attachments": [],
+                    "reference": reference, "createdAt": "2026-01-01T12:00:00Z",
+                })),
+                reactions: Vec::new(),
+            };
+            keep(&reader, &held, false)
+        };
+        let there = "https://b.example/api/dms/dm_1/messages/msg_0";
+        // Ada's reply, held at Erin's provider, to a message Erin sent
+        // her, held at Ada's home: its parent keeps its bare id.
+        assert_eq!(
+            reply(Some("a.example")).message.parent.as_deref(),
+            Some("msg_0")
+        );
+        // Absent, or naming the holder itself, is the holder's own message.
+        assert_eq!(reply(None).message.parent.as_deref(), Some(there));
+        assert_eq!(
+            reply(Some("b.example")).message.parent.as_deref(),
+            Some(there)
+        );
+    }
+
+    #[test]
+    fn a_reaction_naming_another_provider_is_on_no_message_of_the_page() {
+        let items: Vec<TimelineItem> = serde_json::from_value(json!([
+            { "id": "msg_1", "author": "bob@a.example", "type": "message",
+              "content": { "text": "one", "mime": "text/plain" }, "attachments": [],
+              "createdAt": "2026-01-01T12:01:00Z" },
+            { "id": "r_1", "author": "bob@a.example", "key": "+1",
+              "reference": { "type": "message", "id": "msg_1", "provider": "b.example" },
+              "createdAt": "2026-01-01T12:03:00Z" },
+            { "id": "r_2", "author": "bob@a.example", "key": "ok",
+              "reference": { "type": "message", "id": "msg_1", "provider": "a.example" },
+              "createdAt": "2026-01-01T12:04:00Z" },
+        ]))
+        .unwrap();
+        let (_, host) = reader_parts();
+        let page = held_by(&host, items);
+        let keys: Vec<&str> = page[0].reactions.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(keys, ["ok"]);
     }
 
     #[test]

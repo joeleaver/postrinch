@@ -139,6 +139,15 @@ impl Context {
         self.identity.actor().to_string()
     }
 
+    /// What keeps the messages this session's provider gives.
+    pub(crate) fn keeper(&self) -> super::apply::Keeper<'_> {
+        super::apply::Keeper {
+            social: &self.social,
+            actor: self.identity.actor(),
+            host: &self.authority,
+        }
+    }
+
     /// The signed client for this session's provider.
     pub(crate) fn client(&self) -> Client {
         self.social.client(&self.identity, &self.authority)

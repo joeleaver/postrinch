@@ -1,6 +1,6 @@
-//! Channel history, edits, deletes and reactions over REST (§7.1, §7.2).
-//! Posting a channel message is WebSocket-only (`message.create`): the
-//! spec defines no REST create.
+//! Channel history, posts, edits, deletes and reactions over REST (§7.1,
+//! §7.2). A post here follows the same order of checks and idempotency as
+//! the WebSocket's `message.create`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, put};
 use axum::{Extension, Router};
 use ofscp_core::LocalId;
-use ofscp_core::wire::{MessageUpdate, ReactionPut, ReferenceKind, TimelineItem};
+use ofscp_core::wire::{MessageCreate, MessageUpdate, ReactionPut, ReferenceKind, TimelineItem};
 
 use super::RequestBody;
 use super::groups::id;
@@ -27,7 +27,7 @@ pub(super) fn routes() -> Router<Arc<Inner>> {
     Router::new()
         .route(
             "/api/groups/{group}/channels/{channel}/messages",
-            get(history),
+            get(history).post(post),
         )
         .route(MESSAGE, axum::routing::patch(edit).delete(remove))
         .route(&format!("{MESSAGE}/replies"), get(replies))
@@ -72,6 +72,23 @@ async fn history(
     Query(params): Query<HashMap<String, String>>,
 ) -> Reply {
     timeline_page(&inner, &caller, &g, &c, &page_query(&params, 50), |_| true)
+}
+
+/// `POST …/messages` (§7.1 *Sending messages*): `201` with a new
+/// message, `200` with the one an earlier send of its `clientMessageId`
+/// made.
+async fn post(
+    State(inner): State<Arc<Inner>>,
+    Extension(caller): Extension<Caller>,
+    Extension(RequestBody(bytes)): Extension<RequestBody>,
+    Path((g, c)): Path<(String, String)>,
+) -> Reply {
+    let author = caller.signed()?.clone();
+    let create: MessageCreate = body(&bytes)?;
+    match messages::create(&inner, &author, &id(&g)?, &id(&c)?, create, None)? {
+        Made::New(m) => Ok(json(StatusCode::CREATED, &m)),
+        Made::Existing(m) => ok(&m),
+    }
 }
 
 async fn replies(

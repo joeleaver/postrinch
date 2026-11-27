@@ -363,4 +363,8 @@ pub struct SocialOutboxEntry {
     pub attempts: u32,
     /// Why the last attempt failed; `None` while none has.
     pub error: Option<String>,
+    /// Whether its provider refused it for good (a `403`, a `400`):
+    /// it is not tried again, and waits for the person to give it up.
+    #[serde(default)]
+    pub refused: bool,
 }

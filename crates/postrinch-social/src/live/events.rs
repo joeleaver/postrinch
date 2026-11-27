@@ -1,11 +1,11 @@
 //! What a session does with each event its provider sends (§7.1 "Events").
 
-use postrinch_ofscp::http::{Direction, PageRequest};
-use postrinch_ofscp::ofscp_core::wire::{DmConversation, Member, Paged, Reaction};
+use postrinch_ofscp::http::PageRequest;
+use postrinch_ofscp::ofscp_core::wire::{DmConversation, Member};
 use postrinch_ofscp::ofscp_core::ws::{Event, TypingState, Unsubscribed};
 use postrinch_ofscp::ofscp_core::{Actor, DmId, LocalId};
 
-use super::apply::{self, Arrival};
+use super::apply::{self, Arrival, collect};
 use super::session::{End, Live, ends_session};
 use super::{LiveEvent, markers, notices};
 use crate::sync::Run;
@@ -35,18 +35,21 @@ impl Live<'_> {
             Event::MessageCreated(m) => {
                 let place = self.channel(&m.group_id, &m.channel_id);
                 let (arrival, cursor) = self.arrival(&place, Arrival::Any, m.cursor);
-                apply::message(self.cx, place, *m.message, cursor, arrival).await?;
+                apply::message(&self.cx.keeper(), place, *m.message, cursor, arrival).await?;
             }
             Event::MessageUpdated(m) => {
                 let place = self.channel(&m.group_id, &m.channel_id);
                 let (arrival, cursor) = self.arrival(&place, Arrival::IfKept, m.cursor);
-                apply::message(self.cx, place, *m.message, cursor, arrival).await?;
+                apply::message(&self.cx.keeper(), place, *m.message, cursor, arrival).await?;
             }
             Event::MessageDeleted(d) => {
                 let place = self.channel(&d.group_id, &d.channel_id);
                 let id = d.message_id.to_string();
                 let (_, cursor) = self.arrival(&place, Arrival::IfKept, d.cursor);
-                apply::deleted(self.cx, place, id, d.deleted_at, cursor).await?;
+                let at = d
+                    .deleted_at
+                    .unwrap_or_else(|| self.cx.client().provider().clock().now());
+                apply::deleted(&self.cx.keeper(), place, id, at, cursor).await?;
             }
             Event::ReactionAdded(r) => {
                 let message = local_id(r.reaction.reference.id.as_str())?;
@@ -70,7 +73,7 @@ impl Live<'_> {
                 let place = d.dm_id.to_string();
                 self.know_conversation(&d.dm_id).await?;
                 let (arrival, cursor) = self.arrival(&place, Arrival::Any, d.cursor);
-                apply::message(self.cx, place, *d.message, cursor, arrival).await?;
+                apply::message(&self.cx.keeper(), place, *d.message, cursor, arrival).await?;
             }
             Event::DmConversation(c) if home => self.keep_conversation(&c.conversation).await?,
             Event::DmReaction(r) if home => self.dm_reactions(&r.dm_id, &r.message_id).await?,
@@ -130,7 +133,7 @@ impl Live<'_> {
             }
         }
         let place = self.channel(group, channel);
-        apply::reactions(self.cx, place, message.to_string(), all).await
+        apply::reactions(&self.cx.keeper(), place, message.to_string(), all).await
     }
 
     /// Read a private message's reactions again, at home, all of them.
@@ -146,7 +149,7 @@ impl Live<'_> {
                 None => break,
             }
         }
-        apply::reactions(self.cx, dm.to_string(), message.to_string(), all).await
+        apply::reactions(&self.cx.keeper(), dm.to_string(), message.to_string(), all).await
     }
 
     /// How an event in `place` is applied: as it came, or, while the place
@@ -237,15 +240,6 @@ impl Live<'_> {
             typing: *state == TypingState::Start,
         });
     }
-}
-
-/// Add a page of reactions to `all`; the request for the next page, if
-/// there is one (§7.2: continue in the same direction).
-fn collect(all: &mut Vec<Reaction>, page: Paged<Reaction>) -> Option<PageRequest> {
-    all.extend(page.items);
-    page.page
-        .next_cursor
-        .map(|next| PageRequest::after(next, Direction::Backward))
 }
 
 /// A message's id as a reaction names it.

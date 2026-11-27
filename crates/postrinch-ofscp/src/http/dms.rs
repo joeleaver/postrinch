@@ -7,13 +7,10 @@
 //! and pointers are at the signer's home; history is read from both
 //! participants' providers and merged (§7.4 *Reading a whole
 //! conversation*). The caller picks the [`Client`].
-//!
-//! Not here: `PUT /api/dms/{dmId}/messages/{messageId}/reactions/{key}`,
-//! whose answer the spec leaves unspecified.
 
 use ofscp_core::wire::{
     ConversationPointer, DmConversation, DmConversationsResponse, DmMessageCreate, Message,
-    MessageUpdate, MessagesPage, Paged, Reaction,
+    MessageUpdate, MessagesPage, Paged, Reaction, ReactionPut,
 };
 use ofscp_core::{DmId, LocalId};
 use reqwest::Method;
@@ -90,6 +87,24 @@ impl Client {
     ) -> Result<Paged<Reaction>> {
         let path = format!("{}/reactions", dm_message_path(dm_id, message_id));
         self.get(path, page.query()).await
+    }
+
+    /// Add the signer's reaction `key` to a private message, at the
+    /// provider holding the message (§7.4 *Reactions*), shown as `looks`
+    /// says. Idempotent: a repeat answers the reaction already held.
+    pub async fn put_dm_reaction(
+        &self,
+        dm_id: &DmId,
+        message_id: &LocalId,
+        key: &str,
+        looks: &ReactionPut,
+    ) -> Result<Reaction> {
+        let path = format!(
+            "{}{}",
+            dm_message_path(dm_id, message_id),
+            path("/reactions/{}", &[key])
+        );
+        self.send_json(Method::PUT, path, looks).await
     }
 
     /// Take back the signer's reaction `key` on a private message, at the

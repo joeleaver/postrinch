@@ -95,6 +95,13 @@ pub(crate) fn create(
         if r.kind != ReferenceKind::Reply {
             return Err(Problem::bad_request("reference.type must be reply"));
         }
+        // A channel reply's parent is in the same channel, so held here
+        // (§7.1: a `provider` naming another provider is a 400).
+        if r.provider.as_ref().is_some_and(|p| *p != inner.authority) {
+            return Err(Problem::bad_request(
+                "reference.provider must be this channel's provider",
+            ));
+        }
         let parent = c
             .timeline
             .get(&r.id)
@@ -368,6 +375,7 @@ pub(crate) fn new_reaction(
         reference: MessageReference {
             kind: ReferenceKind::Message,
             id: message.clone(),
+            provider: None,
         },
         created_at: now,
         metadata: Vec::new(),
