@@ -143,7 +143,7 @@ fn the_persons_own_message_is_never_kept_unread() {
 }
 
 #[test]
-fn an_uploaded_file_is_kept_in_the_change_and_it_can_still_be_taken_back() {
+fn an_uploaded_file_is_kept_with_the_change_and_it_can_still_be_taken_back() {
     let (_dir, store) = ada_with_general();
     let picture = DraftMedia::File {
         path: "/home/ada/cat.png".into(),
@@ -177,16 +177,29 @@ fn an_uploaded_file_is_kept_in_the_change_and_it_can_still_be_taken_back() {
         "id": "att_1", "mime": "image/png", "url": "https://groups.example/m/1", "size": 3
     });
     let entry = store
-        .social_change_uploaded(ADA, "c1", &picture, attachment.clone())
+        .social_change_uploaded(ADA, "c1", &picture, serde_json::json!({ "old": true }), 5)
         .unwrap()
         .unwrap();
-    let SocialChange::Post(post) = &entry.change else {
+    // Uploaded again, the newer upload replaces the older.
+    let entry_again = store
+        .social_change_uploaded(ADA, "c1", &picture, attachment.clone(), 10)
+        .unwrap()
+        .unwrap();
+    assert_eq!(entry.uploads.len(), 1);
+    assert_eq!(entry_again.uploads.len(), 1);
+    // The change keeps the file as picked; it is sent as uploaded while
+    // the upload is fresh enough.
+    assert_eq!(entry_again.change, change);
+    let uploaded = DraftMedia::Uploaded { attachment };
+    assert!(entry_again.uploaded_since(&picture, 10).is_some());
+    assert!(entry_again.uploaded_since(&picture, 11).is_none());
+    let SocialChange::Post(post) = entry_again.change_uploaded_since(10) else {
         panic!("a post");
     };
-    let uploaded = DraftMedia::Uploaded { attachment };
     assert_eq!(post.content.cover.as_ref(), Some(&uploaded));
     assert_eq!(post.content.attachments, [uploaded]);
-    assert_eq!(store.social_outbox(ADA).unwrap(), [entry]);
+    assert_eq!(entry_again.change_uploaded_since(11), change);
+    assert_eq!(store.social_outbox(ADA).unwrap(), [entry_again]);
 
     assert_eq!(
         store.take_back_social_change(ADA, "c1").unwrap(),
@@ -194,7 +207,7 @@ fn an_uploaded_file_is_kept_in_the_change_and_it_can_still_be_taken_back() {
     );
     assert_eq!(
         store
-            .social_change_uploaded(ADA, "c1", &picture, serde_json::json!({}))
+            .social_change_uploaded(ADA, "c1", &picture, serde_json::json!({}), 20)
             .unwrap(),
         None
     );

@@ -93,6 +93,11 @@ impl Blobs {
         Ok(Some(bytes))
     }
 
+    /// Whether the blob `hash` is here (its bytes are not read).
+    pub(crate) fn contains(&self, hash: &str) -> bool {
+        is_hash(hash) && self.path_of(hash).is_file()
+    }
+
     /// Delete the blob `hash`, returning whether it was there. For a
     /// directory whose blobs only one kind of record refers to (the social
     /// media cache), once none does.

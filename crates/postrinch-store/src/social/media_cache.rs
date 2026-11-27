@@ -10,8 +10,8 @@
 
 use std::collections::HashMap;
 
-use super::media::{MEDIA, media_key};
-use super::{KEY, RECORD, SocialMedia};
+use super::media::MEDIA;
+use super::{RECORD, SocialMedia};
 use crate::codec::Fields;
 use crate::{Store, StoreResult};
 
@@ -45,22 +45,41 @@ impl Store {
         Ok(self.media_cache.get(blob)?)
     }
 
-    /// Record that `account`'s attachment `id` of `provider` was asked for
-    /// at `now`, so the cache keeps it over what was used longer ago.
-    pub fn touch_social_media(
+    /// Keep fetched `bytes` in the media cache as `media`'s, its record
+    /// naming them (and their size), then trim the cache to `max_bytes` (never evicting
+    /// these): all at once, so no eviction or release runs between the
+    /// bytes kept and the record naming them. Returns the record as kept.
+    pub fn keep_social_media(
         &self,
-        account: &str,
-        provider: &str,
-        id: &str,
-        now: i64,
-    ) -> StoreResult<()> {
+        media: &SocialMedia,
+        bytes: &[u8],
+        max_bytes: u64,
+    ) -> StoreResult<(SocialMedia, Trimmed)> {
         self.social_locked(|| {
-            let key = media_key(account, provider, id);
-            if let Some(mut media) = self.social_record::<SocialMedia>(MEDIA, KEY, &key)? {
-                media.used = Some(now);
-                self.write_social_media(&media)?;
+            let blob = self.media_cache.put(bytes)?;
+            let mut kept = media.clone();
+            kept.blob = Some(blob.clone());
+            kept.size = Some(bytes.len() as u64);
+            self.write_social_media(&kept)?;
+            let trimmed = self.trim(max_bytes, Some(&blob))?;
+            Ok((kept, trimmed))
+        })
+    }
+
+    /// Keep `media`, a record naming cached bytes (one just served from
+    /// the cache, its `used` or `url` changed), only if those bytes are
+    /// still cached: an eviction since they were read wins. Returns
+    /// whether it was kept.
+    pub fn put_social_media_if_cached(&self, media: &SocialMedia) -> StoreResult<bool> {
+        self.social_locked(|| {
+            let Some(blob) = media.blob.as_deref() else {
+                return Ok(false);
+            };
+            if !self.media_cache.contains(blob) {
+                return Ok(false);
             }
-            Ok(())
+            self.write_social_media(media)?;
+            Ok(true)
         })
     }
 
@@ -75,27 +94,30 @@ impl Store {
     /// holds at most `max_bytes`. `keep` (the bytes just fetched) is never
     /// evicted, so the cache may stay over the limit by that much.
     pub fn trim_social_media(&self, max_bytes: u64, keep: Option<&str>) -> StoreResult<Trimmed> {
-        self.social_locked(|| {
-            let cached = self.cached_blobs()?;
-            let mut size: u64 = cached.values().map(|c| c.size).sum();
-            let mut trimmed = Trimmed::default();
-            let mut oldest: Vec<(&String, &Cached)> = cached
-                .iter()
-                .filter(|(blob, _)| Some(blob.as_str()) != keep)
-                .collect();
-            oldest.sort_by(|a, b| (a.1.last_used, a.0).cmp(&(b.1.last_used, b.0)));
-            for (blob, entry) in oldest {
-                if size <= max_bytes {
-                    break;
-                }
-                self.evict(blob)?;
-                size -= entry.size;
-                trimmed.evicted += 1;
-                trimmed.freed += entry.size;
+        self.social_locked(|| self.trim(max_bytes, keep))
+    }
+
+    /// [`Store::trim_social_media`]; called with the social lock held.
+    fn trim(&self, max_bytes: u64, keep: Option<&str>) -> StoreResult<Trimmed> {
+        let cached = self.cached_blobs()?;
+        let mut size: u64 = cached.values().map(|c| c.size).sum();
+        let mut trimmed = Trimmed::default();
+        let mut oldest: Vec<(&String, &Cached)> = cached
+            .iter()
+            .filter(|(blob, _)| Some(blob.as_str()) != keep)
+            .collect();
+        oldest.sort_by(|a, b| (a.1.last_used, a.0).cmp(&(b.1.last_used, b.0)));
+        for (blob, entry) in oldest {
+            if size <= max_bytes {
+                break;
             }
-            trimmed.size = size;
-            Ok(trimmed)
-        })
+            self.evict(blob)?;
+            size -= entry.size;
+            trimmed.evicted += 1;
+            trimmed.freed += entry.size;
+        }
+        trimmed.size = size;
+        Ok(trimmed)
     }
 
     /// Evict the cached bytes `blob`: every record of them forgets them,

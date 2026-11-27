@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ContentKind, DraftMedia, Notices};
+use super::{ContentKind, DraftMedia, Notices, SocialOutboxEntry, UploadedFile};
 
 /// A change on its way to a provider.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -146,6 +146,28 @@ impl SocialChange {
             }
         }
         found
+    }
+}
+
+impl SocialOutboxEntry {
+    /// The upload of `media` made at or after `since`, if there is one.
+    pub fn uploaded_since(&self, media: &DraftMedia, since: i64) -> Option<&UploadedFile> {
+        self.uploads
+            .iter()
+            .find(|u| u.media == *media && u.at >= since)
+    }
+
+    /// Its change as it is sent: each file uploaded at or after `since`
+    /// replaced by its Attachment ([`DraftMedia::Uploaded`]).
+    pub fn change_uploaded_since(&self, since: i64) -> SocialChange {
+        let mut change = self.change.clone();
+        for upload in self.uploads.iter().filter(|u| u.at >= since) {
+            let uploaded = DraftMedia::Uploaded {
+                attachment: upload.attachment.clone(),
+            };
+            change.replace_media(&upload.media, &uploaded);
+        }
+        change
     }
 }
 

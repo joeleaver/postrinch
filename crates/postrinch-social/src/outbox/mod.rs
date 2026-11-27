@@ -9,8 +9,9 @@
 //!   cannot be reached, or fails) is tried again later, and the changes
 //!   after it in its place wait for it; other places go on.
 //! - **Files first.** A post or edit's files are uploaded before it
-//!   ([`upload`]), each kept in the queued change as it goes up, so a
-//!   retry uploads only what is not up yet. A change whose files are not
+//!   ([`upload`]), each kept with the queued change as it goes up, so a
+//!   retry uploads only what is not up yet (or what went up too long
+//!   ago for its provider to keep). A change whose files are not
 //!   all up is not sent, and holds back its place; a failed upload is not
 //!   an attempt, and the change can still be taken back.
 //! - **Refused for good** (a `403`, a `400`, a `404` for an edit of what
@@ -162,24 +163,24 @@ impl Social {
         };
         // Uploaded before the account is held: an upload can take long,
         // and signing out or in again need not wait for it.
-        let entry = match self
+        let change = match self
             .upload_files(sender, entry.clone(), &place, &target)
             .await?
         {
-            Uploaded::Ready(entry) => *entry,
+            Uploaded::Ready(change) => *change,
             Uploaded::TakenBack => return Ok(None),
             Uploaded::Not(outcome) => return Ok(Some(outcome)),
         };
         // Held for each change, so signing out or in again waits for the
         // one being sent, but never for the whole pass.
         let _account = self.hold(sender.actor()).await;
-        let (place, target) = match self.place_of(sender, &entry).await? {
+        let (place, target) = match self.place_of(sender, entry).await? {
             Ok(found) => found,
             Err(outcome) => return Ok(Some(outcome)),
         };
         // Checked before it is marked tried: one that waits for its files
         // may still be taken back.
-        if let Err(not_ready) = self.ready(sender, &place, &entry.change).await? {
+        if let Err(not_ready) = self.ready(sender, &place, &change).await? {
             return Ok(Some(not_ready.into()));
         }
         let (account, client_id) = (entry.account.clone(), entry.client_id.clone());
@@ -194,7 +195,7 @@ impl Social {
             place: &place,
             target: &target,
         };
-        let sent = match &entry.change {
+        let sent = match &change {
             SocialChange::Post(post) => sender.post(&going, post).await,
             SocialChange::Edit { message, content } => sender.edit(&going, message, content).await,
             SocialChange::Delete { message } => sender.delete(&going, message).await,

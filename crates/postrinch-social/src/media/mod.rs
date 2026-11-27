@@ -3,9 +3,10 @@
 //! - **Uploads** (the outbox's `upload`): the outbox uploads a change's files before
 //!   the change, to the home provider, naming the provider that will hold
 //!   the message as the upload's `target`. Each file's Attachment is kept
-//!   in the queued change as soon as its provider gives it, so a retry
+//!   with the queued change as soon as its provider gives it, so a retry
 //!   (after a broken connection, a stall, a restart) uploads only the
-//!   files not yet up; the spec's single-step upload cannot resume a file
+//!   files not yet up, or up longer ago than
+//!   [`MediaOptions::upload_fresh`]; the spec's single-step upload cannot resume a file
 //!   part-way, so an interrupted one starts again. Progress is told live
 //!   and kept while it runs ([`progress`]).
 //! - **Fetching** ([`fetch`]): a picture, video or file a message carries
@@ -39,6 +40,10 @@ pub struct MediaOptions {
     /// How long an avatar is served from the cache before the user's
     /// profile is read again, to see whether it changed.
     pub avatar_ttl: Duration,
+    /// How long an upload nothing posted yet is trusted to be kept by its
+    /// provider; a queued change's file uploaded longer ago is uploaded
+    /// again. Under the 24 hours §5.8 promises, to leave the send time.
+    pub upload_fresh: Duration,
 }
 
 impl Default for MediaOptions {
@@ -46,6 +51,7 @@ impl Default for MediaOptions {
         Self {
             cache_bytes: 1024 * 1024 * 1024,
             avatar_ttl: Duration::from_secs(24 * 60 * 60),
+            upload_fresh: Duration::from_secs(20 * 60 * 60),
         }
     }
 }

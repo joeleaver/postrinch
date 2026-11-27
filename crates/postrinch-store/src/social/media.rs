@@ -19,8 +19,8 @@ impl Store {
     /// Cached bytes the record named before, and no record names now, go
     /// from the cache.
     pub fn put_social_media(&self, media: &SocialMedia) -> StoreResult<()> {
-        // Under the social lock, so the cache's eviction never runs between
-        // a fetch's write and its read (media_cache.rs).
+        // Under the social lock, as every change of the records and the
+        // cache is (media_cache.rs).
         self.social_locked(|| self.write_social_media(media))
     }
 

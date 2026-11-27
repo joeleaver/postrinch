@@ -73,19 +73,25 @@ pub(crate) fn outcome_of(error: SocialError) -> SocialResult<Outcome> {
 /// check yet: home is the key's judge, and a `401` there marks the
 /// account before this is asked), `408` and `429`, which pass. A request
 /// that could not even be made (a body that does not encode, a file to
-/// upload that cannot be read) would fail the same way every time.
+/// upload that is gone or may not be read) would fail the same way every
+/// time; a file that failed to read otherwise (a drive not mounted yet)
+/// may read later.
 pub(crate) fn is_refusal(error: &Error) -> bool {
     match error {
         Error::Problem(problem) => {
             (400..500).contains(&problem.status) && ![401, 408, 429].contains(&problem.status)
         }
-        Error::Encode(_)
-        | Error::Sign(_)
-        | Error::Endpoint(_)
-        | Error::InvalidUpload(_)
-        | Error::Read { .. } => true,
+        Error::Encode(_) | Error::Sign(_) | Error::Endpoint(_) | Error::InvalidUpload(_) => true,
+        Error::Read { source, .. } => is_gone(source),
         _ => false,
     }
+}
+
+/// Whether a file failed to read because it is not there, or not one this
+/// account may read: no retry will read it.
+fn is_gone(error: &std::io::Error) -> bool {
+    use std::io::ErrorKind::{IsADirectory, NotFound, PermissionDenied};
+    matches!(error.kind(), NotFound | PermissionDenied | IsADirectory)
 }
 
 /// Whether `error` is a `404`: what the change is about is not there.

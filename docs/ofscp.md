@@ -332,15 +332,16 @@ when an account is deleted.
     any other by URI; an unfollow names the ref exactly as home lists it.
   - Media is uploaded before the message that carries it (PR 11), to the home provider,
     with `target` naming the provider that will hold the message when that isn't home (a
-    remote channel's host, a DM recipient's provider). Each file's Attachment is kept in
-    the queued change as it comes back, so a retry uploads only what isn't up yet; the
+    remote channel's host, a DM recipient's provider). Each file's Attachment is kept with
+    the queued change as it comes back (the change keeps the files as picked), so a retry
+    uploads only what isn't up yet; the
     spec's upload is one request, so a file cut off part-way starts again. A failed upload
     holds back its place but isn't an attempt: the change stays untried and can be taken
-    back. A file that can't be read is refused. Progress is told as
-    `LiveEvent::Uploading` (each whole percent) and kept while it runs (`Social::uploads`).
-    A message held back by failures for over 24 hours after its upload may find the
-    pending upload dropped by the provider (§5.8 keeps it at least that long), and is
-    then refused.
+    back. A file that is gone or may not be read is refused; another read failure is
+    tried again. Progress is told as `LiveEvent::Uploading` (each whole percent) and kept
+    while it runs (`Social::uploads`). A provider keeps an upload nothing posted for at
+    least 24 hours (§5.8), so an upload older than `MediaOptions::upload_fresh` (20 h) is
+    made again before the change goes.
 - **Media cache:** attachments, thumbnails and avatars are fetched unsigned by their URL,
   checked against a `sha-256` hash when they carry one, and kept in `social-media/`, a blob
   directory of their own beside the main `blobs/` (picked and pasted files to upload stay

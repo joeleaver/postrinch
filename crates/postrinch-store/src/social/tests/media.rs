@@ -104,9 +104,9 @@ fn the_cache_evicts_the_least_recently_used_first() {
     assert_eq!(store.social_media_cache_size().unwrap(), 120);
 
     // a2 is asked for after a3 was fetched: a1 is now the oldest, then a3.
-    store
-        .touch_social_media(ADA, "groups.example", "a2", 10)
-        .unwrap();
+    let mut asked = used.clone();
+    asked.used = Some(10);
+    assert!(store.put_social_media_if_cached(&asked).unwrap());
     let trimmed = store.trim_social_media(80, None).unwrap();
     assert_eq!(
         trimmed,
@@ -169,4 +169,34 @@ fn cached_bytes_no_record_names_go_at_once() {
             .is_none()
     );
     assert_eq!(store.social_media_cache_size().unwrap(), 0);
+}
+
+#[test]
+fn fetched_bytes_are_kept_with_their_record_and_a_hit_loses_to_an_eviction() {
+    let (_dir, store) = store();
+    let first = cached(&store, ADA, "a1", &[1; 40], 1);
+    let mut fetched = media(ADA, "a2");
+    fetched.fetched = Some(2);
+    let (kept, trimmed) = store.keep_social_media(&fetched, &[2; 40], 50).unwrap();
+    // The new bytes are kept, named by their record; the old go.
+    let blob = kept.blob.clone().unwrap();
+    assert_eq!(
+        store.cached_social_media_bytes(&blob).unwrap(),
+        Some(vec![2; 40])
+    );
+    assert_eq!(
+        store.social_media(ADA, "groups.example", "a2").unwrap(),
+        Some(kept)
+    );
+    assert_eq!((trimmed.evicted, trimmed.size), (1, 40));
+
+    // A hit read before that eviction does not bring back what it named.
+    let mut stale = first.clone();
+    stale.used = Some(3);
+    assert!(!store.put_social_media_if_cached(&stale).unwrap());
+    let forgotten = store
+        .social_media(ADA, "groups.example", "a1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(forgotten.blob, None);
 }

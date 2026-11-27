@@ -381,4 +381,22 @@ pub struct SocialOutboxEntry {
     /// it is not tried again, and waits for the person to give it up.
     #[serde(default)]
     pub refused: bool,
+    /// The files of its change uploaded so far, each with the Attachment
+    /// its provider gave back: sent in their place. The change keeps the
+    /// files as picked, so one whose upload grew too old to post (§5.8: a
+    /// provider keeps an upload nothing posted for at least a day) is
+    /// uploaded again.
+    #[serde(default)]
+    pub uploads: Vec<UploadedFile>,
+}
+
+/// A file of a queued change, uploaded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UploadedFile {
+    /// The file as the change carries it.
+    pub media: DraftMedia,
+    /// The Attachment its provider gave back, whole.
+    pub attachment: Value,
+    /// When it was uploaded.
+    pub at: i64,
 }

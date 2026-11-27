@@ -143,7 +143,7 @@ impl Social {
         if let Some(hit) = self.cached(&account, media).await? {
             return Ok(hit);
         }
-        self.fetch_into_cache(&account, media, None).await
+        self.fetch_into_cache(&account, media).await
     }
 
     /// `media` from the cache, if it is there.
@@ -170,9 +170,10 @@ impl Social {
             if stale || kept.url != media.url {
                 kept.used = Some(now);
                 kept.url = media.url.clone();
-                let record = kept.clone();
-                self.blocking(move |store| store.put_social_media(&record))
-                    .await?;
+                if !self.keep_if_cached(&kept).await? {
+                    // Evicted since it was read: fetched again.
+                    return Ok(None);
+                }
             }
             return Ok(Some(CachedMedia {
                 media: kept,
@@ -185,9 +186,9 @@ impl Social {
             && let Some(bytes) = self.cached_bytes(&blob).await?
         {
             let record = media.record(account, blob, bytes.len() as u64, None);
-            let kept = record.clone();
-            self.blocking(move |store| store.put_social_media(&kept))
-                .await?;
+            if !self.keep_if_cached(&record).await? {
+                return Ok(None);
+            }
             return Ok(Some(CachedMedia {
                 media: record,
                 bytes,
@@ -197,14 +198,12 @@ impl Social {
         Ok(None)
     }
 
-    /// Fetch `media`, check it, keep it as `record` says (its record made
-    /// afresh when `None`), and trim the cache. Called holding its fetch
-    /// lock.
+    /// Fetch `media`, check it, keep it, and trim the cache. Called
+    /// holding its fetch lock.
     pub(crate) async fn fetch_into_cache(
         &self,
         account: &str,
         media: &MediaRef,
-        record: Option<SocialMedia>,
     ) -> SocialResult<CachedMedia> {
         let limit = self.media.options.cache_bytes;
         if let Some(size) = media.size.filter(|s| *s > limit) {
@@ -221,25 +220,13 @@ impl Social {
                 url: media.url.clone(),
             });
         }
-        let bytes = fetched.bytes.to_vec();
-        let size = bytes.len() as u64;
-        let record = match record {
-            Some(mut record) => {
-                record.blob = Some(blob.clone());
-                record.fetched = Some(now_ms());
-                record.size = Some(size);
-                record.mime = record.mime.or(fetched.mime);
-                record
-            }
-            None => media.record(account, blob, size, fetched.mime),
-        };
-        let (kept, to_cache) = (record.clone(), bytes.clone());
-        let trimmed = self
-            .blocking(move |store| {
-                let cached = store.cache_social_media_bytes(&to_cache)?;
-                store.put_social_media(&kept)?;
-                store.trim_social_media(limit, Some(&cached))
-            })
+        let size = fetched.bytes.len() as u64;
+        let record = media.record(account, blob, size, fetched.mime);
+        // The bytes are shared with the blocking task, not copied.
+        let bytes = fetched.bytes;
+        let to_cache = bytes.clone();
+        let (record, trimmed) = self
+            .blocking(move |store| store.keep_social_media(&record, &to_cache, limit))
             .await?;
         if trimmed.evicted > 0 {
             tracing::debug!(
@@ -251,9 +238,17 @@ impl Social {
         }
         Ok(CachedMedia {
             media: record,
-            bytes,
+            bytes: Vec::from(bytes),
             from_cache: false,
         })
+    }
+
+    /// Keep `record`, just served from the cache, if its bytes are still
+    /// cached; whether it was.
+    pub(crate) async fn keep_if_cached(&self, record: &SocialMedia) -> SocialResult<bool> {
+        let record = record.clone();
+        self.blocking(move |store| store.put_social_media_if_cached(&record))
+            .await
     }
 
     /// The cached bytes `blob`, if they are still there. Bytes the cache

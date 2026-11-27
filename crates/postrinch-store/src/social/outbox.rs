@@ -2,7 +2,10 @@
 //! made. Each is kept until its provider has taken it; reads lay the
 //! pending ones over what sync stored, so sync never undoes one.
 
-use super::{DraftMedia, KEY, RECORD, SocialChange, SocialOutboxEntry, scoped, social_account_key};
+use super::{
+    DraftMedia, KEY, RECORD, SocialChange, SocialOutboxEntry, UploadedFile, scoped,
+    social_account_key,
+};
 use crate::codec::{Fields, FieldsBuilder};
 use crate::format::{INFO, INFO_KEY};
 use crate::{Store, StoreError, StoreResult};
@@ -38,6 +41,7 @@ impl Store {
                 attempts: 0,
                 error: None,
                 refused: false,
+                uploads: Vec::new(),
             };
             self.write_social_change(&key, &entry)?;
             Ok(entry)
@@ -164,17 +168,20 @@ impl Store {
         })
     }
 
-    /// Record that `media`, a file a queued change carries, is uploaded
-    /// as `attachment` (the Attachment its provider gave back, whole): the
-    /// change carries that from now on, and a retry does not upload it
-    /// again. Returns the entry as it is now, or `None` when it is not
-    /// queued (it was taken back while the file went).
+    /// Record that `media`, a file a queued change carries, was uploaded
+    /// at `at` as `attachment` (the Attachment its provider gave back,
+    /// whole), replacing an older upload of it: a retry sends that, and
+    /// does not upload it again while it is fresh
+    /// ([`SocialOutboxEntry::uploads`]). Returns the entry as it is now,
+    /// or `None` when it is not queued (it was taken back while the file
+    /// went).
     pub fn social_change_uploaded(
         &self,
         account: &str,
         client_id: &str,
         media: &DraftMedia,
         attachment: serde_json::Value,
+        at: i64,
     ) -> StoreResult<Option<SocialOutboxEntry>> {
         let key = scoped(account, client_id);
         self.social_locked(|| {
@@ -182,10 +189,13 @@ impl Store {
             else {
                 return Ok(None);
             };
-            let uploaded = DraftMedia::Uploaded { attachment };
-            if entry.change.replace_media(media, &uploaded) {
-                self.write_social_change(&key, &entry)?;
-            }
+            entry.uploads.retain(|u| u.media != *media);
+            entry.uploads.push(UploadedFile {
+                media: media.clone(),
+                attachment,
+                at,
+            });
+            self.write_social_change(&key, &entry)?;
             Ok(Some(entry))
         })
     }

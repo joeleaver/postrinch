@@ -1,6 +1,8 @@
 //! A queued change's files, uploaded before it.
 
-use postrinch_social::{LiveEvent, UploadProgress};
+use std::time::Duration;
+
+use postrinch_social::{LiveEvent, MediaOptions, UploadProgress};
 use postrinch_store::{DraftMedia, SocialChange, TakeBack};
 
 use super::{attached, bytes, file, uploads, with_files};
@@ -162,7 +164,7 @@ async fn a_post_is_held_until_its_files_are_up_and_what_follows_waits_for_it() {
 }
 
 #[tokio::test]
-async fn a_file_up_is_kept_in_the_change_and_not_uploaded_again() {
+async fn a_file_up_is_kept_with_the_change_and_not_uploaded_again() {
     let h = home().await;
     let (_bob, group, channel) = h.bob_with_group();
     let place = channel_uri(&h.provider, &group, &channel);
@@ -184,10 +186,14 @@ async fn a_file_up_is_kept_in_the_change_and_not_uploaded_again() {
     );
     assert_eq!(send(&h).await.failed, 1);
     let waiting = outbox(&h);
+    // The change keeps its files as picked; the first's upload is kept
+    // with it.
     assert!(matches!(
         files(&waiting[0].change),
-        [DraftMedia::Uploaded { .. }, DraftMedia::File { .. }]
+        [DraftMedia::File { .. }, DraftMedia::File { .. }]
     ));
+    assert_eq!(waiting[0].uploads.len(), 1);
+    assert_eq!(waiting[0].uploads[0].media, attached(&small, "image/png"));
     assert_eq!(uploads(&h.provider), 1);
 
     // Gone from the disk now, the first is not needed again.
@@ -199,6 +205,44 @@ async fn a_file_up_is_kept_in_the_change_and_not_uploaded_again() {
         h.provider.messages(&group, &channel)[0].attachments.len(),
         2
     );
+}
+
+#[tokio::test]
+async fn a_file_up_too_long_ago_is_uploaded_again() {
+    let h = home().await;
+    let (_bob, group, channel) = h.bob_with_group();
+    let place = channel_uri(&h.provider, &group, &channel);
+    h.add().await;
+    // Nothing up is trusted to be kept: as if every retry came a day on.
+    let social = h.social.clone().with_media_options(MediaOptions {
+        upload_fresh: Duration::ZERO,
+        ..MediaOptions::default()
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let small = file(dir.path(), "small.png", &bytes(1, 1024));
+    let large = file(dir.path(), "large.png", &bytes(2, 256 * 1024));
+
+    h.provider.faults().cut_uploads_after(Some(64 * 1024));
+    queue(
+        &h,
+        "c1",
+        &place,
+        &with_files(
+            "two pictures",
+            vec![attached(&small, "image/png"), attached(&large, "image/png")],
+        ),
+    );
+    assert_eq!(social.send_outbox(&h.account()).await.unwrap().failed, 1);
+    assert_eq!(uploads(&h.provider), 1);
+    let first = outbox(&h)[0].uploads[0].attachment["id"].clone();
+
+    h.provider.faults().cut_uploads_after(None);
+    assert_eq!(social.send_outbox(&h.account()).await.unwrap().sent, 1);
+    // Both went up this time, and the message carries the new upload.
+    assert_eq!(uploads(&h.provider), 3);
+    let sent = &h.provider.messages(&group, &channel)[0].attachments;
+    assert_eq!(sent.len(), 2);
+    assert_ne!(serde_json::json!(sent[0].id.as_str()), first);
 }
 
 #[tokio::test]

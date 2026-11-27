@@ -67,12 +67,11 @@ impl Social {
             && let Some(mut hit) = self.cached(&account.actor, &wanted).await?
         {
             hit.media.fetched = Some(now_ms());
-            let record = hit.media.clone();
-            self.blocking(move |store| store.put_social_media(&record))
-                .await?;
-            return Ok(Some(hit));
+            if self.keep_if_cached(&hit.media).await? {
+                return Ok(Some(hit));
+            }
         }
-        self.fetch_into_cache(&account.actor, &wanted, None)
+        self.fetch_into_cache(&account.actor, &wanted)
             .await
             .map(Some)
     }

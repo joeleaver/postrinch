@@ -5,16 +5,19 @@
 //! naming as its `target` the provider that will hold the message when
 //! that is not home: a remote channel's, or a private message
 //! recipient's (§5.8 *Where to upload*, *Target*). Each Attachment is kept
-//! in the queued change the moment it comes back
+//! with the queued change the moment it comes back
 //! ([`postrinch_store::Store::social_change_uploaded`]), so a retry, after
 //! a broken connection, a stall or a restart, uploads only what is not up
 //! yet. The spec's upload is one request, so a file cut off part-way is
 //! sent again from its start.
 //!
+//! A provider keeps an upload nothing posted for at least 24 hours (§5.8),
+//! so one older than [`crate::MediaOptions::upload_fresh`] is not trusted
+//! to be there: the change keeps its files as picked, and such a file is
+//! uploaded again.
+//!
 //! Uploading is not sending: the change is not marked tried, so it can
 //! still be taken back, and a failed upload is not counted as an attempt.
-//! An upload nothing ever posts is the provider's to drop (§5.8: a pending
-//! upload is kept at least 24 hours).
 
 use postrinch_ofscp::http::{MediaUpload, Source};
 use postrinch_store::{ContentKind, DraftMedia, SocialChange, SocialOutboxEntry, SocialPlace};
@@ -22,13 +25,15 @@ use postrinch_store::{ContentKind, DraftMedia, SocialChange, SocialOutboxEntry, 
 use super::outcome::{Outcome, outcome_of};
 use super::send::Sender;
 use super::target::Target;
+use crate::media::now_ms;
 use crate::media::progress::{UploadProgress, Watching};
 use crate::{Social, SocialResult};
 
 /// What uploading a change's files came to.
 pub(crate) enum Uploaded {
-    /// Every file is up: the change as it is queued now.
-    Ready(Box<SocialOutboxEntry>),
+    /// Every file is up: the change as it is sent, its files replaced by
+    /// their Attachments.
+    Ready(Box<SocialChange>),
     /// The change was taken back meanwhile.
     TakenBack,
     /// A file could not be uploaded, now or ever.
@@ -44,9 +49,13 @@ impl Social {
         place: &SocialPlace,
         target: &Target,
     ) -> SocialResult<Uploaded> {
-        let pending = to_upload(sender, place, &entry.change).await?;
+        let fresh = i64::try_from(self.media.options.upload_fresh.as_millis()).unwrap_or(i64::MAX);
+        let since = now_ms().saturating_sub(fresh);
+        let pending = to_upload(sender, place, &entry, since).await?;
         if pending.is_empty() {
-            return Ok(Uploaded::Ready(Box::new(entry)));
+            return Ok(Uploaded::Ready(Box::new(
+                entry.change_uploaded_since(since),
+            )));
         }
         let home = sender.home().clone();
         let holder = target.upload_target(&home);
@@ -95,7 +104,7 @@ impl Social {
             );
             let now = self
                 .blocking(move |store| {
-                    store.social_change_uploaded(&account, &client_id, &media, attachment)
+                    store.social_change_uploaded(&account, &client_id, &media, attachment, now_ms())
                 })
                 .await?;
             match now {
@@ -103,7 +112,9 @@ impl Social {
                 None => return Ok(Uploaded::TakenBack),
             }
         }
-        Ok(Uploaded::Ready(Box::new(entry)))
+        Ok(Uploaded::Ready(Box::new(
+            entry.change_uploaded_since(since),
+        )))
     }
 
     /// The upload of `media`; why not, when it can never be made (the
@@ -130,15 +141,16 @@ impl Social {
     }
 }
 
-/// The files `change` carries that are not up yet, each once, in the
-/// order they go: an article's cover first, then the attachments. Another
-/// kind's cover is not sent, so it is not uploaded.
+/// The files `entry`'s change carries that are not up since `since`, each
+/// once, in the order they go: an article's cover first, then the
+/// attachments. Another kind's cover is not sent, so it is not uploaded.
 async fn to_upload(
     sender: &Sender<'_>,
     place: &SocialPlace,
-    change: &SocialChange,
+    entry: &SocialOutboxEntry,
+    since: i64,
 ) -> SocialResult<Vec<DraftMedia>> {
-    let (content, article) = match change {
+    let (content, article) = match &entry.change {
         SocialChange::Post(post) => (&post.content, post.kind == ContentKind::Article),
         SocialChange::Edit { message, content } => {
             (content, sender.is_article(place, message).await?)
@@ -148,7 +160,9 @@ async fn to_upload(
     let cover = content.cover.iter().filter(|_| article);
     let mut pending: Vec<DraftMedia> = Vec::new();
     for media in cover.chain(&content.attachments) {
-        if !matches!(media, DraftMedia::Uploaded { .. }) && !pending.contains(media) {
+        let up = matches!(media, DraftMedia::Uploaded { .. })
+            || entry.uploaded_since(media, since).is_some();
+        if !up && !pending.contains(media) {
             pending.push(media.clone());
         }
     }
