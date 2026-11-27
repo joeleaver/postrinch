@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ofscp_core::Actor;
 use ofscp_core::ws::Event;
@@ -22,6 +22,15 @@ pub(crate) enum Outgoing {
     Close(u16),
     /// Drop the socket with no close frame.
     Drop,
+}
+
+impl Outgoing {
+    pub(crate) fn event(body: Event, correlation_id: Option<String>) -> Self {
+        Outgoing::Event {
+            body: Box::new(body),
+            correlation_id,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -50,6 +59,9 @@ pub(crate) enum To<'a> {
 pub(crate) struct Hub {
     conns: Mutex<HashMap<ConnId, Conn>>,
     next: AtomicU64,
+    /// Set once the provider is dropped: a socket whose upgrade finishes
+    /// after that is dropped as soon as it registers.
+    shut: AtomicBool,
 }
 
 impl Hub {
@@ -63,7 +75,12 @@ impl Hub {
             scopes: HashSet::new(),
             presence: HashSet::new(),
         };
-        self.conns.lock().unwrap().insert(id, conn);
+        let mut conns = self.conns.lock().unwrap();
+        // Read under the lock `drop_all` holds, so no socket slips past.
+        if self.shut.load(Ordering::SeqCst) {
+            let _ = conn.tx.send(Outgoing::Drop);
+        }
+        conns.insert(id, conn);
         (id, rx)
     }
 
@@ -72,10 +89,13 @@ impl Hub {
         self.conns.lock().unwrap().remove(&id).and_then(|c| c.actor)
     }
 
-    pub(crate) fn authenticated(&self, id: ConnId, actor: &Actor, key_id: &str) {
+    /// Mark a connection signed in and queue its `ack` in the same step,
+    /// so no event delivered to the actor can get ahead of the ack.
+    pub(crate) fn authenticated(&self, id: ConnId, actor: &Actor, key_id: &str, ack: Outgoing) {
         if let Some(c) = self.conns.lock().unwrap().get_mut(&id) {
             c.actor = Some(actor.clone());
             c.key_id = Some(key_id.to_owned());
+            let _ = c.tx.send(ack);
         }
     }
 
@@ -114,7 +134,9 @@ impl Hub {
         }
     }
 
-    pub(crate) fn follow_presence(&self, id: ConnId, users: &[Actor], on: bool) {
+    /// Follow or stop following `users`' presence, queuing `ack` in the
+    /// same step so no `presence.update` gets ahead of it.
+    pub(crate) fn follow_presence(&self, id: ConnId, users: &[Actor], on: bool, ack: Outgoing) {
         if let Some(c) = self.conns.lock().unwrap().get_mut(&id) {
             for u in users {
                 if on {
@@ -123,6 +145,7 @@ impl Hub {
                     c.presence.remove(u);
                 }
             }
+            let _ = c.tx.send(ack);
         }
     }
 
@@ -169,10 +192,8 @@ impl Hub {
                 .filter(|(conn, _)| conn == id)
                 .map(|(_, corr)| corr.to_owned());
             for _ in 0..times {
-                let _ = c.tx.send(Outgoing::Event {
-                    body: Box::new(body.clone()),
-                    correlation_id: correlation_id.clone(),
-                });
+                let _ =
+                    c.tx.send(Outgoing::event(body.clone(), correlation_id.clone()));
             }
         }
     }
@@ -183,10 +204,7 @@ impl Hub {
         let mut conns = self.conns.lock().unwrap();
         for c in conns.values_mut() {
             if c.actor.as_ref() == Some(actor) && c.scopes.remove(scope) {
-                let _ = c.tx.send(Outgoing::Event {
-                    body: Box::new(notice.clone()),
-                    correlation_id: None,
-                });
+                let _ = c.tx.send(Outgoing::event(notice.clone(), None));
             }
         }
     }
@@ -206,8 +224,11 @@ impl Hub {
         }
     }
 
+    /// Drop every socket, now and any that register later.
     pub(crate) fn drop_all(&self) {
-        for c in self.conns.lock().unwrap().values() {
+        let conns = self.conns.lock().unwrap();
+        self.shut.store(true, Ordering::SeqCst);
+        for c in conns.values() {
             let _ = c.tx.send(Outgoing::Drop);
         }
     }

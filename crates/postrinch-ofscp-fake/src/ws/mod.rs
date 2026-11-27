@@ -69,13 +69,9 @@ impl Conn {
     /// Queue an event behind everything already queued for this
     /// connection (acks, replays, fan-out), so replies keep their order.
     pub(crate) fn emit(&self, body: Event, correlation_id: Option<String>) {
-        self.inner.hub.send(
-            self.id,
-            Outgoing::Event {
-                body: Box::new(body),
-                correlation_id,
-            },
-        );
+        self.inner
+            .hub
+            .send(self.id, Outgoing::event(body, correlation_id));
     }
 
     /// Write one event to the socket with a fresh id and the provider's

@@ -9,6 +9,7 @@ use ofscp_core::ws::{
 };
 use ofscp_core::{Actor, DmId};
 
+use super::hub::Outgoing;
 use super::typing::Place;
 use super::{Conn, Flow, presence_of, publish_presence, subscribe};
 use crate::ops::{Made, messages};
@@ -153,10 +154,12 @@ pub(super) async fn handle(conn: &mut Conn, text: &str) -> Flow {
         Command::TypingStop(t) => typing(conn, &actor, t, false),
         Command::PresenceSubscribe(p) => return presence_subscribe(conn, corr, p),
         Command::PresenceUnsubscribe(p) => {
-            inner.hub.follow_presence(conn.id, &p.users, false);
-            Ok(Some(Event::PresenceUnsubscribed(PresenceUsersAck {
-                users: p.users,
-            })))
+            let ack = Event::PresenceUnsubscribed(PresenceUsersAck {
+                users: p.users.clone(),
+            });
+            let ack = Outgoing::event(ack, Some(corr));
+            inner.hub.follow_presence(conn.id, &p.users, false, ack);
+            return Flow::Continue;
         }
         Command::PresenceSet(p) => {
             set_presence(&inner, &actor, p.availability, p.status).map(|()| None)
@@ -209,16 +212,18 @@ async fn authenticate(conn: &mut Conn, corr: String, auth: Authenticate) -> Flow
     match verify_ws(&inner, &auth, &nonce).await {
         Ok(verified) => {
             let first = !inner.hub.online(&verified.actor);
-            inner
-                .hub
-                .authenticated(conn.id, &verified.actor, &verified.key_id);
-            conn.actor = Some(verified.actor.clone());
-            conn.key_id = Some(verified.key_id);
-            conn.key_until = verified.until;
             let ack = Event::Authenticated(Authenticated {
                 actor: verified.actor.clone(),
             });
-            conn.emit(ack, Some(corr));
+            inner.hub.authenticated(
+                conn.id,
+                &verified.actor,
+                &verified.key_id,
+                Outgoing::event(ack, Some(corr)),
+            );
+            conn.actor = Some(verified.actor.clone());
+            conn.key_id = Some(verified.key_id);
+            conn.key_until = verified.until;
             if first {
                 publish_presence(&inner, &verified.actor);
             }
@@ -270,11 +275,11 @@ fn presence_subscribe(conn: &Conn, corr: String, p: PresenceUsers) -> Flow {
         state.local_user(&inner.authority, u).is_some()
     });
     if !hosted.is_empty() {
-        inner.hub.follow_presence(conn.id, &hosted, true);
         let ack = Event::PresenceSubscribed(PresenceUsersAck {
             users: hosted.clone(),
         });
-        conn.emit(ack, Some(corr.clone()));
+        let ack = Outgoing::event(ack, Some(corr.clone()));
+        inner.hub.follow_presence(conn.id, &hosted, true, ack);
         for user in hosted {
             if let Some(presence) = presence_of(&inner, &user) {
                 let event =

@@ -87,14 +87,8 @@ pub(super) fn subscribe(conn: &Conn, corr: String, cmd: Subscribe) {
                     channels: ok.iter().map(|(id, _)| id.clone()).collect(),
                     truncated: (!truncated.is_empty()).then_some(truncated),
                 });
-                let mut frames = vec![Outgoing::Event {
-                    body: Box::new(ack),
-                    correlation_id: Some(corr.clone()),
-                }];
-                frames.extend(out.into_iter().map(|body| Outgoing::Event {
-                    body: Box::new(body),
-                    correlation_id: None,
-                }));
+                let mut frames = vec![Outgoing::event(ack, Some(corr.clone()))];
+                frames.extend(out.into_iter().map(|body| Outgoing::event(body, None)));
                 let scopes: Vec<String> = ok.iter().map(|(id, _)| id.as_str().to_owned()).collect();
                 // Under the state lock, so no timeline event slips between the
                 // replay and live delivery (§7.1 *Ordering*).

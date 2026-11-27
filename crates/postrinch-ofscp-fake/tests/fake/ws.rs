@@ -239,3 +239,41 @@ async fn dropping_the_provider_ends_its_sockets() {
     drop(p);
     assert_eq!(ws.ended().await, Ended::Dropped);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_posts_reach_a_subscriber_in_cursor_order() {
+    let (p, alice, group, channel) = setup().await;
+    let mut ws = Ws::signed_in(&p, &alice).await;
+    ws.send(subscribe(&channel, None)).await;
+    assert!(matches!(ws.event().await.body, Event::Subscribed(_)));
+    const WRITERS: usize = 8;
+    const EACH: usize = 25;
+    std::thread::scope(|s| {
+        for w in 0..WRITERS {
+            let (p, alice, group, channel) = (&p, &alice, &group, &channel);
+            s.spawn(move || {
+                for i in 0..EACH {
+                    p.post_as(&alice.actor, group, channel, &format!("{w}.{i}"));
+                }
+            });
+        }
+    });
+    let mut last = 0;
+    for _ in 0..WRITERS * EACH {
+        let (cursor, _) = created(ws.event().await.body);
+        let seq: u64 = cursor.unwrap().rsplit_once('.').unwrap().1.parse().unwrap();
+        assert!(seq > last, "cursor {seq} came after {last}");
+        last = seq;
+    }
+}
+
+#[tokio::test]
+async fn the_challenge_expires_on_real_time_not_the_provider_clock() {
+    let (p, alice, _, _) = setup().await;
+    let mut ws = Ws::connect(&p).await;
+    // Past the 30 s challenge on the provider's clock, inside the ±300 s
+    // signing window.
+    p.faults().set_clock_offset(120);
+    ws.authenticate(&p, &alice).await;
+    assert!(matches!(ws.event().await.body, Event::Authenticated(_)));
+}

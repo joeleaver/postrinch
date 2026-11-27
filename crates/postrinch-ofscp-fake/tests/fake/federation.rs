@@ -149,3 +149,18 @@ async fn the_sender_keeps_a_conversation_pointer_at_home() {
     let r = bob.send(&b, Method::GET, "/api/me/dms", None).await;
     assert_eq!(r.json["items"].as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn a_key_fetch_the_outbound_rules_refuse_is_403() {
+    let p = FakeProvider::start().await.unwrap();
+    let key = ofscp_core::signing::DeviceKey::generate(&mut rand_core::OsRng);
+    let stranger = crate::common::User {
+        actor: ofscp_core::Actor::canonicalize("mallory@example.com").unwrap(),
+        key_id: "key_1".to_owned(),
+        key,
+        http: crate::common::http(),
+    };
+    let r = stranger.send(&p, Method::GET, "/api/me", None).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.json);
+    assert!(r.json["detail"].as_str().unwrap().contains("outbound-request rules"));
+}
