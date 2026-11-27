@@ -2,7 +2,7 @@
 //! a narrow strip at the far left of the whole window with each mode as an
 //! icon and its name under it, a badge of what is unread, and Settings at
 //! its foot. It replaces the Mail | Calendar switch that stood atop the
-//! sidebar. Social joins it with its window (docs/ofscp.md, PR 15).
+//! sidebar.
 
 use std::collections::HashMap;
 
@@ -22,6 +22,7 @@ fn mode_name(mode: View) -> &'static str {
     match mode {
         View::Mail => "Mail",
         View::Calendar => "Calendar",
+        View::Social => "Social",
         View::Settings => "Settings",
     }
 }
@@ -38,11 +39,13 @@ fn badge_text(unread: usize) -> Option<String> {
 
 /// The unread threads a mode has, from the views' counts: Mail's are the
 /// inbox's (none until the inbox is counted). Calendar has none to
-/// count, and Settings is not a mode with mail.
+/// count, and Settings is not a mode with mail. Social's badge comes with
+/// its notices (docs/ofscp.md, build order 22), which say what is worth
+/// counting there.
 fn unread(counts: &HashMap<String, ViewTally>, mode: View) -> usize {
     match mode {
         View::Mail => counts.get(INBOX).map_or(0, |t| t.unread),
-        View::Calendar | View::Settings => 0,
+        View::Calendar | View::Social | View::Settings => 0,
     }
 }
 
@@ -60,6 +63,7 @@ pub fn rail(state: State) -> NodeHandle {
         nav { class: "rail", aria-label: "Modes", style: format!("width: {WIDTH}px"),
             {mode_button(__scope, state, View::Mail)}
             {mode_button(__scope, state, View::Calendar)}
+            {mode_button(__scope, state, View::Social)}
             div { class: "rail-gap" }
             {mode_button(__scope, state, View::Settings)}
         }
@@ -94,6 +98,7 @@ fn mode_icon(mode: View) -> NodeHandle {
     let (a, b) = match mode {
         View::Mail => (ENVELOPE, "M3 7l9 6 9-6"),
         View::Calendar => (CALENDAR, "M16 3v4M8 3v4M4 11h16"),
+        View::Social => (SOCIAL_BACK, SOCIAL_FRONT),
         View::Settings => (GEAR_HUB, GEAR),
     };
     // The paths are written into the svg itself: a list of nodes embedded
@@ -119,6 +124,9 @@ fn mode_icon(mode: View) -> NodeHandle {
 
 const ENVELOPE: &str = "M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z";
 const CALENDAR: &str = "M6 5h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z";
+/// Two speech bubbles, the one behind and the one in front.
+const SOCIAL_BACK: &str = "M21 14l-3-3h-7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v10";
+const SOCIAL_FRONT: &str = "M14 15v2a1 1 0 0 1-1 1H6l-3 3V11a1 1 0 0 1 1-1h2";
 const GEAR_HUB: &str = "M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0";
 const GEAR: &str = "M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z";
 
@@ -160,6 +168,7 @@ mod tests {
     fn each_mode_is_named_under_its_icon() {
         assert_eq!(mode_name(View::Mail), "Mail");
         assert_eq!(mode_name(View::Calendar), "Calendar");
+        assert_eq!(mode_name(View::Social), "Social");
         assert_eq!(mode_name(View::Settings), "Settings");
     }
 
@@ -169,6 +178,7 @@ mod tests {
             [tally("inbox", 40, 7), tally("everything-else", 90, 30)].into();
         assert_eq!(unread(&counts, View::Mail), 7);
         assert_eq!(unread(&counts, View::Calendar), 0);
+        assert_eq!(unread(&counts, View::Social), 0);
         assert_eq!(unread(&counts, View::Settings), 0);
     }
 

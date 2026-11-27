@@ -30,6 +30,7 @@ fn seeded() -> (tempfile::TempDir, Commands) {
     );
     assert!(seeded.messages > seeded.threads);
     assert_eq!((seeded.views, seeded.rules), (9, 3));
+    assert_eq!(seeded.social_views, 4);
     (dir, Commands::new(Store::open(&root).unwrap()))
 }
 
@@ -231,5 +232,42 @@ fn it_never_writes_over_a_store() {
     assert_eq!(
         std::fs::read(dir.path().join("something")).unwrap(),
         b"kept"
+    );
+}
+
+#[test]
+fn the_social_account_has_its_views_places_and_counts() {
+    let (_dir, commands) = seeded();
+    let views = commands.social_views().unwrap();
+    let names: Vec<&str> = views.iter().map(|e| e.view.name.as_str()).collect();
+    for name in ["Home", "Rust Audio", "Spec work", "Long reads", "Book club"] {
+        assert!(names.contains(&name), "no view {name} in {names:?}");
+    }
+    let id = |name: &str| {
+        views
+            .iter()
+            .find(|e| e.view.name == name)
+            .unwrap()
+            .view
+            .id
+            .clone()
+    };
+    let rust = commands.social_view_places(&id("Rust Audio")).unwrap();
+    let rust_names: Vec<&str> = rust.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(rust.len(), 4, "{rust_names:?}");
+    let tally = commands.social_view_tally(&id("Rust Audio")).unwrap();
+    assert_eq!((tally.unread, tally.mentions), (3, 1));
+    let spec = commands.social_view_tally(&id("Spec work")).unwrap();
+    assert_eq!((spec.unread, spec.mentions), (5, 1));
+    let messages = commands
+        .social_view_tally(postrinch_commands::MESSAGES)
+        .unwrap();
+    assert_eq!(messages.unread, 1);
+    assert!(
+        commands
+            .social_places()
+            .unwrap()
+            .iter()
+            .all(|p| p.place.account == postrinch_demo::SAM_SOCIAL)
     );
 }

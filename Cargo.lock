@@ -4809,6 +4809,7 @@ dependencies = [
  "postrinch-rules",
  "postrinch-store",
  "postrinch-sync",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
 ]

@@ -16,14 +16,15 @@ fn main() -> ExitCode {
     match postrinch_demo::seed(&root, &jiff::Zoned::now()) {
         Ok(s) => {
             println!(
-                "Seeded {}: {} accounts, {} conversations ({} messages), {} events, {} views, {} rules.",
+                "Seeded {}: {} accounts, {} conversations ({} messages), {} events, {} views, {} rules, {} social views.",
                 root.display(),
                 s.accounts,
                 s.threads,
                 s.messages,
                 s.events,
                 s.views,
-                s.rules
+                s.rules,
+                s.social_views
             );
             ExitCode::SUCCESS
         }

@@ -35,6 +35,7 @@ pub const PAGE: usize = 100;
 pub enum View {
     Mail,
     Calendar,
+    Social,
     Settings,
 }
 
@@ -199,6 +200,8 @@ pub struct State {
     pub calendar: crate::calendar_ui::CalendarUi,
     /// The calendar open in the calendar's right pane.
     pub panel: crate::calendar_panel::Panel,
+    /// Social mode.
+    pub social: crate::social_ui::SocialUi,
     /// Desktop notices.
     pub notices: crate::notify::Notices,
 }
@@ -280,6 +283,7 @@ impl State {
             invitations: crate::invitations::Invitations::new(),
             calendar: crate::calendar_ui::CalendarUi::new(&settings),
             panel: crate::calendar_panel::Panel::new(),
+            social: crate::social_ui::SocialUi::new(),
             notices: crate::notify::Notices::new(settings.notices.clone()),
         }
     }
@@ -339,6 +343,7 @@ impl State {
             });
         });
         self.load_calendar(ask.clone());
+        self.load_social(ask.clone());
         self.watch_calendar_panel();
         self.watch_notices(ask.clone());
         let accounts = ask.clone();
