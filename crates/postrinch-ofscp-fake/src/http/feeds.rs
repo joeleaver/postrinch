@@ -1,5 +1,5 @@
-//! Follows (§7.6), read markers (§7.7) and the notification feed
-//! (§10.1): signed local-account endpoints.
+//! Follows (§7.6), read markers (§7.7), the notification feed and the
+//! notification settings (§10.1): signed local-account endpoints.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,8 +9,8 @@ use axum::routing::{delete, get, post};
 use axum::{Extension, Router};
 use ofscp_core::wire::{
     Follow, FollowCreateRequest, FollowsResponse, NotificationCounts, NotificationKind,
-    NotificationsMarkResponse, NotificationsResponse, ReadMarker, ReadMarkersResponse,
-    ReadMarkersUpdateRequest,
+    NotificationSettingsResponse, NotificationsMarkResponse, NotificationsResponse, ReadMarker,
+    ReadMarkersResponse, ReadMarkersUpdateRequest,
 };
 use ofscp_core::ws::{Event, ReadUpdated};
 use ofscp_core::{Actor, DmId, LocalId, ObjectRef};
@@ -37,6 +37,21 @@ pub(super) fn routes() -> Router<Arc<Inner>> {
         .route("/api/me/notifications", get(notifications))
         .route("/api/me/notifications/seen", post(mark_seen))
         .route("/api/me/notifications/read", post(mark_read))
+        .route("/api/me/notification-settings", get(notification_settings))
+}
+
+async fn notification_settings(
+    State(inner): State<Arc<Inner>>,
+    Extension(caller): Extension<Caller>,
+) -> Reply {
+    let actor = caller.local(&inner)?;
+    let state = inner.state.lock().unwrap();
+    let user = state
+        .local_user(&inner.authority, &actor)
+        .ok_or_else(|| Problem::not_found("no such user"))?;
+    ok(&NotificationSettingsResponse {
+        prefs: user.notification_settings.clone(),
+    })
 }
 
 async fn follows(State(inner): State<Arc<Inner>>, Extension(caller): Extension<Caller>) -> Reply {

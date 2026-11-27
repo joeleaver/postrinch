@@ -187,3 +187,31 @@ async fn follows_and_read_markers() {
         r.json
     );
 }
+
+#[tokio::test]
+async fn notification_settings_are_served_as_seeded() {
+    use ofscp_core::wire::{NotificationMode, NotificationScope, NotificationSetting};
+
+    let p = FakeProvider::start().await.unwrap();
+    let alice = user(&p, "alice");
+    let r = alice
+        .send(&p, Method::GET, "/api/me/notification-settings", None)
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json, json!({"prefs": []}));
+
+    let group = p.create_group(&alice.actor, "Group");
+    let setting = NotificationSetting {
+        scope_type: NotificationScope::Group,
+        scope_id: group.clone(),
+        mode: NotificationMode::Mentions,
+    };
+    p.set_notification_settings(&alice.actor, vec![setting]);
+    let r = alice
+        .send(&p, Method::GET, "/api/me/notification-settings", None)
+        .await;
+    assert_eq!(
+        r.json,
+        json!({"prefs": [{"scopeType": "group", "scopeId": group.as_str(), "mode": "mentions"}]})
+    );
+}

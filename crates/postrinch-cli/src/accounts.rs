@@ -11,9 +11,10 @@ use crate::context::Context;
 
 pub fn accounts(cx: &Context) -> Result<()> {
     let accounts = cx.store.accounts()?;
-    if accounts.is_empty() {
+    let social = cx.store.social_accounts()?;
+    if accounts.is_empty() && social.is_empty() {
         println!(
-            "No accounts. Add one with `postrinch-cli add-google` or `postrinch-cli add-imap`."
+            "No accounts. Add one with `postrinch-cli add-google`, `add-imap` or `add-ofscp`."
         );
     }
     for account in accounts {
@@ -24,6 +25,7 @@ pub fn accounts(cx: &Context) -> Result<()> {
         let name = account.display_name.as_deref().unwrap_or("");
         println!("{}\t{name}\t{state}", account.address);
     }
+    crate::ofscp::list(&social);
     Ok(())
 }
 

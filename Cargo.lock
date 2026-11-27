@@ -4767,6 +4767,9 @@ dependencies = [
  "postrinch-log",
  "postrinch-mailtest",
  "postrinch-model",
+ "postrinch-ofscp",
+ "postrinch-ofscp-fake",
+ "postrinch-social",
  "postrinch-store",
  "postrinch-sync",
  "postrinch-sync-core",
@@ -4977,6 +4980,26 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "postrinch-social"
+version = "0.1.38"
+dependencies = [
+ "base64 0.22.1",
+ "gethostname",
+ "postrinch-ofscp",
+ "postrinch-ofscp-fake",
+ "postrinch-render",
+ "postrinch-store",
+ "postrinch-sync-core",
+ "rinch-html",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

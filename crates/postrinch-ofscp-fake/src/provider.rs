@@ -9,7 +9,7 @@ use jiff::{SignedDuration, Timestamp};
 use ofscp_core::signing::{VerifyingKey, encode_public_key};
 use ofscp_core::wire::{
     Availability, Channel, ChannelType, Content, Group, JoinPolicy, Member, Message, MessageCreate,
-    Tier,
+    NotificationSetting, Tier,
 };
 use ofscp_core::{Actor, Authority, LocalId};
 use tokio::net::TcpListener;
@@ -109,6 +109,7 @@ impl FakeProvider {
             dm_pointers: BTreeMap::new(),
             read_markers: BTreeMap::new(),
             notifications: Vec::new(),
+            notification_settings: Vec::new(),
         };
         self.inner
             .state
@@ -288,6 +289,19 @@ impl FakeProvider {
             .channel(group, channel)
             .map(|(_, c)| c.timeline.messages().map(|s| s.message.clone()).collect())
             .unwrap_or_default()
+    }
+
+    /// The notification settings `GET /api/me/notification-settings`
+    /// gives `actor` (§10.1); none until set.
+    ///
+    /// # Panics
+    /// If `actor` is not a user of this provider.
+    pub fn set_notification_settings(&self, actor: &Actor, prefs: Vec<NotificationSetting>) {
+        let mut state = self.inner.state.lock().unwrap();
+        state
+            .local_user_mut(&self.inner.authority, actor)
+            .expect("no such user")
+            .notification_settings = prefs;
     }
 
     /// The `cache_until` the keys endpoint gives (§4.6), from now.

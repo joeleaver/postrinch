@@ -131,7 +131,7 @@ async fn fail_next_answers_signed_requests_only_with_503() {
     let alice = user(&p, "alice");
     p.faults().fail_next(2, Some(Duration::from_secs(7)));
     // Unsigned requests do not count.
-    let r = anonymous(&p, Method::GET, "/.well-known/ofscp", None).await;
+    let r = anonymous(&p, Method::GET, "/.well-known/ofscp-provider", None).await;
     assert_eq!(r.status, StatusCode::OK);
     for _ in 0..2 {
         let r = alice.send(&p, Method::GET, "/api/me", None).await;

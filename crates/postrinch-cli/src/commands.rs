@@ -25,6 +25,26 @@ pub(crate) async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Accounts => accounts(&cx),
         Command::AddGoogle => sign_in(&cx, None).await,
+        Command::AddOfscp {
+            actor,
+            password_stdin,
+        } => {
+            let mut terminal = Terminal {
+                from_stdin: password_stdin,
+            };
+            crate::ofscp::add(&cx.social()?, &actor, &mut terminal).await
+        }
+        Command::Ofscp(command) => {
+            let from_stdin = matches!(
+                command,
+                crate::ofscp::OfscpCommand::SignIn {
+                    password_stdin: true,
+                    ..
+                }
+            );
+            let mut terminal = Terminal { from_stdin };
+            crate::ofscp::run(&cx.social()?, command, &mut terminal).await
+        }
         Command::AddImap(args) => {
             let mut terminal = Terminal {
                 from_stdin: args.password_stdin(),

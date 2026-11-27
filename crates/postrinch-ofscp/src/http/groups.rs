@@ -1,9 +1,8 @@
 //! Groups and channels (§5.5) and invites (§5.6), on the group's host
 //! provider: the caller picks the [`Client`] for that provider.
 //!
-//! Not here, for want of a response type in ofscp-core:
-//! `GET /api/groups/{groupId}/channels` (an unpaged `{ items }`) and
-//! `GET /api/groups/{groupId}/invites` (shape unspecified).
+//! Not here: `GET /api/groups/{groupId}/invites`, whose answer the spec
+//! leaves unspecified.
 
 use ofscp_core::LocalId;
 use ofscp_core::wire::{
@@ -73,6 +72,14 @@ impl Client {
         self.send_json(Method::POST, path, request).await
     }
 
+    /// The group's channels the signer can read (§5.5, §11.3): those it
+    /// cannot are left out. The answer is one unpaged `{ items }`.
+    pub async fn channels(&self, group_id: &LocalId) -> Result<Vec<Channel>> {
+        let path = path("/api/groups/{}/channels", &[group_id.as_str()]);
+        let list: ChannelList = self.get(path, Query::new()).await?;
+        Ok(list.items)
+    }
+
     /// A channel (§5.5), under effective read access (§11.3): one the
     /// signer cannot read is a `404`.
     pub async fn channel(&self, group_id: &LocalId, channel_id: &LocalId) -> Result<Channel> {
@@ -139,4 +146,12 @@ fn channel_path(group_id: &LocalId, channel_id: &LocalId) -> String {
         "/api/groups/{}/channels/{}",
         &[group_id.as_str(), channel_id.as_str()],
     )
+}
+
+/// The answer to `GET /api/groups/{groupId}/channels` (§5.5): an unpaged
+/// `{ items }`, which `wire::Paged` (with its required `page`) does not
+/// decode. joeleaver/re-ofscp#31 asks for this type in ofscp-core.
+#[derive(serde::Deserialize)]
+struct ChannelList {
+    items: Vec<Channel>,
 }

@@ -39,7 +39,7 @@ const MULTIPART_SLACK: u64 = 64 * 1024;
 
 pub(crate) fn router(inner: Arc<Inner>) -> Router {
     Router::new()
-        .route("/.well-known/ofscp", get(auth::discovery))
+        .route("/.well-known/ofscp-provider", get(auth::discovery))
         .route(
             "/.well-known/ofscp/users/{handle}/keys",
             get(auth::user_keys),

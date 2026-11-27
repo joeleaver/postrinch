@@ -16,6 +16,8 @@ postrinch-commands = { workspace = true }
 postrinch-discover = { workspace = true }
 postrinch-log = { workspace = true }
 postrinch-model = { workspace = true }
+postrinch-ofscp = { path = "../postrinch-ofscp" }
+postrinch-social = { workspace = true }
 postrinch-store = { workspace = true }
 postrinch-sync = { workspace = true }
 postrinch-sync-core = { workspace = true }
@@ -27,5 +29,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
+postrinch-ofscp-fake = { path = "../postrinch-ofscp-fake" }
 postrinch-mailtest = { path = "../postrinch-mailtest" }
 tempfile = { workspace = true }

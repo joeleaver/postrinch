@@ -1,0 +1,263 @@
+//! The places a sync keeps: the channels of the person's groups, channels
+//! followed without joining, and private conversations; and the groups.
+
+use std::collections::HashSet;
+
+use postrinch_ofscp::http::{Client, PageRequest};
+use postrinch_ofscp::ofscp_core::wire::{Channel, DmConversation, Group, GroupPointer};
+use postrinch_ofscp::ofscp_core::{Authority, DmId, LocalId};
+use postrinch_store::{GroupFound, PlaceKind, SocialGroup, SocialPlace};
+use serde_json::Value;
+
+use super::Run;
+use crate::SocialResult;
+use crate::uris::{channel_uri, group_uri, parse_channel, parse_group};
+
+/// A place whose newest page a sync fetches.
+pub(crate) struct Target {
+    /// The place's id: a channel URI, or a dmId.
+    pub place: String,
+    /// The provider hosting it.
+    pub host: Authority,
+    pub source: Source,
+    pub marker: Marker,
+}
+
+/// Where a place's messages are read from.
+pub(crate) enum Source {
+    /// A channel, from the provider hosting it.
+    Channel {
+        client: Client,
+        group: LocalId,
+        channel: LocalId,
+    },
+    /// A private conversation, from the home provider.
+    Conversation { dm: DmId },
+}
+
+/// What says which of a place's messages are read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Marker {
+    /// The home provider's read marker: the newest message read, `None`
+    /// when nothing is (§7.7).
+    Provider(Option<String>),
+    /// None from the provider (a channel elsewhere): the place keeps its
+    /// own, and what is there when it is first seen counts as read.
+    Local,
+}
+
+impl Run<'_> {
+    /// Keep the groups and places, and give the places to fetch pages for.
+    pub(super) async fn places(&mut self) -> SocialResult<Vec<Target>> {
+        let home = self.home.clone();
+        let follows = self.checked(&home, home.follows().await).await?;
+        let home_authority = self.identity.actor().domain().clone();
+        let mut followed: Vec<(String, crate::uris::ChannelAt)> = follows
+            .follows
+            .iter()
+            .filter_map(|f| parse_channel(&f.channel, f.group_id.as_ref(), &home_authority))
+            .map(|at| (channel_uri(&at.authority, &at.group, &at.channel), at))
+            .collect();
+        let followed_uris: HashSet<String> = followed.iter().map(|(uri, _)| uri.clone()).collect();
+
+        let pointers = self.checked(&home, home.my_groups().await).await?;
+        let mut targets = Vec::new();
+        let mut groups = HashSet::new();
+        for pointer in &pointers.groups {
+            if let Some(uri) = self.group(pointer, &followed_uris, &mut targets).await? {
+                groups.insert(uri);
+            }
+        }
+        // Channels followed in groups the person is not in.
+        followed.retain(|(uri, _)| !targets.iter().any(|t: &Target| &t.place == uri));
+        for (_, at) in followed {
+            let client = self.client_for(&at.authority);
+            let found = client.channel(&at.group, &at.channel).await;
+            if let Some(channel) = self.reachable(&client, found).await? {
+                let group = group_uri(&at.authority, &at.group);
+                targets.push(self.channel(client, &group, &channel, true).await?);
+            }
+        }
+        let conversations = self
+            .checked(&home, home.conversations(&PageRequest::newest()).await)
+            .await?;
+        let channels = targets.iter().map(|t| t.place.clone()).collect();
+        self.forget_the_rest(groups, channels).await?;
+        for conversation in &conversations.items {
+            targets.push(self.conversation(conversation).await?);
+        }
+        Ok(targets)
+    }
+
+    /// Keep a group the home provider lists the person in, with its
+    /// channels; its URI, or `None` when it is gone or not a group.
+    async fn group(
+        &mut self,
+        pointer: &GroupPointer,
+        followed: &HashSet<String>,
+        targets: &mut Vec<Target>,
+    ) -> SocialResult<Option<String>> {
+        let Some((authority, id)) = parse_group(&pointer.group) else {
+            tracing::info!(group = %pointer.group, "not a group URI; left out");
+            self.synced.skipped += 1;
+            return Ok(None);
+        };
+        let uri = group_uri(&authority, &id);
+        let client = self.client_for(&authority);
+        let found = client.group(&id).await;
+        let Some(group) = self.reachable(&client, found).await? else {
+            self.group_gone(pointer, &uri).await?;
+            return Ok(None);
+        };
+        let found = client.channels(&id).await;
+        let Some(channels) = self.reachable(&client, found).await? else {
+            self.group_gone(pointer, &uri).await?;
+            return Ok(None);
+        };
+        self.keep_group(&uri, &authority, &group, pointer).await?;
+        for channel in &channels {
+            let place = channel_uri(&authority, &id, &channel.id);
+            let is_followed = followed.contains(&place);
+            targets.push(
+                self.channel(client.clone(), &uri, channel, is_followed)
+                    .await?,
+            );
+        }
+        Ok(Some(uri))
+    }
+
+    async fn keep_group(
+        &mut self,
+        uri: &str,
+        authority: &Authority,
+        group: &Group,
+        pointer: &GroupPointer,
+    ) -> SocialResult<()> {
+        let role = group
+            .membership
+            .as_ref()
+            .map(|m| m.role.as_str().to_owned())
+            .or_else(|| pointer.role.as_ref().map(|r| r.as_str().to_owned()));
+        let (account, key) = (self.actor(), uri.to_owned());
+        let kept = self
+            .social
+            .blocking(move |store| store.social_group(&account, &key))
+            .await?;
+        let record = SocialGroup {
+            account: self.actor(),
+            uri: uri.to_owned(),
+            provider: authority.to_string(),
+            group: to_json(group),
+            role,
+            found: GroupFound::Member,
+            notices: kept.and_then(|g| g.notices),
+        };
+        self.social
+            .blocking(move |store| store.put_social_group(&record))
+            .await?;
+        self.synced.groups += 1;
+        Ok(())
+    }
+
+    /// Keep a channel as a place, and give it to fetch.
+    async fn channel(
+        &mut self,
+        client: Client,
+        group: &str,
+        channel: &Channel,
+        followed: bool,
+    ) -> SocialResult<Target> {
+        let host = client.provider().endpoint().authority().clone();
+        let place = channel_uri(&host, &channel.group_id, &channel.id);
+        let marker = if host == *self.identity.actor().domain() {
+            self.marker(channel.id.as_str())
+        } else {
+            Marker::Local
+        };
+        let fresh = SocialPlace {
+            account: self.actor(),
+            id: place.clone(),
+            kind: PlaceKind::Channel,
+            group: Some(group.to_owned()),
+            followed,
+            last_activity: None,
+            object: to_json(channel),
+            cursors: Default::default(),
+            read_marker: None,
+            notices: None,
+        };
+        self.keep_place(fresh).await?;
+        Ok(Target {
+            place,
+            host,
+            source: Source::Channel {
+                client,
+                group: channel.group_id.clone(),
+                channel: channel.id.clone(),
+            },
+            marker,
+        })
+    }
+
+    /// Keep a private conversation as a place, and give it to fetch.
+    async fn conversation(&mut self, conversation: &DmConversation) -> SocialResult<Target> {
+        let place = conversation.id.to_string();
+        let fresh = SocialPlace {
+            account: self.actor(),
+            id: place.clone(),
+            kind: PlaceKind::Conversation,
+            group: None,
+            followed: false,
+            last_activity: Some(conversation.updated_at.as_millisecond()),
+            object: to_json(conversation),
+            cursors: Default::default(),
+            read_marker: None,
+            notices: None,
+        };
+        self.keep_place(fresh).await?;
+        Ok(Target {
+            marker: self.marker(&place),
+            place,
+            host: self.identity.actor().domain().clone(),
+            source: Source::Conversation {
+                dm: conversation.id.clone(),
+            },
+        })
+    }
+
+    /// The marker for a scope of the home provider's.
+    fn marker(&self, scope: &str) -> Marker {
+        match self.markers.get(scope) {
+            Some(read) => Marker::Provider(read.clone()),
+            None => Marker::Local,
+        }
+    }
+
+    /// Keep `fresh`, keeping what a place already here holds of its own:
+    /// its cursors, read marker, notices and latest activity.
+    async fn keep_place(&mut self, fresh: SocialPlace) -> SocialResult<()> {
+        self.social
+            .blocking(move |store| {
+                let kept = store.social_place(&fresh.account, &fresh.id)?;
+                let place = match kept {
+                    Some(kept) => SocialPlace {
+                        last_activity: kept.last_activity.max(fresh.last_activity),
+                        cursors: kept.cursors,
+                        read_marker: kept.read_marker,
+                        notices: kept.notices,
+                        ..fresh
+                    },
+                    None => fresh,
+                };
+                store.put_social_place(&place)
+            })
+            .await?;
+        self.synced.places += 1;
+        Ok(())
+    }
+}
+
+/// A wire object whole, as the store keeps it.
+fn to_json<T: serde::Serialize>(object: &T) -> Value {
+    serde_json::to_value(object).expect("a wire object always serializes")
+}

@@ -1,12 +1,15 @@
 //! What the commands work with: the store, and the sync for every account
 //! ([`MailSync`]), Google accounts' over the Gmail API when Google
 //! sign-in is set up, IMAP accounts' always, with their secrets in the
-//! keychain.
+//! keychain; and OFSCP accounts' ([`Social`]), with their device keys in
+//! the keychain.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use postrinch_model::Provider;
+use postrinch_ofscp::{Options, Tls, Transport};
+use postrinch_social::Social;
 use postrinch_store::Store;
 use postrinch_sync::MailSync;
 use postrinch_sync::google::{ClientConfig, GmailApi, GmailSync, GoogleAuth};
@@ -82,5 +85,15 @@ impl Context {
         };
         let imap = self.imap(&self.imap_oauth()?)?;
         Ok(MailSync::new(self.store.clone(), gmail, imap))
+    }
+
+    /// OFSCP accounts' engine, trusting the system's certificates.
+    pub fn social(&self) -> Result<Social> {
+        let transport = Transport::new(Tls::platform()?, Options::default())?;
+        Ok(Social::new(
+            self.store.clone(),
+            transport,
+            Arc::new(Keychain::OFSCP),
+        ))
     }
 }

@@ -20,6 +20,7 @@ postrinch-store = { path = "crates/postrinch-store" }
 postrinch-sync = { path = "crates/postrinch-sync" }
 postrinch-sync-core = { path = "crates/postrinch-sync-core" }
 postrinch-thunderbird = { path = "crates/postrinch-thunderbird" }
+postrinch-social = { path = "crates/postrinch-social" }
 postrinch-update = { path = "crates/postrinch-update" }
 
 # rinch: rinch-html (HtmlView, the cleaner) and rinch-visual-test's

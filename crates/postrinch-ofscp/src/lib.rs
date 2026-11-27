@@ -34,7 +34,7 @@ mod tls;
 mod transport;
 pub mod ws;
 
-pub use clock::ProviderClock;
+pub use clock::{ProviderClock, SKEW_WINDOW_SECS};
 pub use endpoint::{Endpoint, EndpointError};
 pub use error::{Error, Problem, Result};
 pub use identity::Identity;
