@@ -93,16 +93,16 @@ pub(super) enum Source {
 
 /// The policy a body is cleaned under.
 pub(super) fn policy(source: Source) -> Policy {
-    let mut attributes: Vec<(String, String)> = ATTRIBUTES
-        .iter()
-        .map(|(t, a)| ((*t).to_owned(), (*a).to_owned()))
-        .collect();
-    if source == Source::Markdown {
-        attributes.extend(
-            MARKDOWN_ATTRIBUTES
-                .iter()
-                .map(|(t, a)| ((*t).to_owned(), (*a).to_owned())),
-        );
+    let mut allow = AllowList::new().tags(TAGS.iter().copied());
+    let extra: &[(&str, &str)] = match source {
+        Source::Html => &[],
+        Source::Markdown => MARKDOWN_ATTRIBUTES,
+    };
+    for (tag, attribute) in ATTRIBUTES.iter().chain(extra) {
+        allow = allow.attribute(*tag, *attribute);
+    }
+    for tag in REMOVED {
+        allow = allow.remove_with_content(*tag);
     }
     Policy {
         // Nothing a body names by address is loaded (§5.3); its own
@@ -110,12 +110,7 @@ pub(super) fn policy(source: Source) -> Policy {
         picture: Arc::new(|_| None),
         link_schemes: LINK_SCHEMES.iter().map(|s| (*s).to_owned()).collect(),
         user_css: String::new(),
-        allow: Some(AllowList {
-            tags: TAGS.iter().map(|s| (*s).to_owned()).collect(),
-            attributes,
-            removed_with_content: REMOVED.iter().map(|s| (*s).to_owned()).collect(),
-            carried: vec![("img".to_owned(), ATTACHMENT_ATTRIBUTE.to_owned())],
-        }),
+        allow: Some(allow.carry("img", ATTACHMENT_ATTRIBUTE)),
     }
 }
 
