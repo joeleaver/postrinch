@@ -96,7 +96,11 @@ async fn an_invite_link_joins_a_group_on_another_provider() {
         away.roles(&group).get(&h.ada).map(String::as_str),
         Some("member")
     );
-    assert_eq!(pointers(&h).await, [uri.clone()], "listed at home");
+    assert_eq!(
+        pointers(&h).await,
+        std::slice::from_ref(&uri),
+        "listed at home"
+    );
     assert_eq!(found(&h, &uri), Some(GroupFound::Member));
     assert_eq!(h.messages(&place).len(), 1, "its channel is synced");
     assert_eq!(away.invites(&group)[0].uses, 1);
@@ -171,7 +175,11 @@ async fn a_group_elsewhere_whose_pointer_home_lost_is_listed_again() {
     assert!(pointers(&h).await.is_empty());
 
     h.social.sync(&h.account()).await.expect("sync");
-    assert_eq!(pointers(&h).await, [uri.clone()], "written again");
+    assert_eq!(
+        pointers(&h).await,
+        std::slice::from_ref(&uri),
+        "written again"
+    );
     assert_eq!(found(&h, &uri), Some(GroupFound::Member));
     let place = channel_uri(&away, &group, &channel);
     assert!(

@@ -39,7 +39,7 @@ async fn a_manager_makes_lists_and_revokes_invites() {
     assert_eq!(made.invite.created_by, h.account());
 
     let listed = h.social.group_invites(&h.account(), &uri).await.unwrap();
-    assert_eq!(listed, [made.invite.clone()]);
+    assert_eq!(listed, std::slice::from_ref(&made.invite));
 
     h.social
         .revoke_invite(&h.account(), &uri, &made.invite.id)
