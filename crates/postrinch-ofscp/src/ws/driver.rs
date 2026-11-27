@@ -326,7 +326,7 @@ where
         };
         let forward = !is_ack(&frame.body);
         let answer = match &frame.body {
-            Event::Error(e) => Err(RequestError::Rejected(e.clone())),
+            Event::Error(e) => Err(RequestError::Rejected(Box::new(e.clone()))),
             _ => Ok(frame.clone()),
         };
         let _ = pending.reply.send(answer);

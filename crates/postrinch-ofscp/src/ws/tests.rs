@@ -155,7 +155,7 @@ async fn an_error_rejects_the_request() {
         details: None,
     };
     say(&mut peer, "s1", Some(&sent.id), Event::Error(error.clone())).await;
-    assert!(matches!(ask.await.unwrap(), Err(RequestError::Rejected(e)) if e == error));
+    assert!(matches!(ask.await.unwrap(), Err(RequestError::Rejected(e)) if *e == error));
 }
 
 #[tokio::test]

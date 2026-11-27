@@ -154,7 +154,7 @@ pub enum RequestError {
     TimedOut,
     /// The provider answered with an `error` (§7.3).
     #[error("{} ({}): {}", .0.code, .0.status, .0.message)]
-    Rejected(WsError),
+    Rejected(Box<WsError>),
     /// The reply was malformed, and dropped (spec #27).
     #[error("a malformed reply: {0}")]
     Malformed(String),
