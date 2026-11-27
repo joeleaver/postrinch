@@ -6,8 +6,8 @@
 
 use ofscp_core::LocalId;
 use ofscp_core::wire::{
-    Channel, ChannelCreateRequest, ChannelUpdateRequest, Group, GroupCreateRequest,
-    GroupUpdateRequest, Invite, InviteCreateRequest, InviteRedeemResponse,
+    Channel, ChannelCreateRequest, ChannelUpdateRequest, ChannelsResponse, Group,
+    GroupCreateRequest, GroupUpdateRequest, Invite, InviteCreateRequest, InviteRedeemResponse,
 };
 use reqwest::Method;
 
@@ -76,7 +76,7 @@ impl Client {
     /// cannot are left out. The answer is one unpaged `{ items }`.
     pub async fn channels(&self, group_id: &LocalId) -> Result<Vec<Channel>> {
         let path = path("/api/groups/{}/channels", &[group_id.as_str()]);
-        let list: ChannelList = self.get(path, Query::new()).await?;
+        let list: ChannelsResponse = self.get(path, Query::new()).await?;
         Ok(list.items)
     }
 
@@ -146,12 +146,4 @@ fn channel_path(group_id: &LocalId, channel_id: &LocalId) -> String {
         "/api/groups/{}/channels/{}",
         &[group_id.as_str(), channel_id.as_str()],
     )
-}
-
-/// The answer to `GET /api/groups/{groupId}/channels` (§5.5): an unpaged
-/// `{ items }`, which `wire::Paged` (with its required `page`) does not
-/// decode. joeleaver/re-ofscp#31 asks for this type in ofscp-core.
-#[derive(serde::Deserialize)]
-struct ChannelList {
-    items: Vec<Channel>,
 }

@@ -2,8 +2,7 @@
 //! and delete (§7.1), and reactions (§7.1 *Reactions*), on the channel's
 //! host provider.
 //!
-//! Not here: `PUT …/reactions/{key}`, whose optional `{ unicode, image }`
-//! body has no type in ofscp-core and whose answer the spec leaves
+//! Not here: `PUT …/reactions/{key}`, whose answer the spec leaves
 //! unspecified. Over a live connection, `reaction.add` does the same.
 
 use ofscp_core::LocalId;
