@@ -29,12 +29,17 @@
 //! Each account's operations run one at a time: adding, signing in again,
 //! syncing and removing it wait for one another.
 //!
-//! Live sessions, resuming and scrolling back, and the outbox come next
-//! (the plan's PRs 9 and 10).
+//! Its second part (the plan's PR 9) keeps accounts live ([`Social::go_live`],
+//! [`Social::keep_connected`]): a socket to each provider an account has
+//! places on, connected again with backoff, resuming from each place's
+//! cursor and reading over REST what a resume cannot give; read markers,
+//! notifications and presence as they change. What changed is told on
+//! [`Social::live_events`]. The outbox comes next (the plan's PR 10).
 
 mod accounts;
 mod error;
 mod keys;
+mod live;
 mod refused;
 mod sync;
 mod uris;
@@ -51,6 +56,7 @@ use tokio::sync::OwnedMutexGuard;
 pub use accounts::{Added, Found, Removed, Revocation};
 pub use error::{SocialError, SocialResult};
 pub use keys::DeviceKeys;
+pub use live::{LiveEvent, LiveOptions, MessageChange, SessionStatus};
 pub use postrinch_sync_core::Keychain;
 pub use sync::Synced;
 
@@ -65,6 +71,8 @@ pub struct Social {
     /// One lock per account (by its store key), held for the whole of an
     /// operation on it.
     locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    /// The accounts kept live, and where what changed is told.
+    live: Arc<live::Registry>,
 }
 
 impl Social {
@@ -85,6 +93,7 @@ impl Social {
             keys,
             device_name,
             locks: Arc::default(),
+            live: Arc::new(live::Registry::new(LiveOptions::default())),
         }
     }
 

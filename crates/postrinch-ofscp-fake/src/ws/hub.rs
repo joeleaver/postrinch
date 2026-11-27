@@ -76,7 +76,7 @@ impl Hub {
             presence: HashSet::new(),
         };
         let mut conns = self.conns.lock().unwrap();
-        // Read under the lock `drop_all` holds, so no socket slips past.
+        // Read under the lock `shut_down` holds, so no socket slips past.
         if self.shut.load(Ordering::SeqCst) {
             let _ = conn.tx.send(Outgoing::Drop);
         }
@@ -224,8 +224,17 @@ impl Hub {
         }
     }
 
-    /// Drop every socket, now and any that register later.
+    /// Drop every open socket; later ones connect as usual (the network
+    /// failing for a moment).
     pub(crate) fn drop_all(&self) {
+        for c in self.conns.lock().unwrap().values() {
+            let _ = c.tx.send(Outgoing::Drop);
+        }
+    }
+
+    /// Drop every socket, now and any that register later: the provider
+    /// is gone.
+    pub(crate) fn shut_down(&self) {
         let conns = self.conns.lock().unwrap();
         self.shut.store(true, Ordering::SeqCst);
         for c in conns.values() {

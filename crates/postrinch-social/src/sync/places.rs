@@ -225,7 +225,10 @@ impl Run<'_> {
     }
 
     /// Keep a private conversation as a place, and give it to fetch.
-    async fn conversation(&mut self, conversation: &DmConversation) -> SocialResult<Target> {
+    pub(crate) async fn conversation(
+        &mut self,
+        conversation: &DmConversation,
+    ) -> SocialResult<Target> {
         let place = conversation.id.to_string();
         let fresh = SocialPlace {
             account: self.actor(),

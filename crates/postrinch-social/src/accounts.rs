@@ -66,7 +66,15 @@ impl Social {
     /// the keychain, then run the first sync. If any step fails, nothing
     /// is kept: the key is revoked again, and its keychain entry and
     /// whatever was stored are deleted.
+    ///
+    /// While [`Social::keep_connected`] is on, the new account goes live.
     pub async fn add(&self, found: &Found, password: &str) -> SocialResult<Added> {
+        let added = self.add_held(found, password).await?;
+        self.live_if_kept(&added.account.actor).await;
+        Ok(added)
+    }
+
+    async fn add_held(&self, found: &Found, password: &str) -> SocialResult<Added> {
         let actor = &found.actor;
         let _held = self.hold(actor).await;
         self.refuse_if_added(actor).await?;
@@ -97,15 +105,24 @@ impl Social {
         let kept = account.clone();
         self.blocking(move |store| store.put_social_account(&kept))
             .await?;
-        let synced = self.sync_as(&account, identity).await?;
+        let synced = self
+            .sync_as(&account, identity, crate::sync::Pages::All)
+            .await?;
         let account = self.account(identity.actor()).await?;
         Ok(Added { account, synced })
     }
 
     /// Sign `actor` in again with `password`: a new device key, kept in
     /// place of the old one, which is revoked if the provider still has
-    /// it. The account is active again; sync it next.
+    /// it. The account is active again; sync it next. While
+    /// [`Social::keep_connected`] is on, it goes live again.
     pub async fn sign_in_again(&self, actor: &str, password: &str) -> SocialResult<SocialAccount> {
+        let account = self.sign_in_again_held(actor, password).await?;
+        self.live_if_kept(&account.actor).await;
+        Ok(account)
+    }
+
+    async fn sign_in_again_held(&self, actor: &str, password: &str) -> SocialResult<SocialAccount> {
         let actor = parse_actor(actor)?;
         let _held = self.hold(&actor).await;
         let old = self.account(&actor).await?;
@@ -171,6 +188,7 @@ impl Social {
     /// revoke does not keep the account here: the answer says so.
     pub async fn remove(&self, actor: &str) -> SocialResult<Removed> {
         let actor = parse_actor(actor)?;
+        self.go_offline(&actor.to_string()).await?;
         let _held = self.hold(&actor).await;
         let account = self.account(&actor).await?;
         let revocation = self.revoke_own(&account, &actor).await;

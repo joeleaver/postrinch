@@ -295,6 +295,17 @@ when an account is deleted.
 - **After every reconnect:** subscribe each place with its stored cursor. A `truncated`
   answer means a REST backfill. The home session also reads private conversations,
   notifications, read markers and follows again.
+  - A place with no cursor is backfilled too. A backfill walks pages newest first until it
+    reaches a message already kept, so nothing missed is left out.
+  - Pages are read again only for places with no cursor. The rest resume from it.
+  - A 4003 from a provider other than home is checked with home, the only judge of the key.
+    While home still accepts the key, the session retries.
+- **Duplicates:** delivery is at least once (§7.1). An event that changes nothing that is kept
+  is neither written nor reported. A reaction event refetches the message's reactions in
+  full, so a repeated one changes nothing.
+- **Presence** is kept in memory only. It covers the people the account has private
+  conversations with and anyone the window asks for. It is watched on the providers the
+  account has sessions with, and forgotten when a session ends.
 - **Writes are idempotent** (upserts by id).
 - **The outbox:**
   - Sends in order, per place.
