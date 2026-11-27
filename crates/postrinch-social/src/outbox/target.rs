@@ -103,6 +103,7 @@ mod tests {
             cursors: Default::default(),
             read_marker: None,
             notices: None,
+            muted: false,
         }
     }
 
