@@ -1,5 +1,6 @@
 //! A demo store: two made-up Gmail accounts with a few weeks of mail, their
 //! labels, inbox categories, views, rules and a week of calendar events,
+//! and a social account with its groups, channels and views (social.rs),
 //! written into an empty folder for the window to open. It is for the
 //! website's screenshots and for trying the window with no real account;
 //! nothing in it is anyone's real mail (people.rs).
@@ -20,6 +21,7 @@ mod mail;
 mod newsletters;
 mod pdf;
 mod people;
+mod social;
 mod threads;
 mod views_rules;
 
@@ -31,6 +33,7 @@ use postrinch_store::{Store, StoreError};
 use postrinch_sync::SyncError;
 
 pub use people::{SAM_HOME, SAM_WORK};
+pub use social::SAM as SAM_SOCIAL;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DemoError {
@@ -63,6 +66,8 @@ pub struct Seeded {
     pub events: usize,
     pub views: usize,
     pub rules: usize,
+    /// The social account's own views (social.rs).
+    pub social_views: usize,
 }
 
 /// Write the demo store into `root`, a store folder as the window opens it
@@ -77,8 +82,9 @@ pub fn seed(root: &Path, now: &Zoned) -> DemoResult<Seeded> {
     specs.extend(content_work::threads(&clock)?);
     let stored = threads::put_all(&store, &clock, specs)?;
     let events = calendar::put(&store, &clock)?;
-    let commands = Commands::new(store);
+    let commands = Commands::new(store.clone());
     let (views, rules) = views_rules::put(&commands, clock::timestamp(clock.now()))?;
+    let social_views = social::put(&store, &commands, now)?;
     Ok(Seeded {
         accounts,
         threads: stored.threads,
@@ -86,6 +92,7 @@ pub fn seed(root: &Path, now: &Zoned) -> DemoResult<Seeded> {
         events,
         views,
         rules,
+        social_views,
     })
 }
 

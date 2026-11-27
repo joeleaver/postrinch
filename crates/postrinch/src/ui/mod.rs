@@ -51,6 +51,11 @@ mod settings;
 mod share_card;
 mod sidebar;
 mod sign_in_again;
+mod social;
+mod social_head;
+mod social_panel;
+mod social_panel_places;
+mod social_sidebar;
 mod splitter;
 mod status_line;
 mod style;
@@ -165,6 +170,7 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                 style { {rules_page::CSS} {rule_editor::CSS} {rule_from_message::CSS} {rule_run_dialog::CSS} }
                 style { {list_head::CSS} {attachment_cards::CSS} {invitation_card::CSS} {share_card::CSS} {compose_files::CSS} {label_new::CSS} }
                 style { {rail::CSS} {status_line::CSS} }
+                style { {social::CSS} {social_sidebar::CSS} {social_head::CSS} {social_panel::CSS} {social_panel_places::CSS} }
                 style { {list_bar::CSS} {list_order::CSS} {view_panel::CSS} {chooser::CSS} {category_picker::CSS} }
                 style { {calendar_side::CSS} {calendar_view::CSS} {calendar_month::CSS} {event_pane::CSS} {event_notes::CSS} {calendar_pane::CSS} {event_editor::CSS} {notices_settings::CSS} }
                 {label_edit::label_dialog(__scope, state)}
@@ -195,6 +201,8 @@ pub fn app(__scope: &mut RenderScope, state: State, store: Store) -> NodeHandle 
                             {calendar_view::calendar_view(__scope, state)}
                             {event_pane::event_pane(__scope, state)}
                         }
+                    } else if state.view.get() == View::Social {
+                        {social::social(__scope, state)}
                     } else {
                         {settings::settings(__scope, state)}
                     }
