@@ -123,6 +123,17 @@ fn messages_are_read_up_to_a_time_or_one_at_a_time() {
     let m1 = store.social_message(ADA, GENERAL, "m1").unwrap().unwrap();
     assert!(m1.unread);
     assert_eq!(store.social_unread_count(ADA, GENERAL).unwrap(), 2);
+    store
+        .put_social_message(&reply("r1", "m3", 4), "a reply")
+        .unwrap();
+    let unread = store.social_unread_messages(ADA, GENERAL).unwrap();
+    assert_eq!(
+        ids(&unread),
+        ["r1", "m3", "m1"],
+        "replies too, newest first"
+    );
+    let every = store.social_place_messages(ADA, GENERAL).unwrap();
+    assert_eq!(ids(&every), ["r1", "m3", "m2", "m1"]);
 }
 
 #[test]

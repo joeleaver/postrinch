@@ -32,7 +32,11 @@ impl Store {
     /// that changed anything: a replayed event is not written again. A
     /// repeat of the same call finishes what an interrupted one left.
     ///
-    /// [`SocialMessage::unread`] is taken only for a message not here yet:
+    /// A message that carries the client id of a post queued to its place
+    /// (`clientMessageId`) takes that post off the outbox.
+    ///
+    /// [`SocialMessage::unread`] is taken only for a message not here yet,
+    /// and never for the person's own:
     /// whether a kept one is read is the read marker's and the person's
     /// ([`Store::set_social_messages_read`],
     /// [`Store::set_social_message_unread`]), so an edit or a reaction
@@ -52,10 +56,24 @@ impl Store {
     ) -> StoreResult<bool> {
         let key = message_key(&message.account, &message.place, &message.id);
         let kept = self.social_message_at(&key)?;
-        // As it reads back: by its account's key, read as it is here.
+        let account = social_account_key(&message.account);
+        // A post of the person's being sent is done with once its provider
+        // has it, so it never shows twice.
+        if let Some(client_id) = message
+            .message
+            .get("clientMessageId")
+            .and_then(Value::as_str)
+        {
+            self.settle_social_post(&account, &message.place, client_id)?;
+        }
+        // As it reads back: by its account's key, read as it is here. What
+        // the person wrote is never unread to them.
+        let own = social_account_key(&message.author) == account;
         let message = &SocialMessage {
-            account: social_account_key(&message.account),
-            unread: kept.as_ref().map_or(message.unread, |kept| kept.unread),
+            unread: kept
+                .as_ref()
+                .map_or(message.unread && !own, |kept| kept.unread),
+            account,
             ..message.clone()
         };
         if kept.as_ref() == Some(message)
@@ -185,6 +203,40 @@ impl Store {
             }
         }
         Ok(unread)
+    }
+
+    /// A place's unread messages, replies among them, newest first.
+    pub fn social_unread_messages(
+        &self,
+        account: &str,
+        place: &str,
+    ) -> StoreResult<Vec<SocialMessage>> {
+        self.social_place_messages_where(account, place, true)
+    }
+
+    /// Every message of a place, replies among them, newest first.
+    pub fn social_place_messages(
+        &self,
+        account: &str,
+        place: &str,
+    ) -> StoreResult<Vec<SocialMessage>> {
+        self.social_place_messages_where(account, place, false)
+    }
+
+    fn social_place_messages_where(
+        &self,
+        account: &str,
+        place: &str,
+        unread_only: bool,
+    ) -> StoreResult<Vec<SocialMessage>> {
+        let mut found = Vec::new();
+        for scalars in self.social_where(MESSAGE, "place", &scoped(account, place))? {
+            if !unread_only || scalars.bool("unread")? {
+                found.push(((scalars.datetime("created")?, scalars.str(KEY)?), scalars));
+            }
+        }
+        found.sort_by(|a, b| b.0.cmp(&a.0));
+        self.decode_social_messages(found.into_iter().map(|(_, s)| s), usize::MAX)
     }
 
     /// Up to `limit` messages of every account that mention the person,

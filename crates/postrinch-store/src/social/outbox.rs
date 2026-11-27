@@ -2,9 +2,7 @@
 //! made. Each is kept until its provider has taken it; reads lay the
 //! pending ones over what sync stored, so sync never undoes one.
 
-use serde_json::Value;
-
-use super::{KEY, RECORD, SocialOutboxEntry, scoped, social_account_key};
+use super::{KEY, RECORD, SocialChange, SocialOutboxEntry, scoped, social_account_key};
 use crate::codec::{Fields, FieldsBuilder};
 use crate::format::{INFO, INFO_KEY};
 use crate::{Store, StoreError, StoreResult};
@@ -13,16 +11,15 @@ const OUTBOX: &str = "SocialOutbox";
 
 impl Store {
     /// Queue a change, as made at `created`, to go out after every change
-    /// queued before it, with the blobs of the files it uploads first.
-    /// Queuing a client id that is queued already returns that entry as it
+    /// queued before it. The blobs of the files it uploads first are kept
+    /// until it is gone ([`SocialChange::blobs`]). Queuing a client id that is queued already returns that entry as it
     /// is: a repeat of the call queues nothing twice.
     pub fn queue_social_change(
         &self,
         account: &str,
         client_id: &str,
         place: Option<&str>,
-        change: &Value,
-        blobs: &[String],
+        change: &SocialChange,
         created: i64,
     ) -> StoreResult<SocialOutboxEntry> {
         let key = scoped(account, client_id);
@@ -36,8 +33,8 @@ impl Store {
                 place: place.map(str::to_owned),
                 seq: self.next_social_seq()?,
                 change: change.clone(),
-                blobs: blobs.to_vec(),
                 created,
+                tried: false,
                 attempts: 0,
                 error: None,
             };
@@ -86,6 +83,64 @@ impl Store {
         Ok(in_order(entries))
     }
 
+    /// Record that the engine is about to send a queued change: from then
+    /// on it may reach its provider ([`Store::take_back_social_change`]).
+    /// Returns the entry as it is now, or `None` when it is not queued.
+    pub fn social_change_tried(
+        &self,
+        account: &str,
+        client_id: &str,
+    ) -> StoreResult<Option<SocialOutboxEntry>> {
+        let key = scoped(account, client_id);
+        self.social_locked(|| {
+            let Some(mut entry) = self.social_record::<SocialOutboxEntry>(OUTBOX, KEY, &key)?
+            else {
+                return Ok(None);
+            };
+            if !entry.tried {
+                entry.tried = true;
+                self.write_social_change(&key, &entry)?;
+            }
+            Ok(Some(entry))
+        })
+    }
+
+    /// Take back a queued change the engine has not begun to send, as if
+    /// it was never made. Deciding and removing are one step, so the
+    /// engine never sends what was taken back.
+    pub fn take_back_social_change(&self, account: &str, client_id: &str) -> StoreResult<TakeBack> {
+        let key = scoped(account, client_id);
+        self.social_locked(
+            || match self.social_record::<SocialOutboxEntry>(OUTBOX, KEY, &key)? {
+                None => Ok(TakeBack::NotQueued),
+                Some(entry) if entry.tried || entry.attempts > 0 => Ok(TakeBack::Tried),
+                Some(_) => {
+                    self.social_remove(OUTBOX, KEY, &key)?;
+                    Ok(TakeBack::Taken)
+                }
+            },
+        )
+    }
+
+    /// Forget a queued post that sync has kept as `place`'s message: its
+    /// provider has it. Called with the social lock held, as the message
+    /// is written.
+    pub(super) fn settle_social_post(
+        &self,
+        account: &str,
+        place: &str,
+        client_id: &str,
+    ) -> StoreResult<()> {
+        let key = scoped(account, client_id);
+        if let Some(entry) = self.social_record::<SocialOutboxEntry>(OUTBOX, KEY, &key)?
+            && matches!(entry.change, SocialChange::Post(_))
+            && entry.place.as_deref() == Some(place)
+        {
+            self.social_remove(OUTBOX, KEY, &key)?;
+        }
+        Ok(())
+    }
+
     /// Record an attempt to send a queued change that failed, and why.
     /// Returns the entry as it is now, or `None` when it is not queued.
     pub fn social_change_failed(
@@ -118,7 +173,7 @@ impl Store {
         let mut blobs = Vec::new();
         for object in self.db.scan_type_projected(OUTBOX, &[RECORD])? {
             let entry: SocialOutboxEntry = Fields::new(OUTBOX, object).json(RECORD)?;
-            blobs.extend(entry.blobs);
+            blobs.extend(entry.change.blobs());
         }
         Ok(blobs)
     }
@@ -140,4 +195,15 @@ impl Store {
 fn in_order(mut entries: Vec<SocialOutboxEntry>) -> Vec<SocialOutboxEntry> {
     entries.sort_by_key(|e| e.seq);
     entries
+}
+
+/// What came of taking back a queued change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TakeBack {
+    /// It was taken back: nothing will be sent.
+    Taken,
+    /// The engine has begun sending it, so it may reach its provider.
+    Tried,
+    /// It is not queued (sent, given up, or never made).
+    NotQueued,
 }

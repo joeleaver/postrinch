@@ -7,6 +7,10 @@ pub enum CommandError {
     Store(#[from] StoreError),
     #[error("no account {0}")]
     UnknownAccount(EmailAddress),
+    /// A social account (by its actor, `handle@domain`) the store does not
+    /// have, or this caller does not see.
+    #[error("no social account {0}")]
+    UnknownSocialAccount(String),
     /// What the person or agent asked for cannot be done as asked: one
     /// sentence saying why.
     #[error("{0}")]
