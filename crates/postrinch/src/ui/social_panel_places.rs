@@ -1,8 +1,9 @@
 //! The view panel's Places, after the Social mockup: a chip for each group
 //! (every channel, now and later) and each place in the view, from any
 //! account on any provider, with how it tells the person of new messages
-//! (🔔 ▾, changed at once: notices belong to the place or group) and ✕ to
-//! take it out of the view; then "+ Add a place", which finds the groups
+//! (🔔 ▾, changed at once: notices belong to the place or group, and a
+//! private conversation is heard or muted on this computer) and ✕ to take
+//! it out of the view; then "+ Add a place", which finds the groups
 //! and places known to add.
 
 use postrinch_commands::{SocialGroupInfo, SocialPlaceInfo};
@@ -10,7 +11,8 @@ use postrinch_store::{GroupRef, Notices, PlaceKind, PlaceRef};
 use rinch::prelude::*;
 
 use crate::social_shown::{
-    account_domain, notices_choices, notices_name, place_glyph, place_provider,
+    account_domain, muted_choices, muted_name, notices_choices, notices_name, place_glyph,
+    place_provider,
 };
 use crate::social_ui::{Choices, is_place, place_ref};
 use crate::state::State;
@@ -23,6 +25,16 @@ enum Chosen {
     Place(PlaceRef),
 }
 
+/// How a chip's place or group tells the person of new messages.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Bell {
+    /// A channel's or group's notices (§10.2): `None` is its group's, or
+    /// the provider's default.
+    Notices(Option<Notices>),
+    /// A private conversation, muted on this computer or not.
+    Muted(bool),
+}
+
 /// A chip or an offer: what it names and what it says.
 #[derive(Debug, Clone, PartialEq)]
 struct Shown {
@@ -32,8 +44,8 @@ struct Shown {
     name: String,
     /// Said small after it: where it is, or what a group brings.
     detail: String,
-    /// How it tells the person of new messages, for a channel or group.
-    notices: Option<Option<Notices>>,
+    /// How it tells the person of new messages, once it is known.
+    bell: Option<Bell>,
 }
 
 fn group_shown(info: &SocialGroupInfo) -> Shown {
@@ -45,12 +57,15 @@ fn group_shown(info: &SocialGroupInfo) -> Shown {
         before: String::new(),
         name: info.name.clone(),
         detail: "every channel, now and later".to_owned(),
-        notices: Some(info.group.notices),
+        bell: Some(Bell::Notices(info.group.notices)),
     }
 }
 
 fn place_shown(info: &SocialPlaceInfo) -> Shown {
-    let channel = info.place.kind == PlaceKind::Channel;
+    let bell = match info.place.kind {
+        PlaceKind::Channel => Bell::Notices(info.place.notices),
+        PlaceKind::Conversation => Bell::Muted(info.place.muted),
+    };
     Shown {
         chosen: Chosen::Place(place_ref(info)),
         before: info
@@ -60,7 +75,7 @@ fn place_shown(info: &SocialPlaceInfo) -> Shown {
             .unwrap_or_default(),
         name: format!("{} {}", place_glyph(info), info.name),
         detail: place_provider(info),
-        notices: channel.then_some(info.place.notices),
+        bell: Some(bell),
     }
 }
 
@@ -78,7 +93,7 @@ fn chips(edit_groups: &[GroupRef], edit_places: &[PlaceRef], choices: &Choices) 
                 before: String::new(),
                 name: g.uri.clone(),
                 detail: account_domain(&g.account),
-                notices: None,
+                bell: None,
             })
     });
     let places = edit_places.iter().map(|p| {
@@ -92,7 +107,7 @@ fn chips(edit_groups: &[GroupRef], edit_places: &[PlaceRef], choices: &Choices) 
                 before: String::new(),
                 name: p.id.clone(),
                 detail: account_domain(&p.account),
-                notices: None,
+                bell: None,
             })
     });
     groups.chain(places).collect()
@@ -191,8 +206,8 @@ pub fn places_field(__scope: &mut RenderScope, state: State) -> NodeHandle {
 /// A chip: its name, where it is and its notices, and ✕.
 fn chip_of(__scope: &mut RenderScope, state: State, chip: Shown) -> NodeHandle {
     let notices = chip
-        .notices
-        .map(|now| notices_menu(__scope, state, chip.chosen.clone(), now));
+        .bell
+        .map(|now| bell_menu(__scope, state, chip.chosen.clone(), now));
     let take_off = chip.chosen.clone();
     let label = format!("Take {}{} out of the view", chip.before, chip.name);
     let title = label.clone();
@@ -221,16 +236,27 @@ fn chip_of(__scope: &mut RenderScope, state: State, chip: Shown) -> NodeHandle {
 }
 
 /// 🔔 ▾ on a chip: how the channel or group tells the person of new
-/// messages, changed at once.
-fn notices_menu(
-    __scope: &mut RenderScope,
-    state: State,
-    chosen: Chosen,
-    now: Option<Notices>,
-) -> NodeHandle {
-    let of_group = matches!(chosen, Chosen::Group(_));
+/// messages, or whether the conversation is muted, changed at once.
+fn bell_menu(__scope: &mut RenderScope, state: State, chosen: Chosen, now: Bell) -> NodeHandle {
     let open = Signal::new(false);
-    let items: Vec<NodeHandle> = notices_choices(of_group)
+    let (said, choices): (&str, Vec<(Bell, &str)>) = match now {
+        Bell::Notices(value) => {
+            let of_group = matches!(chosen, Chosen::Group(_));
+            let choices = notices_choices(of_group)
+                .into_iter()
+                .map(|(v, name)| (Bell::Notices(v), name))
+                .collect();
+            (notices_name(value, of_group), choices)
+        }
+        Bell::Muted(muted) => {
+            let choices = muted_choices()
+                .into_iter()
+                .map(|(m, name)| (Bell::Muted(m), name))
+                .collect();
+            (muted_name(muted), choices)
+        }
+    };
+    let items: Vec<NodeHandle> = choices
         .into_iter()
         .map(|(value, name)| {
             let chosen = chosen.clone();
@@ -242,9 +268,12 @@ fn notices_menu(
                     aria-checked: if on { "true" } else { "false" },
                     onclick: move || {
                         open.set(false);
-                        match &chosen {
-                            Chosen::Group(g) => state.set_group_notices(g, value),
-                            Chosen::Place(p) => state.set_place_notices(p, value),
+                        match (&chosen, value) {
+                            (Chosen::Group(g), Bell::Notices(v)) => state.set_group_notices(g, v),
+                            (Chosen::Place(p), Bell::Notices(v)) => state.set_place_notices(p, v),
+                            (Chosen::Place(p), Bell::Muted(m)) => state.mute_conversation(p, m),
+                            // Only a conversation, a place, offers muting.
+                            (Chosen::Group(_), Bell::Muted(_)) => {}
                         }
                     },
                     span { class: "order-tick", {if on { "\u{2713}" } else { "" }} }
@@ -266,7 +295,7 @@ fn notices_menu(
                     aria-haspopup: "menu",
                     aria-expanded: {move || if open.get() { "true" } else { "false" }},
                     onclick: move || open.update(|o| *o = !*o),
-                    {format!("\u{1f514} {} \u{25be}", notices_name(now, of_group))}
+                    {format!("\u{1f514} {said} \u{25be}")}
                 }
             }
             DropdownMenuDropdown {

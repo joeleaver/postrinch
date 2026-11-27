@@ -1,7 +1,8 @@
 //! Settings › Notifications, after its mockup: new mail by view, who from,
 //! what a notice shows and several at once; reminders by calendar (when is
-//! Google Calendar's to say); invitations, agents and refused mail; quiet
-//! hours and the window in front. Each change is saved at once.
+//! Google Calendar's to say); invitations, social messages, agents and
+//! refused mail; quiet hours and the window in front. Each change is
+//! saved at once.
 
 use rinch::prelude::*;
 
@@ -113,6 +114,7 @@ pub fn notices_page(state: State) -> NodeHandle {
             h2 { class: "notices-heading", "Also tell me" }
             div { class: "notice-list",
                 {toggle(__scope, state, "New invitations", "Even when they land outside the views above.", |p| p.invitations, |p| p.invitations = !p.invitations)}
+                {toggle(__scope, state, "New social messages", "What each channel\u{2019}s or group\u{2019}s notices let through, and private messages not muted.", |p| p.social, |p| p.social = !p.social)}
                 {toggle(__scope, state, "An agent needs you", "A message, rule, answer or calendar change an agent proposed, waiting for you.", |p| p.agents, |p| p.agents = !p.agents)}
                 {toggle(__scope, state, "Mail Gmail would not send", "A message refused, waiting for you to put right.", |p| p.refused, |p| p.refused = !p.refused)}
             }

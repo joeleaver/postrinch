@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::filters::Filter;
 use super::new_id;
+use super::notices::{Hearer, Notice};
 use super::places::SocialPlaceInfo;
 use super::views_built_in::BuiltInView;
 use crate::{CommandError, CommandResult, Commands};
@@ -36,6 +37,10 @@ pub struct SocialViewTally {
     pub unread: usize,
     /// Those that mention the person.
     pub mentions: usize,
+    /// Those that are to the person (a private message, a mention, a reply
+    /// to them) and get through their places' notices: the count is a
+    /// badge when any are.
+    pub called: usize,
 }
 
 impl SocialViewTally {
@@ -190,20 +195,25 @@ impl Commands {
             id: entry.view.id.clone(),
             unread: 0,
             mentions: 0,
+            called: 0,
         };
         if entry.built_in.is_some_and(|k| !k.shows_messages()) {
             return Ok(tally);
         }
         let filter = Filter::of_view(&entry.view.filters)?;
         let only_mentions = entry.built_in == Some(BuiltInView::Mentions);
+        let mut hearer = Hearer::new(self);
         for place in self.view_places(&entry)? {
+            let hearing = hearer.hear(place)?;
             for message in self
                 .store
-                .social_unread_messages(&place.account, &place.id)?
+                .social_unread_messages(&hearing.place.account, &hearing.place.id)?
             {
                 if filter.keeps(&message) && (message.mentions_me || !only_mentions) {
                     tally.unread += 1;
                     tally.mentions += usize::from(message.mentions_me);
+                    let notice = self.notice_of(&hearing, &message)?;
+                    tally.called += usize::from(notice == Notice::Called);
                 }
             }
         }

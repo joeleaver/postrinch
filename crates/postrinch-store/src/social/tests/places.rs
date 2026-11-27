@@ -86,6 +86,33 @@ fn places_change_as_they_are_and_followed_ones_list_by_activity() {
 }
 
 #[test]
+fn keeping_a_place_merges_with_what_is_here_or_keeps_it_new() {
+    let (_dir, store) = ada_with_general();
+    store
+        .change_social_place(ADA, GENERAL, |p| p.read_marker = Some("m9".into()))
+        .unwrap();
+    let mut fresh = channel(ADA, GENERAL, Some(20));
+    fresh.object = json!({ "id": GENERAL, "name": "renamed" });
+    let kept = store
+        .keep_social_place(fresh, |kept, fresh| SocialPlace {
+            read_marker: kept.read_marker,
+            ..fresh
+        })
+        .unwrap();
+    assert_eq!(kept.read_marker.as_deref(), Some("m9"));
+    assert_eq!(kept.object["name"], "renamed");
+    assert_eq!(store.social_place(ADA, GENERAL).unwrap(), Some(kept));
+
+    // A place not here yet is kept as it came, without asking `keep`.
+    let new = channel(ADA, RANDOM, None);
+    let kept = store
+        .keep_social_place(new.clone(), |_, _| unreachable!("nothing to merge"))
+        .unwrap();
+    assert_eq!(kept, new);
+    assert_eq!(store.social_place(ADA, RANDOM).unwrap(), Some(new));
+}
+
+#[test]
 fn removing_a_place_keeps_its_drafts_without_it() {
     let (_dir, store) = ada_with_general();
     store

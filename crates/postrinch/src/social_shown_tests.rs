@@ -25,6 +25,7 @@ fn channel(group: &str, group_name: &str, name: &str, object: Value) -> SocialPl
             cursors: PlaceCursors::default(),
             read_marker: None,
             notices: None,
+            muted: false,
         },
         name: name.into(),
         group_name: Some(group_name.into()),
@@ -65,11 +66,12 @@ fn built_in(kind: BuiltInView) -> SocialViewEntry {
     }
 }
 
-fn tally(unread: usize, mentions: usize) -> SocialViewTally {
+fn tally(unread: usize, mentions: usize, called: usize) -> SocialViewTally {
     SocialViewTally {
         id: "v1".into(),
         unread,
         mentions,
+        called,
     }
 }
 
@@ -145,23 +147,30 @@ fn groups_are_listed_once_in_the_places_order() {
 }
 
 #[test]
-fn a_count_shows_as_the_view_asks_and_stands_out_for_mentions_and_messages() {
+fn a_count_shows_as_the_view_asks_and_stands_out_for_what_calls_for_the_person() {
     let mine = own(ReadAs::Stream);
     assert_eq!(row_count(&mine, None), None);
-    assert_eq!(row_count(&mine, Some(&tally(0, 0))), None);
-    assert_eq!(row_count(&mine, Some(&tally(4, 0))), Some((4, false)));
-    assert_eq!(row_count(&mine, Some(&tally(3, 1))), Some((3, true)));
+    assert_eq!(row_count(&mine, Some(&tally(0, 0, 0))), None);
+    assert_eq!(row_count(&mine, Some(&tally(4, 0, 0))), Some((4, false)));
+    assert_eq!(row_count(&mine, Some(&tally(3, 1, 1))), Some((3, true)));
+    // A mention in a place heard as nothing stays quiet.
+    assert_eq!(row_count(&mine, Some(&tally(3, 1, 0))), Some((3, false)));
     let messages = built_in(BuiltInView::Messages);
-    assert_eq!(row_count(&messages, Some(&tally(1, 0))), Some((1, true)));
+    assert_eq!(row_count(&messages, Some(&tally(1, 0, 1))), Some((1, true)));
+    // Every unread conversation muted: a plain count.
+    assert_eq!(
+        row_count(&messages, Some(&tally(1, 0, 0))),
+        Some((1, false))
+    );
     let mut mentions_only = own(ReadAs::Stream);
     mentions_only.view.count = SocialCount::Mentions;
     assert_eq!(
-        row_count(&mentions_only, Some(&tally(5, 2))),
+        row_count(&mentions_only, Some(&tally(5, 2, 2))),
         Some((2, true))
     );
     let mut no_count = own(ReadAs::Stream);
     no_count.view.count = SocialCount::None;
-    assert_eq!(row_count(&no_count, Some(&tally(5, 2))), None);
+    assert_eq!(row_count(&no_count, Some(&tally(5, 2, 2))), None);
 }
 
 #[test]
@@ -343,4 +352,11 @@ fn a_tab_stays_chosen_only_while_it_is_one_of_the_views_tabs() {
         chosen_tab(&own(ReadAs::List), &places, Some(&general)),
         None
     );
+}
+
+#[test]
+fn a_conversation_is_named_and_offered_as_heard_or_muted() {
+    assert_eq!(muted_name(false), "every message");
+    assert_eq!(muted_name(true), "muted");
+    assert_eq!(muted_choices(), [(false, "Every message"), (true, "Muted")]);
 }

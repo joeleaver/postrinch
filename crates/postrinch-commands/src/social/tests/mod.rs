@@ -3,6 +3,7 @@
 //! with a private conversation; and Carl's account on other.example, for
 //! what an agent limited to one account sees.
 
+mod notices;
 mod pages;
 mod places;
 mod posting;
@@ -161,6 +162,7 @@ fn channel(account: &str, id: &str, group: &str, name: &str, followed: bool) -> 
         cursors: PlaceCursors::default(),
         read_marker: None,
         notices: Some(Notices::MentionsAndReplies),
+        muted: false,
     }
 }
 
@@ -176,6 +178,7 @@ fn conversation(account: &str, id: &str) -> SocialPlace {
         cursors: PlaceCursors::default(),
         read_marker: None,
         notices: None,
+        muted: false,
     }
 }
 
