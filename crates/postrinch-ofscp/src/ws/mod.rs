@@ -28,6 +28,8 @@ mod close;
 mod connect;
 mod connection;
 mod driver;
+#[cfg(test)]
+mod tests;
 
 use std::time::Duration;
 
@@ -53,8 +55,9 @@ pub struct WsOptions {
     pub idle_timeout: Duration,
     /// The largest frame read.
     pub max_frame_bytes: usize,
-    /// Events held for a reader that is behind, before the socket stops
-    /// being read.
+    /// Events held for a reader that is behind. One more ends the
+    /// connection with [`CloseReason::Overrun`], so the socket is always
+    /// read and pings always answered.
     pub event_buffer: usize,
 }
 

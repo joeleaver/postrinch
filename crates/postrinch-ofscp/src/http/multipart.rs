@@ -133,10 +133,12 @@ impl Upload {
         format!("multipart/form-data; boundary={}", self.boundary)
     }
 
-    /// A fresh stream of the body, for one attempt.
-    pub fn body(&self) -> reqwest::Body {
+    /// A fresh stream of the body, for one attempt, and the count of its
+    /// bytes handed to the connection so far.
+    pub fn body(&self) -> (reqwest::Body, Arc<AtomicU64>) {
         let total = self.len;
         let sent = Arc::new(AtomicU64::new(0));
+        let counter = sent.clone();
         let progress = self.progress.clone();
         let stream = stream::iter(self.segments.to_vec())
             .flat_map(segment_stream)
@@ -147,7 +149,7 @@ impl Upload {
                     progress(Progress { sent: now, total });
                 }
             });
-        reqwest::Body::wrap_stream(stream)
+        (reqwest::Body::wrap_stream(stream), counter)
     }
 }
 
@@ -346,12 +348,13 @@ mod tests {
         )
         .await
         .unwrap();
-        let body = upload.body();
+        let (body, sent) = upload.body();
         let bytes: Vec<Bytes> = http_body_util::BodyDataStream::new(body)
             .try_collect()
             .await
             .unwrap();
         assert_eq!(bytes.concat().len() as u64, upload.len());
+        assert_eq!(sent.load(Ordering::Relaxed), upload.len());
         let seen = seen.lock().unwrap();
         assert_eq!(
             seen.last(),

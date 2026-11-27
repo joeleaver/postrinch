@@ -4,7 +4,6 @@
 use std::time::{Duration, SystemTime};
 
 use bytes::{Bytes, BytesMut};
-use ofscp_core::wire::ProblemDetails;
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use serde::de::DeserializeOwned;
 
@@ -81,7 +80,7 @@ pub(crate) async fn read_capped(
 /// The error a non-success answer means: its problem details when the body
 /// is one, else just its status (§2.6: a proxy's answer may have no body).
 pub(crate) fn problem(reply: &Reply) -> Error {
-    let details = serde_json::from_slice::<ProblemDetails>(&reply.body).ok();
+    let details = serde_json::from_slice::<crate::error::ProblemBody>(&reply.body).ok();
     let mut problem = Problem::new(&reply.authority, reply.status, details);
     // The status line is the truth; a body may claim another.
     problem.status = reply.status;

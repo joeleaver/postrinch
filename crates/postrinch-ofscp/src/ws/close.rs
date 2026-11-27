@@ -26,8 +26,13 @@ pub enum CloseReason {
     Client,
     /// The connection broke without a close frame.
     Dropped(String),
-    /// The provider fell silent past the idle timeout (§7.1 "Heartbeat").
+    /// The provider fell silent past the idle timeout (§7.1 "Heartbeat"),
+    /// or stopped taking frames.
     TimedOut,
+    /// The reader of [`Events`](super::Events) fell more than
+    /// [`WsOptions::event_buffer`](super::WsOptions::event_buffer) events
+    /// behind. Reconnect and resume from the last cursors.
+    Overrun,
 }
 
 impl CloseReason {
@@ -67,6 +72,7 @@ impl std::fmt::Display for CloseReason {
             Self::Client => f.write_str("closed by this client"),
             Self::Dropped(why) => write!(f, "the connection dropped: {why}"),
             Self::TimedOut => f.write_str("the provider stopped answering"),
+            Self::Overrun => f.write_str("the event reader fell behind"),
         }
     }
 }
@@ -115,6 +121,7 @@ mod tests {
         assert!(!CloseReason::Revoked.may_reconnect());
         assert!(CloseReason::AuthFailed.may_reconnect());
         assert!(CloseReason::TimedOut.may_reconnect());
+        assert!(CloseReason::Overrun.may_reconnect());
         assert!(CloseReason::Dropped("reset".into()).may_reconnect());
     }
 }

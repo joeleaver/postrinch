@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 use super::connection::{Connection, Events};
-use super::driver::{self, Ids};
+use super::driver::{self, Ids, Parts};
 use super::{CloseReason, ConnectError, WsOptions};
 use crate::http::Client;
 
@@ -32,7 +32,12 @@ pub async fn connect(
     let mut socket = open(client, &options).await?;
     let mut ids = Ids::default();
     sign_in(&mut socket, client, &options, &mut ids).await?;
-    Ok(driver::spawn(socket, client, options, ids))
+    let parts = Parts {
+        authority: client.provider().endpoint().authority().clone(),
+        actor: client.identity().actor().clone(),
+        clock: client.provider().clock().clone(),
+    };
+    Ok(driver::spawn(socket, parts, options, ids))
 }
 
 async fn open(client: &Client, options: &WsOptions) -> Result<Socket, ConnectError> {

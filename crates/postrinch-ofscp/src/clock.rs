@@ -84,12 +84,14 @@ impl ProviderClock {
         }
     }
 
-    /// Whether a request signed at `signed` was at or near the edge of the
-    /// provider's window, by the clock as now known. After a `401` this
-    /// says the clock, not the key, was the likely cause.
-    pub fn was_near_skew_edge(&self, signed: Timestamp) -> bool {
-        let off = self.now().duration_since(signed).as_secs().abs();
-        off >= SKEW_WINDOW_SECS - EDGE_MARGIN_SECS
+    /// Whether a request signed while the offset was `offset_at_signing`
+    /// was at or near the edge of the provider's window, judged by how far
+    /// the offset has moved since: the clock error alone, not how long the
+    /// request took. After a `401` this says the clock, not the key, was
+    /// the likely cause.
+    pub fn explains_a_rejection(&self, offset_at_signing: i64) -> bool {
+        let error = self.offset_secs().saturating_sub(offset_at_signing).abs();
+        error >= SKEW_WINDOW_SECS - EDGE_MARGIN_SECS
     }
 }
 
@@ -151,12 +153,16 @@ mod tests {
     }
 
     #[test]
-    fn the_skew_edge_is_measured_on_the_corrected_clock() {
+    fn only_a_moved_offset_explains_a_rejection() {
         let clock = ProviderClock::new();
-        let signed = Timestamp::now();
-        assert!(!clock.was_near_skew_edge(signed));
+        let at_signing = clock.offset_secs();
+        assert!(!clock.explains_a_rejection(at_signing));
         let local = SystemTime::now();
         clock.observe(local + Duration::from_secs(301), local);
-        assert!(clock.was_near_skew_edge(signed));
+        assert!(clock.explains_a_rejection(at_signing));
+        // Signed on the corrected clock: a slow request is not skew.
+        assert!(!clock.explains_a_rejection(clock.offset_secs()));
+        clock.observe(local - Duration::from_secs(5), local);
+        assert!(clock.explains_a_rejection(301));
     }
 }

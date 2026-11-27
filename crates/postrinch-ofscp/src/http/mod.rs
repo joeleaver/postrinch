@@ -28,6 +28,7 @@ mod path;
 mod response;
 mod send;
 mod social;
+mod watch;
 
 use std::sync::Arc;
 

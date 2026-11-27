@@ -1,25 +1,39 @@
 //! The task that owns a signed-in socket: it sends commands, matches
 //! replies, keeps the heartbeat, and forwards events.
+//!
+//! Every await in its loop is bounded, so it always comes back to read the
+//! socket, answer pings and time out replies:
+//!
+//! - events go to the reader through a queue it never waits on; a reader
+//!   more than [`WsOptions::event_buffer`] events behind ends the
+//!   connection with [`CloseReason::Overrun`];
+//! - a write, and the close, give up after the idle timeout.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::future::Future;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use ofscp_core::ws::{Command, DecodeError, Empty, Envelope, Event};
+use ofscp_core::{Actor, Authority};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, MissedTickBehavior};
+use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
-use super::connect::Socket;
 use super::connection::{Connection, Events, Op};
 use super::{CloseReason, Incoming, RequestError, WsOptions};
 use crate::ProviderClock;
-use crate::http::Client;
 
 /// How often timeouts and the heartbeat are looked at.
 const TICK: Duration = Duration::from_millis(250);
+
+/// Events in the channel itself; more wait in the driver's queue.
+const CHANNEL: usize = 64;
 
 /// Frame ids, unique within the connection (§7.1).
 #[derive(Debug, Default)]
@@ -32,6 +46,13 @@ impl Ids {
     }
 }
 
+/// Who the connection is for.
+pub(super) struct Parts {
+    pub authority: Authority,
+    pub actor: Actor,
+    pub clock: ProviderClock,
+}
+
 type Reply = oneshot::Sender<Result<Envelope<Event>, RequestError>>;
 
 struct Pending {
@@ -39,57 +60,66 @@ struct Pending {
     deadline: Instant,
 }
 
-struct Driver {
-    socket: Socket,
+struct Driver<S> {
+    socket: WebSocketStream<S>,
     clock: ProviderClock,
     authority: String,
     options: WsOptions,
     ids: Ids,
     pending: HashMap<String, Pending>,
-    /// The id of the last ping this side sent unasked, and when.
-    own_ping: Option<(String, Instant)>,
+    /// When this side last pinged unasked.
+    pinged_at: Option<Instant>,
+    /// When a frame last came in from the socket.
     last_heard: Instant,
     ops: mpsc::Receiver<Op>,
     events: mpsc::Sender<Incoming>,
+    /// Events the channel had no room for, oldest first.
+    queue: VecDeque<Incoming>,
+    /// The reader dropped [`Events`]; events are no longer kept.
+    reader_gone: bool,
     closed: watch::Sender<Option<CloseReason>>,
 }
 
 /// Start the driver for a signed-in `socket`.
-pub(super) fn spawn(
-    socket: Socket,
-    client: &Client,
+pub(super) fn spawn<S>(
+    socket: WebSocketStream<S>,
+    parts: Parts,
     options: WsOptions,
     ids: Ids,
-) -> (Connection, Events) {
-    let (ops_tx, ops) = mpsc::channel(64);
-    let (events, rx) = mpsc::channel(options.event_buffer.max(1));
+) -> (Connection, Events)
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let (ops_tx, ops) = mpsc::channel(CHANNEL);
+    let (events, rx) = mpsc::channel(CHANNEL);
     let (closed, closed_rx) = watch::channel(None);
-    let authority = client.provider().endpoint().authority().clone();
     let driver = Driver {
         socket,
-        clock: client.provider().clock().clone(),
-        authority: authority.to_string(),
+        clock: parts.clock,
+        authority: parts.authority.to_string(),
         options,
         ids,
         pending: HashMap::new(),
-        own_ping: None,
+        pinged_at: None,
         last_heard: Instant::now(),
         ops,
         events,
+        queue: VecDeque::new(),
+        reader_gone: false,
         closed,
     };
     tokio::spawn(driver.run());
     let connection = Connection {
         ops: ops_tx,
-        authority,
-        actor: client.identity().actor().clone(),
+        authority: parts.authority,
+        actor: parts.actor,
         closed: closed_rx,
     };
     (connection, Events { rx })
 }
 
 /// Whether an event only answers a command and is not news in itself.
-fn is_ack(event: &Event) -> bool {
+pub(super) fn is_ack(event: &Event) -> bool {
     matches!(
         event,
         Event::Authenticated(_)
@@ -102,7 +132,10 @@ fn is_ack(event: &Event) -> bool {
     )
 }
 
-impl Driver {
+impl<S> Driver<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     async fn run(mut self) {
         let reason = self.serve().await;
         tracing::debug!(authority = %self.authority, %reason, "socket closed");
@@ -112,13 +145,23 @@ impl Driver {
                 .send(Err(RequestError::Closed(reason.clone())));
         }
         self.closed.send_replace(Some(reason.clone()));
-        let _ = self.events.send(Incoming::Closed(reason)).await;
+        // The socket is done with; what is left is the reader's, in order.
+        if self.reader_gone {
+            return;
+        }
+        self.queue.push_back(Incoming::Closed(reason));
+        while let Some(incoming) = self.queue.pop_front() {
+            if self.events.send(incoming).await.is_err() {
+                return;
+            }
+        }
     }
 
     async fn serve(&mut self) -> CloseReason {
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
+            let backlog = !self.queue.is_empty();
             tokio::select! {
                 message = self.socket.next() => match message {
                     None => return CloseReason::Dropped("the provider closed the connection".into()),
@@ -134,7 +177,7 @@ impl Driver {
                     None | Some(Op::Close) => {
                         let frame = CloseFrame { code: CloseCode::Normal, reason: "".into() };
                         // Best effort: the socket may already be gone.
-                        let _ = self.socket.close(Some(frame)).await;
+                        let _ = self.bounded(|s| s.socket.close(Some(frame))).await;
                         return CloseReason::Client;
                     }
                     Some(Op::Send { command, reply }) => {
@@ -142,6 +185,15 @@ impl Driver {
                             return reason;
                         }
                     }
+                },
+                // An owned permit, so the branch holds no borrow of `self`.
+                permit = self.events.clone().reserve_owned(), if backlog => match permit {
+                    Ok(permit) => {
+                        if let Some(incoming) = self.queue.pop_front() {
+                            permit.send(incoming);
+                        }
+                    }
+                    Err(_) => self.lose_reader(),
                 },
                 _ = tick.tick() => {
                     if let Err(reason) = self.housekeep().await {
@@ -152,7 +204,22 @@ impl Driver {
         }
     }
 
-    /// Send a frame. A failed write ends the connection.
+    /// Run a socket operation, giving up after the idle timeout: a
+    /// provider that stops reading must not stall the loop.
+    async fn bounded<'a, F, Fut, T>(&'a mut self, op: F) -> Result<T, CloseReason>
+    where
+        F: FnOnce(&'a mut Self) -> Fut,
+        Fut: Future<Output = Result<T, tokio_tungstenite::tungstenite::Error>> + 'a,
+    {
+        let limit = self.options.idle_timeout;
+        match tokio::time::timeout(limit, op(self)).await {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(e)) => Err(CloseReason::Dropped(e.to_string())),
+            Err(_) => Err(CloseReason::TimedOut),
+        }
+    }
+
+    /// Send a frame. A failed or stuck write ends the connection.
     async fn send(
         &mut self,
         command: Command,
@@ -179,17 +246,19 @@ impl Driver {
             let deadline = Instant::now() + self.options.reply_timeout;
             self.pending.insert(id.clone(), Pending { reply, deadline });
         }
-        self.socket
-            .send(Message::Text(text.into()))
-            .await
-            .map_err(|e| CloseReason::Dropped(e.to_string()))?;
+        self.bounded(|s| s.socket.send(Message::Text(text.into())))
+            .await?;
         Ok(id)
     }
 
     async fn on_message(&mut self, message: Message) -> Option<CloseReason> {
         match message {
             Message::Text(text) => self.on_text(text.as_str()).await.err(),
-            Message::Close(frame) => Some(CloseReason::from_frame(frame.as_ref())),
+            Message::Close(frame) => {
+                // tungstenite has queued the close's answer; send it.
+                let _ = self.bounded(|s| s.socket.flush()).await;
+                Some(CloseReason::from_frame(frame.as_ref()))
+            }
             // OFSCP is JSON text; control frames are tungstenite's.
             Message::Binary(_) | Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => None,
         }
@@ -230,7 +299,7 @@ impl Driver {
         let Some(pending) = waiter else {
             // A pong no one waits for answers this side's own ping.
             if !matches!(frame.body, Event::Pong(_)) {
-                self.forward(frame).await;
+                self.forward(frame)?;
             }
             return Ok(());
         };
@@ -241,14 +310,42 @@ impl Driver {
         };
         let _ = pending.reply.send(answer);
         if forward {
-            self.forward(frame).await;
+            self.forward(frame)?;
         }
         Ok(())
     }
 
-    async fn forward(&mut self, frame: Envelope<Event>) {
-        // A reader that has gone away just misses events.
-        let _ = self.events.send(Incoming::Event(Box::new(frame))).await;
+    /// Hand an event to the reader, without waiting for it.
+    fn forward(&mut self, frame: Envelope<Event>) -> Result<(), CloseReason> {
+        if self.reader_gone {
+            return Ok(());
+        }
+        let incoming = Incoming::Event(Box::new(frame));
+        if !self.queue.is_empty() {
+            return self.enqueue(incoming);
+        }
+        match self.events.try_send(incoming) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(incoming)) => self.enqueue(incoming),
+            Err(TrySendError::Closed(_)) => {
+                self.lose_reader();
+                Ok(())
+            }
+        }
+    }
+
+    fn enqueue(&mut self, incoming: Incoming) -> Result<(), CloseReason> {
+        if self.queue.len() >= self.options.event_buffer {
+            tracing::warn!(authority = %self.authority, "the event reader fell behind");
+            return Err(CloseReason::Overrun);
+        }
+        self.queue.push_back(incoming);
+        Ok(())
+    }
+
+    fn lose_reader(&mut self) {
+        self.reader_gone = true;
+        self.queue.clear();
     }
 
     /// Time out replies, ping a quiet provider, and give up on a silent one.
@@ -269,31 +366,11 @@ impl Driver {
         if quiet >= self.options.idle_timeout {
             return Err(CloseReason::TimedOut);
         }
-        let pinged_since_heard = self
-            .own_ping
-            .as_ref()
-            .is_some_and(|(_, at)| *at >= self.last_heard);
+        let pinged_since_heard = self.pinged_at.is_some_and(|at| at >= self.last_heard);
         if quiet >= self.options.ping_interval && !pinged_since_heard {
-            let id = self.send(Command::Ping(Empty {}), None, None).await?;
-            self.own_ping = Some((id, now));
+            self.send(Command::Ping(Empty {}), None, None).await?;
+            self.pinged_at = Some(now);
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ids_are_unique() {
-        let mut ids = Ids::default();
-        assert_eq!((ids.next(), ids.next()), ("c1".to_owned(), "c2".to_owned()));
-    }
-
-    #[test]
-    fn acks_are_not_news() {
-        assert!(is_ack(&Event::Pong(Empty {})));
-        assert!(!is_ack(&Event::Ping(Empty {})));
     }
 }

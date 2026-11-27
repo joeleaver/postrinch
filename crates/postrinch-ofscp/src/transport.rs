@@ -16,7 +16,7 @@ pub struct Options {
     /// How long a whole request may take, uploads excepted.
     pub request_timeout: Duration,
     /// How long a connection may sit idle in the middle of a response, or
-    /// of an upload.
+    /// an upload may go without sending a byte.
     pub read_timeout: Duration,
     /// The largest response body read (uploads go the other way).
     pub max_response_bytes: usize,
@@ -89,6 +89,10 @@ pub struct Transport {
 #[derive(Debug)]
 struct Inner {
     http: reqwest::Client,
+    /// The same, without the read timeout: reqwest's runs from the start
+    /// of the request until the answer, so a long upload would trip it.
+    /// The upload watches its own progress instead (`http::watch`).
+    upload_http: reqwest::Client,
     tls: Tls,
     options: Options,
     clocks: Mutex<HashMap<ofscp_core::Authority, ProviderClock>>,
@@ -97,24 +101,17 @@ struct Inner {
 impl Transport {
     /// A transport trusting `tls`, with `options`.
     pub fn new(tls: Tls, options: Options) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .https_only(true)
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(options.connect_timeout)
+        let http = http_client(&tls, &options)?
             .read_timeout(options.read_timeout)
-            .user_agent(options.user_agent.clone())
-            .tls_certs_merge(
-                tls.extra_roots()
-                    .iter()
-                    .map(|der| reqwest::Certificate::from_der(der))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| Error::Tls(crate::TlsError::new(e)))?,
-            )
+            .build()
+            .map_err(|e| Error::Tls(crate::TlsError::new(e)))?;
+        let upload_http = http_client(&tls, &options)?
             .build()
             .map_err(|e| Error::Tls(crate::TlsError::new(e)))?;
         Ok(Self {
             inner: Arc::new(Inner {
                 http,
+                upload_http,
                 tls,
                 options,
                 clocks: Mutex::new(HashMap::new()),
@@ -151,6 +148,11 @@ impl Transport {
         &self.inner.http
     }
 
+    /// The client for uploads, which has no read timeout.
+    pub(crate) fn upload_http(&self) -> &reqwest::Client {
+        &self.inner.upload_http
+    }
+
     pub(crate) fn tls(&self) -> &Tls {
         &self.inner.tls
     }
@@ -159,6 +161,22 @@ impl Transport {
     pub fn options(&self) -> &Options {
         &self.inner.options
     }
+}
+
+/// What both clients share: https only, no redirects, the trust roots.
+fn http_client(tls: &Tls, options: &Options) -> Result<reqwest::ClientBuilder> {
+    let roots = tls
+        .extra_roots()
+        .iter()
+        .map(|der| reqwest::Certificate::from_der(der))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| Error::Tls(crate::TlsError::new(e)))?;
+    Ok(reqwest::Client::builder()
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(options.connect_timeout)
+        .user_agent(options.user_agent.clone())
+        .tls_certs_merge(roots))
 }
 
 #[cfg(test)]

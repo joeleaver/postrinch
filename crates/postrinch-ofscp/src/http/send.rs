@@ -15,6 +15,7 @@ use url::Url;
 use super::multipart::Upload;
 use super::path::Query;
 use super::response::{self, Reply};
+use super::watch::{self, Watch};
 use crate::{Error, Identity, Result};
 
 /// How a request proves who sends it.
@@ -92,12 +93,26 @@ impl super::Provider {
         let mut retry = 0;
         let mut resigned_for_clock = false;
         loop {
+            let offset_at_signing = self.clock().offset_secs();
             let signed_at = self.clock().now();
             let request = self.build(auth, &call, &url, &digest, signed_at)?;
-            let response = request.send().await.map_err(|source| Error::Network {
-                authority: authority.clone(),
-                source,
-            })?;
+            let options = self.transport().options();
+            let response = match &call.body {
+                Body::Upload(upload) => {
+                    let (body, sent) = upload.body();
+                    let watch = Watch::new(
+                        upload.len(),
+                        options.read_timeout,
+                        options.request_timeout,
+                        tokio::time::Instant::now(),
+                    );
+                    watch::send_upload(request.body(body), sent, watch, &authority).await?
+                }
+                _ => request.send().await.map_err(|source| Error::Network {
+                    authority: authority.clone(),
+                    source,
+                })?,
+            };
             if let Some(date) = response.headers().get(DATE).and_then(|d| d.to_str().ok()) {
                 self.clock().observe_date(date);
             }
@@ -114,8 +129,21 @@ impl super::Provider {
                 });
             }
             let headers = response.headers().clone();
-            let limit = self.transport().options().max_response_bytes;
-            let body = response::read_capped(&authority, response, limit).await?;
+            let limit = options.max_response_bytes;
+            let body = match &call.body {
+                // The upload client has no read timeout; bound the answer.
+                Body::Upload(_) => tokio::time::timeout(
+                    options.request_timeout,
+                    response::read_capped(&authority, response, limit),
+                )
+                .await
+                .map_err(|_| Error::Stalled {
+                    authority: authority.clone(),
+                    waiting_for: "the answer to the upload",
+                    after: options.request_timeout,
+                })??,
+                _ => response::read_capped(&authority, response, limit).await?,
+            };
             let reply = Reply {
                 authority: authority.clone(),
                 status,
@@ -129,7 +157,7 @@ impl super::Provider {
             // and nonce; resending the same signature can never succeed.
             if status == 503 {
                 let after = response::retry_after(&reply.headers);
-                if let Some(wait) = self.transport().options().retry.wait(retry, after) {
+                if let Some(wait) = options.retry.wait(retry, after) {
                     tracing::debug!(%authority, ?wait, retry, "503, retrying");
                     tokio::time::sleep(wait).await;
                     retry += 1;
@@ -138,11 +166,12 @@ impl super::Provider {
             }
             // §4.5 step 3: a signature outside ±300 s is a 401. If this
             // answer's Date shows the clock was the cause, sign once more on
-            // the corrected clock.
+            // the corrected clock. Only a moved offset counts: a slow
+            // request is no sign of skew.
             if status == 401
                 && matches!(auth, Auth::Signed(_))
                 && !resigned_for_clock
-                && self.clock().was_near_skew_edge(signed_at)
+                && self.clock().explains_a_rejection(offset_at_signing)
             {
                 tracing::info!(%authority, "401 with a skewed clock, signing again");
                 resigned_for_clock = true;
@@ -169,10 +198,11 @@ impl super::Provider {
         digest: &str,
         signed_at: jiff::Timestamp,
     ) -> Result<reqwest::RequestBuilder> {
-        let mut request = self
-            .transport()
-            .http()
-            .request(call.method.clone(), url.clone());
+        let client = match call.body {
+            Body::Upload(_) => self.transport().upload_http(),
+            _ => self.transport().http(),
+        };
+        let mut request = client.request(call.method.clone(), url.clone());
         match auth {
             Auth::Anonymous => {}
             Auth::Bearer(token) => request = request.bearer_auth(token),
@@ -190,11 +220,10 @@ impl super::Provider {
                 .header(CONTENT_TYPE, "application/json")
                 .body(bytes.clone()),
             // No overall timeout: a large file takes as long as it takes.
-            // The read timeout still catches a stalled connection.
+            // `execute` adds the body, under a watch for stalls.
             Body::Upload(upload) => request
                 .header(CONTENT_TYPE, upload.content_type())
-                .header(CONTENT_LENGTH, upload.len())
-                .body(upload.body()),
+                .header(CONTENT_LENGTH, upload.len()),
         })
     }
 }

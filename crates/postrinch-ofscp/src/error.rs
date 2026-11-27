@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use ofscp_core::signing::CanonicalError;
-use ofscp_core::wire::{ErrorCode, ProblemDetails};
+use ofscp_core::wire::ErrorCode;
 
 use crate::{EndpointError, TlsError};
 
@@ -45,6 +45,16 @@ pub enum Error {
         authority: String,
         /// The limit.
         limit: usize,
+    },
+    /// An upload stopped moving, or its answer did not come in time.
+    #[error("{authority}: no progress waiting for {waiting_for} in {after:?}")]
+    Stalled {
+        /// The provider.
+        authority: String,
+        /// What was awaited.
+        waiting_for: &'static str,
+        /// How long it was awaited.
+        after: std::time::Duration,
     },
     /// A redirect. OFSCP endpoints are at fixed paths on the provider
     /// itself (§3.2) and a signature is bound to its authority (§4.4.2),
@@ -150,8 +160,19 @@ pub struct Problem {
     pub retry_after: Option<Duration>,
 }
 
+/// The parts of a problem details body (§2.6) this crate reads, each
+/// optional: a body missing `type` or `status` still carries the
+/// `errorCode` clients act on, and the status line gives the status.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub(crate) struct ProblemBody {
+    pub error_code: Option<ErrorCode>,
+    pub title: Option<String>,
+    pub detail: Option<String>,
+}
+
 impl Problem {
-    pub(crate) fn new(authority: &str, status: u16, details: Option<ProblemDetails>) -> Self {
+    pub(crate) fn new(authority: &str, status: u16, details: Option<ProblemBody>) -> Self {
         let (error_code, title, detail) = match details {
             Some(d) => (d.error_code, d.title, d.detail),
             None => (None, None, None),
