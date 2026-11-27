@@ -281,21 +281,29 @@ pub struct SocialMessage {
     pub reactions: Vec<ReactionSum>,
 }
 
-/// A picture, video or file a message carries.
+/// A picture, video or file a message carries, or a user's avatar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SocialMedia {
     /// The account's actor.
     pub account: String,
-    /// The domain of the provider that gave the attachment.
+    /// The domain of the provider that issued the attachment: its
+    /// uploader's home (§5.8), so the author's; for an avatar, the user's.
     pub provider: String,
-    /// The attachment's id on that provider.
+    /// The attachment's id on that provider; for a user's avatar, which
+    /// has none, `@` and the user's handle (a local id never holds `@`).
     pub id: String,
     /// Where it is fetched from (unsigned: a capability URL).
     pub url: String,
-    /// SHA-256 of its bytes in the blob store; `None` until fetched.
+    /// SHA-256 of its bytes in the media cache; `None` until fetched, and
+    /// again once evicted.
     pub blob: Option<String>,
     /// When the bytes were fetched.
     pub fetched: Option<i64>,
+    /// When the cached bytes were last asked for: the cache evicts the
+    /// least recently used first. `None` until they are asked for again
+    /// after being fetched.
+    #[serde(default)]
+    pub used: Option<i64>,
     pub mime: Option<String>,
     pub size: Option<u64>,
     pub width: Option<u32>,
@@ -380,4 +388,22 @@ pub struct SocialOutboxEntry {
     /// it is not tried again, and waits for the person to give it up.
     #[serde(default)]
     pub refused: bool,
+    /// The files of its change uploaded so far, each with the Attachment
+    /// its provider gave back: sent in their place. The change keeps the
+    /// files as picked, so one whose upload grew too old to post (§5.8: a
+    /// provider keeps an upload nothing posted for at least a day) is
+    /// uploaded again.
+    #[serde(default)]
+    pub uploads: Vec<UploadedFile>,
+}
+
+/// A file of a queued change, uploaded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UploadedFile {
+    /// The file as the change carries it.
+    pub media: DraftMedia,
+    /// The Attachment its provider gave back, whole.
+    pub attachment: Value,
+    /// When it was uploaded.
+    pub at: i64,
 }

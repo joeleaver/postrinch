@@ -230,7 +230,7 @@ fn a_profile_change_shows_at_once() {
         ..ProfileChange::default()
     };
     assert!(refused(world.commands.change_social_profile(ADA, &blank)).contains("can't be empty"));
-    let text = world.store.put_social_media_bytes(b"text").unwrap();
+    let text = world.store.put_social_kept_bytes(b"text").unwrap();
     let not_picture = ProfileChange {
         avatar: Some(AvatarChange::Set {
             media: DraftMedia::Kept {
@@ -247,7 +247,7 @@ fn a_profile_change_shows_at_once() {
     );
 
     let picture = DraftMedia::Kept {
-        blob: world.store.put_social_media_bytes(b"\x89PNG").unwrap(),
+        blob: world.store.put_social_kept_bytes(b"\x89PNG").unwrap(),
         name: "me.png".into(),
         mime: None,
     };
@@ -283,7 +283,7 @@ fn a_message_renders_with_its_fetched_pictures() {
             .contains(&"carl@groups.example".to_owned())
     );
 
-    let blob = world.store.put_social_media_bytes(b"\x89PNG").unwrap();
+    let blob = world.store.cache_social_media_bytes(b"\x89PNG").unwrap();
     world
         .store
         .put_social_media(&SocialMedia {
@@ -293,6 +293,7 @@ fn a_message_renders_with_its_fetched_pictures() {
             url: url.into(),
             blob: Some(blob),
             fetched: Some(1),
+            used: None,
             mime: Some("image/png".into()),
             size: Some(4),
             width: None,

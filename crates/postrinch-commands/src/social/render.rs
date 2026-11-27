@@ -99,7 +99,7 @@ impl Commands {
             .filter(|m| social_account_key(&m.account) == key)
             .find_map(|m| m.blob.map(|blob| (blob, m.mime)));
         if let Some((blob, kept_mime)) = fetched
-            && let Some(bytes) = self.store.social_media_bytes(&blob)?
+            && let Some(bytes) = self.store.cached_social_media_bytes(&blob)?
         {
             let mime = kept_mime.as_deref().unwrap_or(mime);
             let data = base64::engine::general_purpose::STANDARD.encode(bytes);

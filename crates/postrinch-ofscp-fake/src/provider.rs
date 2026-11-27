@@ -291,6 +291,13 @@ impl FakeProvider {
             .unwrap_or_default()
     }
 
+    /// The provider an upload was made for (its `target`, §5.8), by the
+    /// attachment id it was given; `None` for an id never uploaded here.
+    pub fn upload_target(&self, attachment: &LocalId) -> Option<Authority> {
+        let state = self.inner.state.lock().unwrap();
+        state.uploads.get(attachment).map(|u| u.target.clone())
+    }
+
     /// The notification settings `GET /api/me/notification-settings`
     /// gives `actor` (§10.1); none until set.
     ///

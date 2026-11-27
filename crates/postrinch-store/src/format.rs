@@ -73,6 +73,7 @@ pub(crate) fn open(root: &Path) -> StoreResult<Store> {
     let store = Store {
         db,
         blobs: blobs::Blobs::open(root.join("blobs"))?,
+        media_cache: blobs::Blobs::open(root.join("social-media"))?,
         root: root.to_path_buf(),
         outbox_lock: Arc::default(),
         outbox_cache: Arc::default(),

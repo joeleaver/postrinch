@@ -5,5 +5,6 @@ mod accounts;
 mod common;
 mod errors;
 mod live;
+mod media;
 mod outbox;
 mod sync;

@@ -174,3 +174,48 @@ async fn edits_and_reactions_go_to_the_provider_holding_the_message() {
         .expect("held at Erin's");
     assert_eq!(answer.reference.as_ref().unwrap().provider, None);
 }
+
+#[tokio::test]
+async fn a_file_for_someone_elsewhere_is_uploaded_at_home_for_their_provider() {
+    let h = home().await;
+    let away = erin_wrote(&h).await;
+    h.add().await;
+    let place = away.dm.to_string();
+    let dir = tempfile::tempdir().unwrap();
+    let path = crate::media::file(dir.path(), "for-erin.png", b"a picture for Erin");
+
+    queue(
+        &h,
+        "a1",
+        &place,
+        &crate::media::with_files("this one", vec![crate::media::attached(&path, "image/png")]),
+    );
+    assert_eq!(send(&h).await.sent, 1);
+
+    // Uploaded to Ada's home, the only provider that takes her uploads,
+    // naming Erin's, which holds the message, as its target (§5.8).
+    assert_eq!(crate::media::uploads(&h.provider), 1);
+    assert_eq!(crate::media::uploads(&away.provider), 0);
+    let held = away
+        .client
+        .dm_messages(&away.dm, &PageRequest::newest())
+        .await
+        .unwrap();
+    let sent = held
+        .items
+        .iter()
+        .find_map(|item| match item {
+            postrinch_ofscp::ofscp_core::wire::TimelineItem::Message(m)
+                if m.client_message_id.as_deref() == Some("a1") =>
+            {
+                Some(m)
+            }
+            _ => None,
+        })
+        .expect("held at Erin's");
+    let attachment = &sent.attachments[0];
+    assert_eq!(
+        h.provider.upload_target(&attachment.id),
+        Some(away.provider.authority())
+    );
+}

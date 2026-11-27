@@ -23,7 +23,7 @@ impl Commands {
                     )));
                 }
             },
-            DraftMedia::Kept { blob, name, .. } => match self.store.social_media_bytes(blob)? {
+            DraftMedia::Kept { blob, name, .. } => match self.store.social_kept_bytes(blob)? {
                 Some(bytes) => bytes.len() as u64,
                 None => {
                     return Err(CommandError::Invalid(format!(
