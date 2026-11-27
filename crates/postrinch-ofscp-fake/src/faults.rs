@@ -108,7 +108,11 @@ impl Faults {
         self.inner.faults.lock().unwrap().cut_uploads_after = bytes;
     }
 
-    /// Read `POST /api/media` bodies at `bytes_per_sec`.
+    /// Read `POST /api/media` bodies at most `bytes_per_sec`. The client
+    /// is held back only once the socket buffers between them are full,
+    /// so a small body is sent at once and only the response is late.
+    /// Use bodies well past the buffers (several MiB on loopback) to slow
+    /// the client's sending itself.
     pub fn slow_uploads(&self, bytes_per_sec: Option<u64>) {
         self.inner.faults.lock().unwrap().upload_bytes_per_sec = bytes_per_sec;
     }
@@ -116,13 +120,18 @@ impl Faults {
     /// Restart the provider's in-memory replay store, as a restart would
     /// (§4.5 *Restarts*): every WebSocket closes with 1001, and until the
     /// provider's clock passes now + 300 s every signed request is answered
-    /// `503` with the `Retry-After` the spec asks for. Move the clock on
-    /// with [`set_clock_offset`](Self::set_clock_offset) to end the
-    /// warm-up without waiting.
+    /// `503` with the `Retry-After` the spec asks for. Requests signed
+    /// with a timestamp from before then stay refused, so
+    /// [`end_warm_up`](Self::end_warm_up) is how a test ends it early.
     pub fn restart_replay_store(&self) {
         let now = self.inner.clock.now();
         self.inner.replay.restart(now);
         self.inner.hub.close_all(1001);
+    }
+
+    /// End a replay-store warm-up now, as if its 300 s had passed.
+    pub fn end_warm_up(&self) {
+        self.inner.replay.end_warm_up();
     }
 
     /// When the replay-store warm-up ends, if one is running.

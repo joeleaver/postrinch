@@ -1,14 +1,16 @@
 //! Uploads (§5.8) and the upload faults.
 
-mod common;
-
 use std::time::{Duration, Instant};
 
-use common::{Part, Tweak, multipart, reply, user};
+use crate::common::{Part, Tweak, multipart, reply, user};
 use postrinch_ofscp_fake::FakeProvider;
 use reqwest::{Method, StatusCode};
 
-async fn upload(p: &FakeProvider, u: &common::User, parts: &[Part<'_>]) -> common::Reply {
+async fn upload(
+    p: &FakeProvider,
+    u: &crate::common::User,
+    parts: &[Part<'_>],
+) -> crate::common::Reply {
     let (body, content_type) = multipart(parts);
     u.send_raw(
         p,
@@ -44,12 +46,12 @@ async fn an_upload_is_stored_and_served_at_its_capability_url() {
     assert!(url.starts_with(&format!("{}/media/", p.base_url())));
 
     // Fetched unsigned; not shown inline.
-    let served = reply(common::http().get(url).send().await.unwrap()).await;
+    let served = reply(crate::common::http().get(url).send().await.unwrap()).await;
     assert_eq!(served.status, StatusCode::OK);
     assert_eq!(served.headers["content-disposition"], "attachment");
     assert_eq!(served.headers["x-content-type-options"], "nosniff");
     assert_eq!(served.headers["cache-control"], "private");
-    let bytes = common::http()
+    let bytes = crate::common::http()
         .get(url)
         .send()
         .await
@@ -142,7 +144,7 @@ async fn the_cut_fault_drops_the_connection_mid_upload() {
 }
 
 #[tokio::test]
-async fn the_slow_fault_throttles_uploads() {
+async fn the_slow_fault_limits_how_fast_the_provider_reads() {
     let p = FakeProvider::start().await.unwrap();
     let alice = user(&p, "alice");
     p.faults().slow_uploads(Some(20 * 1024));

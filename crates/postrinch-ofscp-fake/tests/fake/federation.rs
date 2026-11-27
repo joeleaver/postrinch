@@ -1,8 +1,6 @@
 //! Two providers: remote key fetches (§4.6) and direct messages (§7.4).
 
-mod common;
-
-use common::{Ws, user};
+use crate::common::{Ws, user};
 use ofscp_core::DmId;
 use ofscp_core::ws::Event;
 use postrinch_ofscp_fake::{Authentication, FakeProvider};

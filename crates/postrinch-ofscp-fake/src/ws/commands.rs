@@ -14,6 +14,7 @@ use super::{Conn, Flow, presence_of, publish_presence, subscribe};
 use crate::ops::{Made, messages};
 use crate::problem::Problem;
 use crate::verify::verify_ws;
+use tokio::time::Instant;
 
 pub(super) async fn handle(conn: &mut Conn, text: &str) -> Flow {
     let envelope = match Envelope::<Command>::decode(text) {
@@ -21,19 +22,17 @@ pub(super) async fn handle(conn: &mut Conn, text: &str) -> Flow {
         // Before authentication anything but a good `authenticate` closes
         // the connection (§7.1 *Authentication*).
         Err(_) if conn.actor.is_none() => {
-            return fail_auth(conn, None, Problem::unauthorized("malformed authenticate")).await;
+            return fail_auth(conn, None, Problem::unauthorized("malformed authenticate"));
         }
         Err(DecodeError::Data { id, .. }) => {
             conn.error(
                 Problem::bad_request("data does not match the command's schema"),
                 Some(id),
-            )
-            .await;
+            );
             return Flow::Continue;
         }
         Err(_) => {
-            conn.error(Problem::bad_request("not a command envelope"), None)
-                .await;
+            conn.error(Problem::bad_request("not a command envelope"), None);
             return Flow::Continue;
         }
     };
@@ -49,7 +48,7 @@ pub(super) async fn handle(conn: &mut Conn, text: &str) -> Flow {
     let outcome: Result<Option<Event>, Problem> = match envelope.body {
         Command::Authenticate(_) => Err(Problem::bad_request("already authenticated")),
         Command::Subscribe(cmd) => {
-            subscribe::subscribe(conn, corr, cmd).await;
+            subscribe::subscribe(conn, corr, cmd);
             return Flow::Continue;
         }
         Command::Unsubscribe(cmd) => {
@@ -115,9 +114,11 @@ pub(super) async fn handle(conn: &mut Conn, text: &str) -> Flow {
             &cmd.group_id,
             &cmd.channel_id,
             &cmd.message_id,
-            &cmd.key,
-            cmd.unicode,
-            cmd.image,
+            messages::NewReaction {
+                key: &cmd.key,
+                unicode: cmd.unicode,
+                image: cmd.image,
+            },
             reply,
         )
         .map(|made| match made {
@@ -150,7 +151,7 @@ pub(super) async fn handle(conn: &mut Conn, text: &str) -> Flow {
         }),
         Command::TypingStart(t) => typing(conn, &actor, t, true),
         Command::TypingStop(t) => typing(conn, &actor, t, false),
-        Command::PresenceSubscribe(p) => return presence_subscribe(conn, corr, p).await,
+        Command::PresenceSubscribe(p) => return presence_subscribe(conn, corr, p),
         Command::PresenceUnsubscribe(p) => {
             inner.hub.follow_presence(conn.id, &p.users, false);
             Ok(Some(Event::PresenceUnsubscribed(PresenceUsersAck {
@@ -166,18 +167,18 @@ pub(super) async fn handle(conn: &mut Conn, text: &str) -> Flow {
     };
     match outcome {
         Ok(Some(event)) => {
-            conn.emit(event, Some(corr)).await;
+            conn.emit(event, Some(corr));
         }
         Ok(None) => {}
         Err(problem) => {
-            conn.error(problem, Some(corr)).await;
+            conn.error(problem, Some(corr));
         }
     }
     Flow::Continue
 }
 
-async fn fail_auth(conn: &mut Conn, corr: Option<String>, problem: Problem) -> Flow {
-    conn.error(problem, corr).await;
+fn fail_auth(conn: &Conn, corr: Option<String>, problem: Problem) -> Flow {
+    conn.error(problem, corr);
     Flow::Close(CLOSE_AUTH_FAILED)
 }
 
@@ -188,8 +189,7 @@ async fn authenticate(conn: &mut Conn, corr: String, auth: Authenticate) -> Flow
             conn,
             Some(corr),
             Problem::unauthorized("fault: authentication refused"),
-        )
-        .await;
+        );
     }
     // The challenge is good for one attempt, and only until it expires.
     let Some((nonce, expires_at)) = conn.challenge.take() else {
@@ -197,16 +197,14 @@ async fn authenticate(conn: &mut Conn, corr: String, auth: Authenticate) -> Flow
             conn,
             Some(corr),
             Problem::unauthorized("the challenge was used"),
-        )
-        .await;
+        );
     };
-    if inner.clock.now() > expires_at {
+    if Instant::now() > expires_at {
         return fail_auth(
             conn,
             Some(corr),
             Problem::unauthorized("the challenge expired"),
-        )
-        .await;
+        );
     }
     match verify_ws(&inner, &auth, &nonce).await {
         Ok(verified) => {
@@ -220,13 +218,13 @@ async fn authenticate(conn: &mut Conn, corr: String, auth: Authenticate) -> Flow
             let ack = Event::Authenticated(Authenticated {
                 actor: verified.actor.clone(),
             });
-            conn.emit(ack, Some(corr)).await;
+            conn.emit(ack, Some(corr));
             if first {
                 publish_presence(&inner, &verified.actor);
             }
             Flow::Continue
         }
-        Err(problem) => fail_auth(conn, Some(corr), problem).await,
+        Err(problem) => fail_auth(conn, Some(corr), problem),
     }
 }
 
@@ -265,7 +263,7 @@ fn typing(conn: &Conn, actor: &Actor, t: Typing, start: bool) -> Result<Option<E
     Ok(None)
 }
 
-async fn presence_subscribe(conn: &mut Conn, corr: String, p: PresenceUsers) -> Flow {
+fn presence_subscribe(conn: &Conn, corr: String, p: PresenceUsers) -> Flow {
     let inner = conn.inner.clone();
     let (hosted, refused): (Vec<Actor>, Vec<Actor>) = p.users.into_iter().partition(|u| {
         let state = inner.state.lock().unwrap();
@@ -276,19 +274,19 @@ async fn presence_subscribe(conn: &mut Conn, corr: String, p: PresenceUsers) -> 
         let ack = Event::PresenceSubscribed(PresenceUsersAck {
             users: hosted.clone(),
         });
-        conn.emit(ack, Some(corr.clone())).await;
+        conn.emit(ack, Some(corr.clone()));
         for user in hosted {
             if let Some(presence) = presence_of(&inner, &user) {
                 let event =
                     Event::PresenceUpdate(ofscp_core::ws::PresenceChanged { user, presence });
-                conn.emit(event, None).await;
+                conn.emit(event, None);
             }
         }
     }
     if !refused.is_empty() {
         let p = Problem::not_found("no such user")
             .with_details(serde_json::json!({ "users": refused }));
-        conn.error(p, Some(corr)).await;
+        conn.error(p, Some(corr));
     }
     Flow::Continue
 }

@@ -1,19 +1,17 @@
 //! The WebSocket (§7.1): authentication, subscriptions, resume, and the
 //! socket faults.
 
-mod common;
-
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use common::{Ended, Ws, user};
+use crate::common::{Ended, Ws, user};
 use ofscp_core::LocalId;
 use ofscp_core::wire::{Content, MessageCreate};
 use ofscp_core::ws::{ChannelMessageCreate, Command, Event, Subscribe};
 use postrinch_ofscp_fake::FakeProvider;
 
 /// A provider with alice, owner of a group with one channel.
-async fn setup() -> (FakeProvider, common::User, LocalId, LocalId) {
+async fn setup() -> (FakeProvider, crate::common::User, LocalId, LocalId) {
     let p = FakeProvider::start().await.unwrap();
     let alice = user(&p, "alice");
     let group = p.create_group(&alice.actor, "Team");
@@ -212,4 +210,32 @@ async fn a_foreign_member_authenticates_with_its_home_key() {
     let posted = a.post_as(&alice.actor, &group, &channel, "welcome");
     assert_eq!(posted.author, alice.actor);
     assert_eq!(created(ws.event().await.body).1, "welcome");
+}
+
+#[tokio::test]
+async fn subscribed_comes_before_the_error_for_a_missing_channel() {
+    let (p, alice, _, channel) = setup().await;
+    let mut ws = Ws::signed_in(&p, &alice).await;
+    let nowhere = LocalId::new("chn_404").unwrap();
+    ws.send(Command::Subscribe(Subscribe {
+        channels: vec![nowhere, channel.clone()],
+        include: None,
+        since: None,
+    }))
+    .await;
+    assert!(
+        matches!(ws.event().await.body, Event::Subscribed(ref s) if s.channels == vec![channel.clone()])
+    );
+    match ws.event().await.body {
+        Event::Error(e) => assert_eq!(e.details.unwrap()["channels"][0], "chn_404"),
+        other => panic!("expected error, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn dropping_the_provider_ends_its_sockets() {
+    let (p, alice, _, _) = setup().await;
+    let mut ws = Ws::signed_in(&p, &alice).await;
+    drop(p);
+    assert_eq!(ws.ended().await, Ended::Dropped);
 }

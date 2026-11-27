@@ -1,7 +1,5 @@
 //! A small signing OFSCP client for the fake's own tests.
 
-#![allow(dead_code)]
-
 use std::sync::Arc;
 use std::time::Duration;
 

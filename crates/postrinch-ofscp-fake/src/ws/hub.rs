@@ -135,6 +135,13 @@ impl Hub {
             .any(|c| c.actor.as_ref() == Some(actor))
     }
 
+    /// Queue a frame for one connection.
+    pub(crate) fn send(&self, id: ConnId, out: Outgoing) {
+        if let Some(c) = self.conns.lock().unwrap().get(&id) {
+            let _ = c.tx.send(out);
+        }
+    }
+
     /// Fan `body` out `times` times (2 under the duplicate-events fault).
     /// The connection `reply_to` names gets its copies with the command's
     /// id as `correlationId` (§7.1).

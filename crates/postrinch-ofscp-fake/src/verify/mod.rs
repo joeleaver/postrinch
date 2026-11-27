@@ -82,12 +82,13 @@ pub(crate) async fn verify_request(
         )));
     }
 
-    // 3. ±300 s. The replay-store warm-up (§4.5 *Restarts*) answers first,
-    // with 503, so a client is never told its credentials are bad.
+    // 3. ±300 s. A timestamp inside the window but from before the
+    // replay store's warm-up ended (§4.5 *Restarts*) is answered 503, so
+    // a client re-signs rather than thinking its credentials are bad.
     let now = inner.clock.now();
     let signed_at = parse_timestamp(timestamp)?;
-    inner.replay.check_warm_up(signed_at, now)?;
     check_skew(signed_at, now)?;
+    inner.replay.check_warm_up(signed_at, now)?;
 
     // 4. Replay.
     if inner.replay.seen(Signer::Actor, key_id, nonce) {
@@ -208,7 +209,7 @@ async fn check_signature(
             signature_matches(&key, canonical, signature).map(|()| Some(until))
         }
         Lookup::Gone => Err(Problem::unauthorized("no such active key")),
-        Lookup::Refused => Err(Problem::unauthorized(
+        Lookup::Refused => Err(Problem::forbidden(
             "the outbound-request rules refuse fetching this actor's keys",
         )),
         Lookup::Failed(why) => Err(Problem::unavailable(

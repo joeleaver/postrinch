@@ -178,9 +178,11 @@ async fn react(
         &gid,
         &cid,
         &mid,
-        &key,
-        looks.unicode,
-        looks.image,
+        messages::NewReaction {
+            key: &key,
+            unicode: looks.unicode,
+            image: looks.image,
+        },
         None,
     )? {
         Made::New(r) => Ok(json(StatusCode::CREATED, &r)),

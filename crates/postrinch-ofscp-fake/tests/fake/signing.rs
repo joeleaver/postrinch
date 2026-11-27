@@ -1,10 +1,8 @@
 //! §4.5 verification of REST requests, and the faults around it.
 
-mod common;
-
 use std::time::Duration;
 
-use common::{Tweak, anonymous, user};
+use crate::common::{Tweak, anonymous, user};
 use postrinch_ofscp_fake::{Authentication, FakeProvider};
 use reqwest::{Method, StatusCode};
 use serde_json::json;
@@ -114,7 +112,7 @@ async fn a_signature_for_another_provider_is_refused() {
     for (k, v) in headers {
         request = request.header(k, v);
     }
-    let r = common::reply(request.send().await.unwrap()).await;
+    let r = crate::common::reply(request.send().await.unwrap()).await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 }
 
@@ -158,6 +156,17 @@ async fn a_restarted_replay_store_answers_503_while_it_warms_up() {
     let r = alice.send(&p, Method::GET, "/api/me", None).await;
     assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(r.headers.contains_key("retry-after"));
+}
+
+#[tokio::test]
+async fn ending_the_warm_up_serves_requests_again() {
+    let p = FakeProvider::start().await.unwrap();
+    let alice = user(&p, "alice");
+    p.faults().restart_replay_store();
+    p.faults().end_warm_up();
+    assert!(p.faults().warm_up_until().is_none());
+    let r = alice.send(&p, Method::GET, "/api/me", None).await;
+    assert_eq!(r.status, StatusCode::OK);
 }
 
 #[tokio::test]

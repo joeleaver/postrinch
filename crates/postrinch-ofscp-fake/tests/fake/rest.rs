@@ -1,8 +1,6 @@
 //! Groups, channel messages, reactions and the home feeds over REST.
 
-mod common;
-
-use common::{Ws, user};
+use crate::common::{Ws, user};
 use ofscp_core::wire::JoinPolicy;
 use ofscp_core::ws::Event;
 use postrinch_ofscp_fake::FakeProvider;

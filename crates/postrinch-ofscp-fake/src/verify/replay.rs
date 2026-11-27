@@ -51,6 +51,11 @@ impl ReplayStore {
         store.started = Some(now);
     }
 
+    /// End the warm-up early (a test fault).
+    pub(crate) fn end_warm_up(&self) {
+        self.store.lock().unwrap().started = None;
+    }
+
     /// When the warm-up ends, if `now` is still inside it.
     pub(crate) fn warm_up_until(&self, now: Timestamp) -> Option<Timestamp> {
         let started = self.store.lock().unwrap().started?;

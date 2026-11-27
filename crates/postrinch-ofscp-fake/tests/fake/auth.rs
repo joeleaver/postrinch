@@ -1,8 +1,6 @@
 //! Login, bootstrap tokens and device keys (§4.1–§4.7).
 
-mod common;
-
-use common::{anonymous, http, reply, user};
+use crate::common::{anonymous, http, reply, user};
 use ofscp_core::signing::DeviceKey;
 use postrinch_ofscp_fake::{Authentication, FakeProvider};
 use rand_core::OsRng;
@@ -27,12 +25,12 @@ async fn registration_is_closed() {
     assert_eq!(r.json["errorCode"], "registration_closed");
 }
 
-async fn bootstrap(p: &FakeProvider, handle: &str, password: &str) -> common::Reply {
+async fn bootstrap(p: &FakeProvider, handle: &str, password: &str) -> crate::common::Reply {
     let body = json!({"handle": handle, "password": password});
     anonymous(p, Method::POST, "/api/auth/login", Some(&body)).await
 }
 
-async fn register(p: &FakeProvider, token: &str, key: &DeviceKey) -> common::Reply {
+async fn register(p: &FakeProvider, token: &str, key: &DeviceKey) -> crate::common::Reply {
     let body = json!({"public_key": key.public_key_base64(), "device_name": "laptop"});
     let request = http()
         .post(format!("{}/api/auth/device-keys", p.base_url()))

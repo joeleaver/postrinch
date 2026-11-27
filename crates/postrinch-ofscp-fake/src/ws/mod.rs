@@ -56,7 +56,9 @@ pub(crate) struct Conn {
     pub(crate) id: ConnId,
     sink: SplitSink<WebSocket, Frame>,
     next_event: u64,
-    pub(crate) challenge: Option<(String, Timestamp)>,
+    /// The challenge nonce, and when it expires on the real clock (a
+    /// skewed provider clock does not shorten the client's 30 s).
+    pub(crate) challenge: Option<(String, Instant)>,
     pub(crate) actor: Option<Actor>,
     pub(crate) key_id: Option<String>,
     /// For a remote actor: until when its key is confirmed.
@@ -64,8 +66,21 @@ pub(crate) struct Conn {
 }
 
 impl Conn {
-    /// Write one event with a fresh id and the provider's time.
-    pub(crate) async fn emit(&mut self, body: Event, correlation_id: Option<String>) -> bool {
+    /// Queue an event behind everything already queued for this
+    /// connection (acks, replays, fan-out), so replies keep their order.
+    pub(crate) fn emit(&self, body: Event, correlation_id: Option<String>) {
+        self.inner.hub.send(
+            self.id,
+            Outgoing::Event {
+                body: Box::new(body),
+                correlation_id,
+            },
+        );
+    }
+
+    /// Write one event to the socket with a fresh id and the provider's
+    /// time.
+    async fn write(&mut self, body: Event, correlation_id: Option<String>) -> bool {
         self.next_event += 1;
         let envelope = Envelope {
             id: format!("evt_{}", self.next_event),
@@ -77,7 +92,7 @@ impl Conn {
         self.sink.send(Frame::Text(text.into())).await.is_ok()
     }
 
-    pub(crate) async fn error(&mut self, problem: Problem, correlation_id: Option<String>) -> bool {
+    pub(crate) fn error(&self, problem: Problem, correlation_id: Option<String>) {
         let mut details = problem.details.clone();
         if let Some(secs) = problem.retry_after {
             let d = details.get_or_insert_with(|| serde_json::json!({}));
@@ -89,7 +104,7 @@ impl Conn {
             status: problem.status(),
             details,
         });
-        self.emit(body, correlation_id).await
+        self.emit(body, correlation_id);
     }
 
     async fn close(&mut self, code: u16) {
@@ -107,18 +122,21 @@ async fn run(inner: Arc<Inner>, socket: WebSocket) {
     let (sink, mut stream) = socket.split();
     let nonce = crate::random::token(16);
     let expires_at = inner.now() + CHALLENGE_TTL;
+    let deadline = Instant::now() + Duration::from_secs(CHALLENGE_TTL.as_secs().unsigned_abs());
     let mut conn = Conn {
         inner: inner.clone(),
         id,
         sink,
         next_event: 0,
-        challenge: Some((nonce.clone(), expires_at)),
+        challenge: Some((nonce.clone(), deadline)),
         actor: None,
         key_id: None,
         key_until: None,
     };
     let challenge = Event::AuthChallenge(AuthChallenge { nonce, expires_at });
-    let mut open = conn.emit(challenge, None).await;
+    let mut open = conn.write(challenge, None).await;
+    // Set once a close is queued: no further commands are read.
+    let mut closing = false;
     let auth_deadline = Instant::now() + AUTH_WINDOW;
     let mut last_traffic = Instant::now();
     let mut ping = interval(PING_EVERY);
@@ -127,19 +145,23 @@ async fn run(inner: Arc<Inner>, socket: WebSocket) {
 
     while open {
         tokio::select! {
-            frame = stream.next() => {
+            frame = stream.next(), if !closing => {
                 last_traffic = Instant::now();
                 match frame {
                     Some(Ok(Frame::Text(text))) => match commands::handle(&mut conn, text.as_str()).await {
                         Flow::Continue => {}
-                        Flow::Close(code) => { conn.close(code).await; open = false; }
+                        Flow::Close(code) => {
+                            // Behind the replies already queued, such as the error.
+                            inner.hub.send(id, Outgoing::Close(code));
+                            closing = true;
+                        }
                     },
                     Some(Ok(Frame::Close(_))) | None | Some(Err(_)) => open = false,
                     Some(Ok(_)) => {}
                 }
             }
             out = outgoing.recv() => match out {
-                Some(Outgoing::Event { body, correlation_id }) => open = conn.emit(*body, correlation_id).await,
+                Some(Outgoing::Event { body, correlation_id }) => open = conn.write(*body, correlation_id).await,
                 Some(Outgoing::Close(code)) => { conn.close(code).await; open = false; }
                 // No close frame: the socket just goes, as when the network fails.
                 Some(Outgoing::Drop) | None => open = false,
@@ -153,7 +175,7 @@ async fn run(inner: Arc<Inner>, socket: WebSocket) {
                     conn.close(1000).await;
                     open = false;
                 } else {
-                    open = conn.emit(Event::Ping(Default::default()), None).await;
+                    open = conn.write(Event::Ping(Default::default()), None).await;
                 }
             }
             _ = checks.tick() => {

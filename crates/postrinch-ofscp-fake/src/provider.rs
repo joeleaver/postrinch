@@ -35,6 +35,8 @@ impl Drop for FakeProvider {
     fn drop(&mut self) {
         self.task.abort();
         self.inner.conns.abort_all();
+        // Upgraded WebSockets have left the HTTP registry; end them too.
+        self.inner.hub.drop_all();
     }
 }
 

@@ -19,7 +19,7 @@ enum Target {
     Dm,
 }
 
-pub(super) async fn subscribe(conn: &mut Conn, corr: String, cmd: Subscribe) {
+pub(super) fn subscribe(conn: &Conn, corr: String, cmd: Subscribe) {
     let inner = conn.inner.clone();
     let actor = conn.actor.clone().expect("authenticated");
     let cap = inner.settings().subscription_cap;
@@ -29,7 +29,7 @@ pub(super) async fn subscribe(conn: &mut Conn, corr: String, cmd: Subscribe) {
             ErrorCode::SubscriptionLimit,
             "the list exceeds the subscription cap",
         );
-        conn.error(p, Some(corr)).await;
+        conn.error(p, Some(corr));
         return;
     }
     let replay_limit = inner.faults.lock().unwrap().replay_limit;
@@ -106,19 +106,19 @@ pub(super) async fn subscribe(conn: &mut Conn, corr: String, cmd: Subscribe) {
     let (missing, forbidden) = match checked {
         Ok(lists) => lists,
         Err(p) => {
-            conn.error(p, Some(corr)).await;
+            conn.error(p, Some(corr));
             return;
         }
     };
     if !missing.is_empty() {
         let p = Problem::not_found("No such channel")
             .with_details(serde_json::json!({ "channels": missing }));
-        conn.error(p, Some(corr.clone())).await;
+        conn.error(p, Some(corr.clone()));
     }
     if !forbidden.is_empty() {
         let p = Problem::forbidden("not a participant of the conversation")
             .with_details(serde_json::json!({ "channels": forbidden }));
-        conn.error(p, Some(corr)).await;
+        conn.error(p, Some(corr));
     }
 }
 

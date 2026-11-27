@@ -146,7 +146,8 @@ pub(crate) fn create(
     let (_, c) = readable(&mut state, group, channel, Some(author))?;
     let cursor = c.timeline.push(message.clone());
     let notes = notify::on_create(&mut state, &inner.authority, group, channel, &message);
-    drop(state);
+    // Published with the state lock still held, so events go out in
+    // cursor order (§7.1 *Ordering*).
 
     let event = Event::MessageCreated(ChannelMessage {
         group_id: group.clone(),
@@ -202,7 +203,8 @@ pub(crate) fn update(
         .log_change(crate::state::timeline::TimelineEvent::Updated(
             updated.clone(),
         ));
-    drop(state);
+    // Published with the state lock still held, so events go out in
+    // cursor order (§7.1 *Ordering*).
     let event = Event::MessageUpdated(ChannelMessage {
         group_id: group.clone(),
         channel_id: channel.clone(),
@@ -310,7 +312,8 @@ pub(crate) fn delete(
             id: id.clone(),
             at: now,
         });
-    drop(state);
+    // Published with the state lock still held, so events go out in
+    // cursor order (§7.1 *Ordering*).
     let event = Event::MessageDeleted(MessageDeleted {
         group_id: group.clone(),
         channel_id: channel.clone(),
@@ -371,19 +374,28 @@ pub(crate) fn new_reaction(
     })
 }
 
+/// Which reaction to add: its key, and what it looks like.
+pub(crate) struct NewReaction<'a> {
+    pub(crate) key: &'a str,
+    pub(crate) unicode: Option<String>,
+    pub(crate) image: Option<String>,
+}
+
 /// Add a reaction; at most one per author, key and message.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn react(
     inner: &Inner,
     actor: &Actor,
     group: &LocalId,
     channel: &LocalId,
     id: &LocalId,
-    key: &str,
-    unicode: Option<String>,
-    image: Option<String>,
+    reaction: NewReaction<'_>,
     reply_to: ReplyTo<'_>,
 ) -> Outcome<Made<Reaction>> {
+    let NewReaction {
+        key,
+        unicode,
+        image,
+    } = reaction;
     let now = inner.now();
     let mut state = inner.state.lock().unwrap();
     let (g, c) = readable(&mut state, group, channel, Some(actor))?;
@@ -408,7 +420,8 @@ pub(crate) fn react(
         .expect("checked above")
         .reactions
         .push(reaction.clone());
-    drop(state);
+    // Published with the state lock still held, so events go out in
+    // cursor order (§7.1 *Ordering*).
     let event = Event::ReactionAdded(ReactionAdded {
         group_id: group.clone(),
         channel_id: channel.clone(),
@@ -444,7 +457,8 @@ pub(crate) fn unreact(
         .reactions
         .retain(|r| !(r.author == *actor && r.key == key));
     let removed = stored.reactions.len() != before;
-    drop(state);
+    // Published with the state lock still held, so events go out in
+    // cursor order (§7.1 *Ordering*).
     if removed {
         let event = Event::ReactionRemoved(ReactionRemoved {
             group_id: group.clone(),

@@ -121,7 +121,8 @@ pub(crate) fn send(
         pointer.updated_at = now;
     });
     let conversation = author_view.and_then(|()| conversation(inner, &state, author, dm));
-    drop(state);
+    // Published with the state lock still held, so events go out in
+    // cursor order (§7.1 *Ordering*).
 
     let event = Event::DmMessage(DmMessage {
         dm_id: dm.clone(),
@@ -209,7 +210,8 @@ pub(crate) fn change(
     rec.timeline.get_mut(id).expect("checked above").message = message.clone();
     let cursor = rec.timeline.log_change(event);
     let owners = inbox_owners(rec, inner);
-    drop(state);
+    // Published with the state lock still held, so events go out in
+    // cursor order (§7.1 *Ordering*).
     let event = Event::DmMessage(DmMessage {
         dm_id: dm.clone(),
         cursor: Some(cursor),
@@ -272,7 +274,8 @@ pub(crate) fn react(
         }
     };
     let owners = inbox_owners(state.dms.get(dm).expect("checked above"), inner);
-    drop(state);
+    // Published with the state lock still held, so events go out in
+    // cursor order (§7.1 *Ordering*).
     let removed = reaction.is_none();
     let event = Event::DmReaction(DmReaction {
         dm_id: dm.clone(),
@@ -331,7 +334,8 @@ pub(crate) fn put_pointer(
     }
     pointer.updated_at = now;
     let view = conversation(inner, &state, caller, dm).expect("the pointer was just stored");
-    drop(state);
+    // Published with the state lock still held, so events go out in
+    // cursor order (§7.1 *Ordering*).
     let event = Event::DmConversation(DmConversationEvent {
         conversation: Box::new(view.clone()),
     });
